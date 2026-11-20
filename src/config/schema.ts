@@ -44,6 +44,8 @@ export type Mapping = z.infer<typeof MappingSchema>;
 
 const StageOrAllSchema = z.enum([...STAGES, 'all']);
 
+const AGENT_ONLY = ['agent', 'model', 'skill', 'skills'] as const;
+
 export const NodeDefSchema = z
   .strictObject({
     kind: z.enum(['agent', 'builtin', 'script', 'gate']).optional(),
@@ -72,6 +74,24 @@ export const NodeDefSchema = z
         code: 'custom',
         message: 'node needs "kind", or one of "agent", "builtin" or "command" to infer it',
       });
+      return;
+    }
+    // Agent-only fields on another kind would satisfy allowed_*/require_skills without ever running an agent.
+    const kind = effectiveKind(n);
+    if (kind === 'agent') {
+      if (n.agent === undefined) {
+        ctx.addIssue({ code: 'custom', message: 'agent nodes need "agent" (which agent runs this node)' });
+      }
+      return;
+    }
+    for (const field of AGENT_ONLY) {
+      if (n[field] !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `"${field}" only applies to agent nodes (this node is kind "${kind}")`,
+        });
+      }
     }
   });
 export type NodeDef = z.infer<typeof NodeDefSchema>;

@@ -62,12 +62,24 @@ export function checkRules(merged: Merged): Violation[] {
     ] as const) {
       const allowed = rules[rule];
       if (allowed === undefined) continue;
+      const list = allowed.length > 0 ? allowed.join(', ') : '(nothing)';
       for (const { target, node } of all) {
+        if (!isAgent(node)) continue;
         const value = node[field];
-        if (!isAgent(node) || value === undefined || allowed.includes(value)) continue;
+        if (value === undefined) {
+          // fail closed: an unset model is not an allowed one (agent is required by the schema)
+          if (sets.slice(0, idx).some((s) => s.value[rule] !== undefined)) continue;
+          out.push({
+            rule,
+            source,
+            target,
+            message: `${target} has no ${field}, but ${rule} (from ${source}) requires one of: ${list}`,
+          });
+          continue;
+        }
+        if (allowed.includes(value)) continue;
         const excludedEarlier = sets.slice(0, idx).some((s) => s.value[rule] !== undefined && !s.value[rule]!.includes(value));
         if (excludedEarlier) continue;
-        const list = allowed.length > 0 ? allowed.join(', ') : '(nothing)';
         out.push({
           rule,
           source,

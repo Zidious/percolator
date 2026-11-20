@@ -135,3 +135,48 @@ test('json schema is generated', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('kind: agent without "agent" is rejected', async () => {
+  await withYaml('bindings:\n  groom:\n    kind: agent\n', async (file) => {
+    const err = await loadFragment(file).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.equal(err.message, `${file}:3: bindings.groom: agent nodes need "agent" (which agent runs this node)`);
+  });
+});
+
+test('a script node may not set agent, model, skill or skills', async () => {
+  await withYaml(
+    'bindings:\n  plan:\n    kind: script\n    command: [x]\n    agent: codex\n    model: gpt-x\n    skill: s\n    skills: [t]\n',
+    async (file) => {
+      const err = await loadFragment(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.deepEqual(err.message.split('\n'), [
+        `${file}:5: bindings.plan.agent: "agent" only applies to agent nodes (this node is kind "script")`,
+        `${file}:6: bindings.plan.model: "model" only applies to agent nodes (this node is kind "script")`,
+        `${file}:7: bindings.plan.skill: "skill" only applies to agent nodes (this node is kind "script")`,
+        `${file}:8: bindings.plan.skills: "skills" only applies to agent nodes (this node is kind "script")`,
+      ]);
+    },
+  );
+});
+
+test('inferred builtin and explicit gate nodes may not set model or skills', async () => {
+  await withYaml('nodes:\n  a:\n    builtin: b\n    model: m\n    after: plan\n  g:\n    kind: gate\n    skills: [s]\n    after: plan\n', async (file) => {
+    const err = await loadFragment(file).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.deepEqual(err.message.split('\n'), [
+      `${file}:4: nodes.a.model: "model" only applies to agent nodes (this node is kind "builtin")`,
+      `${file}:8: nodes.g.skills: "skills" only applies to agent nodes (this node is kind "gate")`,
+    ]);
+  });
+});
+
+test('agent nodes, explicit or inferred, keep agent/model/skills', async () => {
+  await withYaml('bindings:\n  plan: { kind: agent, agent: claude, model: m, skills: [s] }\n  review: { agent: claude, skill: s }\n', async (file) => {
+    const f = await loadFragment(file);
+    assert.deepEqual(f.bindings, {
+      plan: { kind: 'agent', agent: 'claude', model: 'm', skills: ['s'] },
+      review: { agent: 'claude', skill: 's' },
+    });
+  });
+});

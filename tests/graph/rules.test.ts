@@ -85,13 +85,36 @@ test('allowed_agents violation names the first excluding rule set and is readabl
   assert.equal(v[0]!.message, 'bindings.review uses agent "codex", but allowed_agents (from rules:1) allows: claude');
 });
 
-test('allowed_models: nodes without model pass; excluded model names first excluding set', () => {
+test('allowed_models: excluded model names first excluding set', () => {
   const v = checkRules(
-    m({ plan: { agent: 'claude' }, review: { agent: 'claude', model: 'a' } }, [{ allowed_models: ['b', 'c'] }, { allowed_models: ['b'] }]),
+    m({ plan: { agent: 'claude', model: 'b' }, review: { agent: 'claude', model: 'a' } }, [{ allowed_models: ['b', 'c'] }, { allowed_models: ['b'] }]),
   );
   assert.equal(v.length, 1);
   assert.equal(v[0]!.target, 'bindings.review');
   assert.equal(v[0]!.source, 'rules:0');
+});
+
+test('allowed_models fails closed: an agent node without model is a violation, once, against the first set', () => {
+  const v = checkRules(
+    m({ implement: { agent: 'claude' }, deliver: { command: ['x'] } }, [{ max_rounds_ceiling: 9 }, { allowed_models: ['sonnet'] }, { allowed_models: ['sonnet', 'opus'] }]),
+  );
+  assert.deepEqual(v, [
+    {
+      rule: 'allowed_models',
+      source: 'rules:1',
+      target: 'bindings.implement',
+      message: 'bindings.implement has no model, but allowed_models (from rules:1) requires one of: sonnet',
+    },
+  ]);
+});
+
+test('allowed_models: [] with no model reports (nothing)', () => {
+  const v = checkRules(m({ implement: { agent: 'claude' } }, [{ allowed_models: [] }]));
+  assert.equal(v[0]!.message, 'bindings.implement has no model, but allowed_models (from rules:0) requires one of: (nothing)');
+});
+
+test('allowed_agents only: an agent node without model is fine', () => {
+  assert.deepEqual(checkRules(m({ implement: { agent: 'claude' } }, [{ allowed_agents: ['claude'] }])), []);
 });
 
 test("require_skills '*' covers every binding and extension agent node but not non-agent nodes", () => {
