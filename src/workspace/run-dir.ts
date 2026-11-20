@@ -3,8 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ResolvedMapping } from '../grounds/mappings.ts';
 import type { ResolvedGround } from '../grounds/resolve.ts';
-import { copyContained, renameRetry } from '../util/copy.ts';
-import { writeFileAtomic } from '../util/fs.ts';
+import { copyContained } from '../util/copy.ts';
+import { exists, renameRetry, writeFileAtomic } from '../util/fs.ts';
 
 export type MaterializedMapping = ResolvedMapping & { runPath: string };
 
@@ -16,15 +16,6 @@ export function runDir(home: string, runId: string): string {
 /** `<runDir>/steps/<stepId>/<attempt>` */
 export function stepDir(dir: string, stepId: string, attempt: number): string {
   return path.join(dir, 'steps', stepId, String(attempt));
-}
-
-async function exists(p: string): Promise<boolean> {
-  try {
-    await fs.lstat(p);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function isFile(p: string): Promise<boolean> {

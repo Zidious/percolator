@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
-import { readYamlFile, writeFileAtomic } from '../../src/util/fs.ts';
+import { exists, readYamlFile, renameRetry, writeFileAtomic } from '../../src/util/fs.ts';
 
 let dir: string;
 beforeEach(async () => {
@@ -74,4 +74,33 @@ test('writeFileAtomic does not retry other rename errors', async () => {
   );
   assert.equal(attempts, 1);
   assert.deepEqual(await fs.readdir(dir), []);
+});
+
+test('renameRetry retries EBUSY and then succeeds', async () => {
+  let attempts = 0;
+  await renameRetry('a', 'b', async (from, to) => {
+    attempts++;
+    assert.deepEqual([from, to], ['a', 'b']);
+    if (attempts <= 2) throw errno('EBUSY');
+  });
+  assert.equal(attempts, 3);
+});
+
+test('renameRetry gives up at once on a non-retry code', async () => {
+  let attempts = 0;
+  await assert.rejects(
+    renameRetry('a', 'b', async () => {
+      attempts++;
+      throw errno('ENOENT');
+    }),
+    /ENOENT: rename/,
+  );
+  assert.equal(attempts, 1);
+});
+
+test('exists reports files, directories and absence', async () => {
+  await fs.writeFile(path.join(dir, 'f'), '');
+  assert.equal(await exists(path.join(dir, 'f')), true);
+  assert.equal(await exists(dir), true);
+  assert.equal(await exists(path.join(dir, 'nope')), false);
 });

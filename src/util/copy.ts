@@ -1,15 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-
-async function exists(p: string): Promise<boolean> {
-  try {
-    await fs.lstat(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { exists, renameRetry } from './fs.ts';
 
 function isInside(base: string, target: string): boolean {
   const rel = path.relative(base, target);
@@ -36,20 +28,6 @@ async function copyEntry(src: string, tmp: string, rootReal: string, rel: string
     }
   } else if (st.isFile()) {
     await fs.copyFile(real, tmp);
-  }
-}
-
-/** Rename with the retries Windows needs when a scanner briefly holds a file. */
-export async function renameRetry(from: string, to: string): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await fs.rename(from, to);
-      return;
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (attempt >= 5 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) throw err;
-      await new Promise((r) => setTimeout(r, 20 * (attempt + 1)));
-    }
   }
 }
 
