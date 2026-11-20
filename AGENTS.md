@@ -41,7 +41,7 @@ npm run schema      # regenerate schema/percolator.schema.json
 
   No production code without a failing test first. If you wrote code before the test, delete it and start from the test.
 
-  Agents load the `superpowers:test-driven-development` skill before implementing. Reports include the RED and GREEN commands with their output, and a review treats missing RED evidence as a blocking finding. Tests assert behaviour, including error message text where users will see it. Don't write tests that only exercise mocks.
+  Agents load the `superpowers:test-driven-development` skill before implementing. Reports include the RED and GREEN commands with their **pasted** output (a prose summary such as "RED: module missing" is not evidence), and a review treats missing RED evidence as a blocking finding. Tests assert behaviour, including error message text where users will see it. Don't write tests that only exercise mocks.
 - **Test layout.** Tests live in `tests/`, mirroring `src/`. Fixtures go in `tests/fixtures/`. Temp dirs come from `fs.mkdtemp(path.join(os.tmpdir(), ...))`, never a fixed path. Test output must be pristine (no stray warnings).
 - Commit messages are conventional (`feat(scope): …`, `chore: …`).
 
