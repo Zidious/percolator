@@ -10,7 +10,8 @@ import type { RunState } from './engine/state.ts';
 import { cliHerdrApp } from './herdr/app.ts';
 import { cliHc } from './herdr/hc.ts';
 import type { Hc } from './herdr/hc.ts';
-import { checkResumable, drive, prUrl } from './run/drive.ts';
+import { checkResumable, drive, liveness, prUrl } from './run/drive.ts';
+import { lockIsLive, readDriverLock } from './run/lock.ts';
 import { listRuns, readRunMeta } from './run/meta.ts';
 import type { RunMeta } from './run/meta.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
@@ -177,7 +178,7 @@ async function readAttention(dir: string): Promise<AttentionRecord | undefined> 
 }
 
 /** What a run is doing or waiting for, in one line; an hc failure is reported, never thrown. */
-async function runDetail(dir: string, meta: RunMeta, state: RunState, hc: Hc): Promise<string> {
+async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: DriverDeps): Promise<string> {
   const waiting = await readWaiting(dir).catch(() => undefined);
   const waitingText = waiting && `waiting for approval: ${waiting.commentUrl}`;
   if (state.status === 'running') {
@@ -185,13 +186,22 @@ async function runDetail(dir: string, meta: RunMeta, state: RunState, hc: Hc): P
     const a = await readAttention(dir);
     const what = waitingText ?? (a !== undefined && a.stepId === state.currentStep ? `${a.kind}: attend terminal ${a.terminal}` : undefined);
     let driver: string | undefined;
+    let live = `driver ${meta.driver}`;
     try {
-      const t = await hc.get(meta.driver);
+      const t = await deps.hc.get(meta.driver);
       driver = t?.state === 'live' ? undefined : `driver not running; perc resume ${meta.runId}`;
     } catch (err) {
       driver = `driver unknown (hc: ${(err as Error).message})`;
     }
-    if (what === undefined) return driver ?? `driver ${meta.driver}`;
+    if (driver !== undefined) {
+      // a foreground drive has no driver terminal; its driver.json says it is alive
+      const lock = await readDriverLock(dir);
+      if (lock !== undefined && lockIsLive(lock, liveness(deps))) {
+        driver = undefined;
+        live = `driver pid ${lock.pid}${lock.host === os.hostname() ? '' : ` on ${lock.host}`}`;
+      }
+    }
+    if (what === undefined) return driver ?? live;
     return driver === undefined ? what : `${what}; ${driver}`;
   }
   if (waitingText) return waitingText;
@@ -215,7 +225,7 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
     deps.out(`  branch ${meta.branch}`);
     deps.out(`  status ${state.status}`);
     deps.out(`  step ${state.currentStep ?? '-'}`);
-    deps.out(`  detail ${await runDetail(dir, meta, state, deps.hc)}`);
+    deps.out(`  detail ${await runDetail(dir, meta, state, deps)}`);
     deps.out('history:');
     for (const h of state.history.slice(-10)) deps.out(`  ${h.stepId} a${h.attempt} ${h.status}`);
     return 0;
@@ -227,7 +237,7 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
       deps.out(`${id}  broken  -  ${ticket}  error: ${l.error}`);
       continue;
     }
-    const detail = l.state === undefined ? '' : await runDetail(l.dir, l.meta, l.state, deps.hc);
+    const detail = l.state === undefined ? '' : await runDetail(l.dir, l.meta, l.state, deps);
     deps.out(`${id}  ${l.state?.status ?? '-'}  ${l.state?.currentStep ?? '-'}  ${ticket}  ${detail}`.trimEnd());
   }
   return 0;
@@ -281,6 +291,8 @@ function driverDeps(io: Io, d: Partial<DriverDeps>): DriverDeps {
     out: (s) => io.stdout(`${s}\n`),
     ...(self !== undefined && self !== '' ? { selfTerminal: self } : {}),
     entry: d.entry ?? fileURLToPath(import.meta.url),
+    ...(d.pid !== undefined ? { pid: d.pid } : {}),
+    ...(d.pidAlive !== undefined ? { pidAlive: d.pidAlive } : {}),
   };
 }
 

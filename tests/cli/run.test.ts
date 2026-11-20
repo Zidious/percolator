@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
 import { main } from '../../src/cli.ts';
@@ -32,7 +33,7 @@ const OUTPUT: Record<string, string> = { groom: 'groomed_ticket', plan: 'plan', 
 
 type Env = RunEnv & {
   clock: { t: number };
-  onWait: { fn: (t: FakeTerminal) => boolean };
+  onWait: { fn: (t: FakeTerminal) => boolean | Promise<boolean> };
   dir(id: string): string;
   prepare(): Promise<RunMeta>;
   perc(argv: string[], deps?: Partial<DriverDeps>): Promise<{ code: number; out: string; err: string }>;
@@ -40,9 +41,9 @@ type Env = RunEnv & {
 
 /** Every stage but the builtins is a script that writes its contract output and exits 0; alice approves each gate. */
 async function setup(): Promise<Env> {
-  const onWait = { fn: (_t: FakeTerminal): boolean => false };
+  const onWait = { fn: (_t: FakeTerminal): boolean | Promise<boolean> => false };
   const hc = new FakeHc(async (t) => {
-    if (onWait.fn(t)) return;
+    if (await onWait.fn(t)) return;
     const step = t.labels['percolator.step']!;
     await fs.writeFile(path.join(t.argv.at(-1)!, `${OUTPUT[step]}.md`), `${step} output\n`);
     t.state = 'finished';
@@ -284,6 +285,105 @@ test('status <id> of a run waiting at a gate whose driver died says so', async (
     const r = await e.perc(['status', meta.runId]);
     assert.equal(r.code, 0, r.err);
     assert.equal(r.out.split('\n')[7], `  detail waiting for approval: u; driver not running; perc resume ${meta.runId}`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status during a foreground drive reports the driver pid, not a dead driver', async () => {
+  const e = await setup();
+  try {
+    let during: { code: number; out: string; err: string } | undefined;
+    let id = '';
+    e.onWait.fn = async (t) => {
+      if (t.labels['percolator.step'] === 'plan' && during === undefined) {
+        id = t.labels['percolator.run']!;
+        during = await e.perc(['status', id]);
+      }
+      return false;
+    };
+    const r = await e.perc(runArgv(e, '--foreground'));
+    assert.equal(r.code, 0, r.err);
+    assert.equal(during?.code, 0, during?.err);
+    assert.equal(during!.out.split('\n')[7], `  detail driver pid ${process.pid}`);
+    assert.equal(await exists(path.join(e.dir(id), 'driver.json')), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status of a run waiting at a gate with a live driver lock keeps only the waiting text', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const s = await loadState(e.dir(meta.runId));
+    s.currentStep = 'approve-groom';
+    await saveState(e.dir(meta.runId), s);
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir: e.dir(meta.runId), since: NOW.toISOString(), commentUrl: 'u' });
+    await writeJson(path.join(e.dir(meta.runId), 'driver.json'), { pid: 4242, host: os.hostname(), terminal: null, startedAt: NOW.toISOString() });
+    const r = await e.perc(['status', meta.runId], { ...e.deps, pidAlive: (p) => p === 4242 });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out.split('\n')[7], '  detail waiting for approval: u');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('resume is refused while a foreground drive holds the run', async () => {
+  const e = await setup();
+  try {
+    let during: { code: number; out: string; err: string } | undefined;
+    let id = '';
+    e.onWait.fn = async (t) => {
+      if (t.labels['percolator.step'] === 'plan' && during === undefined) {
+        id = t.labels['percolator.run']!;
+        // this process is the second caller; the drive runs as process 4242
+        during = await e.perc(['resume', id], { ...e.deps, pidAlive: (p) => p === 4242 });
+      }
+      return false;
+    };
+    const r = await e.perc(runArgv(e, '--foreground'), { ...e.deps, pid: 4242, pidAlive: (p) => p === 4242 });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(during?.code, 1);
+    assert.equal(during!.err, `run ${id} is already being driven by process 4242\n`);
+    // no second driver was launched
+    assert.equal(runCalls(e.deps.hc).some((c) => (c[1] as { labels: Record<string, string> }).labels['percolator.role'] === 'driver'), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('resume is refused when another host holds the driver lock', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    await writeJson(path.join(e.dir(meta.runId), 'driver.json'), { pid: 1, host: 'elsewhere', terminal: null, startedAt: NOW.toISOString() });
+    const r = await e.perc(['resume', meta.runId], { ...e.deps, pidAlive: () => false });
+    assert.equal(r.code, 1);
+    assert.equal(r.err, `run ${meta.runId} is already being driven by process 1 on elsewhere\n`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a stale driver lock (dead pid on this host) is replaced, then removed at the end', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const lockFile = path.join(e.dir(meta.runId), 'driver.json');
+    await writeJson(lockFile, { pid: 999999, host: os.hostname(), terminal: null, startedAt: NOW.toISOString() });
+    let held: unknown;
+    e.onWait.fn = async (t) => {
+      if (t.labels['percolator.step'] === 'plan' && held === undefined) held = JSON.parse(await fs.readFile(lockFile, 'utf8'));
+      return false;
+    };
+    // a foreground drive outside any hc terminal records terminal: null
+    const r = await withTerminalId(undefined, () =>
+      e.perc(['resume', meta.runId, '--foreground'], { ...e.deps, pid: 4242, pidAlive: (p) => p === 4242 }),
+    );
+    assert.equal(r.code, 0, r.err);
+    assert.deepEqual(held, { pid: 4242, host: os.hostname(), terminal: null, startedAt: NOW.toISOString() });
+    assert.equal(await exists(lockFile), false);
   } finally {
     await e.cleanup();
   }

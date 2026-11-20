@@ -28,6 +28,10 @@ export type DriverDeps = {
   selfTerminal?: string;
   /** absolute path of the CLI entry the driver terminal runs */
   entry: string;
+  /** this process's pid in `driver.json` (default `process.pid`); injectable for tests */
+  pid?: number;
+  /** liveness of a `driver.json` pid on this host (default `process.kill(pid, 0)`) */
+  pidAlive?: (pid: number) => boolean;
 };
 
 const SPACE_FAILED = 'herdr-app space.new failed: ';

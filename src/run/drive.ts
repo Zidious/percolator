@@ -15,6 +15,8 @@ import { validate } from '../validate.ts';
 import type { ValidateResult } from '../validate.ts';
 import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
 import { ensureWorktree } from '../workspace/worktree.ts';
+import { acquireDriverLock, drivenByProcess, otherLiveLock } from './lock.ts';
+import type { Liveness } from './lock.ts';
 import { readRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
@@ -53,7 +55,7 @@ function mappingChanges(was: readonly string[], now: readonly string[]): string[
  */
 export async function checkResumable(
   runId: string,
-  deps: Pick<DriverDeps, 'hc' | 'home' | 'selfTerminal'>,
+  deps: Pick<DriverDeps, 'hc' | 'home' | 'selfTerminal' | 'pid' | 'pidAlive'>,
 ): Promise<{ dir: string; meta: RunMeta; state: RunState; v: ValidateResult }> {
   const dir = runDir(deps.home, runId);
   const meta = await readRunMeta(dir);
@@ -68,6 +70,9 @@ export async function checkResumable(
   if (driver?.state === 'live' && driver.address !== deps.selfTerminal) {
     throw new Error(`run ${runId} is already being driven by terminal ${meta.driver}`);
   }
+  // a foreground drive has no driver terminal: driver.json is its only trace
+  const lock = await otherLiveLock(dir, liveness(deps));
+  if (lock !== undefined) throw new Error(drivenByProcess(runId, lock));
 
   const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile });
   if (state.graphFingerprint !== undefined && state.graphFingerprint !== graphFingerprint(v.graph)) {
@@ -91,12 +96,36 @@ export async function checkResumable(
  */
 export async function drive(runId: string, deps: DriverDeps): Promise<RunState> {
   const { dir, meta, state, v } = await checkResumable(runId, deps);
+  const now = deps.now ?? (() => new Date());
+  const release = await acquireDriverLock(dir, runId, {
+    ...liveness(deps),
+    ...(deps.selfTerminal !== undefined ? { terminal: deps.selfTerminal } : {}),
+    now,
+  });
+  try {
+    return await driveHeld(runId, deps, { dir, meta, state, v, now });
+  } finally {
+    await release();
+  }
+}
 
+/** `pid`/`pidAlive` from the deps, without undefined keys. */
+export function liveness(deps: Pick<DriverDeps, 'pid' | 'pidAlive'>): Liveness {
+  return {
+    ...(deps.pid !== undefined ? { pid: deps.pid } : {}),
+    ...(deps.pidAlive !== undefined ? { pidAlive: deps.pidAlive } : {}),
+  };
+}
+
+async function driveHeld(
+  runId: string,
+  deps: DriverDeps,
+  { dir, meta, state, v, now }: { dir: string; meta: RunMeta; state: RunState; v: ValidateResult; now: () => Date },
+): Promise<RunState> {
   await sweepLeftovers(dir, { recursive: true });
   await ensureWorktree({ repoRoot: meta.repoRoot, dir: meta.worktree, branch: meta.branch, base: meta.base });
   const mappings = await materializeGrounds(dir, v.mappings, v.grounds);
 
-  const now = deps.now ?? (() => new Date());
   const nowMs = () => now().getTime();
   const sleep = deps.sleep;
   const attentionFile = path.join(dir, 'attention.json');
