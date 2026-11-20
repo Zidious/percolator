@@ -11,13 +11,15 @@ import { githubOpenPr } from '../tracker/pr.ts';
 import { parseTicket } from '../tracker/ticket.ts';
 import { sweepLeftovers, writeFileAtomic } from '../util/fs.ts';
 import { validate } from '../validate.ts';
+import type { ValidateResult } from '../validate.ts';
 import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
 import { ensureWorktree } from '../workspace/worktree.ts';
 import { readRunMeta } from './meta.ts';
+import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 
 /** The PR url the deliver step recorded, if any. */
-async function prUrl(dir: string, state: RunState): Promise<string | undefined> {
+export async function prUrl(dir: string, state: RunState): Promise<string | undefined> {
   const rel = state.history.findLast((h) => h.outputs['pr_url'] !== undefined)?.outputs['pr_url'];
   if (rel === undefined) return undefined;
   return (await fs.readFile(path.join(dir, rel), 'utf8').catch(() => '')).trim() || undefined;
@@ -30,10 +32,14 @@ function groundChanges(was: Record<string, string>, now: Record<string, string>)
 }
 
 /**
- * Drive run `runId` from its saved state until it completes, fails or pauses. Refuses a finished run,
- * a run another live driver owns, and a run whose graph or grounds changed since it started.
+ * The checks a run must pass before it is driven again: not completed or failed, not driven by another
+ * live terminal (`selfTerminal` is this process's own), and the same graph and ground versions it started with.
+ * `drive` runs them, and so does `perc resume` before it launches a driver, so errors reach the owner's terminal.
  */
-export async function drive(runId: string, deps: DriverDeps): Promise<RunState> {
+export async function checkResumable(
+  runId: string,
+  deps: Pick<DriverDeps, 'hc' | 'home' | 'selfTerminal'>,
+): Promise<{ dir: string; meta: RunMeta; state: RunState; v: ValidateResult }> {
   const dir = runDir(deps.home, runId);
   const meta = await readRunMeta(dir);
   const state = await loadState(dir);
@@ -56,6 +62,14 @@ export async function drive(runId: string, deps: DriverDeps): Promise<RunState> 
   if (changed.length > 0) {
     throw new Error(`grounds changed since run ${runId} started: ${changed.join(', ')}; start a new run`);
   }
+  return { dir, meta, state, v };
+}
+
+/**
+ * Drive run `runId` from its saved state until it completes, fails or pauses, after `checkResumable`.
+ */
+export async function drive(runId: string, deps: DriverDeps): Promise<RunState> {
+  const { dir, meta, state, v } = await checkResumable(runId, deps);
 
   await sweepLeftovers(dir, { recursive: true });
   await ensureWorktree({ repoRoot: meta.repoRoot, dir: meta.worktree, branch: meta.branch, base: meta.base });

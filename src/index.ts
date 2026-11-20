@@ -49,3 +49,13 @@ export { buildTask, renderTemplate } from './runtime/task.ts';
 export { HerdrRuntime, sweepTerminals, terminalName } from './runtime/herdr-runtime.ts';
 export type { HerdrRuntimeOptions, StepHandler, Attention } from './runtime/herdr-runtime.ts';
 export { mappingsFor } from './grounds/mappings.ts';
+
+export { drive, checkResumable } from './run/drive.ts';
+export { prepareRun, launchDriver } from './run/prepare.ts';
+export type { DriverDeps } from './run/prepare.ts';
+export { cliGh, GhError } from './tracker/gh.ts';
+export type { Gh } from './tracker/gh.ts';
+export { parseTicket, formatTicket } from './tracker/ticket.ts';
+export { githubIntake } from './tracker/intake.ts';
+export { githubGate } from './tracker/gate.ts';
+export { githubOpenPr } from './tracker/pr.ts';

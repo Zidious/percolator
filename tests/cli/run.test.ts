@@ -1,0 +1,512 @@
+import assert from 'node:assert/strict';
+import * as fsSync from 'node:fs';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { test } from 'node:test';
+import { main } from '../../src/cli.ts';
+import { loadState, saveState } from '../../src/engine/state.ts';
+import { cliHc } from '../../src/herdr/hc.ts';
+import type { RunMeta } from '../../src/run/meta.ts';
+import type { DriverDeps } from '../../src/run/prepare.ts';
+import { prepareRun } from '../../src/run/prepare.ts';
+import { terminalName } from '../../src/runtime/herdr-runtime.ts';
+import { GATE_MARKER } from '../../src/tracker/intake.ts';
+import { FakeGh } from '../helpers/fake-gh.ts';
+import { FakeHc } from '../helpers/fake-hc.ts';
+import type { FakeTerminal } from '../helpers/fake-hc.ts';
+import { git } from '../helpers/git-repo.ts';
+import { ENTRY, NOW, setupRunEnv } from '../helpers/run-env.ts';
+import type { RunEnv } from '../helpers/run-env.ts';
+
+const REPO = 'github.com/o/r';
+const BINDINGS = [
+  '      intake: { builtin: github.intake }',
+  "      groom: { command: [groom-script, '{outputs_dir}'] }",
+  "      plan: { command: [plan-script, '{outputs_dir}'] }",
+  "      implement: { command: [implement-script, '{outputs_dir}'] }",
+  "      review: { command: [review-script, '{outputs_dir}'] }",
+  '      deliver: { builtin: github.open_pr }',
+];
+const TRACKER = '    tracker: { kind: github, approvers: [alice] }';
+const OUTPUT: Record<string, string> = { groom: 'groomed_ticket', plan: 'plan', implement: 'summary', review: 'findings' };
+
+type Env = RunEnv & {
+  clock: { t: number };
+  onWait: { fn: (t: FakeTerminal) => boolean };
+  dir(id: string): string;
+  prepare(): Promise<RunMeta>;
+  perc(argv: string[], deps?: Partial<DriverDeps>): Promise<{ code: number; out: string; err: string }>;
+};
+
+/** Every stage but the builtins is a script that writes its contract output and exits 0; alice approves each gate. */
+async function setup(): Promise<Env> {
+  const onWait = { fn: (_t: FakeTerminal): boolean => false };
+  const hc = new FakeHc(async (t) => {
+    if (onWait.fn(t)) return;
+    const step = t.labels['percolator.step']!;
+    await fs.writeFile(path.join(t.argv.at(-1)!, `${OUTPUT[step]}.md`), `${step} output\n`);
+    t.state = 'finished';
+    t.exitCode = 0;
+  });
+  const gh = new FakeGh({ readFile: (f) => fsSync.readFileSync(f, 'utf8') });
+  gh.addIssue(REPO, 5, { title: 'Fix the thing', body: 'It is broken.' });
+  const base = await setupRunEnv({ hc, gh, bindings: BINDINGS, extra: TRACKER });
+  const clock = { t: NOW.getTime() };
+  const lastIsGate = () => gh.issues.get(`${REPO}#5`)!.comments.at(-1)?.body.includes(GATE_MARKER) === true;
+  Object.assign(base.deps, {
+    now: () => new Date(clock.t),
+    sleep: async () => {
+      clock.t += 30000;
+      if (lastIsGate()) gh.addComment(REPO, 5, 'alice', '/percolator approve');
+    },
+  });
+  const dir = (id: string) => path.join(base.home, '.percolator', 'runs', id);
+  return {
+    ...base,
+    clock,
+    onWait,
+    dir,
+    prepare: () => prepareRun({ ticket: '#5', repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps),
+    perc: async (argv, deps = base.deps) => {
+      let out = '';
+      let err = '';
+      const code = await main(argv, { stdout: (s) => (out += s), stderr: (s) => (err += s) }, deps);
+      return { code, out, err };
+    },
+  };
+}
+
+const exists = (p: string) => fs.lstat(p).then(() => true, () => false);
+const runCalls = (hc: FakeHc) => hc.calls.filter((c) => c[0] === 'run');
+const runArgv = (e: Env, ...more: string[]) => ['run', '#5', '--repo', e.root, '--config', e.configFile, '--profile', 'work', ...more];
+const onlyRun = async (e: Env) => (await fs.readdir(path.join(e.home, '.percolator', 'runs')))[0]!;
+
+async function withTerminalId<T>(id: string | undefined, fn: () => Promise<T>): Promise<T> {
+  const was = process.env['HC_TERMINAL_ID'];
+  if (id === undefined) delete process.env['HC_TERMINAL_ID'];
+  else process.env['HC_TERMINAL_ID'] = id;
+  try {
+    return await fn();
+  } finally {
+    if (was === undefined) delete process.env['HC_TERMINAL_ID'];
+    else process.env['HC_TERMINAL_ID'] = was;
+  }
+}
+
+async function writeJson(file: string, v: unknown): Promise<void> {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(v));
+}
+
+test('run without --foreground launches the driver and prints the start block', async () => {
+  const e = await setup();
+  try {
+    const r = await e.perc(runArgv(e));
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    const id = await onlyRun(e);
+    const driver = terminalName(id, `${REPO}#5`, '@driver', 0);
+    const worktree = path.join(e.home, '.percolator', 'worktrees', 'r', id);
+    assert.equal(
+      r.out,
+      [
+        `run ${id} started`,
+        `  terminal ${driver} (space "r #5")`,
+        `  worktree ${worktree}`,
+        `  follow with: perc status ${id}`,
+        '',
+      ].join('\n'),
+    );
+    const calls = runCalls(e.deps.hc);
+    assert.equal(calls.length, 1);
+    assert.deepEqual((calls[0]![1] as { argv: string[] }).argv, [process.execPath, ENTRY, 'drive', id]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('the driver runs cli.ts by default', async () => {
+  const e = await setup();
+  try {
+    const { entry: _entry, ...deps } = e.deps;
+    const r = await e.perc(runArgv(e), deps);
+    assert.equal(r.code, 0, r.err);
+    const argv = (runCalls(e.deps.hc)[0]![1] as { argv: string[] }).argv;
+    assert.equal(argv[1], path.resolve(import.meta.dirname, '..', '..', 'src', 'cli.ts'));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('run --foreground drives to completion', async () => {
+  const e = await setup();
+  try {
+    const r = await e.perc(runArgv(e, '--foreground'));
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    const id = await onlyRun(e);
+    assert.equal(r.out.split('\n').at(-2), `run ${id} completed: https://${REPO}/pull/1`);
+    assert.equal((await loadState(e.dir(id))).status, 'completed');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status lists runs with details', async () => {
+  const e = await setup();
+  try {
+    const metas: RunMeta[] = [];
+    for (let i = 0; i < 6; i++) {
+      e.clock.t = NOW.getTime() + i * 1000;
+      metas.push(await e.prepare());
+    }
+    const [waiting, paused, dead, done, live, attended] = metas as [RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta];
+    const edit = async (m: RunMeta, f: (s: Awaited<ReturnType<typeof loadState>>) => void) => {
+      const s = await loadState(e.dir(m.runId));
+      f(s);
+      await saveState(e.dir(m.runId), s);
+    };
+    const url = `https://${REPO}/issues/5#issuecomment-7`;
+    await edit(waiting, (s) => (s.currentStep = 'approve-groom'));
+    await writeJson(path.join(e.dir(waiting.runId), 'waiting.json'), {
+      stepId: 'approve-groom', stepDir: path.join(e.dir(waiting.runId), 'steps', 'approve-groom', '1'), since: NOW.toISOString(), commentUrl: url,
+    });
+    await edit(paused, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'approve-groom';
+      s.pausedReason = 'cap: approve-groom reached 3 rounds';
+    });
+    await edit(dead, (s) => (s.currentStep = 'plan'));
+    await edit(done, (s) => {
+      s.status = 'completed';
+      delete s.currentStep;
+      s.history.push({ stepId: 'deliver', attempt: 1, startedAt: '', endedAt: '', status: 'pass', outputs: { pr_url: 'steps/deliver/1/outputs/pr_url.md' } });
+    });
+    await fs.mkdir(path.join(e.dir(done.runId), 'steps', 'deliver', '1', 'outputs'), { recursive: true });
+    await fs.writeFile(path.join(e.dir(done.runId), 'steps', 'deliver', '1', 'outputs', 'pr_url.md'), `https://${REPO}/pull/3\n`);
+    await edit(live, (s) => (s.currentStep = 'implement'));
+    e.deps.hc.add({ name: live.driver, labels: { 'percolator.run': live.runId, 'percolator.role': 'driver' } });
+    await edit(attended, (s) => (s.currentStep = 'groom'));
+    const groomTerm = terminalName(attended.runId, attended.ticket, 'groom', 1);
+    await writeJson(path.join(e.dir(attended.runId), 'attention.json'), { stepId: 'groom', terminal: groomTerm, kind: 'blocked', at: NOW.toISOString() });
+    await fs.mkdir(e.dir('t9-broken'), { recursive: true });
+
+    const r = await e.perc(['status']);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    const t = `${REPO}#5`;
+    const runFile = path.join(e.dir('t9-broken'), 'run.json');
+    assert.equal(
+      r.out,
+      [
+        `${attended.runId}  running  groom  ${t}  blocked: attend terminal ${groomTerm}`,
+        `${live.runId}  running  implement  ${t}  driver ${live.driver}`,
+        `${done.runId}  completed  -  ${t}  https://${REPO}/pull/3`,
+        `${dead.runId}  running  plan  ${t}  driver not running; perc resume ${dead.runId}`,
+        `${paused.runId}  paused  approve-groom  ${t}  cap: approve-groom reached 3 rounds`,
+        `${waiting.runId}  running  approve-groom  ${t}  waiting for approval: ${url}`,
+        `t9-broken  broken  -  -  error: Run metadata ${runFile} is missing or invalid: file not found`,
+        '',
+      ].join('\n'),
+    );
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> when hc is missing', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const s = await loadState(e.dir(meta.runId));
+    s.currentStep = 'plan';
+    s.history.push(
+      { stepId: 'intake', attempt: 1, startedAt: '', endedAt: '', status: 'pass', outputs: {} },
+      { stepId: 'groom', attempt: 1, startedAt: '', endedAt: '', status: 'pass', outputs: {} },
+    );
+    await saveState(e.dir(meta.runId), s);
+    const hc = cliHc({ exec: async () => Promise.reject(new Error('hc not found on PATH')) });
+    const r = await e.perc(['status', meta.runId], { ...e.deps, hc });
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(
+      r.out,
+      [
+        `run ${meta.runId}`,
+        `  ticket ${REPO}#5`,
+        '  profile work',
+        `  worktree ${meta.worktree}`,
+        `  branch ${meta.branch}`,
+        '  status running',
+        '  step plan',
+        '  detail driver unknown (hc: hc not found on PATH)',
+        'history:',
+        '  intake a1 pass',
+        '  groom a1 pass',
+        '',
+      ].join('\n'),
+    );
+    const list = await e.perc(['status'], { ...e.deps, hc });
+    assert.equal(list.out, `${meta.runId}  running  plan  ${REPO}#5  driver unknown (hc: hc not found on PATH)\n`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> shows only the last 10 history records', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const s = await loadState(e.dir(meta.runId));
+    s.status = 'paused';
+    s.currentStep = 'review';
+    s.pausedReason = 'review: stuck';
+    for (let i = 1; i <= 12; i++) s.history.push({ stepId: 'review', attempt: i, startedAt: '', endedAt: '', status: 'fail', outputs: {} });
+    await saveState(e.dir(meta.runId), s);
+    const r = await e.perc(['status', meta.runId]);
+    const lines = r.out.split('\n');
+    assert.equal(lines[7], '  detail review: stuck');
+    assert.deepEqual(lines.slice(9, -1), Array.from({ length: 10 }, (_, i) => `  review a${i + 3} fail`));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('approve writes the decision', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const stepDir = path.join(e.dir(meta.runId), 'steps', 'approve-groom', '1');
+    await fs.mkdir(stepDir, { recursive: true });
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir, since: NOW.toISOString(), commentUrl: 'u' });
+    const r = await e.perc(['approve', meta.runId]);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(r.out, `approved approve-groom of run ${meta.runId}\n`);
+    const d = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
+    assert.equal(d.decision, 'approve');
+    assert.equal(d.via, 'local');
+
+    const rej = await e.perc(['reject', meta.runId, 'tighten', 'the scope']);
+    assert.equal(rej.code, 0, rej.err);
+    assert.equal(rej.out, `rejected approve-groom of run ${meta.runId}\n`);
+    const d2 = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
+    assert.equal(d2.decision, 'reject');
+    assert.equal(d2.feedback, 'tighten the scope');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('approve when not waiting', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const r = await e.perc(['approve', meta.runId]);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, 'run is not waiting at a gate\n');
+    assert.equal(r.out, '');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('reject without feedback is a usage error', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const r = await e.perc(['reject', meta.runId]);
+    assert.equal(r.code, 2);
+    assert.match(r.err, /^reject needs <run-id> and <feedback>\n\nusage: perc/);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a run id that is not a plain name is a usage error', async () => {
+  const e = await setup();
+  try {
+    for (const cmd of ['status', 'approve', 'resume', 'clean', 'drive']) {
+      const r = await e.perc([cmd, '../x']);
+      assert.equal(r.code, 2, cmd);
+      assert.match(r.err, /^invalid run id "\.\.\/x"\n\nusage: perc/, cmd);
+    }
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('resume refuses a changed config before launching', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    await e.writeConfig(TRACKER, BINDINGS.map((l) => l.replace('groom-script', 'other-script')));
+    const r = await e.perc(['resume', meta.runId]);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, `run ${meta.runId} was started with a different graph (config changed since); start a new run\n`);
+    assert.deepEqual(runCalls(e.deps.hc), []);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('resume refuses a completed run with drive\'s message', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const s = await loadState(e.dir(meta.runId));
+    s.status = 'completed';
+    await saveState(e.dir(meta.runId), s);
+    const r = await e.perc(['resume', meta.runId]);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, `run ${meta.runId} already completed\n`);
+    assert.deepEqual(runCalls(e.deps.hc), []);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('resume relaunches a dead driver', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    e.deps.hc.add({ name: meta.driver, state: 'finished', labels: { 'percolator.run': meta.runId, 'percolator.role': 'driver' } });
+    const r = await e.perc(['resume', meta.runId]);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(
+      r.out,
+      [`run ${meta.runId} resumed`, `  terminal ${meta.driver}`, `  follow with: perc status ${meta.runId}`, ''].join('\n'),
+    );
+    const calls = runCalls(e.deps.hc);
+    assert.equal(calls.length, 1);
+    assert.deepEqual((calls[0]![1] as { argv: string[] }).argv, [process.execPath, ENTRY, 'drive', meta.runId]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('resume --foreground drives in this process', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const r = await e.perc(['resume', meta.runId, '--foreground']);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out.split('\n').at(-2), `run ${meta.runId} completed: https://${REPO}/pull/1`);
+    assert.equal(runCalls(e.deps.hc).some((c) => (c[1] as { name: string }).name === meta.driver), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('drive through main does not refuse its own terminal (HC_TERMINAL_ID)', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const driver = e.deps.hc.add({ name: meta.driver, labels: { 'percolator.run': meta.runId, 'percolator.role': 'driver' } });
+    const other = await withTerminalId('w9:p9', () => e.perc(['drive', meta.runId]));
+    assert.equal(other.code, 1);
+    assert.equal(other.err, `run ${meta.runId} is already being driven by terminal ${meta.driver}\n`);
+    const self = await withTerminalId(driver.address, () => e.perc(['drive', meta.runId]));
+    assert.equal(self.code, 0, self.err);
+    assert.equal(self.out.split('\n').at(-2), `run ${meta.runId} completed: https://${REPO}/pull/1`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('drive exits 1 when the run fails', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    e.onWait.fn = (t) => {
+      if (t.labels['percolator.step'] !== 'plan') return false;
+      t.state = 'finished';
+      t.exitCode = 1;
+      return true;
+    };
+    const r = await e.perc(['drive', meta.runId]);
+    assert.equal(r.code, 1);
+    assert.equal(r.out.split('\n').at(-2), `run ${meta.runId} failed at plan`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('clean refuses a live driver', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    e.deps.hc.add({ name: meta.driver, labels: { 'percolator.run': meta.runId, 'percolator.role': 'driver' } });
+    const r = await e.perc(['clean', meta.runId]);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, `run ${meta.runId} is being driven by terminal ${meta.driver}; stop it first\n`);
+    assert.equal(await exists(meta.worktree), true);
+    assert.equal(e.deps.hc.terminals.has(meta.driver), true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('clean removes terminals and worktree', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const labels = { 'percolator.run': meta.runId };
+    e.deps.hc.add({ name: meta.driver, state: 'finished', labels: { ...labels, 'percolator.role': 'driver' } });
+    e.deps.hc.add({ name: 'step-term', labels });
+    e.deps.hc.add({ name: 'foreign', labels: { 'percolator.run': 'other' } });
+    const r = await e.perc(['clean', meta.runId]);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(r.out, `removed 2 terminal(s) and worktree ${meta.worktree}\n`);
+    assert.deepEqual([...e.deps.hc.terminals.keys()], ['foreign']);
+    assert.equal(await exists(meta.worktree), false);
+    assert.match(await git(e.root, 'rev-parse', '--verify', `refs/heads/${meta.branch}`), /^[0-9a-f]{40}$/);
+    assert.equal(await exists(path.join(e.dir(meta.runId), 'run.json')), true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('clean of a dirty worktree needs --force', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    await fs.writeFile(path.join(meta.worktree, 'dirty.txt'), 'x');
+    const r = await e.perc(['clean', meta.runId]);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, `worktree ${meta.worktree} has uncommitted changes; commit them or use --force\n`);
+    const forced = await e.perc(['clean', meta.runId, '--force']);
+    assert.equal(forced.code, 0, forced.err);
+    assert.equal(await exists(meta.worktree), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('clean succeeds when the worktree dir was deleted by hand', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    await fs.rm(meta.worktree, { recursive: true, force: true, maxRetries: 5 });
+    const r = await e.perc(['clean', meta.runId]);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(r.out, `removed 0 terminal(s) and worktree ${meta.worktree}\n`);
+    assert.equal((await git(e.root, 'worktree', 'list', '--porcelain')).includes(meta.runId), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('approve of an unknown run names the missing run record', async () => {
+  const e = await setup();
+  try {
+    const r = await e.perc(['approve', 't1-nope']);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, `Run metadata ${path.join(e.dir('t1-nope'), 'run.json')} is missing or invalid: file not found\n`);
+  } finally {
+    await e.cleanup();
+  }
+});

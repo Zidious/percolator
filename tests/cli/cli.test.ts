@@ -93,3 +93,33 @@ test('schema writes the JSON schema to --out and prints the path', async () => {
   const json = JSON.parse(await fs.readFile(out, 'utf8'));
   assert.equal(json.type, 'object');
 });
+
+test('--help lists the run commands', async () => {
+  const r = await run(['--help']);
+  assert.ok(
+    r.out.includes(
+      [
+        '  run <ticket> [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]',
+        '      start a run: groom, approval, plan, implement, review, PR (default: in its own hc terminal)',
+        '  resume <run-id> [--foreground]',
+        '      continue a paused or interrupted run (grants one more round at a cap)',
+        '  status [<run-id>]',
+        '      list runs, or show one',
+        '  approve <run-id> | reject <run-id> <feedback>',
+        '      answer the approval gate a run is waiting at',
+        '  clean <run-id> [--force]',
+        "      remove a finished run's terminals and worktree (keeps the branch and the run record)",
+        '  drive <run-id>',
+        "      internal: what a run's driver terminal executes",
+        '',
+      ].join('\n'),
+    ),
+    r.out,
+  );
+});
+
+test('run with no ticket exits 2', async () => {
+  const r = await run(['run']);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /^run needs <ticket>\n\nusage: perc/);
+});

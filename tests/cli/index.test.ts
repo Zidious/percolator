@@ -9,7 +9,7 @@ test('public API exports the pipeline', () => {
     'buildGraph', 'runGraph', 'newState', 'saveState', 'loadState', 'writeJsonSchema', 'expandHome',
     'nodeExec', 'cliHc', 'cliHerdrApp', 'ensureWorktree', 'defaultWorktreeDir', 'runDir', 'stepDir',
     'materializeGrounds', 'buildSkillPlugins', 'checkAgents', 'buildTask', 'renderTemplate', 'terminalName',
-    'mappingsFor',
+    'mappingsFor', 'drive', 'prepareRun', 'cliGh', 'parseTicket', 'githubIntake', 'githubGate', 'githubOpenPr',
   ]) {
     assert.equal(typeof (api as Record<string, unknown>)[name], 'function', name);
   }
