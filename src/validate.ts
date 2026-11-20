@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { loadFragment, loadUserConfig } from './config/load.ts';
+import { ConfigError, loadFragment, loadUserConfig } from './config/load.ts';
+import { exists } from './util/fs.ts';
 import type { GraphFragment, GroundSpec } from './config/schema.ts';
 import { selectProfile } from './config/profile.ts';
 import { buildGraph } from './graph/build.ts';
@@ -77,10 +78,19 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
   };
   const repoRoot = (await git.toplevel(opts.cwd)) ?? opts.cwd;
   const repoFile = path.join(repoRoot, '.percolator', 'percolator.yaml');
-  const repoLayer = await (opts.loadRepoLayer ?? loadFragment)(repoFile).catch((err: NodeJS.ErrnoException) => {
-    if (err.code === 'ENOENT') return undefined; // the repo layer is optional; any other failure is real
-    throw err;
-  });
+  let repoLayer: GraphFragment | undefined;
+  if (await exists(repoFile)) {
+    if (profile.trust_repo_config !== true) {
+      throw new ConfigError(
+        `${repoFile} exists, but profile "${name}" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
+        opts.configFile,
+      );
+    }
+    repoLayer = await (opts.loadRepoLayer ?? loadFragment)(repoFile).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return undefined; // vanished since the check; any other failure is real
+      throw err;
+    });
+  }
   const roots = [profileRoot];
   if (repoLayer) roots.push({ source: 'repo:.percolator/percolator.yaml', use: repoLayer.use ?? [], fragment: repoLayer });
   const { layers, mappings } = await collectLayers({ roots, grounds, configFile: opts.configFile });

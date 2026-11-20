@@ -666,6 +666,9 @@
               "kind"
             ],
             "additionalProperties": false
+          },
+          "trust_repo_config": {
+            "type": "boolean"
           }
         },
         "additionalProperties": false

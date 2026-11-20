@@ -1,0 +1,20 @@
+version: 1
+grounds:
+  company: { path: ./grounds/company }
+  team: { path: ./grounds/team }
+profiles:
+  work:
+    trust_repo_config: true
+    use:
+      - { from: company, file: percolator.yaml, as: graph }
+      - { from: team, file: policies/sdlc.md, as: policy }
+    bindings:
+      intake: { builtin: read-ticket }
+      groom: { agent: claude }
+      plan: { agent: claude }
+      implement: { agent: claude }
+      deliver: { command: [echo, deliver] }
+    nodes:
+      lint:
+        command: [echo, lint]
+        after: implement

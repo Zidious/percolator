@@ -26,6 +26,8 @@ const opts = () => ({
   git: new FakeGit(),
 });
 
+const trusted = () => ({ ...opts(), configFile: fx('e2e/config-trusted.yaml') });
+
 test('e2e fixture validates and lists steps (relative ground paths resolve against the config file)', async () => {
   const r = await validate(opts());
   assert.equal(r.profile, 'work');
@@ -43,7 +45,7 @@ test('unbound stages propagate as an error', async () => {
   await assert.rejects(validate({ ...opts(), configFile: fx('e2e/unbound.yaml') }), /unbound/i);
 });
 
-test('repo .percolator/percolator.yaml is the last layer', async () => {
+test('a trusted repo layer is merged as the last layer', async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
   try {
     await fs.mkdir(path.join(cwd, '.percolator'));
@@ -51,8 +53,26 @@ test('repo .percolator/percolator.yaml is the last layer', async () => {
       path.join(cwd, '.percolator', 'percolator.yaml'),
       'nodes:\n  repo-check:\n    command: [echo, hi]\n    after: plan\n',
     );
-    const r = await validate({ ...opts(), cwd });
+    const r = await validate({ ...trusted(), cwd });
     assert.ok(r.graph.steps.map((s) => s.id).includes('repo-check'));
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test('an untrusted repo layer is refused', async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    await fs.mkdir(path.dirname(repoFile));
+    await fs.writeFile(repoFile, 'nodes:\n  repo-check:\n    command: [echo, hi]\n    after: plan\n');
+    const err = await validate({ ...opts(), cwd }).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.equal(err.file, fx('e2e/config.yaml'));
+    assert.equal(
+      err.message,
+      `${fx('e2e/config.yaml')}: ${repoFile} exists, but profile "work" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
+    );
   } finally {
     await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
   }
@@ -70,7 +90,7 @@ test('the repo layer is found at the git toplevel when run from a subdirectory',
     const git = new FakeGit();
     const cwd = path.join(root, 'src', 'deep');
     git.toplevels.set(cwd, root);
-    const r = await validate({ ...opts(), git, cwd });
+    const r = await validate({ ...trusted(), git, cwd });
     assert.ok(r.graph.steps.map((s) => s.id).includes('repo-check'));
     assert.ok(git.calls.includes(`toplevel ${cwd}`));
   } finally {
@@ -82,12 +102,14 @@ test('a repo layer that cannot be read for a reason other than absence is an err
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
   try {
     const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    await fs.mkdir(path.dirname(repoFile));
+    await fs.writeFile(repoFile, 'nodes: {}\n');
     const denied = Object.assign(new Error(`EACCES: permission denied, open '${repoFile}'`), { code: 'EACCES' });
     const loadRepoLayer = async (file: string) => {
       assert.equal(file, repoFile);
       throw denied;
     };
-    await assert.rejects(validate({ ...opts(), cwd, loadRepoLayer }), (e) => e === denied);
+    await assert.rejects(validate({ ...trusted(), cwd, loadRepoLayer }), (e) => e === denied);
   } finally {
     await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
   }

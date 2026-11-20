@@ -159,6 +159,7 @@ export const ProfileSchema = z.strictObject({
   ...graphFragmentShape,
   match: z.strictObject({ remote: stringOrList.optional(), path: stringOrList.optional() }).optional(),
   tracker: z.strictObject({ kind: z.literal('github') }).optional(),
+  trust_repo_config: z.boolean().optional(),
 });
 export type Profile = z.infer<typeof ProfileSchema>;
 
