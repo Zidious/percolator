@@ -56,6 +56,14 @@ function toError(sub: string, code: number, stderr: string): HcError {
   return new HcError(sub, 'unknown', stderr.trim(), code);
 }
 
+const STATUSES: readonly string[] = ['idle', 'working', 'done', 'blocked', 'error'] satisfies AgentStatus[];
+
+/** `hc ls` reports status as a string, `hc get` as `{ app, kind, msg, state }`; anything else is null */
+function toStatus(v: unknown): AgentStatus | null {
+  const s = v !== null && typeof v === 'object' ? (v as Record<string, unknown>)['state'] : v;
+  return typeof s === 'string' && STATUSES.includes(s) ? (s as AgentStatus) : null;
+}
+
 function toTerminal(j: Record<string, unknown>): Terminal {
   const labels: Record<string, string> = {};
   const raw = j['labels'];
@@ -66,7 +74,7 @@ function toTerminal(j: Record<string, unknown>): Terminal {
     address: String(j['address']),
     ...(typeof j['name'] === 'string' ? { name: j['name'] } : {}),
     state: j['state'] as Terminal['state'],
-    status: (j['status'] ?? null) as AgentStatus | null,
+    status: toStatus(j['status']),
     exitCode: (j['exit_code'] ?? null) as number | null,
     turn: Number(j['turn'] ?? 0),
     labels,
@@ -142,7 +150,7 @@ export function cliHc(o: { exec?: Exec; bin?: string } = {}): Hc {
         reason: String(j['reason']),
         ended: Boolean(j['ended']),
         exitCode: (j['exit_code'] ?? null) as number | null,
-        status: (j['status'] ?? null) as AgentStatus | null,
+        status: toStatus(j['status']),
       };
     },
     async read(t, lines) {

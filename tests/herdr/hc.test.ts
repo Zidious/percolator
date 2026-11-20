@@ -130,3 +130,32 @@ test('cliHc.get returns labels', async () => {
   const t = await cliHc({ exec: rec.exec }).get('n');
   assert.deepEqual(t?.labels, { 'percolator.run': 'r1', 'herdr.space': 's1' });
 });
+
+// real `hc get --json` (smoke, 2026-11-20) reports status as an object; `hc ls` reports a string
+test('cliHc.get reads an object status by its state', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, {
+    stdout: JSON.stringify({
+      address: 't1q', name: 'n', state: 'live', turn: 0, labels: {},
+      status: { app: 'claude-code', kind: 'permission', msg: 'trust this folder', state: 'blocked' },
+    }),
+  });
+  const t = await cliHc({ exec: rec.exec }).get('n');
+  assert.equal(t?.status, 'blocked');
+});
+
+test('cliHc.wait reads an object status by its state', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, {
+    stdout: JSON.stringify({ ended: false, exit_code: null, reason: 'status', status: { app: 'claude-code', state: 'idle' } }),
+  });
+  const w = await cliHc({ exec: rec.exec }).wait('n');
+  assert.equal(w.status, 'idle');
+});
+
+test('cliHc maps an unknown status to null', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: JSON.stringify({ address: 't1', state: 'live', turn: 0, status: { state: 'sleeping' } }) });
+  const t = await cliHc({ exec: rec.exec }).get('n');
+  assert.equal(t?.status, null);
+});
