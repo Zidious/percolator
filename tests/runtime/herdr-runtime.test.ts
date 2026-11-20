@@ -12,13 +12,16 @@ import { buildGraph } from '../../src/graph/build.ts';
 import type { Step } from '../../src/graph/build.ts';
 import { mergeLayers } from '../../src/graph/merge.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
-import { HerdrRuntime, terminalName } from '../../src/runtime/herdr-runtime.ts';
+import type { Terminal } from '../../src/herdr/hc.ts';
+import { HerdrRuntime, sweepTerminals, terminalName } from '../../src/runtime/herdr-runtime.ts';
 import type { Attention, HerdrRuntimeOptions } from '../../src/runtime/herdr-runtime.ts';
 import type { MaterializedMapping } from '../../src/workspace/run-dir.ts';
 import { FakeHc } from '../helpers/fake-hc.ts';
 import type { FakeTerminal } from '../helpers/fake-hc.ts';
 
 const RUN_ID = 'Acme-Repo-#123-20261120T101500';
+/** the labels of a terminal this run started */
+const ours = { 'percolator.run': RUN_ID };
 /** first 4 hex chars of sha256(runId + NUL + stepId), the name's hash */
 const h4 = (stepId: string, runId = RUN_ID) => createHash('sha256').update(`${runId}\0${stepId}`).digest('hex').slice(0, 4);
 
@@ -246,7 +249,7 @@ test('resume re-attaches to a live terminal without relaunching or rewriting tas
   const stepDir = path.join(e.runDir, 'steps', 'plan', '2');
   await fs.mkdir(stepDir, { recursive: true });
   await fs.writeFile(path.join(stepDir, 'task.md'), 'MARKER');
-  e.hc.add({ name, argv: ['claude', '--', `Your task is in ${path.join(stepDir, 'task.md')}. Read it and follow it exactly.`] });
+  e.hc.add({ name, labels: ours, argv: ['claude', '--', `Your task is in ${path.join(stepDir, 'task.md')}. Read it and follow it exactly.`] });
 
   const out = await runtime(e).executeStep(step(), ctx({ plan: 1 }));
   assert.deepEqual(out, { status: 'pass', outputs: { plan: 'steps/plan/2/outputs/plan.md' } });
@@ -259,7 +262,7 @@ test('a finished terminal without done.json is removed and relaunched', async ()
     if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
   });
   const name = terminalName(RUN_ID, '#123', 'plan', 1);
-  e.hc.add({ name, state: 'finished', exitCode: 1, address: 'old' });
+  e.hc.add({ name, labels: ours, state: 'finished', exitCode: 1, address: 'old' });
   const out = await runtime(e).executeStep(step(), ctx());
   assert.equal(out.status, 'pass');
   assert.deepEqual(subs(e.hc).slice(0, 3), ['get', 'rm', 'run']);
@@ -269,7 +272,7 @@ test('a finished terminal with a done.json is collected without relaunching', as
   const e = await env();
   const name = terminalName(RUN_ID, '#123', 'plan', 1);
   const stepDir = path.join(e.runDir, 'steps', 'plan', '1');
-  const t = e.hc.add({ name, state: 'finished', exitCode: 0, argv: ['claude', '--', `Your task is in ${path.join(stepDir, 'task.md')}. Read it and follow it exactly.`] });
+  const t = e.hc.add({ name, labels: ours, state: 'finished', exitCode: 0, argv: ['claude', '--', `Your task is in ${path.join(stepDir, 'task.md')}. Read it and follow it exactly.`] });
   await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
   const out = await runtime(e).executeStep(step(), ctx());
   assert.deepEqual(out, { status: 'pass', outputs: { plan: 'steps/plan/1/outputs/plan.md' } });
@@ -555,7 +558,7 @@ test('a live prior attempt whose done.json is invalid is adopted on resume once 
     if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
   });
   const dir1 = path.join(e.runDir, 'steps', 'plan', '1');
-  const prev = e.hc.add({ name: terminalName(RUN_ID, '#123', 'plan', 1), status: 'working', argv: taskArgv(dir1) });
+  const prev = e.hc.add({ name: terminalName(RUN_ID, '#123', 'plan', 1), labels: ours, status: 'working', argv: taskArgv(dir1) });
   await finishWith(e.hc, prev, '{"status":"maybe"}');
   const out = await runtime(e).executeStep(step(), ctx({ plan: 1 }));
   assert.deepEqual(out, { status: 'pass', outputs: { plan: 'steps/plan/1/outputs/plan.md' } });
@@ -615,4 +618,165 @@ test('wait never asks hc for longer than the time left before timeout_s', async 
   assert.equal((await rt.executeStep(s, ctx())).status, 'pass');
   const waits = e.hc.calls.filter((c) => c[0] === 'wait').map((c) => (c[2] as { timeoutS: number }).timeoutS);
   assert.deepEqual(waits, [5]);
+});
+
+test('a live terminal of another run is never adopted', async () => {
+  const e = await env(async (_t, n) => {
+    // if it were adopted, it would complete the step
+    if (n === 1) {
+      const dir = path.join(e.runDir, 'steps', 'plan', '1');
+      await fs.mkdir(path.join(dir, 'outputs'), { recursive: true });
+      await fs.writeFile(path.join(dir, 'done.json'), JSON.stringify({ status: 'pass' }));
+    }
+  });
+  const name = terminalName(RUN_ID, '#123', 'plan', 1);
+  e.hc.add({ name, labels: { 'percolator.run': 'other' } });
+  const out = await runtime(e).executeStep(step(), ctx());
+  assert.deepEqual(out, {
+    status: 'escalate',
+    outputs: {},
+    reason: `terminal ${name} is not part of run ${RUN_ID} (percolator.run=other); remove it with hc rm or rename it, then resume`,
+  });
+  assert.deepEqual(subs(e.hc).filter((s) => s === 'run' || s === 'kill' || s === 'rm'), []);
+  assert.equal(e.hc.terminals.get(name)!.state, 'live');
+});
+
+test('a live prior-attempt terminal without a percolator.run label is not adopted', async () => {
+  const e = await env((t) => {
+    // if it were adopted, it would exit here
+    t.state = 'finished';
+  });
+  const name = terminalName(RUN_ID, '#123', 'plan', 1);
+  e.hc.add({ name, status: 'working' });
+  const out = await runtime(e).executeStep(step(), ctx({ plan: 1 }));
+  assert.deepEqual(out, {
+    status: 'escalate',
+    outputs: {},
+    reason: `terminal ${name} is not part of run ${RUN_ID} (percolator.run=none); remove it with hc rm or rename it, then resume`,
+  });
+  assert.deepEqual(subs(e.hc).filter((s) => s === 'run' || s === 'kill' || s === 'rm'), []);
+});
+
+test('keepTerminals false adopts a live attempt whose done.json is ok', async () => {
+  const e = await env(async (t, n) => {
+    // a relaunched attempt 2 would finish here
+    if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p2' });
+  });
+  const first = terminalName(RUN_ID, '#123', 'plan', 1);
+  const prev = e.hc.add({ name: first, labels: ours, argv: taskArgv(path.join(e.runDir, 'steps', 'plan', '1')) });
+  await finishWith(e.hc, prev, { status: 'pass' }, { plan: 'p1' });
+  const out = await runtime(e).executeStep(step(), ctx({ plan: 1 }));
+  assert.deepEqual(out, { status: 'pass', outputs: { plan: 'steps/plan/1/outputs/plan.md' } });
+  assert.ok(!subs(e.hc).includes('run'));
+  assert.deepEqual(e.hc.calls.filter((c) => c[0] === 'kill' || c[0] === 'rm'), [['kill', first], ['rm', first]]);
+  assert.equal(e.hc.terminals.size, 0);
+});
+
+test('a finished script terminal is collected from its exit code on resume', async () => {
+  const e = await env((t) => {
+    // a relaunched script would pass here
+    t.state = 'finished';
+    t.exitCode = 0;
+  });
+  const s = step({ id: 'lint', name: 'lint', role: 'hook', slotLast: false, def: { command: ['node', 'x.js'] } as Step['def'] });
+  const name = terminalName(RUN_ID, '#123', 'lint', 1);
+  e.hc.add({ name, labels: ours, state: 'finished', exitCode: 3 });
+  const out = await runtime(e).executeStep(s, ctx());
+  assert.deepEqual(out, { status: 'fail', outputs: {}, reason: 'exit code 3' });
+  assert.ok(!subs(e.hc).includes('run'));
+  assert.deepEqual(subs(e.hc).slice(-2), ['kill', 'rm']);
+});
+
+/** idle at turn 0 from the first wait; `now` advances 10 s per sleep; done.json appears on the 3rd sleep */
+async function idleAtTurn0(over: Partial<HerdrRuntimeOptions>) {
+  let term: FakeTerminal | undefined;
+  let clock = 0;
+  const e = await env((t, n) => {
+    if (n === 1) {
+      term = t;
+      t.status = 'idle';
+    }
+  });
+  const atSleep: number[] = [];
+  const out = await runtime(e, {
+    now: () => clock,
+    sleep: async (ms) => {
+      e.sleeps.push(ms);
+      clock += 10_000;
+      if (e.sleeps.length === 3) await finishWith(e.hc, term!, { status: 'pass' }, { plan: 'p' });
+    },
+    onAttention: (a) => {
+      e.attention.push(a);
+      atSleep.push(e.sleeps.length);
+    },
+    ...over,
+  }).executeStep(step(), ctx());
+  return { e, out, atSleep };
+}
+
+test('idle at turn 0 within the boot grace is not attention', async () => {
+  const { e, out } = await idleAtTurn0({});
+  assert.equal(out.status, 'pass');
+  assert.deepEqual(e.attention, []);
+  assert.deepEqual(e.sleeps, [2000, 2000, 2000]);
+});
+
+test('idle at turn 0 past the boot grace is attention once', async () => {
+  const { e, out, atSleep } = await idleAtTurn0({ bootGraceS: 5 });
+  assert.equal(out.status, 'pass');
+  assert.deepEqual(e.attention, [{ stepId: 'plan', terminal: terminalName(RUN_ID, '#123', 'plan', 1), kind: 'idle' }]);
+  // the first poll (0 s) is inside the grace; the second (10 s) is past it
+  assert.deepEqual(atSleep, [1]);
+  assert.deepEqual(e.sleeps, [2000, 2000, 2000]);
+});
+
+/** Like the real hc: `ls` returns no labels, only `get` does. */
+class LsWithoutLabels extends FakeHc {
+  override async list(o?: { labels?: Record<string, string>; all?: boolean }): Promise<Terminal[]> {
+    return (await super.list(o)).map((t) => ({ ...t, labels: {} }));
+  }
+}
+
+test('sweepTerminals removes the run\'s terminals but not the driver', async () => {
+  const hc = new LsWithoutLabels();
+  hc.add({ name: 'driver', labels: { ...ours, 'percolator.role': 'driver' } });
+  hc.add({ name: 'plan-live', labels: { ...ours, 'percolator.step': 'plan' } });
+  hc.add({ name: 'lint-done', labels: { ...ours, 'percolator.step': 'lint' }, state: 'finished', exitCode: 0 });
+  hc.add({ name: 'other-run', labels: { 'percolator.run': 'other' } });
+
+  assert.deepEqual(await sweepTerminals(hc, RUN_ID, { exceptRole: 'driver' }), ['plan-live', 'lint-done']);
+  assert.deepEqual(hc.calls, [
+    ['list', { labels: ours, all: true }],
+    ['get', 'driver'],
+    ['get', 'plan-live'],
+    ['kill', 'plan-live'],
+    ['rm', 'plan-live'],
+    ['get', 'lint-done'],
+    ['kill', 'lint-done'],
+    ['rm', 'lint-done'],
+  ]);
+  assert.deepEqual([...hc.terminals.keys()], ['driver', 'other-run']);
+
+  // without exceptRole every terminal of the run goes, driver included, and nothing needs classifying
+  hc.calls = [];
+  assert.deepEqual(await sweepTerminals(hc, RUN_ID), ['driver']);
+  assert.deepEqual(hc.calls, [['list', { labels: ours, all: true }], ['kill', 'driver'], ['rm', 'driver']]);
+  assert.deepEqual([...hc.terminals.keys()], ['other-run']);
+});
+
+test('a finished terminal of another run is neither removed nor relaunched over', async () => {
+  const e = await env((t) => {
+    // a relaunch over it would exit here
+    t.state = 'finished';
+  });
+  const name = terminalName(RUN_ID, '#123', 'plan', 1);
+  e.hc.add({ name, labels: { 'percolator.run': 'other' }, state: 'finished', exitCode: 0 });
+  const out = await runtime(e).executeStep(step(), ctx());
+  assert.deepEqual(out, {
+    status: 'escalate',
+    outputs: {},
+    reason: `terminal ${name} is not part of run ${RUN_ID} (percolator.run=other); remove it with hc rm or rename it, then resume`,
+  });
+  assert.deepEqual(subs(e.hc), ['get']);
+  assert.ok(e.hc.terminals.has(name));
 });

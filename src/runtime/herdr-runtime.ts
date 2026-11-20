@@ -9,7 +9,7 @@ import type { Step } from '../graph/build.ts';
 import { mappingsFor, resolveInGround } from '../grounds/mappings.ts';
 import type { ResolvedGround } from '../grounds/resolve.ts';
 import { HcError } from '../herdr/hc.ts';
-import type { Hc } from '../herdr/hc.ts';
+import type { Hc, Terminal } from '../herdr/hc.ts';
 import { exists, writeFileAtomic } from '../util/fs.ts';
 import { buildSkillPlugins, findSkill, stepDir } from '../workspace/run-dir.ts';
 import type { MaterializedMapping } from '../workspace/run-dir.ts';
@@ -36,6 +36,8 @@ export type HerdrRuntimeOptions = {
   /** node terminals survive perc exiting (hc --outlive-parent), so a paused run can adopt them; default true */
   outliveParent?: boolean;
   pollMs?: number;
+  /** an agent idle at turn 0 is still starting: not attention until this long after waiting starts; default 120 */
+  bootGraceS?: number;
   waitTimeoutS?: number;
   transcriptLines?: number;
   builtins?: Record<string, StepHandler>;
@@ -72,6 +74,35 @@ function ioFor(runDir: string, stepId: string, attempt: number): StepIo {
 
 const escalate = (reason: string): NodeOutcome => ({ status: 'escalate', outputs: {}, reason });
 
+/** A terminal not labelled with this run is never re-attached to, adopted, killed or removed. */
+function notOurs(t: Terminal, n: string, runId: string): NodeOutcome | undefined {
+  const owner = t.labels['percolator.run'];
+  if (owner === runId) return undefined;
+  return escalate(
+    `terminal ${n} is not part of run ${runId} (percolator.run=${owner ?? 'none'}); remove it with hc rm or rename it, then resume`,
+  );
+}
+
+/**
+ * Kill and remove every terminal of run `runId` (finished ones too), except those whose
+ * `percolator.role` is `exceptRole`. Returns the names removed.
+ */
+export async function sweepTerminals(hc: Hc, runId: string, o: { exceptRole?: string } = {}): Promise<string[]> {
+  const removed: string[] = [];
+  for (const t of await hc.list({ labels: { 'percolator.run': runId }, all: true })) {
+    const n = t.name ?? t.address;
+    if (o.exceptRole !== undefined) {
+      // hc ls returns no labels: get tells the role
+      const labels = Object.keys(t.labels).length > 0 ? t.labels : (await hc.get(n))?.labels;
+      if (labels === undefined || labels['percolator.role'] === o.exceptRole) continue;
+    }
+    await hc.kill(n);
+    await hc.rm(n);
+    removed.push(n);
+  }
+  return removed;
+}
+
 export class HerdrRuntime implements Runtime {
   readonly #o: HerdrRuntimeOptions;
   readonly #sleep: (ms: number) => Promise<void>;
@@ -90,13 +121,18 @@ export class HerdrRuntime implements Runtime {
     const isTerminal = kind === 'agent' || kind === 'script';
 
     // an escalation (timeout_s, invalid done.json) left an earlier attempt's terminal running: resume adopts
-    // the newest one (each escalation bumps the attempt, so the newest live one may be several attempts back)
+    // the newest one (each escalation bumps the attempt, so the newest live one may be several attempts back).
+    // One that already wrote a valid done.json is adopted too (collected, then cleaned up, so no second agent
+    // starts), unless terminals are kept: a kept terminal is expected to stay live after its step.
     if (isTerminal) {
       for (let prev = attempt - 1; prev >= 1; prev--) {
         const prevIo = ioFor(o.runDir, step.id, prev);
         const prevName = terminalName(o.runId, o.ticket, step.id, prev);
-        if ((await o.hc.get(prevName))?.state !== 'live') continue;
-        if ((await readDone(path.join(prevIo.stepDir, 'done.json'))).kind === 'ok') continue;
+        const t = await o.hc.get(prevName);
+        if (t?.state !== 'live') continue;
+        if (o.keepTerminals && (await readDone(path.join(prevIo.stepDir, 'done.json'))).kind === 'ok') continue;
+        const foreign = notOurs(t, prevName, o.runId);
+        if (foreign) return foreign;
         return this.#await(step, kind === 'agent', prevIo, prevName);
       }
     }
@@ -191,15 +227,18 @@ export class HerdrRuntime implements Runtime {
     const hc = o.hc;
     const doneFile = path.join(io.stepDir, 'done.json');
 
-    // live: re-attach; finished with a done.json: collect it in the loop below
+    // live: re-attach; finished with a done.json, or a finished script (its exit code): collect it in #await
     const existing = await hc.get(n);
     if (existing === undefined) {
       // the step completed but perc stopped before the engine saved it: collect, don't relaunch
       const done = await readDone(doneFile);
       if (done.kind === 'ok') return this.#collect(done, io);
+    } else {
+      const foreign = notOurs(existing, n, o.runId);
+      if (foreign) return foreign;
     }
     let launch = existing === undefined;
-    if (existing?.state === 'finished' && (await readDone(doneFile)).kind === 'absent') {
+    if (isAgent && existing?.state === 'finished' && (await readDone(doneFile)).kind === 'absent') {
       await hc.rm(n);
       launch = true;
     }
@@ -259,7 +298,9 @@ export class HerdrRuntime implements Runtime {
         if (done.kind === 'invalid') return escalate(`${doneFile} is invalid: ${done.error}`);
         const kind = t.status === 'done' ? 'idle' : t.status;
         const key = `${kind}:${t.turn}`;
-        if (!seen.has(key)) {
+        // an agent that is still starting up looks idle at turn 0: not attention during the boot grace
+        const booting = kind === 'idle' && t.turn === 0 && this.#now() - started < (o.bootGraceS ?? 120) * 1000;
+        if (!booting && !seen.has(key)) {
           seen.add(key);
           o.onAttention?.({ stepId: step.id, terminal: n, kind });
         }

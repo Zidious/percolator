@@ -46,6 +46,6 @@ export { ADAPTERS } from './adapters/index.ts';
 export type { AgentAdapter, LaunchSpec } from './adapters/index.ts';
 export { checkAgents } from './adapters/check.ts';
 export { buildTask, renderTemplate } from './runtime/task.ts';
-export { HerdrRuntime, terminalName } from './runtime/herdr-runtime.ts';
+export { HerdrRuntime, sweepTerminals, terminalName } from './runtime/herdr-runtime.ts';
 export type { HerdrRuntimeOptions, StepHandler, Attention } from './runtime/herdr-runtime.ts';
 export { mappingsFor } from './grounds/mappings.ts';
