@@ -62,6 +62,9 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | `src/grounds/git.ts` | `Git` interface + `cliGit` (execFile with argv arrays; `--` before positionals; values starting with `-` are rejected) |
 | `src/grounds/lock.ts` | `Lock`, `readLock`, `writeLock` (`percolator.lock`, YAML, written atomically) |
 | `src/grounds/resolve.ts` | `resolveGrounds`. A locked commit with a cached dir makes no git calls (offline). Only `update: true` moves a pin. Materialisation is tmp dir + rename, and the mirror is keyed by url. |
+| `src/grounds/mappings.ts` | `resolveMappings` (every mapping checked before any agent starts; all problems in one ConfigError; paths may not escape the ground), `fragmentLayers`, and `Layer = { source, fragment }`, where source is `ground:<name>/<file>@<commit12 or local>` |
+| `src/graph/core.ts` | `CORE_STAGES`, `STAGE_CONTRACTS` (required outputs per stage), `CORE_GROOM_GATE` (`approve-groom`, locked by `core`). All deep-frozen; contract output lists are `readonly string[]`. |
+| `src/graph/merge.ts` | `mergeLayers` → `Merged` (`Sourced<T>` = value + source + locked). Bindings are normalised to `NodeDef[]`. A locked target can only be restated deep-equal, otherwise `LockViolation` (`"<target> is locked by <src>; <attempt> cannot change it"`). `Merged` never aliases its inputs or the core constants. |
 | `tests/helpers/fake-git.ts` | `FakeGit`: records `calls`, serves refs. Use it in unit tests instead of real git. |
 | `src/engine/state.ts` | `RunState`, `newState`, `saveState`, `loadState` (`<dir>/state.json`, version 1) |
 | `src/index.ts` | public exports |
