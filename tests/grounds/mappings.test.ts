@@ -96,8 +96,48 @@ describe('resolveMappings', () => {
       ),
       (e: unknown) => {
         assert.ok(e instanceof ConfigError);
-        assert.equal(e.message.split('\n').length, 4);
-        assert.match(e.message, /company.*\.\.\/team\/percolator\.yaml.*outside/);
+        assert.deepEqual(e.message.split('\n'), [
+          'config: ground "company": ../team/percolator.yaml is outside the ground',
+          'config: ground "company": ..\\team\\percolator.yaml is outside the ground',
+          `config: ground "company": ${outside} is outside the ground`,
+          'config: ground "company": skills/../../team is outside the ground',
+        ]);
+        return true;
+      },
+    );
+  });
+
+  test('paths containing ":" (drive-relative, alternate data streams) are each reported', async () => {
+    await assert.rejects(
+      resolveMappings([mFile('C:..\\..\\x'), mFile('D:x'), mFile('a:b')], grounds, { configFile: 'prof.yaml' }),
+      (e: unknown) => {
+        assert.ok(e instanceof ConfigError);
+        assert.deepEqual(e.message.split('\n'), [
+          'prof.yaml: ground "company": C:..\\..\\x must not contain ":"',
+          'prof.yaml: ground "company": D:x must not contain ":"',
+          'prof.yaml: ground "company": a:b must not contain ":"',
+        ]);
+        return true;
+      },
+    );
+  });
+
+  test('a symlink inside the ground that points outside it is reported', async (t) => {
+    const link = path.join(grounds.company!.dir, 'escape');
+    try {
+      await fs.symlink(path.join(tmp, 'team'), link, 'junction');
+    } catch {
+      t.skip('cannot create a directory symlink here');
+      return;
+    }
+    await assert.rejects(
+      resolveMappings([mDir('escape'), mFile('escape/percolator.yaml'), mFile('policies/a.md')], grounds),
+      (e: unknown) => {
+        assert.ok(e instanceof ConfigError);
+        assert.deepEqual(e.message.split('\n'), [
+          'config: ground "company": escape resolves outside the ground (through a symlink)',
+          'config: ground "company": escape/percolator.yaml resolves outside the ground (through a symlink)',
+        ]);
         return true;
       },
     );

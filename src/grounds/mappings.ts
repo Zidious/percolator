@@ -8,12 +8,51 @@ export type ResolvedMapping = Mapping & { absPath: string; ground: string; commi
 
 export type Layer = { source: string; fragment: GraphFragment };
 
-// A mapping path must stay inside its ground. Both separators count, so `..\x` is caught on POSIX too.
+// A path must stay inside its ground. Both separators count, so `..\x` is caught on POSIX too.
 function escapesGround(rel: string): boolean {
   const norm = rel.replaceAll('\\', '/');
   if (path.isAbsolute(rel) || path.win32.isAbsolute(rel) || norm.startsWith('/')) return true;
   const resolved = path.posix.normalize(norm);
   return resolved === '..' || resolved.startsWith('../');
+}
+
+function isInside(base: string, target: string): boolean {
+  const rel = path.relative(base, target);
+  return rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
+}
+
+/**
+ * Resolve `rel` (a mapping or prompt path) inside `ground`: no ":" (drive-relative paths, NTFS
+ * streams), no escaping through `..`, an absolute path or a symlink, and it must exist as `expect`.
+ * Returns the absolute path, or a problem line `ground "<name>": ...`.
+ */
+export async function resolveInGround(
+  ground: ResolvedGround,
+  rel: string,
+  expect: 'file' | 'dir',
+): Promise<{ absPath: string } | { problem: string }> {
+  const fail = (msg: string) => ({ problem: `ground "${ground.name}": ${rel} ${msg}` });
+  if (escapesGround(rel)) return fail('is outside the ground');
+  if (rel.includes(':')) return fail('must not contain ":"');
+  const absPath = path.resolve(ground.dir, rel);
+  let stat;
+  try {
+    stat = await fs.stat(absPath);
+  } catch {
+    return fail('does not exist');
+  }
+  if (expect === 'file' && !stat.isFile()) return fail('is not a file');
+  if (expect === 'dir' && !stat.isDirectory()) return fail('is not a directory');
+  if (!isInside(await fs.realpath(ground.dir), await fs.realpath(absPath))) {
+    return fail('resolves outside the ground (through a symlink)');
+  }
+  return { absPath };
+}
+
+/** Throws one ConfigError against `file` listing every problem, one per line; no-op when there are none. */
+export function throwProblems(problems: string[], file: string): void {
+  if (problems.length === 0) return;
+  throw new ConfigError(problems[0]!, file, undefined, undefined, problems.map((p) => `${file}: ${p}`).join('\n'));
 }
 
 /** Resolve every mapping to an absolute path; throws one ConfigError listing all problems. */
@@ -31,36 +70,18 @@ export async function resolveMappings(
       problems.push(`ground "${m.from}": unknown ground (mapping ${rel})`);
       continue;
     }
-    if (escapesGround(rel)) {
-      problems.push(`ground "${m.from}": ${rel} is outside the ground`);
-      continue;
-    }
-    if (m.as === 'graph' && m.file === undefined) {
+    if (m.as === 'graph' && m.file === undefined && !escapesGround(rel)) {
       problems.push(`ground "${m.from}": ${rel} is a graph mapping and must use file, not dir`);
       continue;
     }
-    const absPath = path.resolve(ground.dir, rel);
-    let stat;
-    try {
-      stat = await fs.stat(absPath);
-    } catch {
-      problems.push(`ground "${m.from}": ${rel} does not exist`);
+    const r = await resolveInGround(ground, rel, m.file !== undefined ? 'file' : 'dir');
+    if ('problem' in r) {
+      problems.push(r.problem);
       continue;
     }
-    if (m.file !== undefined && !stat.isFile()) {
-      problems.push(`ground "${m.from}": ${rel} is not a file`);
-      continue;
-    }
-    if (m.dir !== undefined && !stat.isDirectory()) {
-      problems.push(`ground "${m.from}": ${rel} is not a directory`);
-      continue;
-    }
-    out.push({ ...m, absPath, ground: ground.name, commit: ground.commit });
+    out.push({ ...m, absPath: r.absPath, ground: ground.name, commit: ground.commit });
   }
-  if (problems.length > 0) {
-    const file = opts?.configFile ?? 'config';
-    throw new ConfigError(problems[0]!, file, undefined, undefined, problems.map((p) => `${file}: ${p}`).join('\n'));
-  }
+  throwProblems(problems, opts?.configFile ?? 'config');
   return out;
 }
 
