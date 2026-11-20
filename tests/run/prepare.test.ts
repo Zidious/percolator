@@ -83,6 +83,19 @@ test('prepareRun follows the runtime block: worktree_root, base, keep_terminals,
   }
 });
 
+test('a relative worktree_root resolves against the config dir', async () => {
+  const e = await setup();
+  try {
+    await e.writeConfig('    runtime: { worktree_root: wt }');
+    const meta = await prepareRun({ ticket: 'o/r#9', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+    assert.equal(meta.worktree, path.join(path.dirname(e.configFile), 'wt', 'r', meta.runId));
+    assert.equal(path.isAbsolute(meta.worktree), true);
+    assert.equal(await git(meta.worktree, 'rev-parse', '--abbrev-ref', 'HEAD'), `percolator/${meta.runId}`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('a config error creates nothing', async () => {
   const e = await setup();
   try {

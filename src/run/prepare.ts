@@ -71,9 +71,12 @@ export async function prepareRun(
     throw new Error(`cannot detect a base branch (HEAD is detached); set runtime.base in profile "${v.profile}"`);
   }
   const root = v.runtime?.worktree_root;
+  // `expandHome` alone would resolve a relative root against the process cwd
+  const rootDir =
+    root === undefined ? undefined : root.startsWith('~') ? expandHome(root, deps.home) : path.resolve(path.dirname(configFile), root);
   const worktree =
-    root !== undefined
-      ? worktreeIn(expandHome(root, deps.home), repoName, runId)
+    rootDir !== undefined
+      ? worktreeIn(rootDir, repoName, runId)
       : worktreeIn(path.join(deps.home, '.percolator', 'worktrees'), repoName, runId);
 
   if (base.startsWith('origin/')) await runGit(['fetch', '--quiet', 'origin'], repoRoot);
