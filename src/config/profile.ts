@@ -10,14 +10,21 @@ export function normalizeRemote(url: string): string {
   s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
   s = s.replace(/^[^@/]*@/, '');
   // scp-like `host:owner/repo`
-  if (!hasScheme) s = s.replace(/^([^/:]+):/, '$1/');
+  if (hasScheme) s = s.replace(/^([^/:]+):\d+(?=\/)/, '$1');
+  else s = s.replace(/^([^/:]+):/, '$1/');
   s = s.replace(/\/+$/, '').replace(/\.git$/i, '').replace(/\/+$/, '');
   return s.toLowerCase();
 }
 
 const list = (v: string | string[] | undefined): string[] => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
 
-const fold = (s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s);
+// `base/**` also matches `base` itself (like picomatch / gitignore).
+function globMatch(subject: string, pattern: string): boolean {
+  if (path.posix.matchesGlob(subject, pattern)) return true;
+  return pattern.endsWith('/**') && path.posix.matchesGlob(subject, pattern.slice(0, -3));
+}
+
+const fold =(s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s);
 
 export function selectProfile(
   config: UserConfig,
@@ -40,8 +47,8 @@ export function selectProfile(
   for (const [name, profile] of Object.entries(config.profiles)) {
     const m = profile.match;
     if (!m) continue;
-    const remoteHit = remote !== undefined && list(m.remote).some((p) => path.posix.matchesGlob(remote, p.toLowerCase()));
-    const pathHit = list(m.path).some((p) => path.posix.matchesGlob(cwd, fold(toPosix(expandHome(p, ctx.home)))));
+    const remoteHit = remote !== undefined && list(m.remote).some((p) => globMatch(remote, p.toLowerCase()));
+    const pathHit = list(m.path).some((p) => globMatch(cwd,fold(toPosix(expandHome(p, ctx.home)))));
     if (remoteHit || pathHit) return { name, profile };
   }
 

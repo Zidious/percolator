@@ -22,6 +22,18 @@ test.each([
   expect(normalizeRemote(u)).toBe('github.com/acme/payments');
 });
 
+test.each([
+  'ssh://git@github.com:2222/Acme/payments.git',
+  'http://github.com/acme/payments.git',
+  'git://github.com/acme/payments.git',
+])('normalizeRemote(%s) with port or other scheme', (u) => {
+  expect(normalizeRemote(u)).toBe('github.com/acme/payments');
+});
+
+test('pattern ending in /** also matches its base directory', () => {
+  expect(selectProfile(cfg, { cwd: '/h/dev/side', home: '/h' }).name).toBe('personal');
+});
+
 test('remote glob selects work profile', () => {
   expect(selectProfile(cfg, { remoteUrl: 'git@github.com:acme/x.git', cwd: '/r' }).name).toBe('work');
 });
