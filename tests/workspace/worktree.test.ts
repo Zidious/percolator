@@ -126,3 +126,20 @@ test('works with a path containing spaces', async () => {
     await cleanup();
   }
 });
+
+test('is idempotent when dir is reached through a symlinked parent', async () => {
+  const { root, repo, cleanup } = await setup();
+  try {
+    const real = path.join(root, 'wt');
+    const dir = path.join(real, 'r1');
+    await ensureWorktree({ repoRoot: repo, dir, branch: 'perc/t1', base: 'main' });
+    const link = path.join(root, 'link');
+    await fs.symlink(real, link, 'junction');
+    assert.deepEqual(
+      await ensureWorktree({ repoRoot: repo, dir: path.join(link, 'r1'), branch: 'perc/t1', base: 'main' }),
+      { created: false },
+    );
+  } finally {
+    await cleanup();
+  }
+});

@@ -26,6 +26,16 @@ function parseWorktrees(porcelain: string): Listed[] {
   return out;
 }
 
+// samePath does not follow symlinks or 8.3 short names, but git lists real paths.
+async function real(p: string): Promise<string> {
+  try {
+    return await fs.realpath(p);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return p;
+    throw err;
+  }
+}
+
 async function exists(p: string): Promise<boolean> {
   try {
     await fs.stat(p);
@@ -55,7 +65,14 @@ export async function ensureWorktree(o: {
   }
 
   const listed = parseWorktrees(await runGit(['worktree', 'list', '--porcelain'], repoRoot));
-  const here = listed.find((w) => samePath(w.dir, dir));
+  const realDir = await real(dir);
+  let here: Listed | undefined;
+  for (const w of listed) {
+    if (samePath(w.dir, dir) || samePath(await real(w.dir), realDir)) {
+      here = w;
+      break;
+    }
+  }
   if (here) {
     if (here.branch === `refs/heads/${branch}`) return { created: false };
     const other = here.branch?.replace(/^refs\/heads\//, '') ?? '(detached)';
