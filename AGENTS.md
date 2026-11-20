@@ -45,6 +45,8 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | `src/util/paths.ts` | `expandHome` (`~/` and `~\`), `toPosix`, `samePath` |
 | `src/util/entry.ts` | `isDirectRun` (entry-point check through symlinked bins; used by `cli.ts` and `json-schema.ts`) |
 | `src/util/fs.ts` | `writeFileAtomic` (fsync, then rename retried on EPERM/EBUSY/EACCES), `readYamlFile` (keeps line info for located errors) |
+| `src/util/exec.ts` | `Exec` (argv-only; non-zero exit resolves with its code; ENOENT rejects `<file> not found on PATH`) and `nodeExec` (`execFile`, no shell) |
+| `src/herdr/hc.ts` | `Hc` / `cliHc({ exec, bin })`: client for the herdr-core `hc` CLI (run/get/wait/read/kill/rm, `--json`, `--` before the program); `HcError` carries `kind`/`exitCode`/`hint`; `get` returns undefined on not_found; kill/rm ignore not_found/finished |
 | `src/config/schema.ts` | zod schemas + inferred types, `STAGES`, `effectiveKind`, `groundRecord`. All objects strict: new config keys must be added here. Agent nodes need `agent`; `agent`/`model`/`skill`/`skills` only on agent nodes. Node names `^[A-Za-z][A-Za-z0-9_-]*$` |
 | `src/config/load.ts` | `loadUserConfig`, `loadFragment`, `loadYaml(file, schema)`, `ConfigError`; reports every YAML/schema issue as `file:line: path: msg`, one per line |
 | `src/config/json-schema.ts` | `writeJsonSchema`; rerun `pnpm schema [out]` whenever `schema.ts` changes (refinements are not in the JSON schema) |
@@ -65,6 +67,7 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | `src/index.ts` | public exports |
 | `tests/helpers/fake-git.ts` | `FakeGit` (records `calls`; origin url kept in a marker file so it follows renames; `toplevels`, `cloneError`, `onClone` hooks); use instead of real git in unit tests |
 | `tests/helpers/fake-runtime.ts` | `FakeRuntime` (scripted outcomes per step id; records `calls`, rounds and `maxRoundsSeen`; `roundsOf`/`maxRoundsOf`) and the `pass`/`fail`/`esc` helpers |
+| `tests/helpers/exec-recorder.ts` | `ExecRecorder` (records `calls`; `respond(match, result)`; unmatched calls resolve `{}`); never run the real `hc` in tests |
 | `.github/workflows/ci.yml` | test matrix, 3 OSes × Node 24 |
 
 ## Design decisions to keep
