@@ -1,5 +1,5 @@
 docs/
-.superpowers/
+.superpowers
 node_modules
 dist
 .percolator/runs
