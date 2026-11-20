@@ -107,7 +107,7 @@ async function runInit(args: string[], io: Io): Promise<number> {
   const file = path.resolve(values.config ?? defaultConfig());
   await initConfig(file, { force: values.force === true });
   io.stdout(`wrote ${file}
-next: perc validate --config ${file}
+next: perc validate --config ${file} --profile default
 `);
   return 0;
 }

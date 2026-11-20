@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { exists } from '../../src/util/fs.ts';
 import { initConfig, templatePath } from '../../src/config/init.ts';
 
 let tmp: string;
@@ -13,8 +14,9 @@ after(async () => {
   await fs.rm(tmp, { recursive: true, force: true, maxRetries: 5 });
 });
 
-test('templatePath points at templates/config.yaml in the repo', () => {
+test('templatePath points at templates/config.yaml in the repo', async () => {
   assert.equal(templatePath(), path.resolve(import.meta.dirname, '..', '..', 'templates', 'config.yaml'));
+  assert.ok(await exists(templatePath()), 'the template file exists');
 });
 
 test('initConfig writes the template byte for byte, creating the parent dir', async () => {
@@ -35,4 +37,12 @@ test('initConfig with force replaces an existing file', async () => {
   await fs.writeFile(file, 'keep');
   await initConfig(file, { force: true });
   assert.equal(await fs.readFile(file, 'utf8'), await fs.readFile(templatePath(), 'utf8'));
+});
+
+test('initConfig refuses a directory target, with or without force', async () => {
+  const dir = path.join(tmp, 'adir');
+  await fs.mkdir(dir);
+  const message = `${dir} is a directory; pass a file path to --config`;
+  await assert.rejects(initConfig(dir), { message });
+  await assert.rejects(initConfig(dir, { force: true }), { message });
 });

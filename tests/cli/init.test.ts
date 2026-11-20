@@ -24,7 +24,7 @@ test('init writes the config and prints the next step', async () => {
   const file = path.join(tmp, 'one', 'config.yaml');
   const r = await run(['init', '--config', file]);
   assert.equal(r.code, 0, r.err);
-  assert.equal(r.out, `wrote ${file}\nnext: perc validate --config ${file}\n`);
+  assert.equal(r.out, `wrote ${file}\nnext: perc validate --config ${file} --profile default\n`);
   const v = await run(['validate', '--config', file, '--profile', 'default']);
   assert.equal(v.code, 0, v.err);
 });
