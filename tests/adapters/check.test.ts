@@ -24,7 +24,7 @@ function graphOf(bindings: NonNullable<GraphFragment['bindings']>, nodes: GraphF
 }
 
 function mapping(as: ResolvedMapping['as'], absPath: string, extra: Record<string, unknown> = {}): ResolvedMapping {
-  return { from: 'g', dir: 'x', as, applies_to: ['*'], required: false, absPath, ground: 'g', commit: 'local', ...extra } as ResolvedMapping;
+  return { from: 'g', dir: 'x', as, applies_to: ['*'], required: false, absPath, ground: 'g', commit: 'local', source: 'test', ...extra } as ResolvedMapping;
 }
 
 async function tmp(t: TestContext): Promise<string> {

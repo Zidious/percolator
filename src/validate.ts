@@ -11,8 +11,9 @@ import { checkRules, RuleViolationError } from './graph/rules.ts';
 import { cliGit } from './grounds/git.ts';
 import type { Git } from './grounds/git.ts';
 import { checkAgents } from './adapters/check.ts';
-import { checkGraphReferences, fragmentLayers, resolveMappings } from './grounds/mappings.ts';
-import type { Layer, ResolvedMapping } from './grounds/mappings.ts';
+import { collectLayers } from './grounds/layers.ts';
+import { checkGraphReferences } from './grounds/mappings.ts';
+import type { ResolvedMapping } from './grounds/mappings.ts';
 import type { ResolvedGround } from './grounds/resolve.ts';
 import { resolveGrounds } from './grounds/resolve.ts';
 
@@ -65,24 +66,24 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
     ...(opts.update !== undefined ? { update: opts.update } : {}),
     ...(opts.home !== undefined ? { home: opts.home } : {}),
   });
-  const mappings = await resolveMappings(profile.use ?? [], grounds, { configFile: opts.configFile });
-
-  const layers: Layer[] = await fragmentLayers(mappings);
-  layers.push({
+  const profileRoot = {
     source: `profile:${name}`,
+    use: profile.use ?? [],
     fragment: {
       ...(profile.bindings ? { bindings: profile.bindings } : {}),
       ...(profile.nodes ? { nodes: profile.nodes } : {}),
       ...(profile.rules ? { rules: profile.rules } : {}),
     },
-  });
+  };
   const repoRoot = (await git.toplevel(opts.cwd)) ?? opts.cwd;
   const repoFile = path.join(repoRoot, '.percolator', 'percolator.yaml');
   const repoLayer = await (opts.loadRepoLayer ?? loadFragment)(repoFile).catch((err: NodeJS.ErrnoException) => {
     if (err.code === 'ENOENT') return undefined; // the repo layer is optional; any other failure is real
     throw err;
   });
-  if (repoLayer) layers.push({ source: 'repo:.percolator/percolator.yaml', fragment: repoLayer });
+  const roots = [profileRoot];
+  if (repoLayer) roots.push({ source: 'repo:.percolator/percolator.yaml', use: repoLayer.use ?? [], fragment: repoLayer });
+  const { layers, mappings } = await collectLayers({ roots, grounds, configFile: opts.configFile });
 
   const merged = mergeLayers(layers);
   const violations = checkRules(merged);

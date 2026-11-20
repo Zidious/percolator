@@ -1,12 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ConfigError, loadFragment } from '../config/load.ts';
+import { ConfigError } from '../config/load.ts';
 import { STAGES } from '../config/schema.ts';
 import type { GraphFragment, Mapping } from '../config/schema.ts';
 import type { Graph, Step } from '../graph/build.ts';
 import type { ResolvedGround } from './resolve.ts';
 
-export type ResolvedMapping = Mapping & { absPath: string; ground: string; commit: string };
+export type ResolvedMapping = Mapping & { absPath: string; ground: string; commit: string; source: string };
 
 export type Layer = { source: string; fragment: GraphFragment };
 
@@ -57,19 +57,27 @@ export function throwProblems(problems: string[], file: string): void {
   throw new ConfigError(problems[0]!, file, undefined, undefined, problems.map((p) => `${file}: ${p}`).join('\n'));
 }
 
-/** Resolve every mapping to an absolute path; throws one ConfigError listing all problems. */
-export async function resolveMappings(
+/**
+ * Resolve each mapping to an absolute path without throwing: the resolved ones plus every problem
+ * line. `source` is the layer that declared them; with `usedBy` set (a fragment's `use`) an unknown
+ * ground gets the longer hint, since fragments may only use grounds declared in the user config.
+ */
+export async function resolveEach(
   use: Mapping[],
   grounds: Record<string, ResolvedGround>,
-  opts?: { configFile?: string },
-): Promise<ResolvedMapping[]> {
+  o: { source: string; usedBy?: string; configFile: string },
+): Promise<{ mappings: ResolvedMapping[]; problems: string[] }> {
   const problems: string[] = [];
   const out: ResolvedMapping[] = [];
   for (const m of use) {
     const rel = (m.file ?? m.dir)!;
     const ground = grounds[m.from];
     if (!ground) {
-      problems.push(`ground "${m.from}": unknown ground (mapping ${rel})`);
+      problems.push(
+        o.usedBy === undefined
+          ? `ground "${m.from}": unknown ground (mapping ${rel})`
+          : `ground "${m.from}": unknown ground (mapping ${rel}, used by ${o.usedBy}); declare it under grounds: in ${o.configFile}`,
+      );
       continue;
     }
     if (m.as === 'graph' && m.file === undefined && !escapesGround(rel)) {
@@ -81,10 +89,21 @@ export async function resolveMappings(
       problems.push(r.problem);
       continue;
     }
-    out.push({ ...m, absPath: r.absPath, ground: ground.name, commit: ground.commit });
+    out.push({ ...m, absPath: r.absPath, ground: ground.name, commit: ground.commit, source: o.source });
   }
-  throwProblems(problems, opts?.configFile ?? 'config');
-  return out;
+  return { mappings: out, problems };
+}
+
+/** Resolve every mapping to an absolute path; throws one ConfigError listing all problems. */
+export async function resolveMappings(
+  use: Mapping[],
+  grounds: Record<string, ResolvedGround>,
+  opts?: { configFile?: string; source?: string },
+): Promise<ResolvedMapping[]> {
+  const configFile = opts?.configFile ?? 'config';
+  const { mappings, problems } = await resolveEach(use, grounds, { source: opts?.source ?? 'config', configFile });
+  throwProblems(problems, configFile);
+  return mappings;
 }
 
 /**
@@ -120,19 +139,6 @@ export async function checkGraphReferences(
     }
   }
   throwProblems(problems, configFile);
-}
-
-/** `as: graph` mappings, in order, loaded as config layers. loadFragment's ConfigErrors propagate. */
-export async function fragmentLayers(mappings: ResolvedMapping[]): Promise<Layer[]> {
-  const layers: Layer[] = [];
-  for (const m of mappings) {
-    if (m.as !== 'graph') continue;
-    layers.push({
-      source: `ground:${m.ground}/${m.file}@${m.commit.slice(0, 12)}`,
-      fragment: await loadFragment(m.absPath),
-    });
-  }
-  return layers;
 }
 
 /**

@@ -5,7 +5,7 @@ import * as api from '../../src/index.ts';
 test('public API exports the pipeline', () => {
   for (const name of [
     'validate', 'loadUserConfig', 'loadFragment', 'selectProfile', 'normalizeRemote', 'resolveGrounds',
-    'readLock', 'writeLock', 'resolveMappings', 'fragmentLayers', 'mergeLayers', 'checkRules',
+    'readLock', 'writeLock', 'resolveMappings', 'collectLayers', 'mergeMappings', 'mergeLayers', 'checkRules',
     'buildGraph', 'runGraph', 'newState', 'saveState', 'loadState', 'writeJsonSchema', 'expandHome',
     'nodeExec', 'cliHc', 'cliHerdrApp', 'ensureWorktree', 'defaultWorktreeDir', 'runDir', 'stepDir',
     'materializeGrounds', 'buildSkillPlugins', 'checkAgents', 'buildTask', 'renderTemplate', 'terminalName',

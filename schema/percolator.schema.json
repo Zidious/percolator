@@ -576,38 +576,6 @@
             },
             "additionalProperties": false
           },
-          "match": {
-            "type": "object",
-            "properties": {
-              "remote": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                ]
-              },
-              "path": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                ]
-              }
-            },
-            "additionalProperties": false
-          },
           "use": {
             "type": "array",
             "items": {
@@ -653,6 +621,38 @@
               ],
               "additionalProperties": false
             }
+          },
+          "match": {
+            "type": "object",
+            "properties": {
+              "remote": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "path": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
           },
           "tracker": {
             "type": "object",

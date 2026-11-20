@@ -8,7 +8,7 @@ import { ConfigError } from '../../src/config/load.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
 import { buildGraph } from '../../src/graph/build.ts';
 import { mergeLayers } from '../../src/graph/merge.ts';
-import { checkGraphReferences, fragmentLayers, resolveMappings } from '../../src/grounds/mappings.ts';
+import { checkGraphReferences, resolveMappings } from '../../src/grounds/mappings.ts';
 
 let tmp: string;
 let grounds: Record<string, ResolvedGround>;
@@ -143,21 +143,6 @@ describe('resolveMappings', () => {
         return true;
       },
     );
-  });
-});
-
-describe('fragmentLayers', () => {
-  test('graph mappings become layers in use order', async () => {
-    const ms = await resolveMappings(
-      [mFile('percolator.yaml', 'graph', 'company'), mFile('policies/a.md'), mFile('percolator.yaml', 'graph', 'team')],
-      grounds,
-    );
-    const layers = await fragmentLayers(ms);
-    assert.deepEqual(
-      layers.map((l) => l.source),
-      ['ground:company/percolator.yaml@abc123', 'ground:team/percolator.yaml@local'],
-    );
-    assert.deepEqual(layers[0]!.fragment.rules, { max_rounds_ceiling: 2 });
   });
 });
 

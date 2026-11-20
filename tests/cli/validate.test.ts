@@ -220,3 +220,30 @@ test('validate rejects an unknown agent before any agent starts', async () => {
     },
   );
 });
+
+test('validate walks fragment use', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-cfg-'));
+  try {
+    const company = path.join(dir, 'company');
+    await fs.mkdir(company);
+    await fs.writeFile(
+      path.join(company, 'percolator.yaml'),
+      `bindings:\n  review: { agent: claude, skills: [code-review], max_rounds: 3 }\nuse:\n  - { from: team, file: policies/sdlc.md, as: policy, applies_to: ['*'] }\n`,
+    );
+    const cfg = path.join(dir, 'config.yaml');
+    const base = await fs.readFile(fx('e2e/config.yaml'), 'utf8');
+    await fs.writeFile(
+      cfg,
+      base
+        .replace('./grounds/company', JSON.stringify(company))
+        .replace('./grounds/team', JSON.stringify(fx('e2e/grounds/team')))
+        .replace('      - { from: team, file: policies/sdlc.md, as: policy }\n', ''),
+    );
+    const r = await validate({ ...opts(), configFile: cfg });
+    const m = r.mappings.find((x) => x.as === 'policy')!;
+    assert.match(m.absPath, /policies[\\/]sdlc\.md$/);
+    assert.equal(m.source, 'ground:company/percolator.yaml@local');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
+});

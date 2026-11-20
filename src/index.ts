@@ -15,7 +15,8 @@ export { readLock, writeLock } from './grounds/lock.ts';
 export type { Lock } from './grounds/lock.ts';
 export { resolveGrounds } from './grounds/resolve.ts';
 export type { ResolvedGround, ResolveOptions } from './grounds/resolve.ts';
-export { resolveMappings, fragmentLayers } from './grounds/mappings.ts';
+export { resolveMappings } from './grounds/mappings.ts';
+export { collectLayers, mergeMappings } from './grounds/layers.ts';
 export type { ResolvedMapping, Layer } from './grounds/mappings.ts';
 
 export { CORE_STAGES, STAGE_CONTRACTS, CORE_GROOM_GATE } from './graph/core.ts';

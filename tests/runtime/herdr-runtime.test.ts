@@ -171,7 +171,7 @@ test('codex step argv has --no-daemon and skill files listed in task.md', async 
   await fs.writeFile(path.join(groundDir, 'skills', 'tdd', 'SKILL.md'), '# tdd');
   const mapping = {
     from: 'g', dir: 'skills', as: 'skills', applies_to: ['*'], required: false,
-    absPath: path.join(groundDir, 'skills'), ground: 'g', commit: 'local', runPath: path.join(groundDir, 'skills'),
+    absPath: path.join(groundDir, 'skills'), ground: 'g', commit: 'local', source: 'test', runPath: path.join(groundDir, 'skills'),
   } as MaterializedMapping;
   const grounds: Record<string, ResolvedGround> = { g: { name: 'g', dir: groundDir, commit: 'local', source: { path: groundDir } } };
   const out = await runtime(e, { mappings: [mapping], grounds }).executeStep(

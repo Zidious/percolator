@@ -147,6 +147,7 @@ const graphFragmentShape = {
   bindings: z.partialRecord(StageSchema, BindingSchema).optional(),
   nodes: NodesSchema.optional(),
   rules: RulesSchema.optional(),
+  use: z.array(MappingSchema).optional(),
 };
 
 export const GraphFragmentSchema = z.strictObject(graphFragmentShape);
@@ -157,7 +158,6 @@ const stringOrList = z.union([z.string(), z.array(z.string())]);
 export const ProfileSchema = z.strictObject({
   ...graphFragmentShape,
   match: z.strictObject({ remote: stringOrList.optional(), path: stringOrList.optional() }).optional(),
-  use: z.array(MappingSchema).optional(),
   tracker: z.strictObject({ kind: z.literal('github') }).optional(),
 });
 export type Profile = z.infer<typeof ProfileSchema>;
