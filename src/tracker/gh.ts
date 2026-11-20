@@ -94,9 +94,8 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
     async createPr(repo, p) {
       noDash('pr create', 'base', p.base);
       noDash('pr create', 'head', p.head);
-      noDash('pr create', 'title', p.title);
       const out = await call('pr create', [
-        'pr', 'create', '--repo', repo, '--base', p.base, '--head', p.head, '--title', p.title, '--body-file', p.bodyFile,
+        'pr', 'create', '--repo', repo, '--base', p.base, '--head', p.head, `--title=${p.title}`, '--body-file', p.bodyFile,
       ]);
       return out.trim();
     },

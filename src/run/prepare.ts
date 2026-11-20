@@ -61,6 +61,16 @@ export async function prepareRun(
   const origin = await cliGit.remoteUrl(repoRoot);
   const ref = parseTicket(o.ticket, origin === undefined ? undefined : normalizeRemote(origin));
   const ticket = formatTicket(ref);
+  if (origin !== undefined) {
+    // owner/repo only: an ssh host alias (`git@gh-work:o/r`) still names the same repository
+    const want = ref.repo.split('/').slice(-2).join('/');
+    const have = normalizeRemote(origin).split('/').slice(-2).join('/');
+    if (want.toLowerCase() !== have.toLowerCase()) {
+      throw new Error(
+        `ticket ${ticket} is in ${want}, but this clone's origin is ${have}; run perc in a clone of ${want} or pass --repo <dir>`,
+      );
+    }
+  }
   const repoName = ref.repo.split('/').at(-1)!;
 
   const now = (deps.now ?? (() => new Date()))();

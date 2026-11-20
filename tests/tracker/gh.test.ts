@@ -57,7 +57,7 @@ test('createPr passes values and returns the url; editPr uses body-file', async 
   rec.respond(() => true, { stdout: 'https://x/pull/9\n' });
   const gh = cliGh({ exec: rec.exec });
   assert.equal(await gh.createPr(R, { base: 'main', head: 'h', title: 'Ti', bodyFile: 'b.md' }), 'https://x/pull/9');
-  assert.deepEqual(rec.calls[0]!.args, ['pr', 'create', '--repo', R, '--base', 'main', '--head', 'h', '--title', 'Ti', '--body-file', 'b.md']);
+  assert.deepEqual(rec.calls[0]!.args, ['pr', 'create', '--repo', R, '--base', 'main', '--head', 'h', '--title=Ti', '--body-file', 'b.md']);
   await gh.editPr(R, 9, 'b.md');
   assert.deepEqual(rec.calls[1]!.args, ['pr', 'edit', '--repo', R, '--body-file', 'b.md', '--', '9']);
 });
@@ -67,8 +67,15 @@ test('createPr refuses dash-leading values', async () => {
   const o = { base: 'main', head: 'h', title: 't', bodyFile: 'b' };
   await assert.rejects(gh.createPr(R, { ...o, head: '-x' }), { message: 'gh pr create: head must not start with "-": -x' });
   await assert.rejects(gh.createPr(R, { ...o, base: '-x' }), { message: 'gh pr create: base must not start with "-": -x' });
-  await assert.rejects(gh.createPr(R, { ...o, title: '-x' }), { message: 'gh pr create: title must not start with "-": -x' });
   await assert.rejects(gh.findPr(R, '-x'), { message: 'gh pr list: head must not start with "-": -x' });
+});
+
+test('createPr passes a dash-leading title as one --title= token', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: 'https://x/pull/9\n' });
+  const gh = cliGh({ exec: rec.exec });
+  assert.equal(await gh.createPr(R, { base: 'main', head: 'h', title: '-x fix', bodyFile: 'b.md' }), 'https://x/pull/9');
+  assert.deepEqual(rec.calls[0]!.args, ['pr', 'create', '--repo', R, '--base', 'main', '--head', 'h', '--title=-x fix', '--body-file', 'b.md']);
 });
 
 test('a non-zero exit throws GhError keeping the stderr text', async () => {

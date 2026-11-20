@@ -155,6 +155,34 @@ test('a path-like or invalid ticket ref is refused before anything is created', 
   }
 });
 
+test("a ticket in another repo than the clone's origin is refused before anything is created", async () => {
+  const e = await setup();
+  try {
+    await assert.rejects(
+      prepareRun({ ticket: 'other/x#3', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps),
+      {
+        message:
+          "ticket github.com/other/x#3 is in other/x, but this clone's origin is o/r; run perc in a clone of other/x or pass --repo <dir>",
+      },
+    );
+    await assertNothingCreated(e);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('the origin check ignores the host and case, so an ssh host alias still passes', async () => {
+  const e = await setup();
+  try {
+    await git(e.root, 'remote', 'set-url', 'origin', 'git@gh-work:O/R.git');
+    await e.writeConfig('    runtime: { base: main }');
+    const meta = await prepareRun({ ticket: 'o/r#4', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+    assert.equal(meta.ticket, 'github.com/o/r#4');
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('worktreeIn refuses a worktree that would leave its root', () => {
   const root = path.resolve('/wt');
   assert.equal(worktreeIn(root, 'r', 't1-x'), path.join(root, 'r', 't1-x'));
