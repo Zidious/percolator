@@ -19,7 +19,8 @@ import { FakeHc } from '../helpers/fake-hc.ts';
 import type { FakeTerminal } from '../helpers/fake-hc.ts';
 
 const RUN_ID = 'Acme-Repo-#123-20261120T101500';
-const H4 = createHash('sha256').update(RUN_ID).digest('hex').slice(0, 4);
+/** first 4 hex chars of sha256(runId + NUL + stepId), the name's hash */
+const h4 = (stepId: string, runId = RUN_ID) => createHash('sha256').update(`${runId}\0${stepId}`).digest('hex').slice(0, 4);
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -98,24 +99,37 @@ async function finishWith(hc: FakeHc, t: FakeTerminal, done: unknown, outputs: R
 const subs = (hc: FakeHc) => hc.calls.map((c) => c[0]);
 
 test('terminalName is self-documenting, valid, deterministic and distinct per step and attempt', () => {
-  assert.equal(terminalName(RUN_ID, '#123', 'groom', 1), `t123_groom_a1_${H4}`);
-  assert.equal(terminalName(RUN_ID, '#123', 'plan.1', 1), `t123_plan-1_a1_${H4}`);
-  assert.equal(terminalName(RUN_ID, '#123', 'review', 2), `t123_review_a2_${H4}`);
-  assert.equal(terminalName(RUN_ID, '#123', 'Threat_Model', 1), `t123_threat-model_a1_${H4}`);
+  assert.equal(terminalName(RUN_ID, '#123', 'groom', 1), `t123_groom_a1_${h4('groom')}`);
+  assert.equal(terminalName(RUN_ID, '#123', 'plan.1', 1), `t123_plan-1_a1_${h4('plan.1')}`);
+  assert.equal(terminalName(RUN_ID, '#123', 'review', 2), `t123_review_a2_${h4('review')}`);
+  assert.equal(terminalName(RUN_ID, '#123', 'Threat_Model', 1), `t123_threat-model_a1_${h4('Threat_Model')}`);
   assert.match(terminalName(RUN_ID, 'acme/repo#123', 'plan', 1), /^t123_plan_/);
   assert.match(terminalName(RUN_ID, 'https://github.com/acme/repo/issues/123', 'plan', 1), /^t123_plan_/);
-  assert.equal(terminalName(RUN_ID, 'PROJ-42', 'plan', 1), `proj-42_plan_a1_${H4}`);
+  assert.equal(terminalName(RUN_ID, 'PROJ-42', 'plan', 1), `proj-42_plan_a1_${h4('plan')}`);
 
   const longId = `${'abcdefghi-'.repeat(4)}`;
   assert.equal(longId.length, 40);
   const long = terminalName(RUN_ID, '#123', longId, 1);
+  const tail = `_a1_${h4(longId)}`;
   assert.ok(long.startsWith('t123_'));
-  assert.ok(long.endsWith(`_a1_${H4}`));
+  assert.ok(long.endsWith(tail));
   assert.ok(long.length <= 32, long);
-  assert.ok(!long.slice(0, -`_a1_${H4}`.length).endsWith('-'), long);
+  assert.ok(!long.slice(0, -tail.length).endsWith('-'), long);
 
-  for (const n of [long, terminalName(RUN_ID, '!!!', '???', 7), terminalName(RUN_ID, '#123', 'review', 2)]) {
+  // steps whose slugs (or truncated slugs) agree still get distinct names
+  assert.notEqual(terminalName(RUN_ID, '#123', 'plan.0', 1), terminalName(RUN_ID, '#123', 'plan-0', 1));
+  assert.notEqual(terminalName(RUN_ID, '#123', 'Lint', 1), terminalName(RUN_ID, '#123', 'lint', 1));
+  assert.notEqual(terminalName(RUN_ID, '#123', `${longId}x`, 1), terminalName(RUN_ID, '#123', `${longId}y`, 1));
+
+  const bigTicket = terminalName(RUN_ID, `acme/repo#${'1234567890'.repeat(2)}12345`, 'plan', 1);
+  assert.equal(bigTicket, `t89012345_plan_a1_${h4('plan')}`);
+  const dashTicket = terminalName(RUN_ID, 'abcdefg-h', 'plan', 1);
+  assert.equal(dashTicket, `abcdefg_plan_a1_${h4('plan')}`);
+
+  for (const n of [long, bigTicket, dashTicket, terminalName(RUN_ID, '!!!', '???', 7), terminalName(RUN_ID, '#123', 'review', 2)]) {
     assert.match(n, /^[a-z0-9_-]{1,32}$/);
+    assert.ok(n.length <= 32, n);
+    assert.ok(!n.split('_')[0]!.endsWith('-'), n);
   }
   assert.equal(terminalName(RUN_ID, '#123', 'review', 2), terminalName(RUN_ID, '#123', 'review', 2));
   assert.notEqual(terminalName(RUN_ID, '#123', 'review', 2), terminalName(`${RUN_ID}x`, '#123', 'review', 2));
@@ -389,6 +403,82 @@ test('a prompt file is read from its ground; a missing one escalates', async () 
 
   const missing = await rt.executeStep(step({ def: { agent: 'claude', prompt: { from: 'g', file: 'nope.md' } } as Step['def'] }), ctx({ plan: 1 }));
   assert.deepEqual(missing, { status: 'escalate', outputs: {}, reason: 'ground "g": nope.md does not exist' });
+});
+
+test('a status flip to blocked during a wait is surfaced and the run keeps waiting', async () => {
+  let term: FakeTerminal | undefined;
+  const e = await env((t, n) => {
+    term = t;
+    if (n === 1) t.status = 'blocked';
+  });
+  const rt = runtime(e, {
+    sleep: async (ms) => {
+      e.sleeps.push(ms);
+      if (e.sleeps.length === 2) await finishWith(e.hc, term!, { status: 'pass' }, { plan: 'p' });
+    },
+  });
+  const out = await rt.executeStep(step(), ctx());
+  assert.deepEqual(out, { status: 'pass', outputs: { plan: 'steps/plan/1/outputs/plan.md' } });
+  assert.deepEqual(e.attention.map((a) => a.kind), ['blocked']);
+});
+
+test('a script that finishes between get and wait is classified on the next poll', async () => {
+  const e = await env((t) => {
+    t.state = 'finished';
+    t.exitCode = 0;
+  });
+  const s = step({ id: 'lint', name: 'lint', role: 'hook', slotLast: false, def: { command: ['node', 'x.js'] } as Step['def'] });
+  assert.deepEqual(await runtime(e).executeStep(s, ctx()), { status: 'pass', outputs: {} });
+  assert.deepEqual(e.sleeps, [2000]);
+});
+
+test('an error from wait that is not an HcError is rethrown', async () => {
+  const e = await env(() => {
+    throw new Error('boom');
+  });
+  await assert.rejects(runtime(e).executeStep(step(), ctx()), /^Error: boom$/);
+});
+
+test('resume after a timeout re-attaches to the live attempt-1 terminal and collects from its folder', async () => {
+  let phase = 1;
+  let clock = 0;
+  const e = await env(async (t) => {
+    if (phase === 1) {
+      t.status = 'working';
+      clock += 20_000;
+    } else {
+      await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+    }
+  });
+  const s = step({ def: { agent: 'claude', timeout_s: 10 } as Step['def'] });
+  const rt = runtime(e, { now: () => clock });
+  assert.deepEqual(await rt.executeStep(s, ctx()), { status: 'escalate', outputs: {}, reason: 'plan timed out after 10s' });
+  const first = terminalName(RUN_ID, '#123', 'plan', 1);
+  assert.equal(e.hc.terminals.get(first)!.state, 'live');
+
+  phase = 2;
+  e.hc.calls = [];
+  const out = await rt.executeStep(s, ctx({ plan: 1 }));
+  assert.deepEqual(out, { status: 'pass', outputs: { plan: 'steps/plan/1/outputs/plan.md' } });
+  assert.ok(!subs(e.hc).includes('run'));
+  assert.ok(e.hc.calls.every((c) => c[1] === first), JSON.stringify(e.hc.calls));
+  assert.ok(await fs.stat(path.join(e.runDir, 'steps', 'plan', '1', 'transcript.txt')));
+});
+
+test('a live prior-attempt terminal that already wrote done.json is not adopted', async () => {
+  const e = await env(async (t, n) => {
+    if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p2' });
+  });
+  const dir1 = path.join(e.runDir, 'steps', 'plan', '1');
+  const prev = e.hc.add({
+    name: terminalName(RUN_ID, '#123', 'plan', 1),
+    argv: ['claude', '--', `Your task is in ${path.join(dir1, 'task.md')}. Read it and follow it exactly.`],
+  });
+  await finishWith(e.hc, prev, { status: 'pass' }, { plan: 'p1' });
+  const out = await runtime(e, { keepTerminals: true }).executeStep(step(), ctx({ plan: 1 }));
+  assert.deepEqual(out, { status: 'pass', outputs: { plan: 'steps/plan/2/outputs/plan.md' } });
+  const run = e.hc.calls.find((c) => c[0] === 'run')![1] as { name: string };
+  assert.equal(run.name, terminalName(RUN_ID, '#123', 'plan', 2));
 });
 
 test('end-to-end: runGraph with HerdrRuntime and FakeHc completes a graph', async () => {

@@ -16,7 +16,10 @@ export type FakeTerminal = {
 
 type Behave = (t: FakeTerminal, waitCall: number) => void | Promise<void>;
 
-/** In-memory `Hc`: records every call; `behave` runs on each `wait` and may change the terminal or write files. */
+/**
+ * In-memory `Hc`: records every call; `behave` runs on each `wait` and may change the terminal or write
+ * files. `wait` then rejects with `finished` (11) or `blocked` (9) like the real client.
+ */
 export class FakeHc implements Hc {
   calls: [string, ...unknown[]][] = [];
   terminals = new Map<string, FakeTerminal>();
@@ -77,7 +80,10 @@ export class FakeHc implements Hc {
     const n = (this.#waits.get(name) ?? 0) + 1;
     this.#waits.set(name, n);
     await this.#behave?.(t, n);
-    return { reason: 'status', ended: t.state === 'finished', exitCode: t.exitCode, status: t.status };
+    // like the real client: wait exits non-zero when the terminal ends up finished or blocked
+    if (t.state === 'finished') throw new HcError('wait', 'finished', `terminal ${name} has finished`, 11);
+    if (t.status === 'blocked') throw new HcError('wait', 'blocked', `terminal ${name} is blocked`, 9);
+    return { reason: 'status', ended: false, exitCode: t.exitCode, status: t.status };
   }
 
   async read(name: string, lines: number): Promise<string> {
