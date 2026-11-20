@@ -186,3 +186,15 @@ test("a sub-dir mapping listed before its parent keeps the parent's other files"
   assert.equal(await fs.readFile(path.join(run, 'grounds', 'g', 'policies', 'top.md'), 'utf8'), 'T');
   assert.equal(await fs.readFile(path.join(run, 'grounds', 'g', 'policies', 'sub', 'a.md'), 'utf8'), 'A');
 });
+
+test('dir mapping depth is counted on the normalized path', async (t) => {
+  const base = await tmp(t);
+  const g = ground('g', path.join(base, 'g'));
+  await put(path.join(g.dir, 'policies', 'top.md'), 'T');
+  await put(path.join(g.dir, 'policies', 'sub', 'a.md'), 'A');
+  const ms = [mapping(g, 'policy', 'policies/sub/', 'dir'), mapping(g, 'policy', './policies/', 'dir')];
+  const run = path.join(base, 'run');
+  await materializeGrounds(run, ms, { g });
+  assert.equal(await fs.readFile(path.join(run, 'grounds', 'g', 'policies', 'top.md'), 'utf8'), 'T');
+  assert.equal(await fs.readFile(path.join(run, 'grounds', 'g', 'policies', 'sub', 'a.md'), 'utf8'), 'A');
+});

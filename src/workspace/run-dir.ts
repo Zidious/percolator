@@ -48,10 +48,13 @@ export async function materializeGrounds(
 ): Promise<MaterializedMapping[]> {
   const out: MaterializedMapping[] = mappings.map((m) => ({ ...m, runPath: m.absPath }));
   const copied = out.filter((m) => m.as === 'policy' || m.as === 'context');
-  const depth = (m: ResolvedMapping): number => toPosix(m.dir!).split('/').filter(Boolean).length;
-  const dirs = copied.filter((m) => m.dir !== undefined).sort((a, b) => depth(a) - depth(b));
+  const depth = (p: string): number => {
+    const n = path.posix.normalize(toPosix(p));
+    return n === '.' ? 0 : n.split('/').filter(Boolean).length;
+  };
+  const dirs = copied.filter((m) => m.dir !== undefined).sort((a, b) => depth(a.dir!) - depth(b.dir!));
   for (const m of [...dirs, ...copied.filter((m) => m.dir === undefined)]) {
-    m.runPath = path.join(dir, 'grounds', m.ground, (m.file ?? m.dir)!);
+    m.runPath = path.resolve(dir, 'grounds', m.ground, (m.file ?? m.dir)!);
     if (await exists(m.runPath)) continue;
     try {
       await copyContained(m.absPath, m.runPath, groundOf(m, grounds).dir);
