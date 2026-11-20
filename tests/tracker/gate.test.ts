@@ -317,8 +317,9 @@ test('the 60000-char cap bounds the total output text of the comment', async () 
     const body = e.gh.bodies[0]!;
     const expected =
       `### a\n\n${'x'.repeat(40000)}\n\n### b\n\n${'y'.repeat(20000)}\n` +
-      `… (truncated; full text in ${path.resolve(e.runDir, 'steps/groom/1/outputs/b.md')})\n\nReply`;
+      '… (truncated; full text in steps/groom/1/outputs/b.md of run r1)\n\nReply';
     assert.ok(body.includes(expected), 'body holds the capped sections');
+    assert.equal(body.includes(e.runDir), false);
     assert.ok(!body.includes('### c'));
     assert.ok(body.length < 65536);
   } finally {

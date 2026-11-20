@@ -82,10 +82,10 @@ test('prBody keeps the whole body under 60000 chars by cutting the findings', ()
     runId: 'r1',
     review: { used: 3, max: 3, unresolved: 'x'.repeat(100000) },
     groundVersions: { a: 'local' },
-    findingsPath: '/runs/r1/findings.md',
+    findingsPath: 'steps/review/1/outputs/findings.md',
   });
   assert.ok(body.length < 60000, `length ${body.length}`);
-  assert.ok(body.includes('… (truncated; full findings in /runs/r1/findings.md)'));
+  assert.ok(body.includes('… (truncated; full findings in steps/review/1/outputs/findings.md of run r1)'));
   assert.ok(body.endsWith('<sub>Percolator run `r1`</sub>\n'));
 });
 
@@ -186,6 +186,22 @@ test('open_pr with unresolved findings reports the cap and the findings text', a
     assert.ok(
       gh.prs[0]!.body.includes('Self-review stopped at the cap of 3 rounds with unresolved findings:\n\nStill broken.'),
     );
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('open_pr truncation names the run-relative findings path, never a local absolute one', async () => {
+  const s = await setup({ unresolved: 'x'.repeat(100000) });
+  try {
+    const gh = new FakeGh({ readFile: readBody });
+    const h = githubOpenPr({
+      gh, runDir: s.runDir, worktree: '/wt', branch: 'b', base: 'main', push: async () => {},
+    });
+    assert.equal((await h(step, s.ctx, s.io)).status, 'pass');
+    const body = gh.prs[0]!.body;
+    assert.ok(body.includes('… (truncated; full findings in steps/review/findings.md of run r1)'), body.slice(-300));
+    assert.equal(body.includes(s.runDir), false);
   } finally {
     await rm(s.runDir);
   }

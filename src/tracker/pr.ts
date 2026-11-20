@@ -5,6 +5,7 @@ import { runGit } from '../grounds/git.ts';
 import type { StepHandler } from '../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../runtime/outcome.ts';
 import { writeFileAtomic } from '../util/fs.ts';
+import { toPosix } from '../util/paths.ts';
 import type { Gh } from './gh.ts';
 import { readIssueMeta } from './intake.ts';
 import type { IssueMeta } from './intake.ts';
@@ -17,6 +18,7 @@ export type PrBodyInput = {
   summary?: string;
   review: { used: number; max: number; unresolved?: string };
   groundVersions: Record<string, string>;
+  /** run-relative, `/`-separated */
   findingsPath?: string;
 };
 
@@ -50,7 +52,7 @@ export function prBody(o: PrBodyInput): string {
   if (findings === undefined) return build(undefined);
   const full = build(findings.trimEnd());
   if (full.length < BODY_CAP) return full;
-  const marker = `… (truncated; full findings in ${o.findingsPath ?? 'the run directory'})`;
+  const marker = `… (truncated; full findings in ${o.findingsPath ?? 'the run directory'} of run ${o.runId})`;
   const room = BODY_CAP - 1 - build(`\n${marker}`).length;
   return build(`${findings.slice(0, Math.max(0, room)).trimEnd()}\n${marker}`);
 }
@@ -90,8 +92,9 @@ export function githubOpenPr(o: {
       let unresolved: string | undefined;
       let findingsPath: string | undefined;
       if (state.unresolvedFindings) {
-        findingsPath = path.join(o.runDir, state.unresolvedFindings);
-        unresolved = (await readOptional(findingsPath)) ?? '_The findings file is missing._';
+        // run-relative in the PR: a local absolute path would leak into a public body
+        findingsPath = toPosix(state.unresolvedFindings);
+        unresolved = (await readOptional(path.join(o.runDir, state.unresolvedFindings))) ?? '_The findings file is missing._';
       }
       const used = unresolved !== undefined ? max : (edge ? (state.rounds[edge.id] ?? 0) : 0) + 1;
       const body = prBody({

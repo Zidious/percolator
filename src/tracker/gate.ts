@@ -7,6 +7,7 @@ import type { Step } from '../graph/build.ts';
 import type { StepHandler } from '../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../runtime/outcome.ts';
 import { exists, writeFileAtomic } from '../util/fs.ts';
+import { toPosix } from '../util/paths.ts';
 import type { Gh, IssueComment } from './gh.ts';
 import { GATE_MARKER, readIssueMeta } from './intake.ts';
 
@@ -78,7 +79,7 @@ export function parseCommand(body: string): { decision: 'approve' | 'reject'; fe
   return { decision: m[1] as 'approve' | 'reject', feedback };
 }
 
-async function renderOutputs(runDir: string, outputs: Record<string, string>): Promise<string> {
+async function renderOutputs(runDir: string, runId: string, outputs: Record<string, string>): Promise<string> {
   const parts: string[] = [];
   let budget = OUTPUT_CAP;
   for (const key of Object.keys(outputs).sort()) {
@@ -87,7 +88,8 @@ async function renderOutputs(runDir: string, outputs: Record<string, string>): P
     const abs = path.resolve(runDir, rel);
     const text = (await fs.readFile(abs, 'utf8')).trim();
     if (text.length > budget) {
-      parts.push(`### ${key}\n\n${text.slice(0, budget)}\n… (truncated; full text in ${abs})`);
+      // run-relative: a local absolute path would leak into a public comment
+      parts.push(`### ${key}\n\n${text.slice(0, budget)}\n… (truncated; full text in ${toPosix(rel)} of run ${runId})`);
       break;
     }
     budget -= text.length;
@@ -160,7 +162,7 @@ export function githubGate(o: {
           if (found) {
             comment = found;
           } else {
-            const outputs = await renderOutputs(o.runDir, previousStepOutputs(step, ctx));
+            const outputs = await renderOutputs(o.runDir, o.runId, previousStepOutputs(step, ctx));
             const body = [
               marker,
               `**Percolator** needs approval to continue run \`${o.runId}\` (step \`${step.id}\`).`,
