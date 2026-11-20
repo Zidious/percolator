@@ -9,7 +9,6 @@ import { loadState } from './engine/state.ts';
 import type { RunState } from './engine/state.ts';
 import { cliHerdrApp } from './herdr/app.ts';
 import { cliHc } from './herdr/hc.ts';
-import type { Hc } from './herdr/hc.ts';
 import { checkResumable, drive, liveness, prUrl } from './run/drive.ts';
 import { lockIsLive, readDriverLock } from './run/lock.ts';
 import { listRuns, readRunMeta } from './run/meta.ts';
