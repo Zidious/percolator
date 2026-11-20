@@ -54,6 +54,8 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | `src/grounds/mappings.ts` | `resolveMappings` (validates all mappings up front, one ConfigError, no escaping the ground), `fragmentLayers`, `Layer = { source, fragment }` with source `ground:<name>/<file>@<commit12 or local>` |
 | `src/graph/core.ts` | `CORE_STAGES`, `STAGE_CONTRACTS` (required outputs), `CORE_GROOM_GATE` (`approve-groom`, locked by `core`); deep-frozen |
 | `src/graph/merge.ts` | `mergeLayers` → `Merged` (`Sourced<T>` = value + source + locked); never aliases inputs or core constants; violations throw `LockViolation` |
+| `src/graph/rules.ts` | `checkRules(merged)` → `Violation[]` (require_skills, allowed_agents/models, max_rounds_ceiling, required_nodes); the core gate is exempt from the ceiling here because `buildGraph` clamps it |
+| `src/graph/build.ts` | `buildGraph(merged)` → `Graph` (`steps`, `regionStart`, `backEdges` keyed by `fromStepId`); `GraphError`. Step ids are unique. Each `BackEdge` has `jumpAfterIndex`: the review edge fires on review's fail but jumps after the last `after: review` hook |
 | `src/engine/state.ts` | `RunState`, `newState`, `saveState`/`loadState` (`<dir>/state.json`, version 1) |
 | `src/index.ts` | public exports |
 | `tests/helpers/fake-git.ts` | `FakeGit` (records `calls`); use instead of real git in unit tests |
