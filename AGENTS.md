@@ -39,7 +39,7 @@ node tests/smoke/gh.smoke.ts --issue <owner/repo#n>   # manual, read-only: real 
 - **Atomic dirs:** build in a tmp sibling, then rename into place.
 - **Atomic files:** crash-critical files (run state, `percolator.lock`) go through `writeFileAtomic`.
 - **LF** line endings.
-- **`docs/superpowers/` is committed** (the design spec and the current plan; delete a plan once it is done). **Never commit `.superpowers/`** (subagent-run scratch; gitignored; never `git add -f`).
+- **Never commit `docs/superpowers/` or `.superpowers/`.** `docs/superpowers/` holds specs and plans (local working documents; gitignored); `.superpowers/` is subagent-run scratch (gitignored). Never `git add -f` either. Anything a spec decides that must outlive it goes into the code, the tests or this file.
 - **Strict TDD for every step**, including bug fixes and review fixes:
   1. RED: write the test, run it, see it fail for the expected reason (not a typo).
   2. GREEN: minimum code to pass; rerun.
@@ -52,7 +52,7 @@ node tests/smoke/gh.smoke.ts --issue <owner/repo#n>   # manual, read-only: real 
 
 ## Layout
 
-Detailed behaviour lives in the code and in `docs/superpowers/specs/2026-11-20-percolator-design.md`; read the module before changing it.
+Detailed behaviour lives in the code; read the module before changing it.
 
 | Dir | What |
 |---|---|
