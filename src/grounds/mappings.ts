@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ConfigError, loadFragment } from '../config/load.ts';
+import { STAGES } from '../config/schema.ts';
 import type { GraphFragment, Mapping } from '../config/schema.ts';
+import type { Graph } from '../graph/build.ts';
 import type { ResolvedGround } from './resolve.ts';
 
 export type ResolvedMapping = Mapping & { absPath: string; ground: string; commit: string };
@@ -83,6 +85,41 @@ export async function resolveMappings(
   }
   throwProblems(problems, opts?.configFile ?? 'config');
   return out;
+}
+
+/**
+ * Checks what only the built graph can tell: every node `prompt: { from, file }` resolves to a file
+ * inside its ground (same rules as a mapping), and every mapping `applies_to` names "*", a core
+ * stage or a step in the graph. Throws one ConfigError against `configFile` listing all problems.
+ */
+export async function checkGraphReferences(
+  graph: Graph,
+  mappings: ResolvedMapping[],
+  grounds: Record<string, ResolvedGround>,
+  configFile: string,
+): Promise<void> {
+  const problems: string[] = [];
+  for (const step of graph.steps) {
+    const prompt = step.def.prompt;
+    if (prompt === undefined || typeof prompt === 'string') continue;
+    const target = `${step.role === 'slot' ? 'bindings' : 'nodes'}.${step.id}.prompt`;
+    const ground = grounds[prompt.from];
+    if (!ground) {
+      problems.push(`${target}: ground "${prompt.from}": unknown ground (prompt ${prompt.file})`);
+      continue;
+    }
+    const r = await resolveInGround(ground, prompt.file, 'file');
+    if ('problem' in r) problems.push(`${target}: ${r.problem}`);
+  }
+  const known = new Set<string>(['*', ...STAGES, ...graph.steps.map((s) => s.name)]);
+  for (const m of mappings) {
+    for (const entry of m.applies_to) {
+      if (!known.has(entry)) {
+        problems.push(`mapping ${m.from}:${m.file ?? m.dir} applies_to "${entry}": no such stage or node`);
+      }
+    }
+  }
+  throwProblems(problems, configFile);
 }
 
 /** `as: graph` mappings, in order, loaded as config layers. loadFragment's ConfigErrors propagate. */

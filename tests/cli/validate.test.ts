@@ -122,3 +122,80 @@ test('rule violations are thrown as one RuleViolationError against the config fi
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+async function withConfig(body: (abs: (ground: string) => string) => string, fn: (cfg: string) => Promise<void>): Promise<void> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-cfg-'));
+  try {
+    const cfg = path.join(dir, 'config.yaml');
+    await fs.writeFile(cfg, body((g) => JSON.stringify(path.join(fx('e2e/grounds'), g))));
+    await fn(cfg);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+const promptConfig = (abs: (g: string) => string, extra: { applies?: string; plan?: string; implement?: string; lint?: string }) => `version: 1
+grounds:
+  company: { path: ${abs('company')} }
+  team: { path: ${abs('team')} }
+profiles:
+  work:
+    use:
+      - { from: company, file: percolator.yaml, as: graph }
+      - { from: team, file: policies/sdlc.md, as: policy, applies_to: ${extra.applies ?? '["*"]'} }
+    bindings:
+      intake: { builtin: read-ticket }
+      groom: { agent: groomer, prompt: { from: team, file: policies/sdlc.md } }
+      plan: ${extra.plan ?? '{ agent: planner }'}
+      implement: ${extra.implement ?? '{ agent: coder }'}
+      deliver: { command: [echo, deliver] }
+    nodes:
+      lint: ${extra.lint ?? '{ agent: linter, after: implement }'}
+`;
+
+test('every node prompt file is resolved inside its ground before start, all problems at once', async () => {
+  await withConfig(
+    (abs) =>
+      promptConfig(abs, {
+        plan: '{ agent: planner, prompt: { from: company, file: prompts/missing.md } }',
+        implement:
+          '[{ agent: coder, prompt: { from: nope, file: x.md } }, { agent: coder2, prompt: { from: company, file: "../team/policies/sdlc.md" } }]',
+        lint: '{ agent: linter, after: implement, prompt: { from: team, file: "C:x" } }',
+      }),
+    async (cfg) => {
+      const err = await validate({ ...opts(), configFile: cfg }).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.file, cfg);
+      assert.deepEqual(err.message.split('\n'), [
+        `${cfg}: bindings.plan.prompt: ground "company": prompts/missing.md does not exist`,
+        `${cfg}: bindings.implement.0.prompt: ground "nope": unknown ground (prompt x.md)`,
+        `${cfg}: bindings.implement.1.prompt: ground "company": ../team/policies/sdlc.md is outside the ground`,
+        `${cfg}: nodes.lint.prompt: ground "team": C:x must not contain ":"`,
+      ]);
+    },
+  );
+});
+
+test('a valid prompt file passes', async () => {
+  await withConfig(
+    (abs) => promptConfig(abs, { plan: '{ agent: planner, prompt: { from: company, file: percolator.yaml } }' }),
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg });
+      assert.equal(r.graph.steps.find((s) => s.id === 'plan')!.def.agent, 'planner');
+    },
+  );
+});
+
+test('mapping applies_to entries must name a stage, a node or "*"', async () => {
+  await withConfig(
+    (abs) => promptConfig(abs, { applies: '["*", review, lint, approve-groom, reveiw, nope]' }),
+    async (cfg) => {
+      const err = await validate({ ...opts(), configFile: cfg }).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.deepEqual(err.message.split('\n'), [
+        `${cfg}: mapping team:policies/sdlc.md applies_to "reveiw": no such stage or node`,
+        `${cfg}: mapping team:policies/sdlc.md applies_to "nope": no such stage or node`,
+      ]);
+    },
+  );
+});
