@@ -179,3 +179,19 @@ test('violations are ordered by rule set, then stage, then node name', () => {
   );
   assert.deepEqual(v.map((x) => x.target), ['bindings.plan', 'bindings.review', 'nodes.a', 'nodes.b', 'nodes.zz']);
 });
+
+test('require_skills on a stage bound to a script is a violation', () => {
+  const v = checkRules(m({ review: { command: ['make', 'lint'] } }, [{ require_skills: [{ stage: 'review', skills: ['my:review'] }] }]));
+  assert.equal(v.length, 1);
+  assert.equal(v[0]!.rule, 'require_skills');
+  assert.equal(v[0]!.target, 'bindings.review');
+  assert.equal(v[0]!.source, 'rules:0');
+  assert.equal(
+    v[0]!.message,
+    'bindings.review has no agent node, but require_skills (from rules:0) requires skill(s) my:review there',
+  );
+});
+
+test('require_skills "*" with no agent nodes anywhere is not a violation', () => {
+  assert.deepEqual(checkRules(m({ review: { command: ['make', 'lint'] } }, [{ require_skills: [{ stage: '*', skills: ['s'] }] }])), []);
+});

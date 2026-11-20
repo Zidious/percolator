@@ -41,6 +41,17 @@ export function checkRules(merged: Merged): Violation[] {
 
   sets.forEach(({ value: rules, source }, idx) => {
     for (const req of rules.require_skills ?? []) {
+      if (req.stage !== '*') {
+        const bound = merged.bindings[req.stage]?.value;
+        if (bound !== undefined && !bound.some(isAgent)) {
+          out.push({
+            rule: 'require_skills',
+            source,
+            target: `bindings.${req.stage}`,
+            message: `bindings.${req.stage} has no agent node, but require_skills (from ${source}) requires skill(s) ${req.skills.join(', ')} there`,
+          });
+        }
+      }
       for (const { target, node, stage } of all) {
         if (!isAgent(node)) continue;
         if (req.stage !== '*' && stage !== req.stage) continue;
