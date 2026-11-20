@@ -20,7 +20,8 @@ perc status [<run-id>]                # list runs, or show one (detail, last 10 
 perc approve <run-id> | perc reject <run-id> <feedback>   # answer the gate a run waits at
 perc clean <run-id> [--force]         # remove a finished run's terminals and worktree (keeps branch and run record)
 perc drive <run-id>                   # internal: what the driver terminal runs
-node tests/smoke/hc.smoke.ts [--space <id>]   # manual: talks to the real hc (needs hc on PATH; --space also uses herdr-app); not in pnpm test
+node tests/smoke/hc.smoke.ts [--space <id>] [--boot] [--codex]   # manual: talks to the real hc (needs hc on PATH; --space also uses herdr-app; --boot launches claude + an idle program; --codex runs codex on Windows); not in pnpm test
+node tests/smoke/gh.smoke.ts --issue <owner/repo#n>   # manual, read-only: real gh issue view, prints parsed JSON; not in pnpm test
 ```
 
 ## Hard rules
@@ -91,7 +92,8 @@ node tests/smoke/hc.smoke.ts [--space <id>]   # manual: talks to the real hc (ne
 | `tests/helpers/fake-git.ts` | `FakeGit` (records `calls`; origin url kept in a marker file so it follows renames; `toplevels`, `cloneError`, `onClone` hooks); use instead of real git in unit tests |
 | `tests/helpers/fake-runtime.ts` | `FakeRuntime` (scripted outcomes per step id; records `calls`, rounds and `maxRoundsSeen`; `roundsOf`/`maxRoundsOf`) and the `pass`/`fail`/`esc` helpers |
 | `tests/helpers/fake-hc.ts` | `FakeHc` (in-memory `Hc`; records `calls`, `terminals` by name; `behave(t, waitCall)` runs on each `wait`, which then rejects `finished` (11) / `blocked` (9) like the real client; `add` pre-creates a terminal (accepts `labels`); `get` returns labels; `list({ labels, all })` filters by every label and by live state unless `all`, records `['list', o]`; `taskFileOf(t)`; `firstMessageSent`; live duplicate `run` throws `name_taken`) |
-| `tests/smoke/hc.smoke.ts` | manual real-`hc` smoke (script step through `HerdrRuntime`, argv launch printing `firstMessageSent`, with `--space <id>` a labelled terminal plus its `herdr-app ls` entry); names its terminals `perc-smoke-<ts>`, always kills and removes them; not matched by `pnpm test` |
+| `tests/smoke/hc.smoke.ts` | manual real-`hc` smoke (script step through `HerdrRuntime`, argv launch printing `firstMessageSent`, with `--space <id>` a labelled terminal plus its `herdr-app ls` entry; `--boot` prints get status/turn for 20 s for `claude` and an idle node program; `--codex` on Windows runs `codex --no-daemon --help` and reports exit code and whether `--add-dir` shows, skipped elsewhere); names its terminals `perc-smoke-<ts>`, always kills and removes them; not matched by `pnpm test` |
+| `tests/smoke/gh.smoke.ts` | manual read-only real-`gh` smoke: `--issue <owner/repo#n>` runs `parseTicket` + `cliGh().issue` and prints the JSON; posts nothing; not matched by `pnpm test` |
 | `tests/helpers/exec-recorder.ts` | `ExecRecorder` (records `calls` with `opts` (cwd/env); `respond(match, result)`; unmatched calls resolve `{}`); never run the real `hc` or `herdr-app` in tests |
 | `src/tracker/ticket.ts` | `parseTicket(ref, defaultRepo?)` → `TicketRef { repo, number }` (`#n`/`n` need `defaultRepo`; `owner/repo#n`, `host/owner/repo#n`, issue URLs incl. GHE; `/pull/` rejected; repo lower-cased like `normalizeRemote`); `formatTicket` → `<repo>#<n>` (canonical `state.ticket`) |
 | `src/tracker/gh.ts` | `Gh` / `cliGh({ exec, bin })`: issue (with comments), comment (returns URL), user, findPr, createPr, editPr; repo passed as `--repo host/owner/repo`, numbers after `--`, `-`-leading base/head/title refused; prompt-free env (`GH_PROMPT_DISABLED` etc.) via `opts.env`; non-zero exit throws `GhError` (`gh <sub> failed: <stderr>`) |
