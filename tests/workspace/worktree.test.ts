@@ -143,3 +143,16 @@ test('is idempotent when dir is reached through a symlinked parent', async () =>
     await cleanup();
   }
 });
+
+test('re-creates a worktree whose dir was deleted by hand, on its branch', async () => {
+  const { root, repo, cleanup } = await setup();
+  try {
+    const dir = path.join(root, 'wt', 'r1');
+    await ensureWorktree({ repoRoot: repo, dir, branch: 'perc/t1', base: 'main' });
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+    assert.deepEqual(await ensureWorktree({ repoRoot: repo, dir, branch: 'perc/t1', base: 'main' }), { created: true });
+    assert.equal(await git(dir, 'rev-parse', '--abbrev-ref', 'HEAD'), 'perc/t1');
+  } finally {
+    await cleanup();
+  }
+});

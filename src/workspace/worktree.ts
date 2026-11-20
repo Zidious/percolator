@@ -73,6 +73,11 @@ export async function ensureWorktree(o: {
       break;
     }
   }
+  if (here && !(await exists(dir))) {
+    // deleted by hand: git still lists it (prunable); drop the stale entry and add it again
+    await runGit(['worktree', 'prune'], repoRoot);
+    here = undefined;
+  }
   if (here) {
     if (here.branch === `refs/heads/${branch}`) return { created: false };
     const other = here.branch?.replace(/^refs\/heads\//, '') ?? '(detached)';

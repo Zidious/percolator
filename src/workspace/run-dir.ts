@@ -35,28 +35,26 @@ function groundOf(m: ResolvedMapping, grounds: Record<string, ResolvedGround>): 
 /**
  * Copy every policy/context mapping into `<runDir>/grounds/<ground>/…`, the run record. Copies are
  * atomic, so an existing one is complete and is reused. Other kinds are used where they are.
+ * `dir` mappings are copied before `file` mappings: a file inside a copied dir is the same content
+ * from the same pinned ground and is reused, whereas a file copied first would hide the rest of its dir.
+ * The result keeps the mappings' order.
  */
 export async function materializeGrounds(
   dir: string,
   mappings: ResolvedMapping[],
   grounds: Record<string, ResolvedGround>,
 ): Promise<MaterializedMapping[]> {
-  const out: MaterializedMapping[] = [];
-  for (const m of mappings) {
-    if (m.as !== 'policy' && m.as !== 'context') {
-      out.push({ ...m, runPath: m.absPath });
-      continue;
+  const out: MaterializedMapping[] = mappings.map((m) => ({ ...m, runPath: m.absPath }));
+  const copied = out.filter((m) => m.as === 'policy' || m.as === 'context');
+  for (const m of [...copied.filter((m) => m.dir !== undefined), ...copied.filter((m) => m.dir === undefined)]) {
+    m.runPath = path.join(dir, 'grounds', m.ground, (m.file ?? m.dir)!);
+    if (await exists(m.runPath)) continue;
+    try {
+      await copyContained(m.absPath, m.runPath, groundOf(m, grounds).dir);
+    } catch (err) {
+      // a concurrent materialization finished first; its copy is complete
+      if (!(await exists(m.runPath))) throw err;
     }
-    const runPath = path.join(dir, 'grounds', m.ground, (m.file ?? m.dir)!);
-    if (!(await exists(runPath))) {
-      try {
-        await copyContained(m.absPath, runPath, groundOf(m, grounds).dir);
-      } catch (err) {
-        // a concurrent materialization finished first; its copy is complete
-        if (!(await exists(runPath))) throw err;
-      }
-    }
-    out.push({ ...m, runPath });
   }
   return out;
 }
@@ -144,6 +142,9 @@ export async function findSkill(ref: string, mappings: ResolvedMapping[]): Promi
   const colon = ref.indexOf(':');
   const ns = colon === -1 ? undefined : ref.slice(0, colon);
   const name = colon === -1 ? ref : ref.slice(colon + 1);
+  // names are joined into paths: never let one climb out of the skills dir
+  const unsafe = (s: string) => s.includes('/') || s.includes('\\') || s.includes('..');
+  if (unsafe(name) || (ns !== undefined && unsafe(ns))) return undefined;
   for (const m of mappings) {
     if (m.as === 'skills') {
       if (ns !== undefined && m.ground !== ns) continue;

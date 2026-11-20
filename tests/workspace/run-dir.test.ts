@@ -141,3 +141,32 @@ test('findSkill resolves ns:name and bare names, and returns undefined when abse
   assert.equal(await findSkill('alpha:nope', ms), undefined);
   assert.equal(await findSkill('nope', ms), undefined);
 });
+
+test('findSkill never joins a name that could leave the skills dir', async (t) => {
+  const base = await tmp(t);
+  const c = ground('gamma', path.join(base, 'gamma'));
+  await put(path.join(c.dir, 'plug', '.claude-plugin', 'plugin.json'), '{"name":"ns"}');
+  await put(path.join(c.dir, 'plug', 'x', 'SKILL.md'), 'escaped one level');
+  await put(path.join(c.dir, 'x', 'SKILL.md'), 'escaped two levels');
+  const ms = [mapping(c, 'plugins', 'plug', 'dir')];
+  assert.equal(await findSkill('ns:../../x', ms), undefined);
+  assert.equal(await findSkill('../x', ms), undefined);
+  assert.equal(await findSkill('ns:..\\..\\x', ms), undefined);
+  assert.equal(await findSkill('n/s:x', ms), undefined);
+});
+
+test('materializeGrounds copies a whole dir even when a file inside it is mapped first', async (t) => {
+  const base = await tmp(t);
+  const g = ground('acme', path.join(base, 'acme'));
+  await put(path.join(g.dir, 'policies', 'a.md'), 'A');
+  await put(path.join(g.dir, 'policies', 'b.md'), 'B');
+  const ms = [mapping(g, 'policy', 'policies/a.md', 'file'), mapping(g, 'policy', 'policies', 'dir')];
+  const run = path.join(base, 'run');
+  const out = await materializeGrounds(run, ms, { acme: g });
+  assert.deepEqual(out.map((m) => m.runPath), [
+    path.join(run, 'grounds', 'acme', 'policies', 'a.md'),
+    path.join(run, 'grounds', 'acme', 'policies'),
+  ]);
+  assert.deepEqual((await fs.readdir(out[1]!.runPath)).sort(), ['a.md', 'b.md']);
+  assert.equal(await fs.readFile(out[0]!.runPath, 'utf8'), 'A');
+});
