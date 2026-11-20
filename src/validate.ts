@@ -56,6 +56,7 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
     lockFile: path.join(path.dirname(opts.configFile), 'percolator.lock'),
     cacheDir: path.join(opts.home ?? os.homedir(), '.percolator', 'grounds'),
     git,
+    configFile: opts.configFile,
     ...(opts.update !== undefined ? { update: opts.update } : {}),
     ...(opts.home !== undefined ? { home: opts.home } : {}),
   });

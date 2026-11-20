@@ -21,6 +21,8 @@ export type ResolveOptions = {
   git: Git;
   update?: boolean;
   home?: string;
+  /** the config file that declares the grounds; problems with path grounds are reported against it */
+  configFile?: string;
 };
 
 async function exists(p: string): Promise<boolean> {
@@ -45,7 +47,7 @@ export async function resolveGrounds(
     if ('path' in spec) {
       const dir = expandHome(spec.path, opts.home);
       if (!(await exists(dir))) {
-        throw new ConfigError(`ground "${name}": path ${spec.path} does not exist`, lockFile);
+        throw new ConfigError(`ground "${name}": path ${spec.path} does not exist`, opts.configFile ?? 'config');
       }
       out[name] = { name, dir, commit: 'local', source: spec };
       continue;
