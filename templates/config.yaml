@@ -1,0 +1,34 @@
+# Percolator config, written by `perc init`. Edit freely.
+# Schema for editor completion and validation: the Percolator package's schema/percolator.schema.json
+version: 1
+profiles:
+  default:
+    match: { remote: "github.com/*/*" }
+    bindings:
+      intake: { builtin: github.intake }
+      groom:
+        agent: claude
+        model: sonnet
+        prompt: |
+          Make the ticket unambiguous: state the goal, the acceptance criteria and anything out of scope.
+          Look at the repository first; list open questions in the groomed ticket instead of guessing.
+      plan:
+        agent: claude
+        model: opus
+        prompt: |
+          Read the relevant code first and follow the repository's existing conventions.
+          Break the work into small, ordered steps, each with the tests that prove it.
+      implement:
+        agent: claude
+        model: opus
+        prompt: |
+          Work test-first: write a failing test, make it pass, then refactor.
+          Commit in small steps with conventional commit messages and keep the diff focused on the plan.
+      review:
+        agent: claude
+        model: opus
+        max_rounds: 3
+        prompt: |
+          Review like a skeptical maintainer: correctness, missing tests, scope creep and unclear naming.
+          Report each finding with the file it concerns and what to change.
+      deliver: { builtin: github.open_pr }

@@ -14,6 +14,10 @@ pnpm test:watch
 node --test tests/util/paths.test.ts   # focused run
 pnpm build                       # tsc → dist/ (src only; dist/ is gitignored, published via package.json files)
 pnpm schema                      # regenerate schema/percolator.schema.json
+perc init [--config <file>] [--force]   # write the recommended config (templates/config.yaml)
+perc validate [--config <file>] [--profile <name>] [--update]   # load config, resolve grounds and mappings, check the graph (--update re-pins git grounds)
+perc schema [--out <file>]            # write the config JSON schema (default schema/percolator.schema.json)
+node src/cli.ts <command> …           # run perc from a checkout without building
 perc run <ticket> [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]   # start a run (driver in its own hc terminal unless --foreground)
 perc resume <run-id> [--foreground]   # continue a paused/interrupted run; checks run here before the driver launches
 perc status [<run-id>]                # list runs, or show one (detail, last 10 history records)
@@ -35,7 +39,7 @@ node tests/smoke/gh.smoke.ts --issue <owner/repo#n>   # manual, read-only: real 
 - **Atomic dirs:** build in a tmp sibling, then rename into place.
 - **Atomic files:** crash-critical files (run state, `percolator.lock`) go through `writeFileAtomic`.
 - **LF** line endings.
-- **`docs/superpowers/` is committed** (the design spec and the current plan; delete a plan once it is done). **Never commit `.superpowers/`** (subagent-run scratch; gitignored; never `git add -f`).
+- **Never commit `docs/superpowers/` or `.superpowers/`.** `docs/superpowers/` holds specs and plans (local working documents; gitignored); `.superpowers/` is subagent-run scratch (gitignored). Never `git add -f` either. Anything a spec decides that must outlive it goes into the code, the tests or this file.
 - **Strict TDD for every step**, including bug fixes and review fixes:
   1. RED: write the test, run it, see it fail for the expected reason (not a typo).
   2. GREEN: minimum code to pass; rerun.
@@ -48,7 +52,7 @@ node tests/smoke/gh.smoke.ts --issue <owner/repo#n>   # manual, read-only: real 
 
 ## Layout
 
-Detailed behaviour lives in the code and in `docs/superpowers/specs/2026-11-20-percolator-design.md`; read the module before changing it.
+Detailed behaviour lives in the code; read the module before changing it.
 
 | Dir | What |
 |---|---|
@@ -65,6 +69,8 @@ Detailed behaviour lives in the code and in `docs/superpowers/specs/2026-11-20-p
 | `src/workspace/` | worktrees, run/step dirs, ground materialization, skill plugins |
 | `src/util/` | paths, atomic fs, argv-only exec |
 | `src/validate.ts` | full config → graph validation pipeline |
+| `templates/` | recommended config written by `perc init` |
+| `skills/` | agent-agnostic skills shipped in the package |
 | `tests/helpers/` | fakes and fixtures builders (see Testing conventions) |
 | `tests/smoke/` | manual smoke tests against the real `hc`/`gh`; never run by `pnpm test` |
 
@@ -77,7 +83,7 @@ Detailed behaviour lives in the code and in `docs/superpowers/specs/2026-11-20-p
 
 ## Design decisions to keep
 
-- **Six core stages, in order:** `intake`, `groom`, `plan`, `implement`, `review`, `deliver`. All must be bound or the engine refuses to start. Percolator ships no bindings for `groom`, `plan`, `implement`, `review`.
+- **Six core stages, in order:** `intake`, `groom`, `plan`, `implement`, `review`, `deliver`. All must be bound or the engine refuses to start. The engine has no built-in bindings for `groom`, `plan`, `implement`, `review`; `perc init` writes a recommended config into the user's file.
 - **Review loop:** default cap 3 rounds, then proceed to `deliver` with an unresolved-findings summary.
 - **Back-edges** (`on_fail: { back_to, max_rounds }`): at the cap the run escalates (pauses for the owner).
 - **Locks:** `required: true` locks always win over merge order. A locked target may only be restated deep-equal; otherwise `LockViolation` (`"<target> is locked by <src>; <attempt> cannot change it"`), naming the locking source.

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { initConfig } from './config/init.ts';
 import { writeJsonSchema } from './config/json-schema.ts';
 import { loadState } from './engine/state.ts';
 import type { RunState } from './engine/state.ts';
@@ -29,6 +30,8 @@ export type Io = { stdout(s: string): void; stderr(s: string): void };
 const USAGE = `usage: perc <command> [options]
 
 commands:
+  init [--config <file>] [--force]
+      write the recommended config (default: ~/.percolator/config.yaml)
   validate [--config <file>] [--profile <name>] [--update]
       load the config, resolve grounds and mappings, and check the graph
       (default config: ~/.percolator/config.yaml)
@@ -97,6 +100,16 @@ function describe(r: ValidateResult): string {
     lines.push(`${e.fromStepId} → ${target} (max ${e.maxRounds}, ${e.onCap})`);
   }
   return `${lines.join('\n')}\n`;
+}
+
+async function runInit(args: string[], io: Io): Promise<number> {
+  const { values } = parse(args, { config: { type: 'string' }, force: { type: 'boolean' } });
+  const file = path.resolve(values.config ?? defaultConfig());
+  await initConfig(file, { force: values.force === true });
+  io.stdout(`wrote ${file}
+next: perc validate --config ${file} --profile default
+`);
+  return 0;
 }
 
 async function runValidate(args: string[], io: Io): Promise<number> {
@@ -315,6 +328,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     return 0;
   }
   try {
+    if (command === 'init') return await runInit(rest, io);
     if (command === 'validate') return await runValidate(rest, io);
     if (command === 'schema') return await runSchema(rest, io);
     const d = () => driverDeps(io, deps);
