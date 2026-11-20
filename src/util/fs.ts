@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { Document, LineCounter, parseDocument } from 'yaml';
 
@@ -69,4 +70,47 @@ export async function readYamlFile(
   const lineCounter = new LineCounter();
   const doc = parseDocument(text, { lineCounter });
   return { doc, lineCounter, text };
+}
+
+/** Names of tmp/old siblings that atomic writes and dir builds leave behind when a run crashes. */
+const LEFTOVER = /\.(?:tmp|old)-(?:\d+-)?[0-9a-f]{8}$|\.\d+\.[0-9a-f]{8}\.tmp$/;
+
+/**
+ * Remove crash leftovers (see LEFTOVER) in `dir` whose mtime is older than `olderThanMs` (default
+ * 1 hour; the floor protects a concurrent run's work in progress). With `recursive`, descends into
+ * non-matching directories; symlinks are never followed. Returns the removed paths, sorted.
+ */
+export async function sweepLeftovers(
+  dir: string,
+  o: { olderThanMs?: number; now?: number; recursive?: boolean } = {},
+): Promise<string[]> {
+  const cutoff = (o.now ?? Date.now()) - (o.olderThanMs ?? 3_600_000);
+  const removed: string[] = [];
+  const walk = async (d: string): Promise<void> => {
+    let names: string[];
+    try {
+      names = await fs.readdir(d);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const p = path.join(d, name);
+      let st;
+      try {
+        st = await fs.lstat(p);
+      } catch {
+        continue;
+      }
+      if (LEFTOVER.test(name)) {
+        if (st.mtimeMs < cutoff) {
+          await fs.rm(p, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
+          removed.push(p);
+        }
+      } else if (o.recursive && st.isDirectory()) {
+        await walk(p);
+      }
+    }
+  };
+  await walk(dir);
+  return removed.sort();
 }

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ConfigError } from '../config/load.ts';
 import type { GroundSpec } from '../config/schema.ts';
+import { sweepLeftovers } from '../util/fs.ts';
 import { expandHome, toPosix } from '../util/paths.ts';
 import type { Git } from './git.ts';
 import { readLock, writeLock } from './lock.ts';
@@ -39,6 +40,7 @@ export async function resolveGrounds(
   opts: ResolveOptions,
 ): Promise<Record<string, ResolvedGround>> {
   const { lockFile, cacheDir, git } = opts;
+  await sweepLeftovers(cacheDir).catch(() => {});
   const lock = await readLock(lockFile);
   const next = { version: 1 as const, grounds: { ...lock.grounds } };
   const out: Record<string, ResolvedGround> = {};
@@ -95,16 +97,17 @@ const tmpSibling = (target: string, tag = 'tmp') => `${target}.${tag}-${process.
 
 /**
  * Rename the finished `tmp` dir to `target`. If a concurrent run got there first (the rename fails
- * because `target` now exists), ours is discarded and theirs is used.
+ * because `target` now exists), ours is discarded and theirs is used; returns false then.
  */
-async function renameIntoPlace(tmp: string, target: string): Promise<void> {
+async function renameIntoPlace(tmp: string, target: string): Promise<boolean> {
   try {
     await fs.rename(tmp, target);
+    return true;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if ((code === 'EEXIST' || code === 'ENOTEMPTY' || code === 'EPERM') && (await exists(target))) {
       await fs.rm(tmp, { recursive: true, force: true });
-      return;
+      return false;
     }
     throw err;
   }
@@ -126,7 +129,14 @@ async function cloneMirror(git: Git, url: string, mirror: string): Promise<strin
 async function openMirror(git: Git, url: string, mirror: string): Promise<boolean> {
   await fs.mkdir(path.dirname(mirror), { recursive: true });
   if (!(await exists(mirror))) {
-    await renameIntoPlace(await cloneMirror(git, url, mirror), mirror);
+    if (!(await renameIntoPlace(await cloneMirror(git, url, mirror), mirror))) {
+      const other = await git.remoteUrl(mirror);
+      if (!sameUrl(other, url)) {
+        throw new Error(
+          `ground mirror ${mirror} was replaced concurrently by a mirror of ${other ?? 'unknown url'}; run perc again`,
+        );
+      }
+    }
     return true;
   }
   if (sameUrl(await git.remoteUrl(mirror), url)) return false;

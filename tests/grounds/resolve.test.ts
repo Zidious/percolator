@@ -7,6 +7,7 @@ import { readLock, writeLock } from '../../src/grounds/lock.ts';
 import { resolveGrounds } from '../../src/grounds/resolve.ts';
 import type { GroundSpec } from '../../src/config/schema.ts';
 import { ConfigError } from '../../src/config/load.ts';
+import { exists } from '../../src/util/fs.ts';
 import { FakeGit } from '../helpers/fake-git.ts';
 
 const OLD = 'abc123def4567890abc123def4567890abc12345';
@@ -224,6 +225,30 @@ describe('resolveGrounds', () => {
     assert.equal(r.company!.commit, OLD);
     assert.equal(await fake.originOf(mirror), URL);
     assert.deepEqual((await fs.readdir(cacheDir)).filter((e) => e.includes('.tmp')), []);
+  });
+
+  test('a lost mirror race to a different url is an error', async () => {
+    fake.setRef('main', OLD);
+    const mirror = path.join(cacheDir, 'company.mirror');
+    fake.onClone = async (_url, dir) => {
+      if (dir.startsWith(`${mirror}.tmp`)) await fake.seedMirror(mirror, 'https://example.com/other.git');
+    };
+    await assert.rejects(
+      resolveGrounds(specs, opts()),
+      new Error(
+        `ground mirror ${mirror} was replaced concurrently by a mirror of https://example.com/other.git; run perc again`,
+      ),
+    );
+  });
+
+  test('resolveGrounds sweeps old leftovers in the cache', async () => {
+    const left = path.join(cacheDir, 'x.tmp-1-deadbeef');
+    await fs.mkdir(left);
+    const old = new Date(Date.now() - 2 * 3_600_000);
+    await fs.utimes(left, old, old);
+    fake.setRef('main', OLD);
+    await resolveGrounds(specs, opts());
+    assert.equal(await exists(left), false);
   });
 
   test('losing the materialise race to a concurrent run uses the dir it created', async () => {

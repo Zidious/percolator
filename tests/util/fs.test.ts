@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
-import { exists, readYamlFile, renameRetry, writeFileAtomic } from '../../src/util/fs.ts';
+import { exists, readYamlFile, renameRetry, sweepLeftovers, writeFileAtomic } from '../../src/util/fs.ts';
 
 let dir: string;
 beforeEach(async () => {
@@ -103,4 +103,32 @@ test('exists reports files, directories and absence', async () => {
   assert.equal(await exists(path.join(dir, 'f')), true);
   assert.equal(await exists(dir), true);
   assert.equal(await exists(path.join(dir, 'nope')), false);
+});
+
+test('sweepLeftovers removes old tmp/old siblings only', async () => {
+  const names = ['a.tmp-1234-deadbeef', 'b.old-cafebabe', 'state.json.99.0badf00d.tmp', 'keep'];
+  for (const n of names) await fs.mkdir(path.join(dir, n));
+  const old = new Date(Date.now() - 2 * 3_600_000);
+  for (const n of names) await fs.utimes(path.join(dir, n), old, old);
+  await fs.mkdir(path.join(dir, 'c.tmp-0000beef'));
+  const removed = await sweepLeftovers(dir);
+  assert.deepEqual(
+    removed,
+    ['a.tmp-1234-deadbeef', 'b.old-cafebabe', 'state.json.99.0badf00d.tmp'].map((n) => path.join(dir, n)),
+  );
+  assert.deepEqual((await fs.readdir(dir)).sort(), ['c.tmp-0000beef', 'keep']);
+});
+
+test('sweepLeftovers recursive finds nested leftovers', async () => {
+  const nested = path.join(dir, 'steps', 'x', '1', 'plugins');
+  const left = path.join(nested, 'g.tmp-abcdef12');
+  await fs.mkdir(left, { recursive: true });
+  const old = new Date(Date.now() - 2 * 3_600_000);
+  await fs.utimes(left, old, old);
+  assert.deepEqual(await sweepLeftovers(dir, { recursive: true }), [left]);
+  assert.equal(await exists(left), false);
+});
+
+test('sweepLeftovers on a missing dir returns nothing', async () => {
+  assert.deepEqual(await sweepLeftovers(path.join(dir, 'nope')), []);
 });
