@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { loadState } from '../../src/engine/state.ts';
 import { readRunMeta } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
-import { launchDriver, prepareRun } from '../../src/run/prepare.ts';
+import { launchDriver, prepareRun, worktreeIn } from '../../src/run/prepare.ts';
 import type { DriverDeps } from '../../src/run/prepare.ts';
 import { FakeHerdrApp } from '../helpers/fake-app.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
@@ -123,6 +123,32 @@ test('a detached HEAD with no origin/HEAD is refused before anything is created'
     await assertNothingCreated(e);
   } finally {
     await e.cleanup();
+  }
+});
+
+test('a path-like or invalid ticket ref is refused before anything is created', async () => {
+  const e = await setup();
+  try {
+    for (const ticket of ['o/..#1', 'o/..\\..\\..\\..\\Temp#1', '-x/r#1', '#0']) {
+      await assert.rejects(
+        prepareRun({ ticket, repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps),
+        { message: `cannot read ticket "${ticket}": use #123, owner/repo#123 or an issue URL` },
+        ticket,
+      );
+      await assertNothingCreated(e);
+    }
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('worktreeIn refuses a worktree that would leave its root', () => {
+  const root = path.resolve('/wt');
+  assert.equal(worktreeIn(root, 'r', 't1-x'), path.join(root, 'r', 't1-x'));
+  for (const repoName of ['..', path.join('..', '..', 'Temp'), path.resolve('/elsewhere')]) {
+    assert.throws(() => worktreeIn(root, repoName, 't1-x'), {
+      message: `repository name "${repoName}" would put the worktree outside ${root}`,
+    });
   }
 });
 

@@ -45,3 +45,42 @@ test('parseTicket rejects anything else', () => {
 test('formatTicket gives repo#n', () => {
   assert.equal(formatTicket({ repo: D, number: 5 }), 'github.com/o/r#5');
 });
+
+test('parseTicket refuses path-like or invalid owner, repo, host and number', () => {
+  const refs = [
+    'o/..#1',
+    'o/.#1',
+    '../r#1',
+    'o/..\\..\\..\\..\\Temp#1',
+    '-x/r#1',
+    'o/-r#1',
+    '#0',
+    '0',
+    'o/r#0',
+    'bad_host/o/r#1',
+    'https://github.com/o/../issues/1',
+    'https://github.com/o/r/issues/0',
+    'https://gh\\x/o/r/issues/1',
+  ];
+  for (const ref of refs) {
+    assert.throws(
+      () => parseTicket(ref, D),
+      { message: `cannot read ticket "${ref}": use #123, owner/repo#123 or an issue URL` },
+      ref,
+    );
+  }
+});
+
+test('parseTicket accepts a host with a port', () => {
+  assert.deepEqual(parseTicket('https://ghe.acme.com:8443/a/b/issues/7'), { repo: 'ghe.acme.com:8443/a/b', number: 7 });
+});
+
+test('parseTicket checks the default repo the same way', () => {
+  for (const def of ['github.com/o/..', 'github.com/-x/r', 'c/users/me/origin', 'o/r']) {
+    assert.throws(
+      () => parseTicket('#5', def),
+      { message: 'cannot read ticket "#5": use #123, owner/repo#123 or an issue URL' },
+      def,
+    );
+  }
+});

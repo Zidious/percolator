@@ -12,7 +12,7 @@ import { formatTicket, parseTicket } from '../tracker/ticket.ts';
 import { expandHome } from '../util/paths.ts';
 import { validate } from '../validate.ts';
 import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
-import { defaultWorktreeDir, ensureWorktree, removeWorktree } from '../workspace/worktree.ts';
+import { ensureWorktree, removeWorktree } from '../workspace/worktree.ts';
 import { detectBase, driverName, newRunId, writeRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 
@@ -30,6 +30,16 @@ export type DriverDeps = {
 };
 
 const SPACE_FAILED = 'herdr-app space.new failed: ';
+
+/** `<root>/<repoName>/<runId>`, refused unless it stays inside `root` (defence in depth behind `parseTicket`). */
+export function worktreeIn(root: string, repoName: string, runId: string): string {
+  const dir = path.resolve(root, repoName, runId);
+  const rel = path.relative(root, dir);
+  if (rel === '' || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    throw new Error(`repository name "${repoName}" would put the worktree outside ${root}`);
+  }
+  return dir;
+}
 
 /**
  * Validate, then create the run: worktree, Herdr space, `run.json`, materialized grounds and `state.json`.
@@ -63,8 +73,8 @@ export async function prepareRun(
   const root = v.runtime?.worktree_root;
   const worktree =
     root !== undefined
-      ? path.join(expandHome(root, deps.home), repoName, runId)
-      : defaultWorktreeDir(deps.home, repoName, runId);
+      ? worktreeIn(expandHome(root, deps.home), repoName, runId)
+      : worktreeIn(path.join(deps.home, '.percolator', 'worktrees'), repoName, runId);
 
   if (base.startsWith('origin/')) await runGit(['fetch', '--quiet', 'origin'], repoRoot);
   const branchExisted = await runGit(['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], repoRoot).then(
