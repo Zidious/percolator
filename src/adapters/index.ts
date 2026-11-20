@@ -20,7 +20,9 @@ export const ADAPTERS: Readonly<Record<'claude' | 'codex' | 'command', AgentAdap
     name: 'codex',
     nativeSkills: false,
     plugins: false,
-    // `--add-dir` is unverified: codex is not installed on the dev machine (Task 11 smoke run).
+    // Unverified, because codex is not installed on the dev machine (Task 22 `--codex` smoke, 2026-11-20):
+    // whether `--add-dir` exists, and whether hc can launch the Windows `.cmd` shim. If hc reports
+    // `spawn_failed ... not found on PATH`, codex is missing or hc cannot run its shim.
     argv: (s) => [
       'codex',
       '--no-daemon',

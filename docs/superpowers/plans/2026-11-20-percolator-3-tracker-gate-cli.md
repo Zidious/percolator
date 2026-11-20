@@ -39,7 +39,7 @@ Executed with superpowers:subagent-driven-development: one implementer and one s
        1. **Bug, fixed in `fix(hc)`:** `hc get` (and possibly `wait`) reports `status` as an object, while `hc ls` reports a string. `cliHc` had passed the object through, so the runtime's status checks never matched against the real hc. It now maps the object to its `state`.
        2. **Plan-4 item:** every agent step runs in a fresh worktree, so claude will stop at the folder-trust prompt before its first turn. Attention now reports it as `blocked`, but the owner must answer it in each terminal. Pre-trusting the worktree, or surfacing `msg` in the attention line, is plan-4 work.
      - The cancel (Ctrl-C) skipped the smoke's `finally`, leaving its two terminals live. They were removed by hand. The smoke should also clean up on SIGINT (plan 4).
-   - `hc.smoke.ts --codex`: pending.
+   - `hc.smoke.ts --codex`: **could not run 2026-11-20**. codex is not installed, and hc gave `spawn_failed: codex: not found on PATH`. The `.cmd` launch and `--add-dir` stay unverified, and the adapter comment says so. Re-run it once codex is installed.
    - `gh.smoke.ts --issue <a real issue>`: **passed 2026-11-20** on `Zidious/percolator#1`.
      - The URL form parsed to `github.com/zidious/percolator` #1, lower-cased as ruled.
      - `number`, `title`, `body`, `url`, `state` (`OPEN`) and `author` (a login string) all mapped.
