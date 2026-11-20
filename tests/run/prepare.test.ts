@@ -206,12 +206,19 @@ test('space failure names the fix', async () => {
       },
     );
     assert.equal(await exists(path.join(e.home, '.percolator', 'runs')), false);
+    const worktree = e.deps.app.calls[0]![1];
+    const runId = path.basename(worktree);
+    assert.match(runId, /^t5-20260304-050607-[0-9a-f]{4}$/);
+    assert.equal(await exists(worktree), false);
+    const listed = await git(e.root, 'worktree', 'list', '--porcelain');
+    assert.equal(listed.includes(runId), false, listed);
+    assert.equal(await git(e.root, 'branch', '--list', `percolator/${runId}`), '');
   } finally {
     await e.cleanup();
   }
 });
 
-const meta = (o: Partial<RunMeta> = {}): RunMeta => ({
+const meta =(o: Partial<RunMeta> = {}): RunMeta => ({
   version: 1,
   runId: 't5-20260304-050607-ab12',
   ticket: 'github.com/o/r#5',

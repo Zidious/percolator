@@ -12,7 +12,7 @@ import { formatTicket, parseTicket } from '../tracker/ticket.ts';
 import { expandHome } from '../util/paths.ts';
 import { validate } from '../validate.ts';
 import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
-import { defaultWorktreeDir, ensureWorktree } from '../workspace/worktree.ts';
+import { defaultWorktreeDir, ensureWorktree, removeWorktree } from '../workspace/worktree.ts';
 import { detectBase, driverName, newRunId, writeRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 
@@ -67,13 +67,22 @@ export async function prepareRun(
       : defaultWorktreeDir(deps.home, repoName, runId);
 
   if (base.startsWith('origin/')) await runGit(['fetch', '--quiet', 'origin'], repoRoot);
-  await ensureWorktree({ repoRoot, dir: worktree, branch, base });
+  const branchExisted = await runGit(['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], repoRoot).then(
+    () => true,
+    () => false,
+  );
+  const { created } = await ensureWorktree({ repoRoot, dir: worktree, branch, base });
 
   let space: string | undefined;
   if (v.runtime?.space !== false) {
     try {
       space = await deps.app.newSpace(`${repoName} #${ref.number}`, worktree);
     } catch (err) {
+      // no run.json yet, so nothing else would ever find this worktree; best-effort, never masks err
+      if (created) {
+        await removeWorktree({ repoRoot, dir: worktree, force: true }).catch(() => {});
+        if (!branchExisted) await runGit(['branch', '-D', '--', branch], repoRoot).catch(() => {});
+      }
       const detail = (err as Error).message.replace(SPACE_FAILED, '');
       throw new Error(
         `${SPACE_FAILED}${detail}; start the Herdr app or set runtime.space: false in profile "${v.profile}"`,
