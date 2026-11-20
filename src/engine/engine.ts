@@ -15,8 +15,8 @@ export type RunDeps = {
  * Mutates and returns `state`; saves after every recorded step. Never mutates `graph`.
  *
  * The caller owns `RunState`. A run paused at an escalating cap stays at the cap: to grant
- * another round, the caller (`perc resume`) lowers `state.rounds[edgeId]` before calling
- * `runGraph` again.
+ * another round, the caller calls `grantRound(state)` (lowers `rounds[pausedCap]`), sets
+ * `status = 'running'` and calls `runGraph` again.
  */
 export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Promise<RunState> {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -33,7 +33,16 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
   const indexOf = (stepId: string) => steps.findIndex((s) => s.id === stepId);
   // per visit, not persisted: still bounded, since each fresh budget needs an owner resume
   let contractRetried = false;
-  if (state.status === 'running') delete state.pausedReason;
+  if (state.status === 'running') {
+    delete state.pausedReason;
+    delete state.pausedCap;
+  }
+  const persist = async (): Promise<void> => {
+    const current = steps[state.cursor];
+    if (current) state.currentStep = current.id;
+    else delete state.currentStep;
+    await deps.save(state);
+  };
 
   while (state.status === 'running' && state.cursor < steps.length) {
     const i = state.cursor;
@@ -44,7 +53,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       state.cursor = i + 1;
       settle(i);
       // saved because the skipped hook can be the jump point, which changes cursor and rounds
-      await deps.save(state);
+      await persist();
       continue;
     }
 
@@ -72,7 +81,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       } else {
         contractRetried = true;
       }
-      await deps.save(state);
+      await persist();
       continue;
     }
     contractRetried = false;
@@ -102,7 +111,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       state.cursor = i + 1;
     }
     settle(i);
-    await deps.save(state);
+    await persist();
   }
   return state;
 
@@ -158,11 +167,12 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       state.cursor = i;
       state.status = 'paused';
       state.pausedReason = `cap: ${edge.id} reached ${edge.maxRounds} rounds`;
+      state.pausedCap = edge.id;
     }
   }
 }
 
-function graphFingerprint(graph: Graph): string {
+export function graphFingerprint(graph: Graph): string {
   const { steps, backEdges } = graph;
   return createHash('sha256')
     .update(JSON.stringify({ steps: steps.map((s) => [s.id, s.def]), backEdges }))

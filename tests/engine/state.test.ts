@@ -119,3 +119,15 @@ test('pendingJump without stepId still loads', async () => {
   await fs.writeFile(file, JSON.stringify({ ...newState(init), pendingJump: { edgeId: 'review', findings: 'f1' } }));
   assert.deepEqual((await loadState(dir)).pendingJump, { edgeId: 'review', findings: 'f1' });
 });
+
+for (const field of ['pausedCap', 'currentStep']) {
+  test(`loadState rejects a non-string ${field}`, async () => {
+    await fs.writeFile(path.join(dir, 'state.json'), JSON.stringify({ ...newState(init), [field]: 7 }));
+    await assert.rejects(loadState(dir), new RegExp(`invalid "${field}": 7`));
+  });
+
+  test(`${field} round-trips`, async () => {
+    await saveState(dir, { ...newState(init), [field]: 'qa' });
+    assert.equal((await loadState(dir) as Record<string, unknown>)[field], 'qa');
+  });
+}

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
-import { runGraph } from '../../src/engine/engine.ts';
-import { newState } from '../../src/engine/state.ts';
+import { graphFingerprint, runGraph } from '../../src/engine/engine.ts';
+import { grantRound, newState } from '../../src/engine/state.ts';
 import type { RunState } from '../../src/engine/state.ts';
 import type { GraphFragment } from '../../src/config/schema.ts';
 import { buildGraph } from '../../src/graph/build.ts';
@@ -515,4 +515,58 @@ test('a pending jump without stepId (older state) is triggered by its edge step'
   assert.deepEqual(rt.calls, ['audit', 'implement', 'review', 'audit', 'deliver']);
   assert.equal(out.rounds['review'], 1);
   assert.equal(out.status, 'completed');
+});
+
+const qaGraph = () =>
+  graph({ qa: { before: 'deliver', kind: 'script', command: ['qa'], on_fail: { back_to: 'implement', max_rounds: 2 } } });
+
+test('a cap pause records pausedCap and currentStep', async () => {
+  const s = await runGraph(qaGraph(), newState(init), { runtime: new FakeRuntime({ qa: [fail('q1'), fail('q2')] }), save: saver().save });
+  assert.equal(s.status, 'paused');
+  assert.equal(s.pausedCap, 'qa');
+  assert.equal(s.currentStep, 'qa');
+});
+
+test('currentStep follows the cursor and is absent on a completed run', async () => {
+  const { save, saved } = saver();
+  const s = await runGraph(graph(), newState(init), { runtime: new FakeRuntime({}), save });
+  assert.equal(s.status, 'completed');
+  assert.ok(!('currentStep' in s));
+  assert.ok(!('currentStep' in saved.at(-1)!));
+  assert.equal(saved[0]!.currentStep, 'groom');
+});
+
+test('grantRound lets exactly one more round run', async () => {
+  const g = qaGraph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ qa: [fail('q1'), fail('q2')] }), save: saver().save });
+  assert.equal(grantRound(s1), 'qa');
+  assert.equal(s1.rounds['qa'], 1);
+  assert.ok(!('pausedCap' in s1));
+  s1.status = 'running';
+  const rt2 = new FakeRuntime({ qa: [fail('q3'), fail('q4')] });
+  const s2 = await runGraph(g, s1, { runtime: rt2, save: saver().save });
+  assert.deepEqual(rt2.calls, ['qa']);
+  assert.equal(s2.status, 'paused');
+  assert.equal(s2.pausedCap, 'qa');
+  assert.equal(s2.pausedReason, 'cap: qa reached 2 rounds');
+});
+
+test('grantRound is a no-op without a cap pause', async () => {
+  const s = await runGraph(graph(), newState(init), { runtime: new FakeRuntime({ groom: [esc('question')] }), save: saver().save });
+  const before = structuredClone(s);
+  assert.equal(grantRound(s), undefined);
+  assert.deepEqual(s, before);
+});
+
+test('resuming from a non-cap pause clears pausedCap', async () => {
+  const g = qaGraph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ qa: [fail('q1'), fail('q2')] }), save: saver().save });
+  s1.status = 'running';
+  const s2 = await runGraph(g, s1, { runtime: new FakeRuntime({}), save: saver().save });
+  assert.equal(s2.status, 'completed');
+  assert.ok(!('pausedCap' in s2));
+});
+
+test('graphFingerprint is exported and stable', () => {
+  assert.equal(graphFingerprint(qaGraph()), graphFingerprint(qaGraph()));
 });
