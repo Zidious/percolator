@@ -158,7 +158,15 @@ const stringOrList = z.union([z.string(), z.array(z.string())]);
 export const ProfileSchema = z.strictObject({
   ...graphFragmentShape,
   match: z.strictObject({ remote: stringOrList.optional(), path: stringOrList.optional() }).optional(),
-  tracker: z.strictObject({ kind: z.literal('github') }).optional(),
+  tracker: z.strictObject({ kind: z.literal('github'), approvers: z.array(z.string()).optional() }).optional(),
+  runtime: z
+    .strictObject({
+      worktree_root: z.string().optional(),
+      base: z.string().optional(),
+      keep_terminals: z.boolean().optional(),
+      space: z.boolean().optional(),
+    })
+    .optional(),
   trust_repo_config: z.boolean().optional(),
 });
 export type Profile = z.infer<typeof ProfileSchema>;

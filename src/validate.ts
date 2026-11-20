@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ConfigError, loadFragment, loadUserConfig } from './config/load.ts';
-import type { GraphFragment, GroundSpec } from './config/schema.ts';
+import type { GraphFragment, GroundSpec, Profile } from './config/schema.ts';
 import { selectProfile } from './config/profile.ts';
 import { buildGraph } from './graph/build.ts';
 import type { Graph } from './graph/build.ts';
@@ -36,6 +36,9 @@ export type ValidateResult = {
   mappings: ResolvedMapping[];
   grounds: Record<string, ResolvedGround>;
   groundVersions: Record<string, string>;
+  /** The selected profile's blocks as written (undefined when absent). */
+  runtime: Profile['runtime'];
+  tracker: Profile['tracker'];
 };
 
 export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
@@ -115,6 +118,8 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
     mappings,
     grounds,
     groundVersions: Object.fromEntries(Object.values(grounds).map((g) => [g.name, groundVersion(g)])),
+    runtime: profile.runtime,
+    tracker: profile.tracker,
   };
 }
 

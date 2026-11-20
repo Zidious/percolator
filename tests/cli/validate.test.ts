@@ -319,3 +319,9 @@ profiles:
     },
   );
 });
+
+test('validate exposes the selected profile runtime and tracker blocks (undefined when absent)', async () => {
+  const r = await validate(opts());
+  assert.equal(r.runtime, undefined);
+  assert.equal(r.tracker, undefined);
+});

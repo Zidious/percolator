@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { defaultWorktreeDir, ensureWorktree } from '../../src/workspace/worktree.ts';
+import { defaultWorktreeDir, ensureWorktree, removeWorktree } from '../../src/workspace/worktree.ts';
 
 const run = promisify(execFile);
 const G = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'advice.detachedHead=false'];
@@ -152,6 +152,42 @@ test('re-creates a worktree whose dir was deleted by hand, on its branch', async
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
     assert.deepEqual(await ensureWorktree({ repoRoot: repo, dir, branch: 'perc/t1', base: 'main' }), { created: true });
     assert.equal(await git(dir, 'rev-parse', '--abbrev-ref', 'HEAD'), 'perc/t1');
+  } finally {
+    await cleanup();
+  }
+});
+
+test('removeWorktree removes a clean worktree', async () => {
+  const { root, repo, cleanup } = await setup();
+  try {
+    const dir = path.join(root, 'wt', 'r1');
+    await ensureWorktree({ repoRoot: repo, dir, branch: 'perc/t1', base: 'main' });
+    assert.equal(await removeWorktree({ repoRoot: repo, dir, force: false }), true);
+    await assert.rejects(fs.stat(dir), { code: 'ENOENT' });
+  } finally {
+    await cleanup();
+  }
+});
+
+test('removeWorktree refuses a dirty worktree unless forced', async () => {
+  const { root, repo, cleanup } = await setup();
+  try {
+    const dir = path.join(root, 'wt', 'r1');
+    await ensureWorktree({ repoRoot: repo, dir, branch: 'perc/t1', base: 'main' });
+    await fs.writeFile(path.join(dir, 'new.txt'), 'x');
+    await assert.rejects(removeWorktree({ repoRoot: repo, dir, force: false }), {
+      message: `worktree ${dir} has uncommitted changes; commit them or use --force`,
+    });
+    assert.equal(await removeWorktree({ repoRoot: repo, dir, force: true }), true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('removeWorktree returns false for a dir that is not a worktree', async () => {
+  const { root, repo, cleanup } = await setup();
+  try {
+    assert.equal(await removeWorktree({ repoRoot: repo, dir: path.join(root, 'nope'), force: false }), false);
   } finally {
     await cleanup();
   }

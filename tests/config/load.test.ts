@@ -207,3 +207,28 @@ test('required_nodes object needs before or after', async () => {
     assert.ok(err.message.includes('exactly one of "before" or "after" is required'));
   });
 });
+
+test('profile runtime block round-trips and tracker takes approvers', async () => {
+  const file = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'perc-rt-')), 'c.yaml');
+  try {
+    await fs.writeFile(
+      file,
+      'version: 1\nprofiles:\n  p:\n    tracker: { kind: github, approvers: [bob] }\n    runtime: { worktree_root: ~/wt, base: origin/dev, keep_terminals: true, space: false }\n',
+    );
+    const c = await loadUserConfig(file);
+    assert.deepEqual(c.profiles.p.runtime, {
+      worktree_root: '~/wt',
+      base: 'origin/dev',
+      keep_terminals: true,
+      space: false,
+    });
+    assert.deepEqual(c.profiles.p.tracker, { kind: 'github', approvers: ['bob'] });
+    await fs.writeFile(file, 'version: 1\nprofiles:\n  p:\n    runtime: { bogus: 1 }\n');
+    await assert.rejects(
+      loadUserConfig(file),
+      (e: any) => e.name === 'ConfigError' && e.path === 'profiles.p.runtime' && /bogus/.test(e.message),
+    );
+  } finally {
+    await fs.rm(path.dirname(file), { recursive: true, force: true, maxRetries: 5 });
+  }
+});

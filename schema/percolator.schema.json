@@ -660,11 +660,35 @@
               "kind": {
                 "type": "string",
                 "const": "github"
+              },
+              "approvers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
               }
             },
             "required": [
               "kind"
             ],
+            "additionalProperties": false
+          },
+          "runtime": {
+            "type": "object",
+            "properties": {
+              "worktree_root": {
+                "type": "string"
+              },
+              "base": {
+                "type": "string"
+              },
+              "keep_terminals": {
+                "type": "boolean"
+              },
+              "space": {
+                "type": "boolean"
+              }
+            },
             "additionalProperties": false
           },
           "trust_repo_config": {

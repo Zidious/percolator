@@ -46,6 +46,30 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
+async function findListed(repoRoot: string, dir: string): Promise<Listed | undefined> {
+  const listed = parseWorktrees(await runGit(['worktree', 'list', '--porcelain'], repoRoot));
+  const realDir = await real(dir);
+  for (const w of listed) {
+    if (samePath(w.dir, dir) || samePath(await real(w.dir), realDir)) return w;
+  }
+  return undefined;
+}
+
+/** Removes a listed worktree; false when `dir` is not one. A dirty worktree needs `force`. */
+export async function removeWorktree(o: { repoRoot: string; dir: string; force: boolean }): Promise<boolean> {
+  const { repoRoot, dir, force } = o;
+  if (!(await findListed(repoRoot, dir))) return false;
+  try {
+    await runGit(['worktree', 'remove', ...(force ? ['--force'] : []), '--', dir], repoRoot);
+  } catch (err) {
+    if (/contains modified or untracked files/.test((err as Error).message)) {
+      throw new Error(`worktree ${dir} has uncommitted changes; commit them or use --force`);
+    }
+    throw err;
+  }
+  return true;
+}
+
 // Idempotent, so resume can call it again. git builds and cleans up the worktree itself and
 // renaming one breaks its metadata, so this is the one exception to the atomic-dir rule.
 export async function ensureWorktree(o: {
@@ -64,15 +88,7 @@ export async function ensureWorktree(o: {
     throw new Error(`invalid branch name "${branch}"`);
   }
 
-  const listed = parseWorktrees(await runGit(['worktree', 'list', '--porcelain'], repoRoot));
-  const realDir = await real(dir);
-  let here: Listed | undefined;
-  for (const w of listed) {
-    if (samePath(w.dir, dir) || samePath(await real(w.dir), realDir)) {
-      here = w;
-      break;
-    }
-  }
+  let here = await findListed(repoRoot, dir);
   if (here && !(await exists(dir))) {
     // deleted by hand: git still lists it (prunable); drop the stale entry and add it again
     await runGit(['worktree', 'prune'], repoRoot);
