@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { expect, test } from 'vitest';
-import { expandHome, samePath, toPosix } from '../../src/util/paths.js';
+import { expandHome, samePath, toPosix } from '../../src/util/paths.ts';
 
 test('expandHome handles both separators', () => {
   expect(expandHome('~/dev/x', '/h')).toBe(path.resolve('/h', 'dev/x'));

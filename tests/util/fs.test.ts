@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { readYamlFile, writeFileAtomic } from '../../src/util/fs.js';
+import { readYamlFile, writeFileAtomic } from '../../src/util/fs.ts';
 
 let dir: string;
 beforeEach(async () => {
