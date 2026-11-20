@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { test } from 'node:test';
+import type { TestContext } from 'node:test';
 import { ConfigError } from '../../src/config/load.ts';
 import { normalizeRemote, selectProfile } from '../../src/config/profile.ts';
 import type { UserConfig } from '../../src/config/schema.ts';
@@ -94,4 +98,46 @@ test('unknown override errors and lists profiles', () => {
 test('no match errors and lists profiles', () => {
   assert.throws(() => selectProfile(cfg, { cwd: '/nowhere' }), /personal, work/);
   assert.throws(() => selectProfile(cfg, { cwd: '/nowhere' }), ConfigError);
+});
+
+async function linked(t: TestContext): Promise<{ base: string; real: string; link: string } | undefined> {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-profile-'));
+  t.after(() => fs.rm(base, { recursive: true, force: true, maxRetries: 5 }));
+  const real = path.join(base, 'real');
+  const link = path.join(base, 'link');
+  await fs.mkdir(path.join(real, 'sub'), { recursive: true });
+  try {
+    await fs.symlink(real, link, 'junction');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EPERM') {
+      t.skip('symlinks need privilege');
+      return undefined;
+    }
+    throw err;
+  }
+  return { base, real, link };
+}
+
+const pathCfg = (p: string): UserConfig => ({ version: 1, profiles: { p: { match: { path: p } } } });
+
+test('path match follows a symlinked cwd', async (t) => {
+  const d = await linked(t);
+  if (!d) return;
+  const r = selectProfile(pathCfg(path.join(d.real, '**')), {
+    cwd: path.join(d.link, 'sub'),
+    realCwd: path.join(d.real, 'sub'),
+  });
+  assert.equal(r.name, 'p');
+});
+
+test('path match follows a symlinked pattern base', async (t) => {
+  const d = await linked(t);
+  if (!d) return;
+  assert.equal(selectProfile(pathCfg(path.join(d.link, '**')), { cwd: d.real }).name, 'p');
+});
+
+test('path match is case-insensitive on darwin', () => {
+  const c = pathCfg('/Users/Me/Dev/**');
+  assert.equal(selectProfile(c, { cwd: '/users/me/dev/x', platform: 'darwin' }).name, 'p');
+  assert.throws(() => selectProfile(c, { cwd: '/users/me/dev/x', platform: 'linux' }), /no profile matches this repository/);
 });

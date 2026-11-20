@@ -1,5 +1,6 @@
+import fs from 'node:fs';
 import path from 'node:path';
-import { expandHome, toPosix } from '../util/paths.ts';
+import { expandHome, foldCase, toPosix } from '../util/paths.ts';
 import { ConfigError } from './load.ts';
 import type { Profile, UserConfig } from './schema.ts';
 
@@ -24,11 +25,33 @@ function globMatch(subject: string, pattern: string): boolean {
   return pattern.endsWith('/**') && path.posix.matchesGlob(subject, pattern.slice(0, -3));
 }
 
-const fold =(s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s);
+/** The pattern with its static prefix (leading segments without glob characters) realpathed, when it exists. */
+function realpathPrefix(pattern: string): string | undefined {
+  const segs = pattern.split('/');
+  let n = 0;
+  while (n < segs.length && !/[*?[{]/.test(segs[n]!)) n++;
+  if (n === 0) return undefined;
+  let prefix = segs.slice(0, n).join('/');
+  if (/^[A-Za-z]:$/.test(prefix)) prefix += '/';
+  try {
+    const real = toPosix(fs.realpathSync.native(prefix)).replace(/\/+$/, '');
+    return [real, ...segs.slice(n)].join('/');
+  } catch {
+    return undefined;
+  }
+}
 
 export function selectProfile(
   config: UserConfig,
-  ctx: { remoteUrl?: string; cwd: string; override?: string; home?: string; configFile?: string },
+  ctx: {
+    remoteUrl?: string;
+    cwd: string;
+    override?: string;
+    home?: string;
+    configFile?: string;
+    realCwd?: string;
+    platform?: NodeJS.Platform;
+  },
 ): { name: string; profile: Profile } {
   const file = ctx.configFile ?? 'config';
   const names = Object.keys(config.profiles);
@@ -42,13 +65,18 @@ export function selectProfile(
   }
 
   const remote = ctx.remoteUrl ? normalizeRemote(ctx.remoteUrl) : undefined;
-  const cwd = fold(toPosix(path.resolve(ctx.cwd)));
+  const fold = (s: string): string => foldCase(s, ctx.platform);
+  const subjects = [ctx.cwd, ...(ctx.realCwd !== undefined ? [ctx.realCwd] : [])].map((c) => fold(toPosix(path.resolve(c))));
 
   for (const [name, profile] of Object.entries(config.profiles)) {
     const m = profile.match;
     if (!m) continue;
     const remoteHit = remote !== undefined && list(m.remote).some((p) => globMatch(remote, p.toLowerCase()));
-    const pathHit = list(m.path).some((p) => globMatch(cwd,fold(toPosix(expandHome(p, ctx.home)))));
+    const pathHit = list(m.path).some((p) => {
+      const written = toPosix(expandHome(p, ctx.home));
+      const patterns = [written, realpathPrefix(written)].filter((x): x is string => x !== undefined).map(fold);
+      return patterns.some((pat) => subjects.some((s) => globMatch(s, pat)));
+    });
     if (remoteHit || pathHit) return { name, profile };
   }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
-import { expandHome, samePath, toPosix } from '../../src/util/paths.ts';
+import { expandHome, foldCase, samePath, toPosix } from '../../src/util/paths.ts';
 
 test('expandHome handles both separators', () => {
   assert.equal(expandHome('~/dev/x', '/h'), path.resolve('/h', 'dev/x'));
@@ -15,4 +15,18 @@ test('toPosix normalises windows paths', () => {
 
 test('samePath ignores case on windows', { skip: process.platform !== 'win32' }, () => {
   assert.equal(samePath('C:\\Repo', 'c:/repo'), true);
+});
+
+test('expandHome refuses ~user', () => {
+  assert.throws(() => expandHome('~bob/x', '/h'), {
+    message: '"~bob/x": ~user paths are not supported; use ~/ or an absolute path',
+  });
+  assert.equal(expandHome('~', '/h'), path.resolve('/h'));
+  assert.equal(expandHome('~/x', '/h'), path.resolve('/h', 'x'));
+});
+
+test('foldCase lower-cases on win32 and darwin only', () => {
+  assert.equal(foldCase('/A/B', 'win32'), '/a/b');
+  assert.equal(foldCase('/A/B', 'darwin'), '/a/b');
+  assert.equal(foldCase('/A/B', 'linux'), '/A/B');
 });

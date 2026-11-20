@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { loadFragment, loadUserConfig } from './config/load.ts';
@@ -40,6 +41,7 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
   const remoteUrl = opts.profile === undefined ? await git.remoteUrl(opts.cwd) : undefined;
   const { name, profile } = selectProfile(config, {
     cwd: opts.cwd,
+    realCwd: await fs.realpath(opts.cwd).catch(() => opts.cwd),
     configFile: opts.configFile,
     ...(remoteUrl !== undefined ? { remoteUrl } : {}),
     ...(opts.profile !== undefined ? { override: opts.profile } : {}),

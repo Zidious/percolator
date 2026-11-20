@@ -43,7 +43,7 @@ node tests/smoke/hc.smoke.ts [--space <id>]   # manual: talks to the real hc (ne
 
 | Path | Purpose |
 |---|---|
-| `src/util/paths.ts` | `expandHome` (`~/` and `~\`), `toPosix`, `samePath` |
+| `src/util/paths.ts` | `expandHome` (`~/` and `~\`; `~user` throws), `toPosix`, `samePath`, `foldCase(s, platform?)` (lower-cases on win32/darwin) |
 | `src/util/entry.ts` | `isDirectRun` (entry-point check through symlinked bins; used by `cli.ts` and `json-schema.ts`) |
 | `src/util/fs.ts` | `writeFileAtomic` (fsync, then `renameRetry`), `renameRetry` (rename retried on EPERM/EBUSY/EACCES, shared), `exists` (lstat-based), `readYamlFile` (keeps line info for located errors) |
 | `src/util/exec.ts` | `Exec` (argv-only; non-zero exit resolves with its code; ENOENT rejects `<file> not found on PATH`) and `nodeExec` (`execFile`, no shell) |
@@ -58,7 +58,7 @@ node tests/smoke/hc.smoke.ts [--space <id>]   # manual: talks to the real hc (ne
 | `src/config/schema.ts` | zod schemas + inferred types, `STAGES`, `effectiveKind`, `groundRecord`. All objects strict: new config keys must be added here. Agent nodes need `agent`; `agent`/`model`/`skill`/`skills` only on agent nodes. Node names `^[A-Za-z][A-Za-z0-9_-]*$` |
 | `src/config/load.ts` | `loadUserConfig`, `loadFragment`, `loadYaml(file, schema)`, `ConfigError`; reports every YAML/schema issue as `file:line: path: msg`, one per line |
 | `src/config/json-schema.ts` | `writeJsonSchema`; rerun `pnpm schema [out]` whenever `schema.ts` changes (refinements are not in the JSON schema) |
-| `src/config/profile.ts` | `normalizeRemote` (→ lower-case `host/owner/repo`), `selectProfile` (override, else first matching `match.remote`/`match.path` glob; `/**` also matches its base dir) |
+| `src/config/profile.ts` | `normalizeRemote` (→ lower-case `host/owner/repo`), `selectProfile` (override, else first matching `match.remote`/`match.path` glob; `/**` also matches its base dir; path patterns are also tried with their static prefix realpathed, against `cwd` and `realCwd`; case folded per `platform`) |
 | `src/grounds/git.ts` | `runGit` (exported argv-array git runner, errors redacted), `Git` interface (incl. `toplevel`) + `cliGit` (argv arrays, `--`, rejects leading `-`, `redactUrls` hides url credentials in errors) |
 | `src/grounds/lock.ts` | `readLock`/`writeLock` for `percolator.lock` (YAML, atomic); `LockSchema` (full hex commits), located ConfigError |
 | `src/grounds/resolve.ts` | `resolveGrounds`; locked commit + cached dir = no git calls; only `update: true` moves a pin; mirror keyed by name; re-created (atomically) when its url changes; a lost rename race reuses the winner's dir |
