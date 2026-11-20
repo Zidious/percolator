@@ -145,6 +145,8 @@ test('a rejected groom goes back to groom with the feedback as input', async () 
     const state = await drive(meta.runId, e.deps);
     assert.equal(state.status, 'completed');
     assert.equal(runs(e, 'groom').length, 2);
+    // one gate comment per round: the rejected round and the approved one
+    assert.equal(gateComments(e).length, 2);
     const task = await fs.readFile(path.join(e.runDir(meta), 'steps', 'groom', '2', 'task.md'), 'utf8');
     const findings = path.join(e.runDir(meta), 'steps', 'approve-groom', '1', 'outputs', 'findings.md');
     assert.ok(task.includes(`findings (from approve-groom): ${findings}`), task);

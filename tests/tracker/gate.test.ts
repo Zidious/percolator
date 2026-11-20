@@ -44,6 +44,7 @@ async function setup(): Promise<Env> {
   const groomStep = { id: 'groom' } as Step;
   const step = { id: 'approve-groom' } as Step;
   const ctx = {
+    state: { history: [] },
     graph: { steps: [{ id: 'intake' }, groomStep, step] },
     previousOutputs: {
       intake: {},
@@ -75,7 +76,7 @@ async function setup(): Promise<Env> {
   };
 }
 
-const MARKER = '<!-- percolator:gate run=r1 step=approve-groom attempt=1 -->';
+const MARKER = '<!-- percolator:gate run=r1 step=approve-groom round=1 -->';
 
 const EXPECTED_BODY = `${MARKER}
 **Percolator** needs approval to continue run \`r1\` (step \`approve-groom\`).
@@ -320,6 +321,122 @@ test('the 60000-char cap bounds the total output text of the comment', async () 
     assert.ok(body.includes(expected), 'body holds the capped sections');
     assert.ok(!body.includes('### c'));
     assert.ok(body.length < 65536);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+const record = (status: 'pass' | 'fail' | 'escalate' | 'contract_error', attempt: number) => ({
+  stepId: 'approve-groom',
+  attempt,
+  startedAt: '',
+  endedAt: '',
+  status,
+  outputs: {},
+});
+/** The runtime creates each attempt's step dir before calling the gate. */
+const attemptIo = async (e: Env, n: number) => {
+  const stepDir = path.join(e.runDir, 'steps', 'approve-groom', String(n));
+  await fsp.mkdir(path.join(stepDir, 'outputs'), { recursive: true });
+  return { stepDir, outputsDir: path.join(stepDir, 'outputs') };
+};
+
+test('an escalation after posting, then a new attempt, posts no second comment and reuses postedAt', async () => {
+  const e = await setup();
+  try {
+    await fsp.writeFile(path.join(e.io.stepDir, 'decision.json'), '{"decision":"maybe"}');
+    const gate = githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts });
+    const first = await gate(e.step, e.ctx, e.io);
+    assert.equal(first.status, 'escalate');
+    const posted = (await e.gh.issue(REPO, 7)).comments[0]!;
+    e.ctx.state.history.push(record('escalate', 1));
+    e.onSleep.fn = () => {
+      e.gh.addComment(REPO, 7, OWNER, '/percolator approve');
+    };
+    const io2 = await attemptIo(e, 2);
+    const out = await gate(e.step, e.ctx, io2);
+    assert.equal(out.status, 'pass');
+    assert.equal(e.gh.calls.filter((c) => c.method === 'comment').length, 1);
+    const g = JSON.parse(await fsp.readFile(path.join(io2.stepDir, 'gate.json'), 'utf8'));
+    assert.deepEqual(g, { commentUrl: posted.url, postedAt: posted.createdAt });
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test('a rejected round makes the next round post a new comment', async () => {
+  const e = await setup();
+  try {
+    e.gh.addComment(REPO, 7, OWNER, `${MARKER}\nround one`);
+    e.ctx.state.history.push(record('escalate', 1), record('fail', 2));
+    e.onSleep.fn = () => {
+      e.gh.addComment(REPO, 7, OWNER, '/percolator approve');
+    };
+    const gate = githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts });
+    const out = await gate(e.step, e.ctx, await attemptIo(e, 3));
+    assert.equal(out.status, 'pass');
+    assert.equal(e.gh.calls.filter((c) => c.method === 'comment').length, 1);
+    assert.ok(e.gh.bodies[0]!.startsWith('<!-- percolator:gate run=r1 step=approve-groom round=2 -->\n'), e.gh.bodies[0]);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test('a failed lookup after posting falls back to the pre-post time', async () => {
+  const e = await setup();
+  try {
+    e.clock.t = Date.UTC(2025, 0, 1);
+    const realIssue = e.gh.issue.bind(e.gh);
+    let issueCalls = 0;
+    e.gh.issue = async (repo, n) => {
+      issueCalls++;
+      // call 1 searches for the marker, call 2 looks up the posted comment
+      if (issueCalls === 2) throw new Error('network down');
+      return realIssue(repo, n);
+    };
+    e.onSleep.fn = () => {
+      e.gh.addComment(REPO, 7, OWNER, '/percolator approve');
+    };
+    const gate = githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts });
+    const out = await gate(e.step, e.ctx, e.io);
+    assert.equal(out.status, 'pass');
+    const g = JSON.parse(await fsp.readFile(path.join(e.io.stepDir, 'gate.json'), 'utf8'));
+    assert.deepEqual(g, { commentUrl: (await realIssue(REPO, 7)).comments[0]!.url, postedAt: '2025-01-01T00:00:00.000Z' });
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test('the marker search only trusts comments by the gh user', async () => {
+  const e = await setup();
+  try {
+    const forged = e.gh.addComment(REPO, 7, 'mallory', `${MARKER}\nforged`);
+    e.onSleep.fn = () => {
+      e.gh.addComment(REPO, 7, OWNER.toUpperCase(), '/percolator approve');
+    };
+    const gate = githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', approvers: [OWNER], ...e.opts });
+    const out = await gate(e.step, e.ctx, e.io);
+    assert.equal(out.status, 'pass');
+    assert.equal(e.gh.calls.filter((c) => c.method === 'comment').length, 1);
+    const g = JSON.parse(await fsp.readFile(path.join(e.io.stepDir, 'gate.json'), 'utf8'));
+    assert.notEqual(g.commentUrl, forged.url);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test('the marker search matches the gh user case-insensitively', async () => {
+  const e = await setup();
+  try {
+    const existing = e.gh.addComment(REPO, 7, OWNER.toUpperCase(), `${MARKER}\nold body`);
+    e.onSleep.fn = () => {
+      e.gh.addComment(REPO, 7, OWNER, '/percolator approve');
+    };
+    const gate = githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts });
+    assert.equal((await gate(e.step, e.ctx, e.io)).status, 'pass');
+    assert.equal(e.gh.calls.filter((c) => c.method === 'comment').length, 0);
+    const g = JSON.parse(await fsp.readFile(path.join(e.io.stepDir, 'gate.json'), 'utf8'));
+    assert.equal(g.commentUrl, existing.url);
   } finally {
     await rm(e.runDir);
   }

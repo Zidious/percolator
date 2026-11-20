@@ -139,8 +139,10 @@ export function githubGate(o: {
     try {
       const meta = await readIssueMeta(o.runDir);
       const approvers = (o.approvers ?? [await o.gh.user()]).map((a) => a.toLowerCase());
-      const attempt = path.basename(io.stepDir);
-      const marker = `${GATE_MARKER} run=${o.runId} step=${step.id} attempt=${attempt} -->`;
+      // keyed on the round, not the attempt: an escalation after posting re-runs the gate in a new
+      // attempt dir, and that attempt must find (not re-post) this round's comment
+      const round = ctx.state.history.filter((h) => h.stepId === step.id && (h.status === 'pass' || h.status === 'fail')).length + 1;
+      const marker = `${GATE_MARKER} run=${o.runId} step=${step.id} round=${round} -->`;
       const gateFile = path.join(io.stepDir, 'gate.json');
 
       let commentUrl: string;
@@ -150,7 +152,10 @@ export function githubGate(o: {
         if (saved) {
           ({ commentUrl, postedAt } = saved);
         } else {
-          const found = (await o.gh.issue(meta.repo, meta.number)).comments.find((c) => c.body.includes(marker));
+          const self = (await o.gh.user()).toLowerCase();
+          const found = (await o.gh.issue(meta.repo, meta.number)).comments.find(
+            (c) => c.author.toLowerCase() === self && c.body.includes(marker),
+          );
           let comment: { url: string; createdAt: string };
           if (found) {
             comment = found;
@@ -167,9 +172,13 @@ export function githubGate(o: {
             ].join('\n');
             const bodyFile = path.join(io.stepDir, 'gate-comment.md');
             await writeFileAtomic(bodyFile, body);
-            const before = new Date().toISOString();
+            const before = new Date(now()).toISOString();
             const url = await o.gh.comment(meta.repo, meta.number, bodyFile);
-            const posted = (await o.gh.issue(meta.repo, meta.number)).comments.find((c) => c.url === url);
+            // the comment exists now: a failed lookup must not escalate, or the resume would search again
+            const posted = await o.gh
+              .issue(meta.repo, meta.number)
+              .then((i) => i.comments.find((c) => c.url === url))
+              .catch(() => undefined);
             comment = { url, createdAt: posted?.createdAt ?? before };
           }
           commentUrl = comment.url;
