@@ -80,12 +80,17 @@ export function parseCommand(body: string): { decision: 'approve' | 'reject'; fe
 
 async function renderOutputs(runDir: string, outputs: Record<string, string>): Promise<string> {
   const parts: string[] = [];
+  let budget = OUTPUT_CAP;
   for (const key of Object.keys(outputs).sort()) {
     const rel = outputs[key]!;
     if (!rel.toLowerCase().endsWith('.md')) continue;
     const abs = path.resolve(runDir, rel);
-    let text = (await fs.readFile(abs, 'utf8')).trim();
-    if (text.length > OUTPUT_CAP) text = `${text.slice(0, OUTPUT_CAP)}\n… (truncated; full text in ${abs})`;
+    const text = (await fs.readFile(abs, 'utf8')).trim();
+    if (text.length > budget) {
+      parts.push(`### ${key}\n\n${text.slice(0, budget)}\n… (truncated; full text in ${abs})`);
+      break;
+    }
+    budget -= text.length;
     parts.push(`### ${key}\n\n${text}`);
   }
   return parts.join('\n\n');

@@ -279,3 +279,32 @@ test('a posting error escalates with the step id', async () => {
     await rm(e.runDir);
   }
 });
+
+test('the 60000-char cap bounds the total output text of the comment', async () => {
+  const e = await setup();
+  try {
+    const dir = path.join(e.runDir, 'steps', 'groom', '1', 'outputs');
+    await fsp.writeFile(path.join(dir, 'a.md'), 'x'.repeat(40000));
+    await fsp.writeFile(path.join(dir, 'b.md'), 'y'.repeat(40000));
+    await fsp.writeFile(path.join(dir, 'c.md'), 'z');
+    e.ctx.previousOutputs.groom = {
+      a: 'steps/groom/1/outputs/a.md',
+      b: 'steps/groom/1/outputs/b.md',
+      c: 'steps/groom/1/outputs/c.md',
+    };
+    e.onSleep.fn = () => {
+      e.gh.addComment(REPO, 7, OWNER, '/percolator approve');
+    };
+    const gate = githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts });
+    await gate(e.step, e.ctx, e.io);
+    const body = e.gh.bodies[0]!;
+    const expected =
+      `### a\n\n${'x'.repeat(40000)}\n\n### b\n\n${'y'.repeat(20000)}\n` +
+      `… (truncated; full text in ${path.resolve(e.runDir, 'steps/groom/1/outputs/b.md')})\n\nReply`;
+    assert.ok(body.includes(expected), 'body holds the capped sections');
+    assert.ok(!body.includes('### c'));
+    assert.ok(body.length < 65536);
+  } finally {
+    await rm(e.runDir);
+  }
+});
