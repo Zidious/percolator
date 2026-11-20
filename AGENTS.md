@@ -56,9 +56,12 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | `src/graph/merge.ts` | `mergeLayers` → `Merged` (`Sourced<T>` = value + source + locked); never aliases inputs or core constants; violations throw `LockViolation` |
 | `src/graph/rules.ts` | `checkRules(merged)` → `Violation[]` (require_skills, allowed_agents/models, max_rounds_ceiling, required_nodes); the core gate is exempt from the ceiling here because `buildGraph` clamps it |
 | `src/graph/build.ts` | `buildGraph(merged)` → `Graph` (`steps`, `regionStart`, `backEdges` keyed by `fromStepId`); `GraphError`. Step ids are unique. Each `BackEdge` has `jumpAfterIndex`: the review edge fires on review's fail but jumps after the last `after: review` hook |
-| `src/engine/state.ts` | `RunState`, `newState`, `saveState`/`loadState` (`<dir>/state.json`, version 1) |
+| `src/engine/state.ts` | `RunState`, `newState`, `saveState`/`loadState` (`<dir>/state.json`, version 1; `pendingJump` persists a review fail awaiting its jump) |
+| `src/engine/runtime.ts` | `Runtime` interface, `NodeOutcome` (`pass`/`fail`/`escalate`), `RunContext` |
+| `src/engine/engine.ts` | `runGraph`: saves after every step; caps enforced in code (counters clamp at `maxRounds`); `once` hooks skip only after a `pass`; escalate pauses with the cursor on that step; contracts get one retry. The caller owns `RunState` and lowers `rounds[edgeId]` to grant another round |
 | `src/index.ts` | public exports |
 | `tests/helpers/fake-git.ts` | `FakeGit` (records `calls`); use instead of real git in unit tests |
+| `tests/helpers/fake-runtime.ts` | `FakeRuntime` (scripted outcomes per step id; records `calls` and rounds) and the `pass`/`fail`/`esc` helpers |
 | `.github/workflows/ci.yml` | test matrix, 3 OSes × Node 24 |
 
 ## Design decisions to keep
