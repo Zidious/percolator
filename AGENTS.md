@@ -33,7 +33,15 @@ npm run build       # tsc → dist/ (src only)
 - **Atomic writes.** Any file that must survive a crash, such as run state or `percolator.lock`, goes through `writeFileAtomic` (`src/util/fs.ts`).
 - **LF line endings** (`.gitattributes`: `* text=auto eol=lf`).
 - **Never commit `docs/` or `.superpowers/`.** Both are gitignored on purpose: the design spec and plans stay local. Never `git add -f` them.
-- **TDD.** Write the failing test first, watch it fail, implement, watch it pass. Tests live in `tests/`, mirroring `src/`. Fixtures go in `tests/fixtures/`. Use a temp dir from `fs.mkdtemp(path.join(os.tmpdir(), ...))`, never a fixed path.
+- **TDD for every step: new features, bug fixes, and fixes for review findings.**
+  1. RED: write the test first and run it. Watch it fail for the expected reason, e.g. a missing module or a wrong value, not a typo.
+  2. GREEN: write the minimum code that makes it pass, then run it again.
+  3. Refactor with the tests still green.
+
+  No production code without a failing test first. If you wrote code before the test, delete it and start from the test.
+
+  Agents load the `superpowers:test-driven-development` skill before implementing. Reports include the RED and GREEN commands with their output, and a review treats missing RED evidence as a blocking finding. Tests assert behaviour, including error message text where users will see it. Don't write tests that only exercise mocks.
+- **Test layout.** Tests live in `tests/`, mirroring `src/`. Fixtures go in `tests/fixtures/`. Temp dirs come from `fs.mkdtemp(path.join(os.tmpdir(), ...))`, never a fixed path. Test output must be pristine (no stray warnings).
 - Commit messages are conventional (`feat(scope): …`, `chore: …`).
 
 ## Layout
