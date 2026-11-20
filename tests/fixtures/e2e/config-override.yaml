@@ -1,0 +1,14 @@
+version: 1
+grounds:
+  company: { path: ./grounds/company }
+profiles:
+  work:
+    use:
+      - { from: company, file: percolator.yaml, as: graph }
+    bindings:
+      intake: { builtin: read-ticket }
+      groom: { agent: groomer }
+      plan: { agent: planner }
+      implement: { agent: coder }
+      review: { agent: sloppy }
+      deliver: { command: [echo, deliver] }

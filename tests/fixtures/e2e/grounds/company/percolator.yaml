@@ -1,0 +1,6 @@
+bindings:
+  review:
+    agent: reviewer
+    skills: [code-review]
+    max_rounds: 3
+    required: true

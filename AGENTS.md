@@ -59,6 +59,8 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | `src/engine/state.ts` | `RunState`, `newState`, `saveState`/`loadState` (`<dir>/state.json`, version 1; `pendingJump` persists a review fail awaiting its jump) |
 | `src/engine/runtime.ts` | `Runtime` interface, `NodeOutcome` (`pass`/`fail`/`escalate`), `RunContext` |
 | `src/engine/engine.ts` | `runGraph`: saves after every step; caps enforced in code (counters clamp at `maxRounds`); `once` hooks skip only after a `pass`; escalate pauses with the cursor on that step; contracts get one retry. The caller owns `RunState` and lowers `rounds[edgeId]` to grant another round |
+| `src/validate.ts` | `validate`: config → profile → grounds (lock beside config; relative `path:` grounds resolve against the config dir) → mappings → layers (mappings, profile, repo `.percolator/percolator.yaml`) → merge → rules → graph; returns `violations`, throws ConfigError/LockViolation/GraphError |
+| `src/cli.ts` | `main(argv, io)` → exit code (0 ok, 1 error/violations, 2 usage); `perc validate`, `perc schema`; `parseArgs`, no CLI deps |
 | `src/index.ts` | public exports |
 | `tests/helpers/fake-git.ts` | `FakeGit` (records `calls`); use instead of real git in unit tests |
 | `tests/helpers/fake-runtime.ts` | `FakeRuntime` (scripted outcomes per step id; records `calls` and rounds) and the `pass`/`fail`/`esc` helpers |
