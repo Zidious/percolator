@@ -4,6 +4,7 @@ import { normalizeRemote } from '../config/profile.ts';
 import { graphFingerprint } from '../engine/engine.ts';
 import { newState, saveState } from '../engine/state.ts';
 import { cliGit, runGit } from '../grounds/git.ts';
+import { mappingKeys, mappingsFingerprint } from '../grounds/mappings.ts';
 import type { HerdrApp } from '../herdr/app.ts';
 import type { Hc } from '../herdr/hc.ts';
 import { foreignTerminal } from '../runtime/herdr-runtime.ts';
@@ -136,6 +137,8 @@ export async function prepareRun(
   await materializeGrounds(dir, v.mappings, v.grounds);
   const state = newState({ runId, ticket, profile: v.profile, groundVersions: v.groundVersions });
   state.graphFingerprint = graphFingerprint(v.graph);
+  state.mappingKeys = mappingKeys(v.mappings);
+  state.mappingsFingerprint = mappingsFingerprint(state.mappingKeys);
   await saveState(dir, state);
   return meta;
 }

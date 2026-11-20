@@ -131,3 +131,17 @@ for (const field of ['pausedCap', 'currentStep', 'grantedRound']) {
     assert.equal((await loadState(dir) as Record<string, unknown>)[field], 'qa');
   });
 }
+
+test('loadState rejects a non-string mappingsFingerprint or a non-string-array mappingKeys', async () => {
+  await fs.writeFile(path.join(dir, 'state.json'), JSON.stringify({ ...newState(init), mappingsFingerprint: 7 }));
+  await assert.rejects(loadState(dir), /invalid "mappingsFingerprint": 7/);
+  await fs.writeFile(path.join(dir, 'state.json'), JSON.stringify({ ...newState(init), mappingKeys: [1] }));
+  await assert.rejects(loadState(dir), /invalid "mappingKeys": \[1\]/);
+});
+
+test('mappingsFingerprint and mappingKeys round-trip', async () => {
+  await saveState(dir, { ...newState(init), mappingsFingerprint: 'f', mappingKeys: ['k'] });
+  const s = await loadState(dir);
+  assert.equal(s.mappingsFingerprint, 'f');
+  assert.deepEqual(s.mappingKeys, ['k']);
+});

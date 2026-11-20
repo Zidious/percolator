@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ConfigError } from '../config/load.ts';
@@ -151,4 +152,15 @@ export function mappingsFor<M extends Mapping>(step: Step, mappings: M[]): M[] {
       (a) => a === '*' || a === step.id || (step.role === 'hook' && a === step.name) || (step.role === 'slot' && a === step.stage),
     ),
   );
+}
+
+/** Sorted JSON keys `[as, ground, file ?? dir, required, applies_to]`: what a run's mappings are, for resume checks. */
+export function mappingKeys(mappings: readonly ResolvedMapping[]): string[] {
+  return mappings
+    .map((m) => JSON.stringify([m.as, m.ground, m.file ?? m.dir, m.required ?? false, m.applies_to]))
+    .sort();
+}
+
+export function mappingsFingerprint(keys: readonly string[]): string {
+  return createHash('sha256').update(JSON.stringify(keys)).digest('hex');
 }

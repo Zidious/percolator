@@ -3,6 +3,7 @@ import path from 'node:path';
 import { graphFingerprint, runGraph } from '../engine/engine.ts';
 import { grantRound, loadState, saveState } from '../engine/state.ts';
 import type { RunState } from '../engine/state.ts';
+import { mappingKeys, mappingsFingerprint } from '../grounds/mappings.ts';
 import { HerdrRuntime, sweepTerminals } from '../runtime/herdr-runtime.ts';
 import type { Attention } from '../runtime/herdr-runtime.ts';
 import { githubGate } from '../tracker/gate.ts';
@@ -29,6 +30,20 @@ export async function prUrl(dir: string, state: RunState): Promise<string | unde
 function groundChanges(was: Record<string, string>, now: Record<string, string>): string[] {
   const names = [...new Set([...Object.keys(was), ...Object.keys(now)])].sort();
   return names.filter((n) => was[n] !== now[n]).map((n) => `${n} ${was[n] ?? 'none'} → ${now[n] ?? 'none'}`);
+}
+
+/** `+<as> <ground>:<path>` for each added key, then `-…` for each removed one (tracker and runtime are not mappings). */
+function mappingChanges(was: readonly string[], now: readonly string[]): string[] {
+  const label = (k: string): string => {
+    const [as, ground, p] = JSON.parse(k) as [string, string, string];
+    return `${as} ${ground}:${p}`;
+  };
+  const before = new Set(was);
+  const after = new Set(now);
+  return [
+    ...now.filter((k) => !before.has(k)).map((k) => `+${label(k)}`),
+    ...was.filter((k) => !after.has(k)).map((k) => `-${label(k)}`),
+  ];
 }
 
 /**
@@ -61,6 +76,12 @@ export async function checkResumable(
   const changed = groundChanges(state.groundVersions, v.groundVersions);
   if (changed.length > 0) {
     throw new Error(`grounds changed since run ${runId} started: ${changed.join(', ')}; start a new run`);
+  }
+  if (state.mappingsFingerprint !== undefined) {
+    const keys = mappingKeys(v.mappings);
+    if (mappingsFingerprint(keys) !== state.mappingsFingerprint) {
+      throw new Error(`mappings changed since run ${runId} started: ${mappingChanges(state.mappingKeys ?? [], keys).join(', ')}; start a new run`);
+    }
   }
   return { dir, meta, state, v };
 }

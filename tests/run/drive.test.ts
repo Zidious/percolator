@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { test } from 'node:test';
 import { loadState, saveState } from '../../src/engine/state.ts';
-import { drive } from '../../src/run/drive.ts';
+import { checkResumable, drive } from '../../src/run/drive.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
@@ -224,6 +224,39 @@ test('resume refuses changed grounds', async () => {
     await assert.rejects(drive(meta.runId, e.deps), {
       message: `grounds changed since run ${meta.runId} started: team main (0123456789ab) → local; start a new run`,
     });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('resume refuses changed mappings, naming them', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const state = await loadState(e.runDir(meta));
+    assert.match(state.mappingsFingerprint!, /^[0-9a-f]{64}$/);
+    const text = await fs.readFile(e.configFile, 'utf8');
+    await fs.writeFile(e.configFile, text.replace('as: policy }', 'as: context }'));
+    await assert.rejects(checkResumable(meta.runId, e.deps), {
+      message: `mappings changed since run ${meta.runId} started: +context team:policies/sdlc.md, -policy team:policies/sdlc.md; start a new run`,
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a state without mappingsFingerprint (older run) skips the mappings check', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const state = await loadState(e.runDir(meta));
+    delete state.mappingsFingerprint;
+    delete state.mappingKeys;
+    await saveState(e.runDir(meta), state);
+    const text = await fs.readFile(e.configFile, 'utf8');
+    await fs.writeFile(e.configFile, text.replace('as: policy }', 'as: context }'));
+    const r = await checkResumable(meta.runId, e.deps);
+    assert.equal(r.meta.runId, meta.runId);
   } finally {
     await e.cleanup();
   }

@@ -37,6 +37,10 @@ export type RunState = {
   pendingJump?: { edgeId: string; stepId: string; findings?: string };
   /** sha256 of the graph this run started on; set by `runGraph` on a new run, checked on resume */
   graphFingerprint?: string;
+  /** sha256 of `mappingKeys`; set by `prepareRun`, checked on resume; absent in older states (no check) */
+  mappingsFingerprint?: string;
+  /** sorted mapping keys (JSON `[as, ground, file ?? dir, required, applies_to]`) the run started on */
+  mappingKeys?: string[];
 };
 
 const STATUSES: readonly string[] = ['running', 'paused', 'failed', 'completed'];
@@ -55,6 +59,9 @@ function invalidField(s: Record<string, unknown>): string | undefined {
   if (s['pausedCap'] !== undefined && typeof s['pausedCap'] !== 'string') return 'pausedCap';
   if (s['currentStep'] !== undefined && typeof s['currentStep'] !== 'string') return 'currentStep';
   if (s['grantedRound'] !== undefined && typeof s['grantedRound'] !== 'string') return 'grantedRound';
+  if (s['mappingsFingerprint'] !== undefined && typeof s['mappingsFingerprint'] !== 'string') return 'mappingsFingerprint';
+  const keys = s['mappingKeys'];
+  if (keys !== undefined && !(Array.isArray(keys) && keys.every((k) => typeof k === 'string'))) return 'mappingKeys';
   return undefined;
 }
 
