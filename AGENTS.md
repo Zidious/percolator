@@ -28,7 +28,7 @@ node tests/smoke/hc.smoke.ts [--space <id>]   # manual: talks to the real hc (ne
 - **Atomic dirs:** build in a tmp sibling, then rename into place.
 - **Atomic files:** crash-critical files (run state, `percolator.lock`) go through `writeFileAtomic`.
 - **LF** line endings.
-- **Never commit `docs/` or `.superpowers/`** (gitignored; never `git add -f`).
+- **`docs/superpowers/` is committed** (the design spec and the current plan; delete a plan once it is done). **Never commit `.superpowers/`** (subagent-run scratch; gitignored; never `git add -f`).
 - **Strict TDD for every step**, including bug fixes and review fixes:
   1. RED: write the test, run it, see it fail for the expected reason (not a typo).
   2. GREEN: minimum code to pass; rerun.
