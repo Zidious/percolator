@@ -4,14 +4,33 @@ import { readYamlFile } from '../util/fs.ts';
 import { GraphFragmentSchema, UserConfigSchema } from './schema.ts';
 import type { GraphFragment, UserConfig } from './schema.ts';
 
+function formatIssue(message: string, file: string, line?: number, path?: string): string {
+  const where = line === undefined ? file : `${file}:${line}`;
+  return `${where}: ${path ? `${path}: ` : ''}${message}`;
+}
+
+type FlatIssue = { path: PropertyKey[]; message: string };
+
+// Expand invalid_union issues into the issues of the closest branch (fewest issues),
+// so the user sees what is actually wrong instead of "Invalid input".
+function flatten(issues: readonly z.core.$ZodIssue[], prefix: PropertyKey[] = []): FlatIssue[] {
+  return issues.flatMap((issue): FlatIssue[] => {
+    const path = [...prefix, ...issue.path];
+    if (issue.code === 'invalid_union' && issue.errors.length > 0) {
+      const best = issue.errors.reduce((a, b) => (b.length < a.length ? b : a));
+      if (best.length > 0) return flatten(best, path);
+    }
+    return [{ path, message: issue.message }];
+  });
+}
+
 export class ConfigError extends Error {
   file: string;
   line?: number;
   path?: string;
 
-  constructor(message: string, file: string, line?: number, path?: string) {
-    const where = line === undefined ? file : `${file}:${line}`;
-    super(`${where}: ${path ? `${path}: ` : ''}${message}`);
+  constructor(message: string, file: string, line?: number, path?: string, fullMessage?: string) {
+    super(fullMessage ?? formatIssue(message, file, line, path));
     this.name = 'ConfigError';
     this.file = file;
     if (line !== undefined) this.line = line;
@@ -32,15 +51,30 @@ function lineAt(doc: Document, lineCounter: LineCounter, path: PropertyKey[]): n
 
 async function load<T extends z.ZodType>(file: string, schema: T): Promise<z.output<T>> {
   const { doc, lineCounter } = await readYamlFile(file);
-  const yamlErr = doc.errors[0];
-  if (yamlErr) {
-    throw new ConfigError(yamlErr.message.split('\n')[0], file, yamlErr.linePos?.[0].line);
+  if (doc.errors.length > 0) {
+    const found = doc.errors.map((e) => ({ message: e.message.split('\n')[0], line: e.linePos?.[0].line }));
+    throw new ConfigError(
+      found[0].message,
+      file,
+      found[0].line,
+      undefined,
+      found.map((f) => formatIssue(f.message, file, f.line)).join('\n'),
+    );
   }
   const result = schema.safeParse(doc.toJS());
   if (!result.success) {
-    const issue = result.error.issues[0];
-    const path = issue.path.length > 0 ? issue.path.join('.') : undefined;
-    throw new ConfigError(issue.message, file, lineAt(doc, lineCounter, issue.path as PropertyKey[]), path);
+    const found = flatten(result.error.issues).map((i) => ({
+      message: i.message,
+      line: lineAt(doc, lineCounter, i.path),
+      path: i.path.length > 0 ? i.path.join('.') : undefined,
+    }));
+    throw new ConfigError(
+      found[0].message,
+      file,
+      found[0].line,
+      found[0].path,
+      found.map((f) => formatIssue(f.message, file, f.line, f.path)).join('\n'),
+    );
   }
   return result.data;
 }

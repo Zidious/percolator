@@ -127,41 +127,27 @@
                       }
                     },
                     "before": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "intake",
-                            "groom",
-                            "plan",
-                            "implement",
-                            "review",
-                            "deliver"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "const": "all"
-                        }
+                      "type": "string",
+                      "enum": [
+                        "intake",
+                        "groom",
+                        "plan",
+                        "implement",
+                        "review",
+                        "deliver",
+                        "all"
                       ]
                     },
                     "after": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "intake",
-                            "groom",
-                            "plan",
-                            "implement",
-                            "review",
-                            "deliver"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "const": "all"
-                        }
+                      "type": "string",
+                      "enum": [
+                        "intake",
+                        "groom",
+                        "plan",
+                        "implement",
+                        "review",
+                        "deliver",
+                        "all"
                       ]
                     },
                     "once": {
@@ -273,41 +259,27 @@
                         }
                       },
                       "before": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "intake",
-                              "groom",
-                              "plan",
-                              "implement",
-                              "review",
-                              "deliver"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "const": "all"
-                          }
+                        "type": "string",
+                        "enum": [
+                          "intake",
+                          "groom",
+                          "plan",
+                          "implement",
+                          "review",
+                          "deliver",
+                          "all"
                         ]
                       },
                       "after": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "enum": [
-                              "intake",
-                              "groom",
-                              "plan",
-                              "implement",
-                              "review",
-                              "deliver"
-                            ]
-                          },
-                          {
-                            "type": "string",
-                            "const": "all"
-                          }
+                        "type": "string",
+                        "enum": [
+                          "intake",
+                          "groom",
+                          "plan",
+                          "implement",
+                          "review",
+                          "deliver",
+                          "all"
                         ]
                       },
                       "once": {
@@ -426,41 +398,27 @@
                   }
                 },
                 "before": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "intake",
-                        "groom",
-                        "plan",
-                        "implement",
-                        "review",
-                        "deliver"
-                      ]
-                    },
-                    {
-                      "type": "string",
-                      "const": "all"
-                    }
+                  "type": "string",
+                  "enum": [
+                    "intake",
+                    "groom",
+                    "plan",
+                    "implement",
+                    "review",
+                    "deliver",
+                    "all"
                   ]
                 },
                 "after": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "enum": [
-                        "intake",
-                        "groom",
-                        "plan",
-                        "implement",
-                        "review",
-                        "deliver"
-                      ]
-                    },
-                    {
-                      "type": "string",
-                      "const": "all"
-                    }
+                  "type": "string",
+                  "enum": [
+                    "intake",
+                    "groom",
+                    "plan",
+                    "implement",
+                    "review",
+                    "deliver",
+                    "all"
                   ]
                 },
                 "once": {

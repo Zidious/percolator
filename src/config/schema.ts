@@ -27,7 +27,7 @@ export const MappingSchema = z
   });
 export type Mapping = z.infer<typeof MappingSchema>;
 
-const StageOrAllSchema = z.union([StageSchema, z.literal('all')]);
+const StageOrAllSchema = z.enum([...STAGES, 'all']);
 
 export const NodeDefSchema = z
   .strictObject({
