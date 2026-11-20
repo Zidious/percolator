@@ -11,6 +11,7 @@ import { cliGit } from './grounds/git.ts';
 import type { Git } from './grounds/git.ts';
 import { checkGraphReferences, fragmentLayers, resolveMappings } from './grounds/mappings.ts';
 import type { Layer, ResolvedMapping } from './grounds/mappings.ts';
+import type { ResolvedGround } from './grounds/resolve.ts';
 import { resolveGrounds } from './grounds/resolve.ts';
 
 export type ValidateOptions = {
@@ -28,6 +29,7 @@ export type ValidateResult = {
   profile: string;
   graph: Graph;
   mappings: ResolvedMapping[];
+  grounds: Record<string, ResolvedGround>;
   groundVersions: Record<string, string>;
 };
 
@@ -88,6 +90,7 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
     profile: name,
     graph,
     mappings,
+    grounds,
     groundVersions: Object.fromEntries(Object.values(grounds).map((g) => [g.name, g.commit === 'local' ? 'local' : g.commit.slice(0, 12)])),
   };
 }

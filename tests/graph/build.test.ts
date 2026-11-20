@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildGraph, GraphError } from '../../src/graph/build.ts';
+import { mappingsFor } from '../../src/grounds/mappings.ts';
+import type { Mapping } from '../../src/config/schema.ts';
 import { mergeLayers } from '../../src/graph/merge.ts';
 import type { GraphFragment } from '../../src/config/schema.ts';
 
@@ -232,4 +234,37 @@ test('failRoutes routes a step with its own on_fail to its own edge', () => {
   assert.equal(g.failRoutes['review.1'], 'review.1');
   assert.equal(g.failRoutes['approve-groom'], 'approve-groom');
   assert.equal(g.failRoutes['implement'], undefined);
+});
+
+test('steps carry the source and lock of their binding', () => {
+  const merged = mergeLayers([
+    {
+      source: 'profile:p',
+      fragment: {
+        bindings: {
+          intake: { agent: 'claude' },
+          groom: { agent: 'claude' },
+          plan: { agent: 'claude', required: true },
+          implement: { agent: 'claude' },
+          review: { agent: 'claude' },
+          deliver: { agent: 'claude' },
+        },
+      },
+    },
+  ]);
+  const g = buildGraph(merged);
+  const byId = (id: string) => g.steps.find((s) => s.id === id)!;
+  assert.deepEqual({ source: byId('plan').source, locked: byId('plan').locked }, { source: 'profile:p', locked: true });
+  assert.deepEqual({ source: byId('intake').source, locked: byId('intake').locked }, { source: 'profile:p', locked: false });
+  assert.deepEqual({ source: byId('approve-groom').source, locked: byId('approve-groom').locked }, { source: 'core', locked: true });
+});
+
+test('mappingsFor matches *, stage (slots only), node name and step id', () => {
+  const g = buildGraph(full({ nodes: { 'threat-model': { after: 'plan', agent: 'claude' } } }));
+  const m = (applies_to: string[]): Mapping => ({ from: 'g', file: 'f.md', as: 'policy', applies_to, required: false });
+  const maps = [m(['*']), m(['plan']), m(['plan.1']), m(['threat-model'])];
+  const at = (id: string) => mappingsFor(g.steps.find((s) => s.id === id)!, maps).map((x) => x.applies_to[0]);
+  assert.deepEqual(at('plan.0'), ['*', 'plan']);
+  assert.deepEqual(at('plan.1'), ['*', 'plan', 'plan.1']);
+  assert.deepEqual(at('threat-model'), ['*', 'threat-model']);
 });

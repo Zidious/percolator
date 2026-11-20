@@ -199,3 +199,9 @@ test('mapping applies_to entries must name a stage, a node or "*"', async () => 
     },
   );
 });
+
+test('validate returns resolved grounds', async () => {
+  const r = await validate(opts());
+  assert.deepEqual(Object.keys(r.grounds).sort(), ['company', 'team']);
+  assert.ok(path.isAbsolute(r.grounds.company!.dir));
+});

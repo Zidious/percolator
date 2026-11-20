@@ -11,6 +11,10 @@ export type Step = {
   def: NodeDef;
   /** last node of a stage slot: the stage contract is checked here */
   slotLast: boolean;
+  /** layer source of the binding or node this step came from (`core` for the groom gate) */
+  source: string;
+  /** the binding or node is a `required: true` lock */
+  locked: boolean;
 };
 
 export type BackEdge = {
@@ -47,20 +51,21 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
     if (def.before === undefined && def.after === undefined) {
       throw new GraphError(`extension node "${name}" needs "before" or "after"`, `nodes.${name}`);
     }
-    return { name, def };
+    return { name, def, source: sourced.source, locked: sourced.locked };
   });
 
   const steps: Step[] = [];
   const regionStart = {} as Record<Stage, number>;
-  const pushHook = (h: { name: string; def: NodeDef }, stage: Step['stage']) =>
-    steps.push({ id: h.name, name: h.name, stage, role: 'hook', def: h.def, slotLast: false });
+  const pushHook = (h: { name: string; def: NodeDef; source: string; locked: boolean }, stage: Step['stage']) =>
+    steps.push({ id: h.name, name: h.name, stage, role: 'hook', def: h.def, slotLast: false, source: h.source, locked: h.locked });
 
   for (const h of hooks.filter((h) => h.def.before === 'all')) pushHook(h, 'before-all');
   for (const stage of CORE_STAGES) {
     const before = hooks.filter((h) => h.def.before === stage);
     regionStart[stage] = steps.length;
     for (const h of before) pushHook(h, stage);
-    const slot = merged.bindings[stage]!.value;
+    const binding = merged.bindings[stage]!;
+    const slot = binding.value;
     slot.forEach((def, i) => {
       steps.push({
         id: slot.length > 1 ? `${stage}.${i}` : stage,
@@ -69,6 +74,8 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
         role: 'slot',
         def,
         slotLast: i === slot.length - 1,
+        source: binding.source,
+        locked: binding.locked,
       });
     });
     for (const h of hooks.filter((h) => h.def.after === stage)) pushHook(h, stage);

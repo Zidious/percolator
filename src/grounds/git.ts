@@ -22,7 +22,7 @@ export function redactUrls(message: string): string {
   return message.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/@\s'"]+@/gi, '$1***@');
 }
 
-async function git(args: string[], cwd?: string): Promise<string> {
+export async function runGit(args: string[], cwd?: string): Promise<string> {
   try {
     const { stdout } = await execFileP('git', args, cwd === undefined ? {} : { cwd });
     return stdout.trim();
@@ -39,16 +39,16 @@ function assertNotOption(label: string, value: string): void {
 
 export const cliGit: Git = {
   async clone(url, dir, opts) {
-    await git(['clone', '--quiet', ...(opts?.mirror ? ['--mirror'] : []), '--', url, dir]);
+    await runGit(['clone', '--quiet', ...(opts?.mirror ? ['--mirror'] : []), '--', url, dir]);
   },
   async fetch(dir) {
-    await git(['fetch', '--quiet', '--prune', 'origin'], dir);
+    await runGit(['fetch', '--quiet', '--prune', 'origin'], dir);
   },
   async resolveRef(dir, ref) {
     assertNotOption('ref', ref);
     for (const candidate of [`origin/${ref}`, ref]) {
       try {
-        return await git(['rev-parse', '--verify', '--quiet', `${candidate}^{commit}`], dir);
+        return await runGit(['rev-parse', '--verify', '--quiet', `${candidate}^{commit}`], dir);
       } catch {
         // try the next candidate
       }
@@ -57,18 +57,18 @@ export const cliGit: Git = {
   },
   async checkout(dir, commit) {
     assertNotOption('commit', commit);
-    await git(['checkout', '--quiet', '--detach', commit], dir);
+    await runGit(['checkout', '--quiet', '--detach', commit], dir);
   },
   async remoteUrl(cwd) {
     try {
-      return (await git(['remote', 'get-url', 'origin'], cwd)) || undefined;
+      return (await runGit(['remote', 'get-url', 'origin'], cwd)) || undefined;
     } catch {
       return undefined;
     }
   },
   async toplevel(cwd) {
     try {
-      const top = await git(['rev-parse', '--show-toplevel'], cwd);
+      const top = await runGit(['rev-parse', '--show-toplevel'], cwd);
       return top ? path.resolve(top) : undefined;
     } catch {
       return undefined;

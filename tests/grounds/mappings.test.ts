@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, test } from 'node:test';
 import type { Mapping } from '../../src/config/schema.ts';
 import { ConfigError } from '../../src/config/load.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
-import { fragmentLayers, resolveMappings } from '../../src/grounds/mappings.ts';
+import { buildGraph } from '../../src/graph/build.ts';
+import { mergeLayers } from '../../src/graph/merge.ts';
+import { checkGraphReferences, fragmentLayers, resolveMappings } from '../../src/grounds/mappings.ts';
 
 let tmp: string;
 let grounds: Record<string, ResolvedGround>;
@@ -156,5 +158,31 @@ describe('fragmentLayers', () => {
       ['ground:company/percolator.yaml@abc123', 'ground:team/percolator.yaml@local'],
     );
     assert.deepEqual(layers[0]!.fragment.rules, { max_rounds_ceiling: 2 });
+  });
+});
+
+describe('checkGraphReferences', () => {
+  test('applies_to accepts a step id', async () => {
+    const graph = buildGraph(
+      mergeLayers([
+        {
+          source: 'test',
+          fragment: {
+            bindings: {
+              intake: { agent: 'claude' },
+              groom: { agent: 'claude' },
+              plan: [{ agent: 'claude' }, { agent: 'codex' }],
+              implement: { agent: 'claude' },
+              review: { agent: 'claude' },
+              deliver: { agent: 'claude' },
+            },
+          },
+        },
+      ]),
+    );
+    const ms = await resolveMappings([{ ...mFile('policies/a.md'), applies_to: ['plan.0'] }], grounds);
+    await checkGraphReferences(graph, ms, grounds, 'config.yaml');
+    const bad = await resolveMappings([{ ...mFile('policies/a.md'), applies_to: ['plan.9'] }], grounds);
+    await assert.rejects(checkGraphReferences(graph, bad, grounds, 'config.yaml'), /applies_to "plan.9": no such stage or node/);
   });
 });

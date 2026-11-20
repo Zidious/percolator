@@ -3,7 +3,7 @@ import path from 'node:path';
 import { ConfigError, loadFragment } from '../config/load.ts';
 import { STAGES } from '../config/schema.ts';
 import type { GraphFragment, Mapping } from '../config/schema.ts';
-import type { Graph } from '../graph/build.ts';
+import type { Graph, Step } from '../graph/build.ts';
 import type { ResolvedGround } from './resolve.ts';
 
 export type ResolvedMapping = Mapping & { absPath: string; ground: string; commit: string };
@@ -111,7 +111,7 @@ export async function checkGraphReferences(
     const r = await resolveInGround(ground, prompt.file, 'file');
     if ('problem' in r) problems.push(`${target}: ${r.problem}`);
   }
-  const known = new Set<string>(['*', ...STAGES, ...graph.steps.map((s) => s.name)]);
+  const known = new Set<string>(['*', ...STAGES, ...graph.steps.flatMap((s) => [s.name, s.id])]);
   for (const m of mappings) {
     for (const entry of m.applies_to) {
       if (!known.has(entry)) {
@@ -133,4 +133,16 @@ export async function fragmentLayers(mappings: ResolvedMapping[]): Promise<Layer
     });
   }
   return layers;
+}
+
+/**
+ * The mappings that apply to `step`, in mapping order: `*`, its step id, its node name (hooks) or
+ * its stage (slots only: a hook attached to a stage is not matched by that stage's name).
+ */
+export function mappingsFor<M extends Mapping>(step: Step, mappings: M[]): M[] {
+  return mappings.filter((m) =>
+    m.applies_to.some(
+      (a) => a === '*' || a === step.id || (step.role === 'hook' && a === step.name) || (step.role === 'slot' && a === step.stage),
+    ),
+  );
 }
