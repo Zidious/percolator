@@ -17,3 +17,12 @@ test('nodeExec passes an argument with spaces and quotes as one argument', async
 test('nodeExec reports a missing binary', async () => {
   await assert.rejects(nodeExec('perc-no-such-bin', []), { message: 'perc-no-such-bin not found on PATH' });
 });
+
+test('nodeExec passes extra env and keeps PATH', async () => {
+  const r = await nodeExec(
+    process.execPath,
+    ['-e', 'process.stdout.write((process.env.PERC_T ?? "") + "|" + (process.env.PATH ? "path" : ""))'],
+    { env: { PERC_T: 'x' } },
+  );
+  assert.equal(r.stdout, 'x|path');
+});

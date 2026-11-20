@@ -22,9 +22,14 @@ export function redactUrls(message: string): string {
   return message.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/@\s'"]+@/gi, '$1***@');
 }
 
+/** Environment for git children: never prompt for credentials (fail instead of hanging). */
+export function gitEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
+}
+
 export async function runGit(args: string[], cwd?: string): Promise<string> {
   try {
-    const { stdout } = await execFileP('git', args, cwd === undefined ? {} : { cwd });
+    const { stdout } = await execFileP('git', args, { env: gitEnv(), ...(cwd === undefined ? {} : { cwd }) });
     return stdout.trim();
   } catch (err) {
     const stderr = (err as { stderr?: string }).stderr?.trim() || (err as Error).message;
