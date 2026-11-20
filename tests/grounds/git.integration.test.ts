@@ -17,7 +17,7 @@ const mktmp = async () => {
   return d;
 };
 after(async () => {
-  await Promise.all(tmps.map((d) => fs.rm(d, { recursive: true, force: true })));
+  await Promise.all(tmps.map((d) => fs.rm(d, { recursive: true, force: true, maxRetries: 5 })));
 });
 
 const run = promisify(execFile);

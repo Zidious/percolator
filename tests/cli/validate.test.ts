@@ -15,7 +15,7 @@ before(async () => {
   tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-home-'));
 });
 after(async () => {
-  await fs.rm(tmpHome, { recursive: true, force: true });
+  await fs.rm(tmpHome, { recursive: true, force: true, maxRetries: 5 });
 });
 
 const opts = () => ({
@@ -54,7 +54,7 @@ test('repo .percolator/percolator.yaml is the last layer', async () => {
     const r = await validate({ ...opts(), cwd });
     assert.ok(r.graph.steps.map((s) => s.id).includes('repo-check'));
   } finally {
-    await fs.rm(cwd, { recursive: true, force: true });
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 
@@ -74,7 +74,7 @@ test('the repo layer is found at the git toplevel when run from a subdirectory',
     assert.ok(r.graph.steps.map((s) => s.id).includes('repo-check'));
     assert.ok(git.calls.includes(`toplevel ${cwd}`));
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 
@@ -89,7 +89,7 @@ test('a repo layer that cannot be read for a reason other than absence is an err
     };
     await assert.rejects(validate({ ...opts(), cwd, loadRepoLayer }), (e) => e === denied);
   } finally {
-    await fs.rm(cwd, { recursive: true, force: true });
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 
@@ -120,7 +120,7 @@ test('rule violations are thrown as one RuleViolationError against the config fi
       'bindings.review uses agent "claude", but allowed_agents (from profile:work) allows: codex',
     ]);
   } finally {
-    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 
@@ -131,7 +131,7 @@ async function withConfig(body: (abs: (ground: string) => string) => string, fn:
     await fs.writeFile(cfg, body((g) => JSON.stringify(path.join(fx('e2e/grounds'), g))));
     await fn(cfg);
   } finally {
-    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
 }
 

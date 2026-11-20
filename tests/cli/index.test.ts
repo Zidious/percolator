@@ -7,6 +7,9 @@ test('public API exports the pipeline', () => {
     'validate', 'loadUserConfig', 'loadFragment', 'selectProfile', 'normalizeRemote', 'resolveGrounds',
     'readLock', 'writeLock', 'resolveMappings', 'fragmentLayers', 'mergeLayers', 'checkRules',
     'buildGraph', 'runGraph', 'newState', 'saveState', 'loadState', 'writeJsonSchema', 'expandHome',
+    'nodeExec', 'cliHc', 'cliHerdrApp', 'ensureWorktree', 'defaultWorktreeDir', 'runDir', 'stepDir',
+    'materializeGrounds', 'buildSkillPlugins', 'checkAgents', 'buildTask', 'renderTemplate', 'terminalName',
+    'mappingsFor',
   ]) {
     assert.equal(typeof (api as Record<string, unknown>)[name], 'function', name);
   }
@@ -15,4 +18,7 @@ test('public API exports the pipeline', () => {
   assert.ok(new api.LockViolation('t', 'a', 'b') instanceof api.ConfigError);
   assert.equal(typeof api.GraphError, 'function');
   assert.ok(api.cliGit);
+  assert.equal(typeof api.HcError, 'function');
+  assert.equal(typeof api.HerdrRuntime, 'function');
+  assert.equal(typeof api.ADAPTERS.claude.argv, 'function');
 });

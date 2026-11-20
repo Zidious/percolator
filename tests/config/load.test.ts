@@ -50,7 +50,7 @@ test('node with no agent/builtin/command is rejected', async () => {
     await fs.writeFile(file, 'nodes:\n  x:\n    model: m\n');
     await assert.rejects(loadFragment(file), ConfigError);
   } finally {
-    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 
@@ -61,7 +61,7 @@ async function withYaml(text: string, fn: (file: string) => Promise<void>): Prom
     await fs.writeFile(file, text);
     await fn(file);
   } finally {
-    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
 }
 
@@ -132,7 +132,7 @@ test('json schema is generated', async () => {
     const parsed = JSON.parse(await fs.readFile(out, 'utf8'));
     assert.notEqual(parsed.properties.profiles, undefined);
   } finally {
-    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
 });
 

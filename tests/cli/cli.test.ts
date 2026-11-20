@@ -12,7 +12,7 @@ before(async () => {
   tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-cli-'));
 });
 after(async () => {
-  await fs.rm(tmp, { recursive: true, force: true });
+  await fs.rm(tmp, { recursive: true, force: true, maxRetries: 5 });
 });
 
 async function run(argv: string[]) {

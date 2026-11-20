@@ -14,6 +14,7 @@ pnpm test:watch
 node --test tests/util/paths.test.ts   # focused run
 pnpm build                       # tsc → dist/ (src only)
 pnpm schema                      # regenerate schema/percolator.schema.json
+node tests/smoke/hc.smoke.ts [--space <id>]   # manual: talks to the real hc (needs hc on PATH; --space also uses herdr-app); not in pnpm test
 ```
 
 ## Hard rules
@@ -77,6 +78,7 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | `tests/helpers/fake-git.ts` | `FakeGit` (records `calls`; origin url kept in a marker file so it follows renames; `toplevels`, `cloneError`, `onClone` hooks); use instead of real git in unit tests |
 | `tests/helpers/fake-runtime.ts` | `FakeRuntime` (scripted outcomes per step id; records `calls`, rounds and `maxRoundsSeen`; `roundsOf`/`maxRoundsOf`) and the `pass`/`fail`/`esc` helpers |
 | `tests/helpers/fake-hc.ts` | `FakeHc` (in-memory `Hc`; records `calls`, `terminals` by name; `behave(t, waitCall)` runs on each `wait`, which then rejects `finished` (11) / `blocked` (9) like the real client; `add` pre-creates a terminal; `taskFileOf(t)`; `firstMessageSent`; live duplicate `run` throws `name_taken`) |
+| `tests/smoke/hc.smoke.ts` | manual real-`hc` smoke (script step through `HerdrRuntime`, argv launch printing `firstMessageSent`, with `--space <id>` a labelled terminal plus its `herdr-app ls` entry); names its terminals `perc-smoke-<ts>`, always kills and removes them; not matched by `pnpm test` |
 | `tests/helpers/exec-recorder.ts` | `ExecRecorder` (records `calls`; `respond(match, result)`; unmatched calls resolve `{}`); never run the real `hc` or `herdr-app` in tests |
 | `tests/source-files.test.ts` | walks the repo root files, `src/`, `tests/` and `schema/`: no file may contain a NUL byte (git would treat it as binary and skip EOL normalization); write `\0` escapes |
 | `.github/workflows/ci.yml` | test matrix, 3 OSes × Node 24 |

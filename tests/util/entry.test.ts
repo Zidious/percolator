@@ -24,7 +24,7 @@ async function withSymlink(fn: (link: string) => Promise<void>): Promise<boolean
     await fn(path.join(linkDir, 'cli.ts'));
     return true;
   } finally {
-    await fs.rm(dir, { recursive: true, force: true });
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
 }
 
@@ -62,6 +62,6 @@ test('pnpm schema (json-schema.ts) runs when invoked through a symlink', async (
     });
     if (!ran) t.skip('cannot create symlinks here');
   } finally {
-    await fs.rm(path.dirname(out), { recursive: true, force: true });
+    await fs.rm(path.dirname(out), { recursive: true, force: true, maxRetries: 5 });
   }
 });

@@ -10,7 +10,7 @@ beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-fs-'));
 });
 afterEach(async () => {
-  await fs.rm(dir, { recursive: true, force: true });
+  await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 test('writeFileAtomic leaves no tmp files and replaces content', async () => {

@@ -29,7 +29,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await fs.rm(tmp, { recursive: true, force: true });
+  await fs.rm(tmp, { recursive: true, force: true, maxRetries: 5 });
 });
 
 const opts = () => ({ lockFile, cacheDir, git: fake });
