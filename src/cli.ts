@@ -179,18 +179,23 @@ async function readAttention(dir: string): Promise<AttentionRecord | undefined> 
 /** What a run is doing or waiting for, in one line; an hc failure is reported, never thrown. */
 async function runDetail(dir: string, meta: RunMeta, state: RunState, hc: Hc): Promise<string> {
   const waiting = await readWaiting(dir).catch(() => undefined);
-  if (waiting) return `waiting for approval: ${waiting.commentUrl}`;
-  if (state.status === 'paused') return state.pausedReason ?? '';
+  const waitingText = waiting && `waiting for approval: ${waiting.commentUrl}`;
   if (state.status === 'running') {
+    // a killed driver leaves waiting.json and attention.json behind, so liveness is always reported
     const a = await readAttention(dir);
-    if (a !== undefined && a.stepId === state.currentStep) return `${a.kind}: attend terminal ${a.terminal}`;
+    const what = waitingText ?? (a !== undefined && a.stepId === state.currentStep ? `${a.kind}: attend terminal ${a.terminal}` : undefined);
+    let driver: string | undefined;
     try {
       const t = await hc.get(meta.driver);
-      return t?.state === 'live' ? `driver ${meta.driver}` : `driver not running; perc resume ${meta.runId}`;
+      driver = t?.state === 'live' ? undefined : `driver not running; perc resume ${meta.runId}`;
     } catch (err) {
-      return `driver unknown (hc: ${(err as Error).message})`;
+      driver = `driver unknown (hc: ${(err as Error).message})`;
     }
+    if (what === undefined) return driver ?? `driver ${meta.driver}`;
+    return driver === undefined ? what : `${what}; ${driver}`;
   }
+  if (waitingText) return waitingText;
+  if (state.status === 'paused') return state.pausedReason ?? '';
   if (state.status === 'completed') return (await prUrl(dir, state)) ?? '';
   return '';
 }

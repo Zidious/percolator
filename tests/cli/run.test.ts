@@ -156,21 +156,35 @@ test('status lists runs with details', async () => {
   const e = await setup();
   try {
     const metas: RunMeta[] = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 8; i++) {
       e.clock.t = NOW.getTime() + i * 1000;
       metas.push(await e.prepare());
     }
-    const [waiting, paused, dead, done, live, attended] = metas as [RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta];
+    const [waiting, paused, dead, done, live, attended, waitingLive, attendedDead] = metas as RunMeta[] as [
+      RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta,
+    ];
+    const liveDriver = (m: RunMeta) => e.deps.hc.add({ name: m.driver, labels: { 'percolator.run': m.runId, 'percolator.role': 'driver' } });
+    const waitAt = async (m: RunMeta) => {
+      await edit(m, (s) => (s.currentStep = 'approve-groom'));
+      await writeJson(path.join(e.dir(m.runId), 'waiting.json'), {
+        stepId: 'approve-groom', stepDir: path.join(e.dir(m.runId), 'steps', 'approve-groom', '1'), since: NOW.toISOString(), commentUrl: url,
+      });
+    };
+    const attend = async (m: RunMeta) => {
+      await edit(m, (s) => (s.currentStep = 'groom'));
+      const term = terminalName(m.runId, m.ticket, 'groom', 1);
+      await writeJson(path.join(e.dir(m.runId), 'attention.json'), { stepId: 'groom', terminal: term, kind: 'blocked', at: NOW.toISOString() });
+      return term;
+    };
+    const url = `https://${REPO}/issues/5#issuecomment-7`;
     const edit = async (m: RunMeta, f: (s: Awaited<ReturnType<typeof loadState>>) => void) => {
       const s = await loadState(e.dir(m.runId));
       f(s);
       await saveState(e.dir(m.runId), s);
     };
-    const url = `https://${REPO}/issues/5#issuecomment-7`;
-    await edit(waiting, (s) => (s.currentStep = 'approve-groom'));
-    await writeJson(path.join(e.dir(waiting.runId), 'waiting.json'), {
-      stepId: 'approve-groom', stepDir: path.join(e.dir(waiting.runId), 'steps', 'approve-groom', '1'), since: NOW.toISOString(), commentUrl: url,
-    });
+    await waitAt(waiting);
+    await waitAt(waitingLive);
+    liveDriver(waitingLive);
     await edit(paused, (s) => {
       s.status = 'paused';
       s.currentStep = 'approve-groom';
@@ -185,10 +199,10 @@ test('status lists runs with details', async () => {
     await fs.mkdir(path.join(e.dir(done.runId), 'steps', 'deliver', '1', 'outputs'), { recursive: true });
     await fs.writeFile(path.join(e.dir(done.runId), 'steps', 'deliver', '1', 'outputs', 'pr_url.md'), `https://${REPO}/pull/3\n`);
     await edit(live, (s) => (s.currentStep = 'implement'));
-    e.deps.hc.add({ name: live.driver, labels: { 'percolator.run': live.runId, 'percolator.role': 'driver' } });
-    await edit(attended, (s) => (s.currentStep = 'groom'));
-    const groomTerm = terminalName(attended.runId, attended.ticket, 'groom', 1);
-    await writeJson(path.join(e.dir(attended.runId), 'attention.json'), { stepId: 'groom', terminal: groomTerm, kind: 'blocked', at: NOW.toISOString() });
+    liveDriver(live);
+    const groomTerm = await attend(attended);
+    liveDriver(attended);
+    const deadGroomTerm = await attend(attendedDead);
     await fs.mkdir(e.dir('t9-broken'), { recursive: true });
 
     const r = await e.perc(['status']);
@@ -199,12 +213,14 @@ test('status lists runs with details', async () => {
     assert.equal(
       r.out,
       [
+        `${attendedDead.runId}  running  groom  ${t}  blocked: attend terminal ${deadGroomTerm}; driver not running; perc resume ${attendedDead.runId}`,
+        `${waitingLive.runId}  running  approve-groom  ${t}  waiting for approval: ${url}`,
         `${attended.runId}  running  groom  ${t}  blocked: attend terminal ${groomTerm}`,
         `${live.runId}  running  implement  ${t}  driver ${live.driver}`,
         `${done.runId}  completed  -  ${t}  https://${REPO}/pull/3`,
         `${dead.runId}  running  plan  ${t}  driver not running; perc resume ${dead.runId}`,
         `${paused.runId}  paused  approve-groom  ${t}  cap: approve-groom reached 3 rounds`,
-        `${waiting.runId}  running  approve-groom  ${t}  waiting for approval: ${url}`,
+        `${waiting.runId}  running  approve-groom  ${t}  waiting for approval: ${url}; driver not running; perc resume ${waiting.runId}`,
         `t9-broken  broken  -  -  error: Run metadata ${runFile} is missing or invalid: file not found`,
         '',
       ].join('\n'),
@@ -248,6 +264,26 @@ test('status <id> when hc is missing', async () => {
     );
     const list = await e.perc(['status'], { ...e.deps, hc });
     assert.equal(list.out, `${meta.runId}  running  plan  ${REPO}#5  driver unknown (hc: hc not found on PATH)\n`);
+
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir: e.dir(meta.runId), since: NOW.toISOString(), commentUrl: 'u' });
+    const waiting = await e.perc(['status'], { ...e.deps, hc });
+    assert.equal(waiting.out, `${meta.runId}  running  plan  ${REPO}#5  waiting for approval: u; driver unknown (hc: hc not found on PATH)\n`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> of a run waiting at a gate whose driver died says so', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const s = await loadState(e.dir(meta.runId));
+    s.currentStep = 'approve-groom';
+    await saveState(e.dir(meta.runId), s);
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir: e.dir(meta.runId), since: NOW.toISOString(), commentUrl: 'u' });
+    const r = await e.perc(['status', meta.runId]);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out.split('\n')[7], `  detail waiting for approval: u; driver not running; perc resume ${meta.runId}`);
   } finally {
     await e.cleanup();
   }
