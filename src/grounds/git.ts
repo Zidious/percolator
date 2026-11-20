@@ -17,13 +17,18 @@ export interface Git {
   toplevel(cwd: string): Promise<string | undefined>;
 }
 
+/** Replace the userinfo of every url in `message` (`https://user:token@host` → `https://***@host`). */
+export function redactUrls(message: string): string {
+  return message.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/@\s'"]+@/gi, '$1***@');
+}
+
 async function git(args: string[], cwd?: string): Promise<string> {
   try {
     const { stdout } = await execFileP('git', args, cwd === undefined ? {} : { cwd });
     return stdout.trim();
   } catch (err) {
     const stderr = (err as { stderr?: string }).stderr?.trim() || (err as Error).message;
-    throw new Error(`git ${args.join(' ')} failed: ${stderr}`);
+    throw new Error(redactUrls(`git ${args.join(' ')} failed: ${stderr}`));
   }
 }
 

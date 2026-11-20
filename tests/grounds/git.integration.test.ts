@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { promisify } from 'node:util';
-import { cliGit } from '../../src/grounds/git.ts';
+import { cliGit, redactUrls } from '../../src/grounds/git.ts';
 import { readLock } from '../../src/grounds/lock.ts';
 import { resolveGrounds } from '../../src/grounds/resolve.ts';
 import { samePath } from '../../src/util/paths.ts';
@@ -96,4 +96,19 @@ test('toplevel is the repo root from a subdirectory, and undefined outside a rep
   assert.ok(top !== undefined);
   assert.equal(path.isAbsolute(top), true);
   assert.ok(samePath(await fs.realpath(top), await fs.realpath(repo)), `${top} is not ${repo}`);
+});
+
+test('credentials in a url never appear in git error messages', async () => {
+  const tmp = await mktmp();
+  const err = await cliGit.clone('https://user:s3cr3t-token@127.0.0.1:9/x.git', path.join(tmp, 'x')).catch((e) => e);
+  assert.ok(err instanceof Error);
+  assert.doesNotMatch(err.message, /s3cr3t-token|user:/);
+  assert.match(err.message, /https:\/\/\*\*\*@127\.0\.0\.1:9\/x\.git/);
+});
+
+test('redactUrls hides userinfo in every url of a message', () => {
+  assert.equal(
+    redactUrls('fatal: https://u:tok@host/a.git and ssh://git@h2/b, not mail a@b.c or https://host/x'),
+    'fatal: https://***@host/a.git and ssh://***@h2/b, not mail a@b.c or https://host/x',
+  );
 });
