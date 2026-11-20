@@ -24,6 +24,8 @@ export type RunState = {
   status: 'running' | 'paused' | 'failed' | 'completed';
   pausedReason?: string;
   unresolvedFindings?: string;
+  /** a back-edge was triggered but its jump waits for the step at `jumpAfterIndex` */
+  pendingJump?: { edgeId: string; findings?: string };
 };
 
 const STATE_FILE = 'state.json';

@@ -79,3 +79,10 @@ test('invalid JSON is rejected naming the file', async () => {
   await fs.writeFile(path.join(dir, 'state.json'), '{"trunc');
   await assert.rejects(loadState(dir), /state\.json.*not valid JSON/);
 });
+
+test('round-trips a pending back-edge jump', async () => {
+  const s = newState(init);
+  s.pendingJump = { edgeId: 'review', findings: 'f1' };
+  await saveState(dir, s);
+  assert.deepEqual((await loadState(dir)).pendingJump, { edgeId: 'review', findings: 'f1' });
+});
