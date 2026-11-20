@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import path from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
@@ -12,6 +13,8 @@ export interface Git {
   checkout(dir: string, commit: string): Promise<void>;
   /** URL of the `origin` remote, or undefined when absent / not a repo. */
   remoteUrl(cwd: string): Promise<string | undefined>;
+  /** Absolute root of the work tree containing `cwd`, or undefined when not in a repo. */
+  toplevel(cwd: string): Promise<string | undefined>;
 }
 
 async function git(args: string[], cwd?: string): Promise<string> {
@@ -54,6 +57,14 @@ export const cliGit: Git = {
   async remoteUrl(cwd) {
     try {
       return (await git(['remote', 'get-url', 'origin'], cwd)) || undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  async toplevel(cwd) {
+    try {
+      const top = await git(['rev-parse', '--show-toplevel'], cwd);
+      return top ? path.resolve(top) : undefined;
     } catch {
       return undefined;
     }

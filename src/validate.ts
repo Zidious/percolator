@@ -1,8 +1,7 @@
-import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { loadFragment, loadUserConfig } from './config/load.ts';
-import type { GroundSpec } from './config/schema.ts';
+import type { GraphFragment, GroundSpec } from './config/schema.ts';
 import { selectProfile } from './config/profile.ts';
 import { buildGraph } from './graph/build.ts';
 import type { Graph } from './graph/build.ts';
@@ -22,6 +21,8 @@ export type ValidateOptions = {
   update?: boolean;
   home?: string;
   git?: Git;
+  /** Test hook: loads the repo layer (default loadFragment). */
+  loadRepoLayer?: (file: string) => Promise<GraphFragment>;
 };
 
 export type ValidateResult = {
@@ -71,10 +72,13 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
       ...(profile.rules ? { rules: profile.rules } : {}),
     },
   });
-  const repoFile = path.join(opts.cwd, '.percolator', 'percolator.yaml');
-  if (await fs.access(repoFile).then(() => true, () => false)) {
-    layers.push({ source: 'repo:.percolator/percolator.yaml', fragment: await loadFragment(repoFile) });
-  }
+  const repoRoot = (await git.toplevel(opts.cwd)) ?? opts.cwd;
+  const repoFile = path.join(repoRoot, '.percolator', 'percolator.yaml');
+  const repoLayer = await (opts.loadRepoLayer ?? loadFragment)(repoFile).catch((err: NodeJS.ErrnoException) => {
+    if (err.code === 'ENOENT') return undefined; // the repo layer is optional; any other failure is real
+    throw err;
+  });
+  if (repoLayer) layers.push({ source: 'repo:.percolator/percolator.yaml', fragment: repoLayer });
 
   const merged = mergeLayers(layers);
   const violations = checkRules(merged);

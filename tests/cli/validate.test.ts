@@ -56,6 +56,41 @@ test('repo .percolator/percolator.yaml is the last layer', async () => {
   }
 });
 
+test('the repo layer is found at the git toplevel when run from a subdirectory', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    await fs.mkdir(path.join(root, '.percolator'));
+    await fs.mkdir(path.join(root, 'src', 'deep'), { recursive: true });
+    await fs.writeFile(
+      path.join(root, '.percolator', 'percolator.yaml'),
+      'nodes:\n  repo-check:\n    command: [echo, hi]\n    after: plan\n',
+    );
+    const git = new FakeGit();
+    const cwd = path.join(root, 'src', 'deep');
+    git.toplevels.set(cwd, root);
+    const r = await validate({ ...opts(), git, cwd });
+    assert.ok(r.graph.steps.map((s) => s.id).includes('repo-check'));
+    assert.ok(git.calls.includes(`toplevel ${cwd}`));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a repo layer that cannot be read for a reason other than absence is an error', async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    const denied = Object.assign(new Error(`EACCES: permission denied, open '${repoFile}'`), { code: 'EACCES' });
+    const loadRepoLayer = async (file: string) => {
+      assert.equal(file, repoFile);
+      throw denied;
+    };
+    await assert.rejects(validate({ ...opts(), cwd, loadRepoLayer }), (e) => e === denied);
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test('rule violations are returned, not thrown', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-cfg-'));
   try {

@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { cliGit } from '../../src/grounds/git.ts';
 import { readLock } from '../../src/grounds/lock.ts';
 import { resolveGrounds } from '../../src/grounds/resolve.ts';
+import { samePath } from '../../src/util/paths.ts';
 
 const tmps: string[] = [];
 const mktmp = async () => {
@@ -82,4 +83,17 @@ test('remoteUrl is undefined without an origin or outside a repo, and the url ot
   assert.equal(await cliGit.remoteUrl(repo), undefined);
   await git(repo, 'remote', 'add', 'origin', 'https://example.com/x.git');
   assert.equal(await cliGit.remoteUrl(repo), 'https://example.com/x.git');
+});
+
+test('toplevel is the repo root from a subdirectory, and undefined outside a repo', async () => {
+  const tmp = await mktmp();
+  const repo = path.join(tmp, 'repo');
+  const sub = path.join(repo, 'a', 'b');
+  await fs.mkdir(sub, { recursive: true });
+  assert.equal(await cliGit.toplevel(tmp), undefined);
+  await git(repo, 'init');
+  const top = await cliGit.toplevel(sub);
+  assert.ok(top !== undefined);
+  assert.equal(path.isAbsolute(top), true);
+  assert.ok(samePath(await fs.realpath(top), await fs.realpath(repo)), `${top} is not ${repo}`);
 });

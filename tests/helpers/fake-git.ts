@@ -15,6 +15,8 @@ export class FakeGit implements Git {
   urls = new Map<string, string>();
   /** commits the mirror lacks until the next fetch */
   missing = new Set<string>();
+  /** repo root per cwd, for toplevel() */
+  toplevels = new Map<string, string>();
   checkoutError: Error | undefined;
   cloneError: Error | undefined;
   /** runs after a clone has created its dir (e.g. to simulate a concurrent run) */
@@ -63,6 +65,11 @@ export class FakeGit implements Git {
     this.calls.push(`checkout ${dir} ${commit}`);
     if (this.checkoutError) throw this.checkoutError;
     if (this.missing.has(commit)) throw new Error(`unknown commit ${commit}`);
+  }
+
+  async toplevel(cwd: string): Promise<string | undefined> {
+    this.calls.push(`toplevel ${cwd}`);
+    return this.toplevels.get(cwd);
   }
 
   async remoteUrl(cwd: string): Promise<string | undefined> {
