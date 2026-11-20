@@ -15,6 +15,48 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-20-percolator-design.md`. The relevant sections are §5.1 (side effects are engine-owned), §5.5 (humans: groom gate, escalation), §5.6 (fragments, locks, rules), §5.7 (runtime, process model) and §5.8 (run state). Read it together with `AGENTS.md` and plans 1 and 2 in `docs/superpowers/plans/`.
 
+## Execution status (resume here)
+
+Executed with superpowers:subagent-driven-development: one implementer and one spec+quality review per task, with fix rounds until the review is clean. The per-run ledger lives in `.superpowers/` (gitignored), so this section is the portable record.
+
+**Resume point:** first **review Task 14** (commit `1f262b1`, implemented but not yet reviewed). Its review package is `git diff 813947b..1f262b1`. Then continue with **Task 15**.
+
+| Task | State | Commits |
+|---|---|---|
+| 1–9 (Phase A) | done, reviewed | `17f1851..53c95b8` |
+| 10–12 (Phase B) | done, reviewed | `53c95b8..68913ea` |
+| 13 | done, reviewed | `68913ea..813947b` |
+| 14 | implemented, **review pending** | `813947b..1f262b1` |
+| 15–22 | not started | — |
+
+`pnpm test` at `1f262b1`: 423 pass, 0 fail, 2 skipped. `pnpm typecheck` is clean.
+
+**Rulings that bind later tasks:**
+- **Node:** development ran on Node 26.12.1 (winget has no Node 24) with pnpm 12.18.0. engines `>=24` holds, and the CI matrix on Node 24 is the check for anything that only works on 26.
+- **Ownership (Task 11):** the runtime's ownership check also covers *finished* terminals under a step's name, because only terminals labelled with the run's `percolator.run` may be killed or removed. `sweepTerminals` re-checks `percolator.run` itself, fetching with `get` when `ls` gives no labels, and never trusts hc's `--label` filter alone.
+- **Granted round (Task 12):** `grantRound(state)` lowers `rounds[pausedCap]`, deletes `pausedCap` and sets `state.grantedRound`. On start, `runGraph` jumps back to the loop start (`cursor = edge.toStepIndex`) without re-running the cap step, and voids an overtaken `pendingJump`. Task 19's "resume at a cap grants one round" relies on this.
+- **Depth sort (Task 7):** dir-mapping depth counts segments of `path.posix.normalize(toPosix(dir))`, with `.` as depth 0. `runPath` is built with `path.resolve`.
+- **Ticket refs (Task 13):** `parseTicket` lower-cases `repo` in every form, matching `normalizeRemote`. For Task 18: "`#123` with no GitHub origin" means there is no `origin` remote, so pass `defaultRepo: undefined` then. Any host, GHE included, counts as GitHub.
+- **Run identity (for Tasks 18/19):** restore `keepTerminals` from `run.json` on resume. A mismatch would adopt a kept terminal from an earlier round. Task 11 sets no `percolator.role` label yet; Task 18's driver adds `percolator.role: driver`.
+- **driverName (Task 17):** uses `terminalName` as-is, whatever it does to `@driver`.
+- **Task 22:** the executor adds only the smoke flags. The real-tool runs are owner actions.
+- **Tests:** plan-2 runtime fixtures may gain `labels: { 'percolator.run': <runId> }`, as fixture setup only.
+
+**Minor findings deferred to the final whole-branch review:**
+- T1: `~user` throws a plain Error with no file:line from `selectProfile` and from `path:` grounds; no test that `validate` passes `realCwd`.
+- T2: `sweepLeftovers` reports a path even when its `rm` failed; the swap-path restore rename swallows its error; the swap path ignores `renameIntoPlace`'s result; sweep option tests are thin.
+- T3: the `gitEnv` PATH assertion is tautological on Windows; no test that `runGit` applies `gitEnv`.
+- T4: a node with no hook position prints "attached unattached"; no tests for `before/after all` or for both set.
+- T5: deep equality via `sortKeys` + `JSON.stringify` (vs `isDeepStrictEqual`); dedupe/merge keys use the raw path text (`./p.md` ≠ `p.md`); a `loadFragment` failure drops problems already collected; the profile root is detected with `startsWith('profile:')`.
+- T6: a non-ENOENT stat error surfaces as a raw ErrnoException; the `lstatRepoLayer`/`loadRepoLayer` test hooks are public API.
+- T7: runs materialized before the fix don't self-heal.
+- T8: `perc validate` output for git grounds is untested (`main()` has no git injection).
+- T9: the deliver check hand-rolls the kind instead of using `effectiveKind`; a cast hides the `STAGE_BRIEFS` narrowing; `BuiltinName` is unused.
+- T10: no dedicated `FakeHc.list` test; label keys starting with `-` are not rejected.
+- T11: a finished prior attempt (after a timeout escalation) is not collected; a script killed with perc when `outliveParent` is false reports fail.
+- T12: no test that the re-run implement sees the capped findings; no test of a grant with `unresolvedFindings` set.
+- T13: `/pull/12/files` gets the generic error; `#0` is accepted; a repo starting with `-` is not rejected.
+
 ## Global Constraints
 
 - Node ≥ 24; pnpm only (`pnpm install --frozen-lockfile`); runtime deps `zod`, `yaml` only. No new deps.
