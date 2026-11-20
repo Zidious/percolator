@@ -26,7 +26,25 @@ export type RunState = {
   unresolvedFindings?: string;
   /** a back-edge was triggered but its jump waits for the step at `jumpAfterIndex` */
   pendingJump?: { edgeId: string; findings?: string };
+  /** sha256 of the graph this run started on; set by `runGraph` on a new run, checked on resume */
+  graphFingerprint?: string;
 };
+
+const STATUSES: readonly string[] = ['running', 'paused', 'failed', 'completed'];
+
+const isNumberRecord = (v: unknown) =>
+  v !== null && typeof v === 'object' && !Array.isArray(v) && Object.values(v).every((n) => typeof n === 'number');
+
+/** Name of the first field of `s` with an invalid shape, or undefined. */
+function invalidField(s: Record<string, unknown>): string | undefined {
+  if (!Number.isInteger(s['cursor']) || (s['cursor'] as number) < 0) return 'cursor';
+  if (!STATUSES.includes(s['status'] as string)) return 'status';
+  if (!Array.isArray(s['history'])) return 'history';
+  if (!isNumberRecord(s['rounds'])) return 'rounds';
+  if (!isNumberRecord(s['executed'])) return 'executed';
+  if (s['graphFingerprint'] !== undefined && typeof s['graphFingerprint'] !== 'string') return 'graphFingerprint';
+  return undefined;
+}
 
 const STATE_FILE = 'state.json';
 
@@ -73,6 +91,11 @@ export async function loadState(dir: string): Promise<RunState> {
   const version = (parsed as { version?: unknown } | null)?.version;
   if (version !== 1) {
     throw new Error(`Run state ${file} has unsupported version ${String(version)} (expected 1)`);
+  }
+  const record = parsed as Record<string, unknown>;
+  const field = invalidField(record);
+  if (field !== undefined) {
+    throw new Error(`Run state ${file} has an invalid "${field}": ${JSON.stringify(record[field]) ?? 'undefined'}`);
   }
   return parsed as RunState;
 }

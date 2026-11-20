@@ -386,3 +386,50 @@ test('a runtime mutating previousOutputs cannot change history', async () => {
   const s = await runGraph(graph(), newState(init), { runtime, save: saver().save });
   assert.equal(s.history[0]!.outputs['ticket'], 'x');
 });
+
+test('a new run records the graph fingerprint, and resuming against the same graph works', async () => {
+  const { save, saved } = saver();
+  const rt = new FakeRuntime({ implement: [esc('stuck')] });
+  const s = await runGraph(graph(), newState(init), { runtime: rt, save });
+  assert.match(s.graphFingerprint!, /^[0-9a-f]{64}$/);
+  assert.equal(saved[0]!.graphFingerprint, s.graphFingerprint);
+  s.status = 'running';
+  const done = await runGraph(graph(), s, { runtime: new FakeRuntime(), save });
+  assert.equal(done.status, 'completed');
+});
+
+test('resuming against a changed graph throws before running anything', async () => {
+  const { save } = saver();
+  const s = await runGraph(graph(), newState(init), { runtime: new FakeRuntime({ implement: [esc('stuck')] }), save });
+  s.status = 'running';
+  const before = structuredClone(s);
+  const changed = graph({ lint: { before: 'implement', kind: 'script', command: ['lint'] } });
+  const rt = new FakeRuntime();
+  const save2 = mock.fn(async () => {});
+  await assert.rejects(
+    runGraph(changed, s, { runtime: rt, save: save2 }),
+    (e: Error) => {
+      assert.equal(
+        e.message,
+        'run state was recorded against a different graph (config changed since this run started); start a new run',
+      );
+      return true;
+    },
+  );
+  assert.deepEqual(rt.calls, []);
+  assert.equal(save2.mock.callCount(), 0);
+  assert.deepEqual(s, before);
+});
+
+test('a pending jump for a back-edge not in the graph is a clear error', async () => {
+  const s = newState(init);
+  s.cursor = 3;
+  s.pendingJump = { edgeId: 'nope' };
+  const rt = new FakeRuntime();
+  await assert.rejects(runGraph(graph(), s, { runtime: rt, save: async () => {} }), (e: Error) => {
+    assert.ok(!(e instanceof TypeError));
+    assert.equal(e.message, 'run state has a pending jump on back-edge "nope", which is not in this graph');
+    return true;
+  });
+  assert.deepEqual(rt.calls, []);
+});

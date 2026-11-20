@@ -86,3 +86,30 @@ test('round-trips a pending back-edge jump', async () => {
   await saveState(dir, s);
   assert.deepEqual((await loadState(dir)).pendingJump, { edgeId: 'review', findings: 'f1' });
 });
+
+for (const [field, value] of [
+  ['cursor', -1],
+  ['cursor', 1.5],
+  ['cursor', '2'],
+  ['status', 'bogus'],
+  ['history', {}],
+  ['rounds', { review: 'x' }],
+  ['rounds', null],
+  ['executed', [1]],
+  ['graphFingerprint', 7],
+] as const) {
+  test(`loadState rejects an invalid ${field} (${JSON.stringify(value)}) naming the file and field`, async () => {
+    const file = path.join(dir, 'state.json');
+    await fs.writeFile(file, JSON.stringify({ ...newState(init), [field]: value }));
+    await assert.rejects(loadState(dir), (e: Error) => {
+      assert.equal(e.message, `Run state ${file} has an invalid "${field}": ${JSON.stringify(value)}`);
+      return true;
+    });
+  });
+}
+
+test('round-trips a graph fingerprint', async () => {
+  const s = { ...newState(init), graphFingerprint: 'abc' };
+  await saveState(dir, s);
+  assert.equal((await loadState(dir)).graphFingerprint, 'abc');
+});
