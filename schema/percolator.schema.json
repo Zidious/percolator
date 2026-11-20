@@ -1,0 +1,682 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "grounds": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "git": {
+                "type": "string"
+              },
+              "ref": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "git",
+              "ref"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "bindings": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "enum": [
+                "intake",
+                "groom",
+                "plan",
+                "implement",
+                "review",
+                "deliver"
+              ]
+            },
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "agent",
+                        "builtin",
+                        "script",
+                        "gate"
+                      ]
+                    },
+                    "agent": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "skill": {
+                      "type": "string"
+                    },
+                    "skills": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "prompt": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string"
+                            },
+                            "file": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "file"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "builtin": {
+                      "type": "string"
+                    },
+                    "command": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "before": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "intake",
+                            "groom",
+                            "plan",
+                            "implement",
+                            "review",
+                            "deliver"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "const": "all"
+                        }
+                      ]
+                    },
+                    "after": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "intake",
+                            "groom",
+                            "plan",
+                            "implement",
+                            "review",
+                            "deliver"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "const": "all"
+                        }
+                      ]
+                    },
+                    "once": {
+                      "type": "boolean"
+                    },
+                    "on_fail": {
+                      "type": "object",
+                      "properties": {
+                        "back_to": {
+                          "type": "string",
+                          "enum": [
+                            "intake",
+                            "groom",
+                            "plan",
+                            "implement",
+                            "review",
+                            "deliver"
+                          ]
+                        },
+                        "max_rounds": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "back_to",
+                        "max_rounds"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "max_rounds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "timeout_s": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "escalation": {
+                      "type": "boolean"
+                    },
+                    "required": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "agent",
+                          "builtin",
+                          "script",
+                          "gate"
+                        ]
+                      },
+                      "agent": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string"
+                      },
+                      "skill": {
+                        "type": "string"
+                      },
+                      "skills": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "prompt": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "from": {
+                                "type": "string"
+                              },
+                              "file": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "from",
+                              "file"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "builtin": {
+                        "type": "string"
+                      },
+                      "command": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "before": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "intake",
+                              "groom",
+                              "plan",
+                              "implement",
+                              "review",
+                              "deliver"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "const": "all"
+                          }
+                        ]
+                      },
+                      "after": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "intake",
+                              "groom",
+                              "plan",
+                              "implement",
+                              "review",
+                              "deliver"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "const": "all"
+                          }
+                        ]
+                      },
+                      "once": {
+                        "type": "boolean"
+                      },
+                      "on_fail": {
+                        "type": "object",
+                        "properties": {
+                          "back_to": {
+                            "type": "string",
+                            "enum": [
+                              "intake",
+                              "groom",
+                              "plan",
+                              "implement",
+                              "review",
+                              "deliver"
+                            ]
+                          },
+                          "max_rounds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "back_to",
+                          "max_rounds"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "max_rounds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "timeout_s": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "escalation": {
+                        "type": "boolean"
+                      },
+                      "required": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              ]
+            }
+          },
+          "nodes": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "agent",
+                    "builtin",
+                    "script",
+                    "gate"
+                  ]
+                },
+                "agent": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "skill": {
+                  "type": "string"
+                },
+                "skills": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "prompt": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "type": "string"
+                        },
+                        "file": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "file"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "builtin": {
+                  "type": "string"
+                },
+                "command": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "before": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "intake",
+                        "groom",
+                        "plan",
+                        "implement",
+                        "review",
+                        "deliver"
+                      ]
+                    },
+                    {
+                      "type": "string",
+                      "const": "all"
+                    }
+                  ]
+                },
+                "after": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "intake",
+                        "groom",
+                        "plan",
+                        "implement",
+                        "review",
+                        "deliver"
+                      ]
+                    },
+                    {
+                      "type": "string",
+                      "const": "all"
+                    }
+                  ]
+                },
+                "once": {
+                  "type": "boolean"
+                },
+                "on_fail": {
+                  "type": "object",
+                  "properties": {
+                    "back_to": {
+                      "type": "string",
+                      "enum": [
+                        "intake",
+                        "groom",
+                        "plan",
+                        "implement",
+                        "review",
+                        "deliver"
+                      ]
+                    },
+                    "max_rounds": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "back_to",
+                    "max_rounds"
+                  ],
+                  "additionalProperties": false
+                },
+                "max_rounds": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "timeout_s": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "escalation": {
+                  "type": "boolean"
+                },
+                "required": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "rules": {
+            "type": "object",
+            "properties": {
+              "require_skills": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "stage": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "intake",
+                            "groom",
+                            "plan",
+                            "implement",
+                            "review",
+                            "deliver"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "const": "*"
+                        }
+                      ]
+                    },
+                    "skills": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "stage",
+                    "skills"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "allowed_agents": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "allowed_models": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "max_rounds_ceiling": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "required_nodes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "match": {
+            "type": "object",
+            "properties": {
+              "remote": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "path": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "use": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                },
+                "dir": {
+                  "type": "string"
+                },
+                "as": {
+                  "type": "string",
+                  "enum": [
+                    "policy",
+                    "context",
+                    "skills",
+                    "plugins",
+                    "prompt",
+                    "graph"
+                  ]
+                },
+                "applies_to": {
+                  "default": [
+                    "*"
+                  ],
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "required": {
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "from",
+                "as"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "tracker": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "github"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "version",
+    "profiles"
+  ],
+  "additionalProperties": false
+}
