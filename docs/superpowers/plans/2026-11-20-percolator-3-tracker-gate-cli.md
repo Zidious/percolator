@@ -19,17 +19,15 @@
 
 Executed with superpowers:subagent-driven-development: one implementer and one spec+quality review per task, with fix rounds until the review is clean. The per-run ledger lives in `.superpowers/` (gitignored), so this section is the portable record.
 
-**Resume point:** first **review Task 14** (commit `1f262b1`, implemented but not yet reviewed). Its review package is `git diff 813947b..1f262b1`. Then continue with **Task 15**.
-
 | Task | State | Commits |
 |---|---|---|
-| 1–9 (Phase A) | done, reviewed | `17f1851..53c95b8` |
-| 10–12 (Phase B) | done, reviewed | `53c95b8..68913ea` |
-| 13 | done, reviewed | `68913ea..813947b` |
-| 14 | implemented, **review pending** | `813947b..1f262b1` |
-| 15–22 | not started | — |
+| 1–21 | done, reviewed | `17f1851..f664395` |
+| 22 | done, reviewed (smoke flags only; the real-tool runs are owner actions) | `c3b5199..da04289` |
+| Final whole-branch review fix wave (I1–I6, M1–M3, M5) | applied | `da04289..` (the `fix(tracker)`/`fix(run)`/`fix(cli)` commits after `da04289`, plus this `docs(plan)` commit) |
 
-`pnpm test` at `1f262b1`: 423 pass, 0 fail, 2 skipped. `pnpm typecheck` is clean.
+**Owner actions pending (resume here):**
+1. Run the four smokes from Task 22 Step 2 (`hc.smoke.ts --space <id>`, `--boot`, `--codex`, `gh.smoke.ts --issue <a real issue>`), then do Task 22 Step 3 from the results.
+2. Push `main` and watch the 3-OS CI matrix.
 
 **Rulings that bind later tasks:**
 - **Node:** development ran on Node 26.12.1 (winget has no Node 24) with pnpm 12.18.0. engines `>=24` holds, and the CI matrix on Node 24 is the check for anything that only works on 26.
@@ -41,6 +39,15 @@ Executed with superpowers:subagent-driven-development: one implementer and one s
 - **driverName (Task 17):** uses `terminalName` as-is, whatever it does to `@driver`.
 - **Task 22:** the executor adds only the smoke flags. The real-tool runs are owner actions.
 - **Tests:** plan-2 runtime fixtures may gain `labels: { 'percolator.run': <runId> }`, as fixture setup only.
+
+**Final-wave rulings (binding from here on):**
+- **I1 ticket refs:** owner and repo match `^[A-Za-z0-9_.-]+$`, are not `.`/`..` and do not start with `-`; the host matches `^[A-Za-z0-9.-]+(:\d+)?$`; the number is ≥ 1; the default repo is checked the same way. `prepareRun` also refuses a worktree outside its root (`worktreeIn`).
+- **I2 gate comments:** one comment per round, not per attempt: round = pass/fail records of the gate step in `state.history` + 1; marker `<!-- percolator:gate run=<id> step=<step> round=<n> -->`; the marker search only trusts comments by `gh.user()` (case-insensitive); a failed lookup after posting falls back to the pre-post `now`.
+- **I3 driver liveness:** `drive` holds `<runDir>/driver.json` (`{ pid, host, terminal, startedAt }`, created with `wx`, a dead pid on this host replaced, another host counts as live, removed in `finally`); `checkResumable` refuses another live holder; `perc status` reports `driver pid <pid>`.
+- **I4 worktree_root:** a relative root resolves against the config file's dir.
+- **I5 origin check:** an explicit `owner/repo#n` must match the clone's origin owner/repo (host and case ignored) before anything is created.
+- **I6 mappings:** `state.mappingsFingerprint` (+ `mappingKeys`) is recorded at `prepareRun` and compared on resume; absent in older states, so not checked there; tracker and runtime blocks are not covered.
+- **M2 clean:** `perc clean` needs `--force` unless the run completed or failed.
 
 **Minor findings deferred to the final whole-branch review:**
 - T1: `~user` throws a plain Error with no file:line from `selectProfile` and from `path:` grounds; no test that `validate` passes `realCwd`.
@@ -55,7 +62,7 @@ Executed with superpowers:subagent-driven-development: one implementer and one s
 - T10: no dedicated `FakeHc.list` test; label keys starting with `-` are not rejected.
 - T11: a finished prior attempt (after a timeout escalation) is not collected; a script killed with perc when `outliveParent` is false reports fail.
 - T12: no test that the re-run implement sees the capped findings; no test of a grant with `unresolvedFindings` set.
-- T13: `/pull/12/files` gets the generic error; `#0` is accepted; a repo starting with `-` is not rejected.
+- T13: `/pull/12/files` gets the generic error. (`#0` and a `-`-leading repo are now refused, by I1.)
 
 ## Global Constraints
 
