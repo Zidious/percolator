@@ -43,6 +43,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       // the granted round starts at the loop start; the cap step is not re-run and rounds are already lowered
       jumpBack(graph.backEdges[state.grantedRound]!);
       delete state.grantedRound;
+      voidOvertakenJump();
     }
   }
   const persist = async (): Promise<void> => {
@@ -139,19 +140,27 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
 
   /** After the step at `i`: resolve a pending jump that is due or overtaken, and detect completion. */
   function settle(i: number): void {
-    const pending = state.pendingJump;
-    if (state.status === 'running' && pending) {
-      const edge = graph.backEdges[pending.edgeId]!;
-      // older states have no stepId: their trigger was the edge's own step
-      if (state.cursor <= indexOf(pending.stepId ?? edge.fromStepId)) {
-        // a later step's own edge jumped back to or before the trigger: the pending round is void
-        delete state.pendingJump;
-      } else if (edge.jumpAfterIndex === i) {
-        delete state.pendingJump;
-        decide(edge, i, pending.findings);
+    if (state.status === 'running') {
+      voidOvertakenJump();
+      const pending = state.pendingJump;
+      if (pending) {
+        const edge = graph.backEdges[pending.edgeId]!;
+        if (edge.jumpAfterIndex === i) {
+          delete state.pendingJump;
+          decide(edge, i, pending.findings);
+        }
       }
     }
     if (state.status === 'running' && state.cursor >= steps.length) state.status = 'completed';
+  }
+
+  /** A jump back to or before a pending jump's trigger step voids the pending round. */
+  function voidOvertakenJump(): void {
+    const pending = state.pendingJump;
+    if (!pending) return;
+    // older states have no stepId: their trigger was the edge's own step
+    const trigger = pending.stepId ?? graph.backEdges[pending.edgeId]!.fromStepId;
+    if (state.cursor <= indexOf(trigger)) delete state.pendingJump;
   }
 
   /** Move the cursor to the start of `edge`'s loop; loops nested inside the re-run span start fresh. */

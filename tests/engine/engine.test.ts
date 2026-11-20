@@ -560,7 +560,7 @@ test('grantRound is a no-op without a cap pause', async () => {
   assert.deepEqual(s, before);
 });
 
-test('resuming from a non-cap pause clears pausedCap', async () => {
+test('resuming a cap pause without a grant re-runs the cap step and clears pausedCap', async () => {
   const g = qaGraph();
   const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ qa: [fail('q1'), fail('q2')] }), save: saver().save });
   s1.status = 'running';
@@ -571,4 +571,28 @@ test('resuming from a non-cap pause clears pausedCap', async () => {
 
 test('graphFingerprint is exported and stable', () => {
   assert.equal(graphFingerprint(qaGraph()), graphFingerprint(qaGraph()));
+});
+
+test('a granted jump voids a pending jump it overtakes', async () => {
+  const g = graph({ audit: { after: 'review', agent: 'claude', on_fail: { back_to: 'review', max_rounds: 1 } } });
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ review: [fail('f')], audit: [fail('a')] }), save: saver().save });
+  assert.equal(s1.pausedCap, 'audit');
+  assert.ok(s1.pendingJump, 'the review fail is still pending');
+  grantRound(s1);
+  s1.status = 'running';
+  const rt2 = new FakeRuntime();
+  const s2 = await runGraph(g, s1, { runtime: rt2, save: saver().save });
+  assert.deepEqual(rt2.calls, ['review', 'audit', 'deliver']);
+  assert.equal(s2.status, 'completed');
+  assert.ok(!s2.pendingJump);
+  assert.equal(s2.rounds['review'] ?? 0, 0, 'no review round consumed');
+});
+
+test('a granted round on a back-edge not in the graph is a clear error', async () => {
+  const s = newState(init);
+  s.grantedRound = 'nope';
+  await assert.rejects(runGraph(graph(), s, { runtime: new FakeRuntime(), save: async () => {} }), (e: Error) => {
+    assert.equal(e.message, 'run state has a granted round on back-edge "nope", which is not in this graph');
+    return true;
+  });
 });
