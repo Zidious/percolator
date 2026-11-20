@@ -264,9 +264,17 @@ async function runDecide(decision: 'approve' | 'reject', args: string[], deps: D
 async function runClean(args: string[], deps: DriverDeps): Promise<number> {
   const { values, positionals } = parseWith(args, { force: { type: 'boolean' } });
   const runId = onlyRunId('clean', positionals);
-  const meta = await readRunMeta(runDir(deps.home, runId));
+  const dir = runDir(deps.home, runId);
+  const meta = await readRunMeta(dir);
   const driver = await deps.hc.get(meta.driver);
   if (driver?.state === 'live') throw new Error(`run ${runId} is being driven by terminal ${meta.driver}; stop it first`);
+  if (values.force !== true) {
+    // a paused or running run still has live node terminals the owner may want
+    const { status } = await loadState(dir);
+    if (status !== 'completed' && status !== 'failed') {
+      throw new Error(`run ${runId} is ${status}; finish it or use perc clean ${runId} --force`);
+    }
+  }
   const removed = await sweepTerminals(deps.hc, runId);
   await removeWorktree({ repoRoot: meta.repoRoot, dir: meta.worktree, force: values.force === true });
   deps.out(`removed ${removed.length} terminal(s) and worktree ${meta.worktree}`);

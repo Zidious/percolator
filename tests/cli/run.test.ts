@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { main } from '../../src/cli.ts';
 import { loadState, saveState } from '../../src/engine/state.ts';
 import { cliHc } from '../../src/herdr/hc.ts';
+import type { RunState } from '../../src/engine/state.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import type { DriverDeps } from '../../src/run/prepare.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
@@ -29,6 +30,7 @@ const BINDINGS = [
   '      deliver: { builtin: github.open_pr }',
 ];
 const TRACKER = '    tracker: { kind: github, approvers: [alice] }';
+const NL = String.fromCharCode(10);
 const OUTPUT: Record<string, string> = { groom: 'groomed_ticket', plan: 'plan', implement: 'summary', review: 'findings' };
 
 type Env = RunEnv & {
@@ -584,10 +586,36 @@ test('clean refuses a live driver', async () => {
   }
 });
 
+async function setStatus(dir: string, status: RunState['status']): Promise<void> {
+  const s = await loadState(dir);
+  s.status = status;
+  await saveState(dir, s);
+}
+
+test('clean of a running or paused run needs --force', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    for (const status of ['running', 'paused'] as const) {
+      await setStatus(e.dir(meta.runId), status);
+      const r = await e.perc(['clean', meta.runId]);
+      assert.equal(r.code, 1);
+      assert.equal(r.err, `run ${meta.runId} is ${status}; finish it or use perc clean ${meta.runId} --force` + NL);
+      assert.equal(await exists(meta.worktree), true);
+    }
+    const forced = await e.perc(['clean', meta.runId, '--force']);
+    assert.equal(forced.code, 0, forced.err);
+    assert.equal(await exists(meta.worktree), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('clean removes terminals and worktree', async () => {
   const e = await setup();
   try {
     const meta = await e.prepare();
+    await setStatus(e.dir(meta.runId), 'completed');
     const labels = { 'percolator.run': meta.runId };
     e.deps.hc.add({ name: meta.driver, state: 'finished', labels: { ...labels, 'percolator.role': 'driver' } });
     e.deps.hc.add({ name: 'step-term', labels });
@@ -609,6 +637,7 @@ test('clean of a dirty worktree needs --force', async () => {
   const e = await setup();
   try {
     const meta = await e.prepare();
+    await setStatus(e.dir(meta.runId), 'failed');
     await fs.writeFile(path.join(meta.worktree, 'dirty.txt'), 'x');
     const r = await e.perc(['clean', meta.runId]);
     assert.equal(r.code, 1);
@@ -625,6 +654,7 @@ test('clean succeeds when the worktree dir was deleted by hand', async () => {
   const e = await setup();
   try {
     const meta = await e.prepare();
+    await setStatus(e.dir(meta.runId), 'completed');
     await fs.rm(meta.worktree, { recursive: true, force: true, maxRetries: 5 });
     const r = await e.perc(['clean', meta.runId]);
     assert.equal(r.err, '');
