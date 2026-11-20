@@ -28,7 +28,7 @@ test('readDone: absent, invalid (truncated JSON, unknown status), ok', async () 
   }
 });
 
-test('collectOutputs keys files by name, ignores empty files and symlinks, and reports duplicate keys', async () => {
+test('collectOutputs keys files by name, ignores empty files and subdirs, and reports duplicate keys', async () => {
   const d = await tmp();
   try {
     const out = path.join(d, 'steps', 's', '1', 'outputs');
@@ -37,16 +37,31 @@ test('collectOutputs keys files by name, ignores empty files and symlinks, and r
     await fs.writeFile(path.join(out, 'plan.md'), 'x');
     await fs.writeFile(path.join(out, 'empty.md'), '');
     await fs.writeFile(path.join(out, 'sub', 'n.md'), 'x');
-    try {
-      await fs.symlink(path.join(out, 'plan.md'), path.join(out, 'link.md'));
-    } catch {
-      // symlinks may be unavailable (Windows without privilege)
-    }
     assert.deepEqual(await collectOutputs(out, d), { outputs: { plan: 'steps/s/1/outputs/plan.md' } });
     await fs.writeFile(path.join(out, 'plan.txt'), 'y');
     assert.deepEqual(await collectOutputs(out, d), {
       error: 'outputs/plan.md and outputs/plan.txt both produce "plan"',
     });
+  } finally {
+    await rm(d);
+  }
+});
+
+test('collectOutputs ignores symlinks', async (t) => {
+  const d = await tmp();
+  try {
+    const out = path.join(d, 'steps', 's', '1', 'outputs');
+    await fs.mkdir(out, { recursive: true });
+    await fs.writeFile(path.join(out, 'plan.md'), 'x');
+    try {
+      await fs.symlink(path.join(out, 'plan.md'), path.join(out, 'link.md'));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EPERM') throw err;
+      t.skip('symlinks need privilege');
+      return;
+    }
+    assert.ok((await fs.lstat(path.join(out, 'link.md'))).isSymbolicLink());
+    assert.deepEqual(await collectOutputs(out, d), { outputs: { plan: 'steps/s/1/outputs/plan.md' } });
   } finally {
     await rm(d);
   }

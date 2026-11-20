@@ -33,6 +33,8 @@ export type HerdrRuntimeOptions = {
   space?: string;
   parentTerminal?: string;
   keepTerminals?: boolean;
+  /** node terminals survive perc exiting (hc --outlive-parent), so a paused run can adopt them; default true */
+  outliveParent?: boolean;
   pollMs?: number;
   waitTimeoutS?: number;
   transcriptLines?: number;
@@ -87,14 +89,14 @@ export class HerdrRuntime implements Runtime {
     const kind = effectiveKind(step.def);
     const isTerminal = kind === 'agent' || kind === 'script';
 
-    // an escalation (e.g. timeout_s) left an earlier attempt's terminal running: resume adopts the newest one
-    // (each escalation bumps the attempt, so the newest live one may be several attempts back)
+    // an escalation (timeout_s, invalid done.json) left an earlier attempt's terminal running: resume adopts
+    // the newest one (each escalation bumps the attempt, so the newest live one may be several attempts back)
     if (isTerminal) {
       for (let prev = attempt - 1; prev >= 1; prev--) {
         const prevIo = ioFor(o.runDir, step.id, prev);
         const prevName = terminalName(o.runId, o.ticket, step.id, prev);
         if ((await o.hc.get(prevName))?.state !== 'live') continue;
-        if ((await readDone(path.join(prevIo.stepDir, 'done.json'))).kind !== 'absent') continue;
+        if ((await readDone(path.join(prevIo.stepDir, 'done.json'))).kind === 'ok') continue;
         return this.#await(step, kind === 'agent', prevIo, prevName);
       }
     }
@@ -191,6 +193,11 @@ export class HerdrRuntime implements Runtime {
 
     // live: re-attach; finished with a done.json: collect it in the loop below
     const existing = await hc.get(n);
+    if (existing === undefined) {
+      // the step completed but perc stopped before the engine saved it: collect, don't relaunch
+      const done = await readDone(doneFile);
+      if (done.kind === 'ok') return this.#collect(done, io);
+    }
     let launch = existing === undefined;
     if (existing?.state === 'finished' && (await readDone(doneFile)).kind === 'absent') {
       await hc.rm(n);
@@ -203,7 +210,7 @@ export class HerdrRuntime implements Runtime {
         'percolator.worktree': o.worktree,
         ...(o.space !== undefined ? { 'herdr.space': o.space } : {}),
       };
-      const launched = await hc.run({ name: n, cwd: o.worktree, argv, labels });
+      const launched = await hc.run({ name: n, cwd: o.worktree, argv, labels, outliveParent: o.outliveParent ?? true });
       if (launched.firstMessageSent === false) {
         const transcript = await this.#saveTranscript(n, io);
         await hc.kill(n);
@@ -237,8 +244,12 @@ export class HerdrRuntime implements Runtime {
         break;
       }
       if (t.status === 'working' || t.status === null) {
+        const waitS = o.waitTimeoutS ?? 60;
+        const leftS = timeoutS === undefined ? waitS : Math.ceil((timeoutS * 1000 - (this.#now() - started)) / 1000);
         try {
-          await hc.wait(n, { timeoutS: o.waitTimeoutS ?? 60 });
+          const w = await hc.wait(n, { timeoutS: Math.max(1, Math.min(waitS, leftS)) });
+          // plain programs report no status, so wait can return at once: don't spin
+          if (w.status === null) await this.#sleep(o.pollMs ?? 2000);
         } catch (err) {
           // blocked, finished, timeout…: hc exits non-zero; the next get re-classifies the terminal
           if (!(err instanceof HcError)) throw err;
@@ -259,14 +270,7 @@ export class HerdrRuntime implements Runtime {
       }
     }
 
-    const collected = await collectOutputs(io.outputsDir, o.runDir);
-    let outcome: NodeOutcome;
-    if ('error' in collected) {
-      outcome = escalate(collected.error);
-    } else {
-      outcome = { status: result.status, outputs: collected.outputs };
-      if (result.status !== 'pass' && result.reason !== undefined) outcome.reason = result.reason;
-    }
+    const outcome = await this.#collect(result, io);
     await this.#saveTranscript(n, io);
     if (!o.keepTerminals) {
       await hc.kill(n);
@@ -275,9 +279,25 @@ export class HerdrRuntime implements Runtime {
     return outcome;
   }
 
+  async #collect(result: { status: NodeOutcome['status']; reason?: string }, io: StepIo): Promise<NodeOutcome> {
+    const collected = await collectOutputs(io.outputsDir, this.#o.runDir);
+    if ('error' in collected) return escalate(collected.error);
+    const outcome: NodeOutcome = { status: result.status, outputs: collected.outputs };
+    if (result.status !== 'pass' && result.reason !== undefined) outcome.reason = result.reason;
+    return outcome;
+  }
+
+  /** Best-effort: a terminal that has vanished leaves no transcript. */
   async #saveTranscript(n: string, io: StepIo): Promise<string> {
     const file = path.join(io.stepDir, 'transcript.txt');
-    await writeFileAtomic(file, await this.#o.hc.read(n, this.#o.transcriptLines ?? 10000));
+    let text: string;
+    try {
+      text = await this.#o.hc.read(n, this.#o.transcriptLines ?? 10000);
+    } catch (err) {
+      if (!(err instanceof HcError)) throw err;
+      return file;
+    }
+    await writeFileAtomic(file, text);
     return file;
   }
 }

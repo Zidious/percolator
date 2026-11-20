@@ -547,3 +547,72 @@ test('end-to-end: runGraph with HerdrRuntime and FakeHc completes a graph', asyn
   );
   assert.equal(e.hc.terminals.size, 0);
 });
+
+const taskArgv = (dir: string) => ['claude', '--', `Your task is in ${path.join(dir, 'task.md')}. Read it and follow it exactly.`];
+
+test('a live prior attempt whose done.json is invalid is adopted on resume once it is fixed', async () => {
+  const e = await env(async (t, n) => {
+    if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+  });
+  const dir1 = path.join(e.runDir, 'steps', 'plan', '1');
+  const prev = e.hc.add({ name: terminalName(RUN_ID, '#123', 'plan', 1), status: 'working', argv: taskArgv(dir1) });
+  await finishWith(e.hc, prev, '{"status":"maybe"}');
+  const out = await runtime(e).executeStep(step(), ctx({ plan: 1 }));
+  assert.deepEqual(out, { status: 'pass', outputs: { plan: 'steps/plan/1/outputs/plan.md' } });
+  assert.ok(!subs(e.hc).includes('run'));
+});
+
+test('a valid done.json of this attempt with no terminal is collected without launching', async () => {
+  const e = await env();
+  const dir = path.join(e.runDir, 'steps', 'plan', '1');
+  await fs.mkdir(path.join(dir, 'outputs'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'outputs', 'plan.md'), '# Plan');
+  await fs.writeFile(path.join(dir, 'done.json'), JSON.stringify({ status: 'fail', reason: 'nope' }));
+  const out = await runtime(e).executeStep(step(), ctx());
+  assert.deepEqual(out, { status: 'fail', outputs: { plan: 'steps/plan/1/outputs/plan.md' }, reason: 'nope' });
+  assert.deepEqual([...new Set(subs(e.hc))], ['get']);
+});
+
+test('node terminals outlive perc by default; outliveParent false turns it off', async () => {
+  for (const [over, expected] of [[{}, true], [{ outliveParent: false }, false]] as const) {
+    const e = await env(async (t, n) => {
+      if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+    });
+    await runtime(e, over).executeStep(step(), ctx());
+    const run = e.hc.calls.find((c) => c[0] === 'run')![1] as { outliveParent?: boolean };
+    assert.equal(run.outliveParent, expected);
+  }
+});
+
+test('a status-less terminal whose wait returns at once does not spin: it sleeps between polls', async () => {
+  const e = await env((t, n) => {
+    if (n === 4) {
+      t.state = 'finished';
+      t.exitCode = 0;
+    }
+  });
+  const s = step({ id: 'lint', name: 'lint', role: 'hook', slotLast: false, def: { command: ['node', 'x.js'] } as Step['def'] });
+  assert.deepEqual(await runtime(e).executeStep(s, ctx()), { status: 'pass', outputs: {} });
+  assert.equal(subs(e.hc).filter((c) => c === 'wait').length, 4);
+  assert.ok(e.sleeps.length >= 3, JSON.stringify(e.sleeps));
+});
+
+test('a terminal that vanishes during wait still returns its outcome; the transcript is skipped', async () => {
+  const e = await env((t) => {
+    e.hc.terminals.delete(t.name);
+  });
+  const s = step({ id: 'lint', name: 'lint', role: 'hook', slotLast: false, def: { command: ['node', 'x.js'] } as Step['def'] });
+  assert.deepEqual(await runtime(e).executeStep(s, ctx()), { status: 'fail', outputs: {}, reason: 'exit code null' });
+  await assert.rejects(fs.stat(path.join(e.runDir, 'steps', 'lint', '1', 'transcript.txt')), { code: 'ENOENT' });
+});
+
+test('wait never asks hc for longer than the time left before timeout_s', async () => {
+  const e = await env(async (t, n) => {
+    if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+  });
+  const rt = runtime(e, { waitTimeoutS: 60 });
+  const s = step({ def: { agent: 'claude', timeout_s: 5 } as Step['def'] });
+  assert.equal((await rt.executeStep(s, ctx())).status, 'pass');
+  const waits = e.hc.calls.filter((c) => c[0] === 'wait').map((c) => (c[2] as { timeoutS: number }).timeoutS);
+  assert.deepEqual(waits, [5]);
+});
