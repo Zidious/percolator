@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { ConfigError, loadFragment, loadUserConfig } from './config/load.ts';
-import { exists } from './util/fs.ts';
 import type { GraphFragment, GroundSpec } from './config/schema.ts';
 import { selectProfile } from './config/profile.ts';
 import { buildGraph } from './graph/build.ts';
@@ -27,6 +26,8 @@ export type ValidateOptions = {
   git?: Git;
   /** Test hook: loads the repo layer (default loadFragment). */
   loadRepoLayer?: (file: string) => Promise<GraphFragment>;
+  /** Test hook: stats the repo layer (default fs.lstat); only ENOENT means absent. */
+  lstatRepoLayer?: (file: string) => Promise<unknown>;
 };
 
 export type ValidateResult = {
@@ -79,7 +80,14 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
   const repoRoot = (await git.toplevel(opts.cwd)) ?? opts.cwd;
   const repoFile = path.join(repoRoot, '.percolator', 'percolator.yaml');
   let repoLayer: GraphFragment | undefined;
-  if (await exists(repoFile)) {
+  const repoPresent = await (opts.lstatRepoLayer ?? fs.lstat)(repoFile).then(
+    () => true,
+    (err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return false; // only ENOENT means absent
+      throw err;
+    },
+  );
+  if (repoPresent) {
     if (profile.trust_repo_config !== true) {
       throw new ConfigError(
         `${repoFile} exists, but profile "${name}" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,

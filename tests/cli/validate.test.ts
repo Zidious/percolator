@@ -98,6 +98,14 @@ test('the repo layer is found at the git toplevel when run from a subdirectory',
   }
 });
 
+test('a repo layer whose existence cannot be checked is an error, not an absent layer', async () => {
+  const denied = Object.assign(new Error('EACCES: permission denied, lstat'), { code: 'EACCES' });
+  const lstatRepoLayer = async () => {
+    throw denied;
+  };
+  await assert.rejects(validate({ ...trusted(), lstatRepoLayer }), (e) => e === denied);
+});
+
 test('a repo layer that cannot be read for a reason other than absence is an error', async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
   try {
