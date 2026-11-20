@@ -26,7 +26,16 @@ Executed with superpowers:subagent-driven-development: one implementer and one s
 | Final whole-branch review fix wave (I1–I6, M1–M3, M5) | applied | `da04289..` (the `fix(tracker)`/`fix(run)`/`fix(cli)` commits after `da04289`, plus this `docs(plan)` commit) |
 
 **Owner actions pending (resume here):**
-1. Run the four smokes from Task 22 Step 2 (`hc.smoke.ts --space <id>`, `--boot`, `--codex`, `gh.smoke.ts --issue <a real issue>`), then do Task 22 Step 3 from the results.
+1. Run the four smokes from Task 22 Step 2, then do Task 22 Step 3 from the results.
+   - `hc.smoke.ts --space <id>`: **passed 2026-11-20**.
+     - The script step passed with outputs `note`.
+     - `transcript.txt` was 0 bytes, as expected: the script prints nothing.
+     - The argv launch gave `firstMessageSent=undefined`, the same as the plan 2 result.
+     - The labelled terminal `perc-smoke-…-sp` was listed by `herdr-app ls` in the space.
+     - This closes the carry-over "the smoke `--space` branch has never run".
+   - `hc.smoke.ts --boot`: pending.
+   - `hc.smoke.ts --codex`: pending.
+   - `gh.smoke.ts --issue <a real issue>`: pending.
 2. Push `main` and watch the 3-OS CI matrix.
 
 **Rulings that bind later tasks:**
