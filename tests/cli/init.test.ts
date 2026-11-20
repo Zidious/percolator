@@ -48,6 +48,7 @@ test('init --force overwrites', async () => {
 test('init with a positional is a usage error', async () => {
   const r = await run(['init', 'extra', '--config', path.join(tmp, 'four.yaml')]);
   assert.equal(r.code, 2);
+  assert.ok(r.err.startsWith("Unexpected argument 'extra'"), r.err);
   assert.ok(r.err.includes('usage: perc'));
 });
 
