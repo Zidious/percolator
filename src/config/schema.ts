@@ -111,6 +111,12 @@ export function effectiveKind(n: NodeDef): 'agent' | 'builtin' | 'script' | 'gat
 export const BindingSchema = z.union([NodeDefSchema, z.array(NodeDefSchema)]);
 export type Binding = z.infer<typeof BindingSchema>;
 
+const RequiredNodeSchema = z
+  .strictObject({ name: z.string(), before: StageOrAllSchema.optional(), after: StageOrAllSchema.optional() })
+  .refine((r) => (r.before === undefined) !== (r.after === undefined), {
+    message: 'exactly one of "before" or "after" is required',
+  });
+
 export const RulesSchema = z.strictObject({
   require_skills: z
     .array(z.strictObject({ stage: z.union([StageSchema, z.literal('*')]), skills: z.array(z.string()) }))
@@ -118,7 +124,7 @@ export const RulesSchema = z.strictObject({
   allowed_agents: z.array(z.string()).optional(),
   allowed_models: z.array(z.string()).optional(),
   max_rounds_ceiling: z.number().int().min(1).optional(),
-  required_nodes: z.array(z.string()).optional(),
+  required_nodes: z.array(z.union([z.string(), RequiredNodeSchema])).optional(),
 });
 export type Rules = z.infer<typeof RulesSchema>;
 

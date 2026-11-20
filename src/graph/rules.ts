@@ -26,6 +26,13 @@ function entries(merged: Merged): Entry[] {
   return out;
 }
 
+/** `before <stage>` / `after <stage>`, or `unattached` for a node with no hook position. */
+function position(p: { before?: string; after?: string }): string {
+  if (p.before !== undefined) return `before ${p.before}`;
+  if (p.after !== undefined) return `after ${p.after}`;
+  return 'unattached';
+}
+
 const isAgent = (n: NodeDef) => effectiveKind(n) === 'agent';
 
 /**
@@ -132,13 +139,27 @@ export function checkRules(merged: Merged): Violation[] {
       }
     }
 
-    for (const name of rules.required_nodes ?? []) {
-      if (!(name in merged.nodes)) {
+    for (const req of rules.required_nodes ?? []) {
+      const name = typeof req === 'string' ? req : req.name;
+      const have = merged.nodes[name];
+      if (have === undefined) {
         out.push({
           rule: 'required_nodes',
           source,
           target: `nodes.${name}`,
           message: `node "${name}" is required by required_nodes (from ${source}) but is not defined`,
+        });
+        continue;
+      }
+      if (typeof req === 'string') continue;
+      const want = position(req);
+      const got = position(have.value);
+      if (want !== got) {
+        out.push({
+          rule: 'required_nodes',
+          source,
+          target: `nodes.${name}`,
+          message: `node "${name}" is required ${want} by required_nodes (from ${source}), but it is attached ${got}`,
         });
       }
     }

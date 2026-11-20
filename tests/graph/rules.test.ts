@@ -195,3 +195,23 @@ test('require_skills on a stage bound to a script is a violation', () => {
 test('require_skills "*" with no agent nodes anywhere is not a violation', () => {
   assert.deepEqual(checkRules(m({ review: { command: ['make', 'lint'] } }, [{ require_skills: [{ stage: '*', skills: ['s'] }] }])), []);
 });
+
+test('required_nodes with a position accepts the right hook', () => {
+  const v = checkRules(
+    m({}, [{ required_nodes: [{ name: 'threat-model', after: 'plan' }] }], { 'threat-model': { agent: 'claude', after: 'plan' } }),
+  );
+  assert.deepEqual(v, []);
+});
+
+test('required_nodes with a position rejects a moved hook', () => {
+  const v = checkRules(
+    m({}, [{ required_nodes: [{ name: 'threat-model', after: 'plan' }] }], { 'threat-model': { agent: 'claude', before: 'implement' } }),
+  );
+  assert.equal(v.length, 1);
+  assert.equal(v[0]!.rule, 'required_nodes');
+  assert.equal(v[0]!.target, 'nodes.threat-model');
+  assert.equal(
+    v[0]!.message,
+    'node "threat-model" is required after plan by required_nodes (from rules:0), but it is attached before implement',
+  );
+});

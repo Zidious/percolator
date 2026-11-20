@@ -199,3 +199,11 @@ test('ordinary node names are accepted', async () => {
     assert.deepEqual(Object.keys((await loadFragment(file)).nodes!), ['approve-groom', 'threat_model']);
   });
 });
+
+test('required_nodes object needs before or after', async () => {
+  await withYaml('rules:\n  required_nodes:\n    - name: x\n', async (file) => {
+    const err = await loadFragment(file).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.ok(err.message.includes('exactly one of "before" or "after" is required'));
+  });
+});
