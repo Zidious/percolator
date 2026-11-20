@@ -6,7 +6,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { promisify } from 'node:util';
-import { isDirectRun } from '../../src/cli.ts';
+import { isDirectRun } from '../../src/util/entry.ts';
 
 const execFileP = promisify(execFile);
 const cliTs = path.resolve(import.meta.dirname, '..', '..', 'src', 'cli.ts');
@@ -33,7 +33,7 @@ test('isDirectRun is true for the module path itself', () => {
 });
 
 test('isDirectRun is false for another file or a missing argv1', () => {
-  assert.equal(isDirectRun(path.join(import.meta.dirname, 'cli.test.ts'), pathToFileURL(cliTs).href), false);
+  assert.equal(isDirectRun(import.meta.filename, pathToFileURL(cliTs).href), false);
   assert.equal(isDirectRun(undefined, pathToFileURL(cliTs).href), false);
   assert.equal(isDirectRun(path.join(os.tmpdir(), 'does-not-exist-perc'), pathToFileURL(cliTs).href), false);
 });
@@ -51,4 +51,17 @@ test('perc --help works when invoked through a symlink', async (t) => {
     assert.match(stdout, /usage: perc/i);
   });
   if (!ran) t.skip('cannot create symlinks here');
+});
+
+test('pnpm schema (json-schema.ts) runs when invoked through a symlink', async (t) => {
+  const out = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'perc-schema-')), 's.json');
+  try {
+    const ran = await withSymlink(async (link) => {
+      await execFileP(process.execPath, [path.join(path.dirname(link), 'config', 'json-schema.ts'), out]);
+      assert.equal(JSON.parse(await fs.readFile(out, 'utf8')).type, 'object');
+    });
+    if (!ran) t.skip('cannot create symlinks here');
+  } finally {
+    await fs.rm(path.dirname(out), { recursive: true, force: true });
+  }
 });

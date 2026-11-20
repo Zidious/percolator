@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { isDirectRun } from '../util/entry.ts';
 import { UserConfigSchema } from './schema.ts';
 
 export async function writeJsonSchema(outFile: string): Promise<void> {
@@ -10,6 +10,7 @@ export async function writeJsonSchema(outFile: string): Promise<void> {
   await fs.writeFile(outFile, `${JSON.stringify(schema, null, 2)}\n`, 'utf8');
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await writeJsonSchema(path.resolve(import.meta.dirname, '..', '..', 'schema', 'percolator.schema.json'));
+// `pnpm schema [out]`; the default is the committed schema/percolator.schema.json
+if (isDirectRun(process.argv[1], import.meta.url)) {
+  await writeJsonSchema(process.argv[2] ?? path.resolve(import.meta.dirname, '..', '..', 'schema', 'percolator.schema.json'));
 }
