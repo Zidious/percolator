@@ -7,25 +7,26 @@ Read this before you change anything. Update it when you add a convention, a mod
 ## Commands
 
 ```sh
-npm ci              # install (lockfile is committed; CI uses npm ci)
-npm run typecheck   # tsc -p tsconfig.test.json (src + tests, no emit)
-npm test            # node --test (all tests under tests/**/*.test.ts)
-npm run test:watch  # node --test --watch
+pnpm install --frozen-lockfile   # install (pnpm-lock.yaml is committed; CI does the same)
+pnpm typecheck                   # tsc -p tsconfig.test.json (src + tests, no emit)
+pnpm test                        # node --test (all tests under tests/**/*.test.ts)
+pnpm test:watch                  # node --test --watch
 node --test tests/util/paths.test.ts   # focused run while iterating
-npm run build       # tsc → dist/ (src only)
-npm run schema      # regenerate schema/percolator.schema.json
+pnpm build                       # tsc → dist/ (src only)
+pnpm schema                      # regenerate schema/percolator.schema.json
 ```
 
 ## Hard rules
 
 - **Node ≥ 24 only.** `engines` is `>=24`; CI runs Node 24 on ubuntu, windows and macos.
+- **pnpm only.** Never `npm install` / `npx`; the lockfile is `pnpm-lock.yaml`. Install with `pnpm install --frozen-lockfile` locally and in CI. Only `pnpm add` / `pnpm remove` (with the owner's agreement) may change the lockfile.
 - **Minimal dependencies.** Runtime deps are `zod` and `yaml` only; dev deps are `typescript` and `@types/node` only. Prefer Node built-ins:
   - argv parsing → `node:util` `parseArgs`
   - child processes → `node:child_process` `execFile` / `spawn`
   - globbing → `path.posix.matchesGlob`
   - running TS → Node's native type stripping
 
-  Adding a dependency needs the owner's agreement.
+  Adding a dependency (`pnpm add` / `pnpm add -D`) needs the owner's agreement.
 - **Native TypeScript.** Relative imports carry the `.ts` extension (`import { x } from './util/paths.ts'`). `tsc` rewrites them to `.js` in `dist/`. Only erasable syntax: no `enum`, `namespace` or constructor parameter properties. Type-only imports use `import type`, because `verbatimModuleSyntax` is on.
 - **Cross-platform first.** Windows, Linux and macOS are all first-class, and the owner develops on Windows 11.
   - Build paths with `node:path`, never string concatenation.
@@ -56,7 +57,7 @@ npm run schema      # regenerate schema/percolator.schema.json
 | `src/util/fs.ts` | `writeFileAtomic`, `readYamlFile` (yaml Document + LineCounter for located errors) |
 | `src/config/schema.ts` | zod schemas + inferred types (`STAGES`, `Stage`, `GroundSpec`, `Mapping`, `NodeDef`, `Binding`, `Rules`, `GraphFragment`, `Profile`, `UserConfig`, `effectiveKind`). All objects are strict, so a new config key must be added here. |
 | `src/config/load.ts` | `loadUserConfig`, `loadFragment`, `ConfigError` (`file`, `line`, `path`). Reports **every** YAML or schema issue as `file:line: path: msg`, one per line. Union errors are flattened to the closest branch. |
-| `src/config/json-schema.ts` | `writeJsonSchema`. `npm run schema` regenerates the committed `schema/percolator.schema.json`; rerun it whenever `schema.ts` changes. |
+| `src/config/json-schema.ts` | `writeJsonSchema`. `pnpm schema` regenerates the committed `schema/percolator.schema.json`; rerun it whenever `schema.ts` changes. |
 | `src/config/profile.ts` | `normalizeRemote` (any git URL form → lower-case `host/owner/repo`, no user, port or `.git`), `selectProfile` (override, then the first profile whose `match.remote` / `match.path` glob matches; a `/**` pattern also matches its base dir) |
 | `src/grounds/git.ts` | `Git` interface + `cliGit` (execFile with argv arrays; `--` before positionals; values starting with `-` are rejected) |
 | `src/grounds/lock.ts` | `Lock`, `readLock`, `writeLock` (`percolator.lock`, YAML, written atomically) |
