@@ -115,6 +115,21 @@ describe('collectLayers', () => {
     );
   });
 
+  test('a repo-layer unknown ground names the repo layer', async () => {
+    const repo = 'repo:.percolator/percolator.yaml';
+    await assert.rejects(
+      collectLayers({ roots: [root([]), root([policy({ from: 'nope' })], repo)], grounds, configFile: 'config.yaml' }),
+      (e: unknown) => {
+        assert.ok(e instanceof ConfigError);
+        assert.equal(
+          e.message,
+          `config.yaml: ground "nope": unknown ground (mapping p.md, used by ${repo}); declare it under grounds: in config.yaml`,
+        );
+        return true;
+      },
+    );
+  });
+
   test('mappings carry the source of the layer that declared them', async () => {
     await fs.writeFile(path.join(tmp, 'company', 'percolator.yaml'), `use:\n${yamlUse(policy())}`);
     const { mappings } = await collectLayers({
@@ -166,6 +181,22 @@ describe('mergeMappings', () => {
       { source: 'b', mappings: [resolved(policy({ required: true }), 'b')] },
     ]);
     assert.equal(out.length, 1);
+  });
+
+  test('a lock restated identically still names the original locker', () => {
+    assert.throws(
+      () =>
+        mergeMappings([
+          { source: COMPANY, mappings: [resolved(policy({ required: true }), COMPANY)] },
+          { source: 'profile:p', mappings: [resolved(policy({ required: true }), 'profile:p')] },
+          { source: 'repo:r', mappings: [resolved(policy({ applies_to: ['review'], required: true }), 'repo:r')] },
+        ]),
+      (e: unknown) => {
+        assert.ok(e instanceof LockViolation);
+        assert.equal(e.message, `mapping team:p.md (policy) is locked by ${COMPANY}; repo:r cannot change it`);
+        return true;
+      },
+    );
   });
 
   test('an unlocked mapping is overridden in place by a later layer', () => {

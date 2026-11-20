@@ -46,7 +46,8 @@ export async function collectLayers(o: {
   }
 
   for (const root of o.roots) {
-    await walk(root.source, root.use, undefined);
+    // Only the profile (the user config itself) keeps the short unknown-ground message.
+    await walk(root.source, root.use, root.source.startsWith('profile:') ? undefined : root.source);
     layers.push({ source: root.source, fragment: root.fragment });
   }
   throwProblems(problems, o.configFile);
@@ -84,8 +85,9 @@ export function mergeMappings(perLayer: { source: string; mappings: ResolvedMapp
       const rel = (m.file ?? m.dir)!;
       const key = `${m.as}:${m.ground}:${rel}`;
       const earlier = out.get(key);
-      if (earlier?.required === true && !sameMapping(earlier, m)) {
-        throw new LockViolation(`mapping ${m.ground}:${rel} (${m.as})`, earlier.source, m.source);
+      if (earlier?.required === true) {
+        if (!sameMapping(earlier, m)) throw new LockViolation(`mapping ${m.ground}:${rel} (${m.as})`, earlier.source, m.source);
+        continue; // restated identically: the original locker stays the locker
       }
       out.set(key, m);
     }
