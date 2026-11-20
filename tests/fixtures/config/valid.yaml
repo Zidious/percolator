@@ -7,4 +7,4 @@ profiles:
         as: policy
     bindings:
       implement:
-        agent: coder
+        agent: claude

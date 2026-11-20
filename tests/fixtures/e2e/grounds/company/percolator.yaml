@@ -1,6 +1,6 @@
 bindings:
   review:
-    agent: reviewer
+    agent: claude
     skills: [code-review]
     max_rounds: 3
     required: true

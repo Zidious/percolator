@@ -49,16 +49,17 @@ test('validate prints rule violations and exits 1', async () => {
   const base = (await fs.readFile(fx('e2e/config.yaml'), 'utf8'))
     .replace('./grounds/company', abs('company'))
     .replace('./grounds/team', abs('team'));
-  await fs.writeFile(cfg, `${base}    rules:\n      allowed_agents: [groomer]\n`);
+  await fs.writeFile(cfg, `${base}    rules:\n      allowed_agents: [codex]\n`);
   const r = await run(['validate', '--config', cfg, '--profile', 'work']);
   assert.equal(r.code, 1);
   assert.equal(r.out, '');
   assert.equal(
     r.err,
     [
-      'bindings.plan uses agent "planner", but allowed_agents (from profile:work) allows: groomer',
-      'bindings.implement uses agent "coder", but allowed_agents (from profile:work) allows: groomer',
-      'bindings.review uses agent "reviewer", but allowed_agents (from profile:work) allows: groomer',
+      'bindings.groom uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      'bindings.plan uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      'bindings.implement uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      'bindings.review uses agent "claude", but allowed_agents (from profile:work) allows: codex',
       '',
     ].join('\n'),
   );

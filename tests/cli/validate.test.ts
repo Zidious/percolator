@@ -102,7 +102,7 @@ test('rule violations are thrown as one RuleViolationError against the config fi
     const abs = (name: string) => JSON.stringify(path.join(groundsDir, name));
     await fs.writeFile(
       cfg,
-      `${base.replace('./grounds/company', abs('company')).replace('./grounds/team', abs('team'))}    rules:\n      allowed_agents: [groomer]\n`,
+      `${base.replace('./grounds/company', abs('company')).replace('./grounds/team', abs('team'))}    rules:\n      allowed_agents: [codex]\n`,
     );
     const err = await validate({ ...opts(), configFile: cfg }).catch((e) => e);
     assert.ok(err instanceof RuleViolationError);
@@ -111,12 +111,13 @@ test('rule violations are thrown as one RuleViolationError against the config fi
     assert.equal(err.file, cfg);
     assert.deepEqual(
       err.violations.map((v) => v.target),
-      ['bindings.plan', 'bindings.implement', 'bindings.review'],
+      ['bindings.groom', 'bindings.plan', 'bindings.implement', 'bindings.review'],
     );
     assert.deepEqual(err.message.split('\n'), [
-      'bindings.plan uses agent "planner", but allowed_agents (from profile:work) allows: groomer',
-      'bindings.implement uses agent "coder", but allowed_agents (from profile:work) allows: groomer',
-      'bindings.review uses agent "reviewer", but allowed_agents (from profile:work) allows: groomer',
+      'bindings.groom uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      'bindings.plan uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      'bindings.implement uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      'bindings.review uses agent "claude", but allowed_agents (from profile:work) allows: codex',
     ]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -145,22 +146,22 @@ profiles:
       - { from: team, file: policies/sdlc.md, as: policy, applies_to: ${extra.applies ?? '["*"]'} }
     bindings:
       intake: { builtin: read-ticket }
-      groom: { agent: groomer, prompt: { from: team, file: policies/sdlc.md } }
-      plan: ${extra.plan ?? '{ agent: planner }'}
-      implement: ${extra.implement ?? '{ agent: coder }'}
+      groom: { agent: claude, prompt: { from: team, file: policies/sdlc.md } }
+      plan: ${extra.plan ?? '{ agent: claude }'}
+      implement: ${extra.implement ?? '{ agent: claude }'}
       deliver: { command: [echo, deliver] }
     nodes:
-      lint: ${extra.lint ?? '{ agent: linter, after: implement }'}
+      lint: ${extra.lint ?? '{ agent: claude, after: implement }'}
 `;
 
 test('every node prompt file is resolved inside its ground before start, all problems at once', async () => {
   await withConfig(
     (abs) =>
       promptConfig(abs, {
-        plan: '{ agent: planner, prompt: { from: company, file: prompts/missing.md } }',
+        plan: '{ agent: claude, prompt: { from: company, file: prompts/missing.md } }',
         implement:
-          '[{ agent: coder, prompt: { from: nope, file: x.md } }, { agent: coder2, prompt: { from: company, file: "../team/policies/sdlc.md" } }]',
-        lint: '{ agent: linter, after: implement, prompt: { from: team, file: "C:x" } }',
+          '[{ agent: claude, prompt: { from: nope, file: x.md } }, { agent: codex, prompt: { from: company, file: "../team/policies/sdlc.md" } }]',
+        lint: '{ agent: claude, after: implement, prompt: { from: team, file: "C:x" } }',
       }),
     async (cfg) => {
       const err = await validate({ ...opts(), configFile: cfg }).catch((e) => e);
@@ -178,10 +179,10 @@ test('every node prompt file is resolved inside its ground before start, all pro
 
 test('a valid prompt file passes', async () => {
   await withConfig(
-    (abs) => promptConfig(abs, { plan: '{ agent: planner, prompt: { from: company, file: percolator.yaml } }' }),
+    (abs) => promptConfig(abs, { plan: '{ agent: claude, prompt: { from: company, file: percolator.yaml } }' }),
     async (cfg) => {
       const r = await validate({ ...opts(), configFile: cfg });
-      assert.equal(r.graph.steps.find((s) => s.id === 'plan')!.def.agent, 'planner');
+      assert.equal(r.graph.steps.find((s) => s.id === 'plan')!.def.agent, 'claude');
     },
   );
 });
@@ -204,4 +205,18 @@ test('validate returns resolved grounds', async () => {
   const r = await validate(opts());
   assert.deepEqual(Object.keys(r.grounds).sort(), ['company', 'team']);
   assert.ok(path.isAbsolute(r.grounds.company!.dir));
+});
+test('validate rejects an unknown agent before any agent starts', async () => {
+  await withConfig(
+    (abs) =>
+      promptConfig(abs, {})
+        .replace('      - { from: company, file: percolator.yaml, as: graph }\n', '')
+        .replace('      deliver:', '      review: { agent: gemini }\n      deliver:'),
+    async (cfg) => {
+      await assert.rejects(
+        validate({ ...opts(), configFile: cfg }),
+        /bindings\.review: unknown agent "gemini" \(known: claude, codex, command\)/,
+      );
+    },
+  );
 });

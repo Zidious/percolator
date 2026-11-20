@@ -9,9 +9,9 @@ profiles:
       - { from: team, file: policies/sdlc.md, as: policy }
     bindings:
       intake: { builtin: read-ticket }
-      groom: { agent: groomer }
-      plan: { agent: planner }
-      implement: { agent: coder }
+      groom: { agent: claude }
+      plan: { agent: claude }
+      implement: { agent: claude }
       deliver: { command: [echo, deliver] }
     nodes:
       lint:

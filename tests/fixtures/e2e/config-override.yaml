@@ -7,8 +7,8 @@ profiles:
       - { from: company, file: percolator.yaml, as: graph }
     bindings:
       intake: { builtin: read-ticket }
-      groom: { agent: groomer }
-      plan: { agent: planner }
-      implement: { agent: coder }
-      review: { agent: sloppy }
+      groom: { agent: claude }
+      plan: { agent: claude }
+      implement: { agent: claude }
+      review: { agent: codex }
       deliver: { command: [echo, deliver] }

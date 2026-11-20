@@ -9,6 +9,7 @@ import { mergeLayers } from './graph/merge.ts';
 import { checkRules, RuleViolationError } from './graph/rules.ts';
 import { cliGit } from './grounds/git.ts';
 import type { Git } from './grounds/git.ts';
+import { checkAgents } from './adapters/check.ts';
 import { checkGraphReferences, fragmentLayers, resolveMappings } from './grounds/mappings.ts';
 import type { Layer, ResolvedMapping } from './grounds/mappings.ts';
 import type { ResolvedGround } from './grounds/resolve.ts';
@@ -86,6 +87,7 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
   if (violations.length > 0) throw new RuleViolationError(violations, opts.configFile);
   const graph = buildGraph(merged);
   await checkGraphReferences(graph, mappings, grounds, opts.configFile);
+  await checkAgents(graph, mappings, opts.configFile);
   return {
     profile: name,
     graph,

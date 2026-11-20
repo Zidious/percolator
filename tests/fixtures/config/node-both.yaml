@@ -1,5 +1,5 @@
 bindings:
   implement:
-    agent: coder
+    agent: claude
     before: plan
     after: plan
