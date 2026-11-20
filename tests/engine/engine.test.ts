@@ -311,3 +311,78 @@ test('a skipped once:true hook at the jump point still applies the pending jump'
   assert.equal(s.pendingJump, undefined);
   assert.equal(s.status, 'completed');
 });
+
+test('once hook escalate → resume re-runs it', async () => {
+  const g = graph({ chk: { before: 'deliver', kind: 'script', command: ['chk'], once: true } });
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ chk: [esc('hold')] }), save: saver().save });
+  assert.equal(s1.status, 'paused');
+  const rt2 = new FakeRuntime();
+  const s2 = await runGraph(g, { ...s1, status: 'running' }, { runtime: rt2, save: saver().save });
+  assert.deepEqual(rt2.calls, ['chk', 'deliver']);
+  assert.equal(s2.status, 'completed');
+});
+
+test('once hook with on_fail is re-run until it passes or hits its cap', async () => {
+  const g = graph({ chk: { before: 'deliver', kind: 'script', command: ['chk'], once: true, on_fail: { back_to: 'implement', max_rounds: 3 } } });
+  const rt1 = new FakeRuntime({ chk: [fail('c1'), pass()] });
+  const s1 = await runGraph(g, newState(init), { runtime: rt1, save: saver().save });
+  assert.equal(rt1.calls.filter((id) => id === 'chk').length, 2);
+  assert.equal(s1.status, 'completed');
+
+  const rt2 = new FakeRuntime({ chk: [fail('c1'), fail('c2'), fail('c3')] });
+  const s2 = await runGraph(g, newState(init), { runtime: rt2, save: saver().save });
+  assert.equal(rt2.calls.filter((id) => id === 'chk').length, 3);
+  assert.equal(s2.status, 'paused');
+  assert.match(s2.pausedReason!, /^cap: chk /);
+});
+
+test('review escalating without findings pauses with its reason, not a contract error', async () => {
+  const rt = new FakeRuntime({ review: [esc('need the owner')] });
+  const s = await runGraph(graph(), newState(init), { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'paused');
+  assert.equal(s.pausedReason, 'need the owner');
+  assert.equal(rt.calls.filter((id) => id === 'review').length, 1);
+  assert.equal(s.history.at(-1)!.status, 'escalate');
+});
+
+test('resuming at a qa cap and failing again keeps the counter and message at the cap', async () => {
+  const g = graph({ qa: { before: 'deliver', kind: 'script', command: ['qa'], on_fail: { back_to: 'implement', max_rounds: 2 } } });
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ qa: [fail('q1'), fail('q2')] }), save: saver().save });
+  assert.equal(s1.pausedReason, 'cap: qa reached 2 rounds');
+  const rt2 = new FakeRuntime({ qa: [fail('q3')] });
+  const s2 = await runGraph(g, { ...s1, status: 'running' }, { runtime: rt2, save: saver().save });
+  assert.deepEqual(rt2.calls, ['qa']);
+  assert.equal(s2.status, 'paused');
+  assert.equal(s2.pausedReason, 'cap: qa reached 2 rounds');
+  assert.equal(s2.rounds['qa'], 2);
+});
+
+test('a resumed run that completes has no pausedReason', async () => {
+  const s1 = await runGraph(graph(), newState(init), { runtime: new FakeRuntime({ groom: [esc('question')] }), save: saver().save });
+  assert.equal(s1.pausedReason, 'question');
+  const s2 = await runGraph(graph(), { ...s1, status: 'running' }, { runtime: new FakeRuntime(), save: saver().save });
+  assert.equal(s2.status, 'completed');
+  assert.ok(!('pausedReason' in s2));
+});
+
+test('a contract key that is present but not a string is a contract error', async () => {
+  const bad = { status: 'fail', outputs: { findings: undefined as unknown as string } } as const;
+  const rt = new FakeRuntime({ review: [bad, bad] });
+  const s = await runGraph(graph(), newState(init), { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'paused');
+  assert.equal(s.pausedReason, 'contract: review missing findings');
+  assert.equal(rt.calls.filter((id) => id === 'implement').length, 1);
+});
+
+test('a runtime mutating previousOutputs cannot change history', async () => {
+  const inner = new FakeRuntime();
+  const runtime = {
+    async executeStep(step: Parameters<FakeRuntime['executeStep']>[0], ctx: Parameters<FakeRuntime['executeStep']>[1]) {
+      const prev = ctx.previousOutputs['intake'];
+      if (prev) prev['ticket'] = 'tampered';
+      return inner.executeStep(step, ctx);
+    },
+  };
+  const s = await runGraph(graph(), newState(init), { runtime, save: saver().save });
+  assert.equal(s.history[0]!.outputs['ticket'], 'x');
+});

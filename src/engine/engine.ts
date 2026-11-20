@@ -12,20 +12,28 @@ export type RunDeps = {
 /**
  * Walk `graph` from `state.cursor` until the run completes, fails or pauses.
  * Mutates and returns `state`; saves after every recorded step. Never mutates `graph`.
+ *
+ * The caller owns `RunState`. A run paused at an escalating cap stays at the cap: to grant
+ * another round, the caller (`perc resume`) lowers `state.rounds[edgeId]` before calling
+ * `runGraph` again.
  */
 export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Promise<RunState> {
   const now = deps.now ?? (() => new Date().toISOString());
   const { steps } = graph;
   const indexOf = (stepId: string) => steps.findIndex((s) => s.id === stepId);
+  // per visit, not persisted: still bounded, since each fresh budget needs an owner resume
   let contractRetried = false;
+  if (state.status === 'running') delete state.pausedReason;
 
   while (state.status === 'running' && state.cursor < steps.length) {
     const i = state.cursor;
     const step = steps[i]!;
 
-    if (step.role === 'hook' && step.def.once === true && (state.executed[step.id] ?? 0) > 0) {
+    // a once hook is done only after it has passed; a fail or escalate must run it again
+    if (step.role === 'hook' && step.def.once === true && state.history.some((h) => h.stepId === step.id && h.status === 'pass')) {
       state.cursor = i + 1;
       settle(i);
+      // saved because the skipped hook can be the jump point, which changes cursor and rounds
       await deps.save(state);
       continue;
     }
@@ -112,7 +120,8 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
 
   /** Count a round on `edge` after the step at `i`: jump back, or apply the cap. */
   function decide(edge: BackEdge, i: number, findings: string | undefined): void {
-    const n = (state.rounds[edge.id] ?? 0) + 1;
+    // clamped: failing again after resuming at a cap does not count past it
+    const n = Math.min((state.rounds[edge.id] ?? 0) + 1, edge.maxRounds);
     state.rounds[edge.id] = n;
     if (n < edge.maxRounds) {
       state.cursor = edge.toStepIndex;
@@ -129,21 +138,22 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       // cursor stays on the step: resume re-runs it
       state.cursor = i;
       state.status = 'paused';
-      state.pausedReason = `cap: ${edge.id} reached ${n} rounds`;
+      state.pausedReason = `cap: ${edge.id} reached ${edge.maxRounds} rounds`;
     }
   }
 }
 
-/** Required outputs absent from a stage's last slot node (on pass; review on any status). */
+/** Required outputs absent from a stage's last slot node (on pass; review also on fail; escalate is exempt). */
 function missingOutputs(step: Step, outcome: NodeOutcome): string[] {
   if (!step.slotLast || step.stage === 'before-all' || step.stage === 'after-all') return [];
-  if (outcome.status !== 'pass' && step.stage !== 'review') return [];
-  return STAGE_CONTRACTS[step.stage].requiredOutputs.filter((k) => !Object.hasOwn(outcome.outputs, k));
+  if (outcome.status === 'escalate') return [];
+  if (outcome.status === 'fail' && step.stage !== 'review') return [];
+  return STAGE_CONTRACTS[step.stage].requiredOutputs.filter((k) => typeof outcome.outputs[k] !== 'string');
 }
 
-/** Outputs of each step's latest valid (non-contract_error) record. */
+/** Copies of each step's latest valid (non-contract_error) outputs: a runtime cannot alter history. */
 function latestOutputs(state: RunState): Record<string, Record<string, string>> {
   const out: Record<string, Record<string, string>> = {};
   for (const h of state.history) if (h.status !== 'contract_error') out[h.stepId] = h.outputs;
-  return out;
+  return structuredClone(out);
 }
