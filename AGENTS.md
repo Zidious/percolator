@@ -53,6 +53,7 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | `src/workspace/run-dir.ts` | `runDir`/`stepDir`; `materializeGrounds` copies policy/context mappings into `<runDir>/grounds/<ground>/…` (idempotent, the run record); `buildSkillPlugins(dir, mappings, grounds)` makes one Claude plugin per ground with `skills` mappings (call per step attempt with `mappingsFor`; duplicate skill names throw) and returns roots plus `plugins` mappings; `findSkill(ref, mappings)` → absolute `SKILL.md` for `ns:name`/bare names |
 | `src/runtime/task.ts` | `renderTemplate` (`{{ name }}`; unknown names throw `TemplateError`), `STAGE_BRIEFS`, `buildTask(TaskInput)` renders the agent task markdown (stage contract for slots, skills, policies, context, inputs as absolute paths in step order, workspace, outputs with `Required:`, done protocol, optional `hc send`) |
 | `src/runtime/outcome.ts` | `readDone(file)` (absent/invalid/ok, zod, unknown keys allowed); `collectOutputs(outputsDir, runDir)` keys non-empty regular files (lstat; symlinks/dirs ignored) by name without last extension to run-relative `/` paths; duplicate keys give an error |
+| `src/runtime/herdr-runtime.ts` | `terminalName(runId, ticket, stepId, attempt)` (`<ticket>_<step>_a<attempt>_<hash4>`, ≤32, deterministic for resume); `HerdrRuntime` (a `Runtime`): builtin/gate go to injected handlers; agent steps write `task.md` once and launch the adapter argv, script steps substitute `{run_dir}`/`{outputs_dir}`/`{worktree}`; hc terminal labelled `percolator.*` (+ `herdr.space`), re-attached when live, relaunched when finished without `done.json`; polls `done.json`, `onAttention` once per (kind, turn), `timeout_s`; saves `transcript.txt`, then kill+rm unless `keepTerminals`; prep errors escalate before any terminal starts. `sleep`/`now` injectable |
 | `src/config/schema.ts` | zod schemas + inferred types, `STAGES`, `effectiveKind`, `groundRecord`. All objects strict: new config keys must be added here. Agent nodes need `agent`; `agent`/`model`/`skill`/`skills` only on agent nodes. Node names `^[A-Za-z][A-Za-z0-9_-]*$` |
 | `src/config/load.ts` | `loadUserConfig`, `loadFragment`, `loadYaml(file, schema)`, `ConfigError`; reports every YAML/schema issue as `file:line: path: msg`, one per line |
 | `src/config/json-schema.ts` | `writeJsonSchema`; rerun `pnpm schema [out]` whenever `schema.ts` changes (refinements are not in the JSON schema) |
@@ -75,6 +76,7 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | `src/index.ts` | public exports |
 | `tests/helpers/fake-git.ts` | `FakeGit` (records `calls`; origin url kept in a marker file so it follows renames; `toplevels`, `cloneError`, `onClone` hooks); use instead of real git in unit tests |
 | `tests/helpers/fake-runtime.ts` | `FakeRuntime` (scripted outcomes per step id; records `calls`, rounds and `maxRoundsSeen`; `roundsOf`/`maxRoundsOf`) and the `pass`/`fail`/`esc` helpers |
+| `tests/helpers/fake-hc.ts` | `FakeHc` (in-memory `Hc`; records `calls`, `terminals` by name; `behave(t, waitCall)` runs on each `wait`; `add` pre-creates a terminal; `taskFileOf(t)`; `firstMessageSent`; live duplicate `run` throws `name_taken`) |
 | `tests/helpers/exec-recorder.ts` | `ExecRecorder` (records `calls`; `respond(match, result)`; unmatched calls resolve `{}`); never run the real `hc` or `herdr-app` in tests |
 | `.github/workflows/ci.yml` | test matrix, 3 OSes × Node 24 |
 
@@ -84,3 +86,4 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 - **Review loop:** default cap 3 rounds, then proceed to `deliver` with an unresolved-findings summary.
 - **Back-edges** (`on_fail: { back_to, max_rounds }`): at the cap the run escalates (pauses for the owner).
 - **Locks:** `required: true` locks always win over merge order. A locked target may only be restated deep-equal; otherwise `LockViolation` (`"<target> is locked by <src>; <attempt> cannot change it"`), naming the locking source.
+- **Completion** = `done.json` + `outputs/<key>.md` files; hc status is only for attention.
