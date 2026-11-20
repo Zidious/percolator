@@ -49,7 +49,8 @@ function lineAt(doc: Document, lineCounter: LineCounter, path: PropertyKey[]): n
   return undefined;
 }
 
-async function load<T extends z.ZodType>(file: string, schema: T): Promise<z.output<T>> {
+/** Read a YAML file and parse it with `schema`; every YAML or schema issue becomes one located line of a ConfigError. */
+export async function loadYaml<T extends z.ZodType>(file: string, schema: T): Promise<z.output<T>> {
   const { doc, lineCounter } = await readYamlFile(file);
   if (doc.errors.length > 0) {
     const found = doc.errors.map((e) => ({ message: e.message.split('\n')[0], line: e.linePos?.[0].line }));
@@ -80,9 +81,9 @@ async function load<T extends z.ZodType>(file: string, schema: T): Promise<z.out
 }
 
 export function loadUserConfig(file: string): Promise<UserConfig> {
-  return load(file, UserConfigSchema);
+  return loadYaml(file, UserConfigSchema);
 }
 
 export function loadFragment(file: string): Promise<GraphFragment> {
-  return load(file, GraphFragmentSchema);
+  return loadYaml(file, GraphFragmentSchema);
 }

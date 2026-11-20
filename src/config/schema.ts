@@ -13,17 +13,21 @@ export type GroundSpec = z.infer<typeof GroundSpecSchema>;
 // Ground names become cache directory names, so they must be safe path components.
 // Checked with superRefine rather than a key schema, so the message names the offending key.
 const GROUND_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-export const GroundsSchema = z.record(z.string(), GroundSpecSchema).superRefine((grounds, ctx) => {
-  for (const name of Object.keys(grounds)) {
-    if (!GROUND_NAME.test(name)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: [name],
-        message: 'ground names must start with a letter or digit and contain only letters, digits, ".", "_" and "-"',
-      });
+/** Record of anything keyed by ground name (config grounds, lock entries). */
+export function groundRecord<T extends z.ZodType>(value: T) {
+  return z.record(z.string(), value).superRefine((grounds, ctx) => {
+    for (const name of Object.keys(grounds)) {
+      if (!GROUND_NAME.test(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message: 'ground names must start with a letter or digit and contain only letters, digits, ".", "_" and "-"',
+        });
+      }
     }
-  }
-});
+  });
+}
+export const GroundsSchema = groundRecord(GroundSpecSchema);
 
 export const MappingKindSchema = z.enum(['policy', 'context', 'skills', 'plugins', 'prompt', 'graph']);
 export type MappingKind = z.infer<typeof MappingKindSchema>;

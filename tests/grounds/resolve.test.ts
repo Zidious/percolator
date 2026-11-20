@@ -47,6 +47,37 @@ describe('lock file', () => {
     await writeLock(lockFile, lock);
     assert.deepEqual(await readLock(lockFile), lock);
   });
+
+  test('a commit that is not a full hex sha is a located ConfigError in percolator.lock', async () => {
+    await fs.writeFile(lockFile, `version: 1\ngrounds:\n  company:\n    git: ${URL}\n    ref: main\n    commit: "../../../evil"\n`);
+    const err = await readLock(lockFile).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.equal(err.file, lockFile);
+    assert.equal(err.line, 6);
+    assert.equal(
+      err.message,
+      `${lockFile}:6: grounds.company.commit: commit must be a full 40- or 64-character lower-case hex sha`,
+    );
+  });
+
+  test('an unsafe ground name or wrong version in the lock is reported, every issue', async () => {
+    await fs.writeFile(lockFile, `version: 2\ngrounds:\n  "../x":\n    git: ${URL}\n    ref: main\n    commit: ${OLD}\n`);
+    const err = await readLock(lockFile).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.deepEqual(err.message.split('\n'), [
+      `${lockFile}:1: version: Invalid input: expected 1`,
+      `${lockFile}:4: grounds.../x: ground names must start with a letter or digit and contain only letters, digits, ".", "_" and "-"`,
+    ]);
+  });
+
+  test('malformed YAML in the lock is a located ConfigError', async () => {
+    await fs.writeFile(lockFile, 'version: 1\ngrounds:\n  company: [\n');
+    const err = await readLock(lockFile).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.equal(err.file, lockFile);
+    assert.equal(typeof err.line, 'number');
+    assert.ok(err.message.startsWith(`${lockFile}:${err.line}: `));
+  });
 });
 
 describe('resolveGrounds', () => {
