@@ -8,10 +8,11 @@ Read this before you change anything. Update it when you add a convention, a mod
 
 ```sh
 npm ci              # install (lockfile is committed; CI uses npm ci)
-npm run typecheck   # tsc --noEmit
+npm run typecheck   # tsc -p tsconfig.test.json (src + tests, no emit)
 npm test            # vitest run (all tests under tests/**/*.test.ts)
 npx vitest run tests/util   # focused run while iterating
 npm run build       # tsc → dist/ (src only)
+npm run schema      # regenerate schema/percolator.schema.json
 ```
 
 ## Hard rules
@@ -50,6 +51,9 @@ npm run build       # tsc → dist/ (src only)
 |---|---|
 | `src/util/paths.ts` | `expandHome`, `toPosix`, `samePath` |
 | `src/util/fs.ts` | `writeFileAtomic`, `readYamlFile` (yaml Document + LineCounter for located errors) |
+| `src/config/schema.ts` | zod schemas + inferred types (`STAGES`, `Stage`, `GroundSpec`, `Mapping`, `NodeDef`, `Binding`, `Rules`, `GraphFragment`, `Profile`, `UserConfig`, `effectiveKind`). All objects are strict, so a new config key must be added here. |
+| `src/config/load.ts` | `loadUserConfig`, `loadFragment`, `ConfigError` (`file`, `line`, `path`). Reports **every** YAML or schema issue as `file:line: path: msg`, one per line. Union errors are flattened to the closest branch. |
+| `src/config/json-schema.ts` | `writeJsonSchema`. `npm run schema` regenerates the committed `schema/percolator.schema.json`; rerun it whenever `schema.ts` changes. |
 | `src/engine/state.ts` | `RunState`, `newState`, `saveState`, `loadState` (`<dir>/state.json`, version 1) |
 | `src/index.ts` | public exports |
 | `.github/workflows/ci.yml` | test matrix (3 OSes × Node 24) |
