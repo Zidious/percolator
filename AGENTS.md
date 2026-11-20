@@ -30,7 +30,8 @@ npm run schema      # regenerate schema/percolator.schema.json
   - Build paths with `node:path`, never string concatenation.
   - `~` expands via `expandHome`, which handles both `~/` and `~\`.
   - Compare paths with `samePath` / `toPosix` from `src/util/paths.ts`.
-- **Never spawn through a shell.** Child processes take argv arrays; never `shell: true`, never a command string.
+- **Never spawn through a shell.** Child processes take argv arrays; never `shell: true`, never a command string. Put `--` before positional args that come from config (URLs, paths), and reject config values that start with `-`.
+- **Atomic dirs.** Materialise directories in a tmp sibling and rename them into place, so a crash never leaves a half-built dir that looks valid.
 - **Atomic writes.** Any file that must survive a crash, such as run state or `percolator.lock`, goes through `writeFileAtomic` (`src/util/fs.ts`).
 - **LF line endings** (`.gitattributes`: `* text=auto eol=lf`).
 - **Never commit `docs/` or `.superpowers/`.** Both are gitignored on purpose: the design spec and plans stay local. Never `git add -f` them.
@@ -54,6 +55,11 @@ npm run schema      # regenerate schema/percolator.schema.json
 | `src/config/schema.ts` | zod schemas + inferred types (`STAGES`, `Stage`, `GroundSpec`, `Mapping`, `NodeDef`, `Binding`, `Rules`, `GraphFragment`, `Profile`, `UserConfig`, `effectiveKind`). All objects are strict, so a new config key must be added here. |
 | `src/config/load.ts` | `loadUserConfig`, `loadFragment`, `ConfigError` (`file`, `line`, `path`). Reports **every** YAML or schema issue as `file:line: path: msg`, one per line. Union errors are flattened to the closest branch. |
 | `src/config/json-schema.ts` | `writeJsonSchema`. `npm run schema` regenerates the committed `schema/percolator.schema.json`; rerun it whenever `schema.ts` changes. |
+| `src/config/profile.ts` | `normalizeRemote` (any git URL form → lower-case `host/owner/repo`, no user, port or `.git`), `selectProfile` (override, then the first profile whose `match.remote` / `match.path` glob matches; a `/**` pattern also matches its base dir) |
+| `src/grounds/git.ts` | `Git` interface + `cliGit` (execFile with argv arrays; `--` before positionals; values starting with `-` are rejected) |
+| `src/grounds/lock.ts` | `Lock`, `readLock`, `writeLock` (`percolator.lock`, YAML, written atomically) |
+| `src/grounds/resolve.ts` | `resolveGrounds`. A locked commit with a cached dir makes no git calls (offline). Only `update: true` moves a pin. Materialisation is tmp dir + rename, and the mirror is keyed by url. |
+| `tests/helpers/fake-git.ts` | `FakeGit`: records `calls`, serves refs. Use it in unit tests instead of real git. |
 | `src/engine/state.ts` | `RunState`, `newState`, `saveState`, `loadState` (`<dir>/state.json`, version 1) |
 | `src/index.ts` | public exports |
 | `.github/workflows/ci.yml` | test matrix (3 OSes × Node 24) |
