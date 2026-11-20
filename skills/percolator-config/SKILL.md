@@ -7,7 +7,7 @@ description: Use when the user wants to create or modify a Percolator config (pe
 
 You help the user create or change a Percolator config file. Your only actions are running `perc` commands and editing the YAML config.
 
-References: `schema/percolator.schema.json` in the Percolator package lists every key. The design spec, sections 5.3 (node definition) and 5.6 (config, profiles, grounds), explains them.
+References: the Percolator package's `schema/percolator.schema.json` lists every key. The design spec, sections 5.3 (node definition) and 5.6 (config, profiles, grounds), explains them: https://github.com/Zidious/percolator/blob/main/docs/superpowers/specs/2026-11-20-percolator-design.md
 
 ## 1. Find the config
 

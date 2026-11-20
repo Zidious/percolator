@@ -103,7 +103,8 @@ contributors, runs on Windows via `npx`.
 
 The core defines a fixed set of **stages**. Each is a slot with an input/output contract. The
 config **must** bind every slot; `perc` refuses to start if one is unbound. The engine has
-**no built-in bindings**; `perc init` writes a recommended config into the user's file. Superpowers is one example among many.
+**no built-in bindings**; `perc init` writes a recommended config into the user's file. Superpowers
+is one example among many.
 
 | Stage | Input | Must produce |
 |---|---|---|

@@ -1,5 +1,5 @@
 # Percolator config, written by `perc init`. Edit freely.
-# Schema for editor completion and validation: schema/percolator.schema.json
+# Schema for editor completion and validation: the Percolator package's schema/percolator.schema.json
 version: 1
 profiles:
   default:
@@ -11,7 +11,7 @@ profiles:
         model: sonnet
         prompt: |
           Make the ticket unambiguous: state the goal, the acceptance criteria and anything out of scope.
-          Look at the repository before asking questions; list open questions explicitly instead of guessing.
+          Look at the repository first; list open questions in the groomed ticket instead of guessing.
       plan:
         agent: claude
         model: opus
@@ -30,5 +30,5 @@ profiles:
         max_rounds: 3
         prompt: |
           Review like a skeptical maintainer: correctness, missing tests, scope creep and unclear naming.
-          Report only findings you can point to in the diff, each with the file and what to change.
+          Report each finding with the file it concerns and what to change.
       deliver: { builtin: github.open_pr }

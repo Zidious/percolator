@@ -65,9 +65,9 @@ Detailed behaviour lives in the code and in `docs/superpowers/specs/2026-11-20-p
 | `src/adapters/` | agent argv builders (`claude`, `codex`, `command`) and config checks |
 | `src/workspace/` | worktrees, run/step dirs, ground materialization, skill plugins |
 | `src/util/` | paths, atomic fs, argv-only exec |
+| `src/validate.ts` | full config → graph validation pipeline |
 | `templates/` | recommended config written by `perc init` |
 | `skills/` | agent-agnostic skills shipped in the package |
-| `src/validate.ts` | full config → graph validation pipeline |
 | `tests/helpers/` | fakes and fixtures builders (see Testing conventions) |
 | `tests/smoke/` | manual smoke tests against the real `hc`/`gh`; never run by `pnpm test` |
 
