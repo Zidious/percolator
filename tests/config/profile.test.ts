@@ -101,7 +101,7 @@ test('no match errors and lists profiles', () => {
 });
 
 async function linked(t: TestContext): Promise<{ base: string; real: string; link: string } | undefined> {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-profile-'));
+  const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'perc-profile-')));
   t.after(() => fs.rm(base, { recursive: true, force: true, maxRetries: 5 }));
   const real = path.join(base, 'real');
   const link = path.join(base, 'link');
