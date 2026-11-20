@@ -542,10 +542,12 @@ test('grantRound lets exactly one more round run', async () => {
   assert.equal(grantRound(s1), 'qa');
   assert.equal(s1.rounds['qa'], 1);
   assert.ok(!('pausedCap' in s1));
+  assert.equal(s1.grantedRound, 'qa');
   s1.status = 'running';
   const rt2 = new FakeRuntime({ qa: [fail('q3'), fail('q4')] });
   const s2 = await runGraph(g, s1, { runtime: rt2, save: saver().save });
-  assert.deepEqual(rt2.calls, ['qa']);
+  assert.deepEqual(rt2.calls, ['implement', 'review', 'qa']);
+  assert.ok(!('grantedRound' in s2));
   assert.equal(s2.status, 'paused');
   assert.equal(s2.pausedCap, 'qa');
   assert.equal(s2.pausedReason, 'cap: qa reached 2 rounds');

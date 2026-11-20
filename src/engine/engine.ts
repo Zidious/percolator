@@ -29,6 +29,9 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
   if (state.pendingJump && !graph.backEdges[state.pendingJump.edgeId]) {
     throw new Error(`run state has a pending jump on back-edge "${state.pendingJump.edgeId}", which is not in this graph`);
   }
+  if (state.grantedRound !== undefined && !graph.backEdges[state.grantedRound]) {
+    throw new Error(`run state has a granted round on back-edge "${state.grantedRound}", which is not in this graph`);
+  }
   state.graphFingerprint = fingerprint;
   const indexOf = (stepId: string) => steps.findIndex((s) => s.id === stepId);
   // per visit, not persisted: still bounded, since each fresh budget needs an owner resume
@@ -36,6 +39,11 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
   if (state.status === 'running') {
     delete state.pausedReason;
     delete state.pausedCap;
+    if (state.grantedRound !== undefined) {
+      // the granted round starts at the loop start; the cap step is not re-run and rounds are already lowered
+      jumpBack(graph.backEdges[state.grantedRound]!);
+      delete state.grantedRound;
+    }
   }
   const persist = async (): Promise<void> => {
     const current = steps[state.cursor];
@@ -146,19 +154,23 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
     if (state.status === 'running' && state.cursor >= steps.length) state.status = 'completed';
   }
 
+  /** Move the cursor to the start of `edge`'s loop; loops nested inside the re-run span start fresh. */
+  function jumpBack(edge: BackEdge): void {
+    state.cursor = edge.toStepIndex;
+    const from = indexOf(edge.fromStepId);
+    for (const other of Object.values(graph.backEdges)) {
+      const t = indexOf(other.fromStepId);
+      if (other.id !== edge.id && t >= edge.toStepIndex && t < from) delete state.rounds[other.id];
+    }
+  }
+
   /** Count a round on `edge` after the step at `i`: jump back, or apply the cap. */
   function decide(edge: BackEdge, i: number, findings: string | undefined): void {
     // clamped: failing again after resuming at a cap does not count past it
     const n = Math.min((state.rounds[edge.id] ?? 0) + 1, edge.maxRounds);
     state.rounds[edge.id] = n;
     if (n < edge.maxRounds) {
-      state.cursor = edge.toStepIndex;
-      // loops nested inside the re-run span start fresh
-      const from = indexOf(edge.fromStepId);
-      for (const other of Object.values(graph.backEdges)) {
-        const t = indexOf(other.fromStepId);
-        if (other.id !== edge.id && t >= edge.toStepIndex && t < from) delete state.rounds[other.id];
-      }
+      jumpBack(edge);
     } else if (edge.onCap === 'continue') {
       state.unresolvedFindings = findings;
       state.cursor = i + 1;

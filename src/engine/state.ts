@@ -25,6 +25,8 @@ export type RunState = {
   pausedReason?: string;
   /** back-edge id when paused at an escalating cap; cleared when the run resumes */
   pausedCap?: string;
+  /** back-edge whose extra round `grantRound` granted; `runGraph` jumps to its loop start on resume, then clears it */
+  grantedRound?: string;
   /** id of the step at `cursor`; absent once the cursor is past the end */
   currentStep?: string;
   unresolvedFindings?: string;
@@ -52,18 +54,20 @@ function invalidField(s: Record<string, unknown>): string | undefined {
   if (s['graphFingerprint'] !== undefined && typeof s['graphFingerprint'] !== 'string') return 'graphFingerprint';
   if (s['pausedCap'] !== undefined && typeof s['pausedCap'] !== 'string') return 'pausedCap';
   if (s['currentStep'] !== undefined && typeof s['currentStep'] !== 'string') return 'currentStep';
+  if (s['grantedRound'] !== undefined && typeof s['grantedRound'] !== 'string') return 'grantedRound';
   return undefined;
 }
 
 /**
  * Grant one more round at the cap the run is paused on: lowers `rounds[pausedCap]` by one (floor 0),
- * clears `pausedCap` and returns the edge id; undefined when not paused at a cap. Leaves `status` to the caller.
+ * clears `pausedCap`, sets `grantedRound` and returns the edge id; undefined when not paused at a cap. Leaves `status` to the caller.
  */
 export function grantRound(state: RunState): string | undefined {
   const edgeId = state.pausedCap;
   if (edgeId === undefined) return undefined;
   state.rounds[edgeId] = Math.max((state.rounds[edgeId] ?? 0) - 1, 0);
   delete state.pausedCap;
+  state.grantedRound = edgeId;
   return edgeId;
 }
 
