@@ -82,6 +82,22 @@ test('ground with neither git nor path gives a readable message', async () => {
   });
 });
 
+test.each(['../x', 'a/b', '..\\x', '-x', '.hidden', 'a b'])('ground name %j is rejected as unsafe', async (name) => {
+  await withYaml(`version: 1\ngrounds:\n  ${JSON.stringify(name)}:\n    path: /tmp/x\nprofiles: {}\n`, async (file) => {
+    const err = await loadUserConfig(file).catch((e) => e);
+    expect(err).toBeInstanceOf(ConfigError);
+    expect(err.message).toContain(file);
+    expect(err.message).toMatch(/ground names? .*letters, digits, "\.", "_" and "-"/);
+    expect(err.message).not.toMatch(/Invalid input$/m);
+  });
+});
+
+test('ordinary ground names are accepted', async () => {
+  await withYaml('version: 1\ngrounds:\n  company-1.x_y:\n    path: /tmp/x\nprofiles: {}\n', async (file) => {
+    expect(Object.keys((await loadUserConfig(file)).grounds!)).toEqual(['company-1.x_y']);
+  });
+});
+
 test('every schema issue appears in the message, first one in line/path', async () => {
   await withYaml('nodes:\n  a:\n    agent: x\n    before: foo\n  b:\n    agent: y\n    after: bar\n', async (file) => {
     const err = await loadFragment(file).catch((e) => e);

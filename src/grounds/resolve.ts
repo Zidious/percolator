@@ -1,8 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ConfigError } from '../config/load.ts';
 import type { GroundSpec } from '../config/schema.ts';
-import { expandHome } from '../util/paths.ts';
+import { expandHome, toPosix } from '../util/paths.ts';
 import type { Git } from './git.ts';
 import { readLock, writeLock } from './lock.ts';
 
@@ -53,28 +54,29 @@ export async function resolveGrounds(
     const locked = lock.grounds[name];
     const pinned = locked && locked.git === spec.git && locked.ref === spec.ref && !opts.update ? locked : undefined;
     const mirror = path.join(cacheDir, `${name}.mirror`);
-    const materialise = async (commit: string): Promise<string> => {
-      const dir = path.join(cacheDir, `${name}@${commit.slice(0, 12)}`);
-      if (!(await exists(dir))) {
-        await git.clone(mirror, dir);
-        await git.checkout(dir, commit);
-      }
-      return dir;
-    };
+    const dirFor = (commit: string) => path.join(cacheDir, `${name}@${commit.slice(0, 12)}`);
 
     if (pinned) {
-      const dir = path.join(cacheDir, `${name}@${pinned.commit.slice(0, 12)}`);
+      const dir = dirFor(pinned.commit);
       if (!(await exists(dir))) {
-        await ensureMirror(git, spec.git, mirror);
-        await materialise(pinned.commit);
+        // Use the cached mirror as-is; only go to the network if it lacks the pinned commit.
+        const fresh = await openMirror(git, spec.git, mirror);
+        try {
+          await materialise(git, mirror, dir, pinned.commit);
+        } catch (err) {
+          if (fresh) throw err;
+          await git.fetch(mirror);
+          await materialise(git, mirror, dir, pinned.commit);
+        }
       }
       out[name] = { name, dir, commit: pinned.commit, source: spec };
       continue;
     }
 
-    await ensureMirror(git, spec.git, mirror);
+    if (!(await openMirror(git, spec.git, mirror))) await git.fetch(mirror);
     const commit = await git.resolveRef(mirror, spec.ref);
-    const dir = await materialise(commit);
+    const dir = dirFor(commit);
+    await materialise(git, mirror, dir, commit);
     next.grounds[name] = { git: spec.git, ref: spec.ref, commit };
     out[name] = { name, dir, commit, source: spec };
   }
@@ -83,8 +85,31 @@ export async function resolveGrounds(
   return out;
 }
 
-async function ensureMirror(git: Git, url: string, mirror: string): Promise<void> {
+function sameUrl(a: string | undefined, b: string): boolean {
+  return a !== undefined && (a === b || toPosix(a) === toPosix(b));
+}
+
+/** Make sure `mirror` is a mirror of `url`. Returns true when it was cloned just now. */
+async function openMirror(git: Git, url: string, mirror: string): Promise<boolean> {
   await fs.mkdir(path.dirname(mirror), { recursive: true });
-  if (await exists(mirror)) await git.fetch(mirror);
-  else await git.clone(url, mirror, { mirror: true });
+  if (await exists(mirror)) {
+    if (sameUrl(await git.remoteUrl(mirror), url)) return false;
+    await fs.rm(mirror, { recursive: true, force: true }); // ground now points elsewhere
+  }
+  await git.clone(url, mirror, { mirror: true });
+  return true;
+}
+
+/** Build `dir` at `commit` in a temp sibling and rename it in, so a partial checkout never looks pinned. */
+async function materialise(git: Git, mirror: string, dir: string, commit: string): Promise<void> {
+  if (await exists(dir)) return;
+  const tmp = `${dir}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
+  try {
+    await git.clone(mirror, tmp);
+    await git.checkout(tmp, commit);
+    await fs.rename(tmp, dir);
+  } catch (err) {
+    await fs.rm(tmp, { recursive: true, force: true });
+    throw err;
+  }
 }

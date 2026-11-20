@@ -28,6 +28,7 @@ beforeEach(async () => {
 });
 
 const opts = () => ({ lockFile, cacheDir, git: fake });
+const norm = (calls: string[]) => calls.map((c) => c.replace(/\.tmp-[\w-]+/g, '.tmp'));
 const lockedOld = () =>
   writeLock(lockFile, { version: 1, grounds: { company: { git: URL, ref: 'main', commit: OLD } } });
 
@@ -59,7 +60,11 @@ describe('resolveGrounds', () => {
     const r = await resolveGrounds(specs, opts());
     const mirror = path.join(cacheDir, 'company.mirror');
     const dir = path.join(cacheDir, 'company@abc123def456');
-    expect(fake.calls).toEqual([`clone ${URL} ${mirror}`, `clone ${mirror} ${dir}`, `checkout ${dir} ${OLD}`]);
+    expect(norm(fake.calls)).toEqual([
+      `clone --mirror ${URL} ${mirror}`,
+      `clone ${mirror} ${dir}.tmp`,
+      `checkout ${dir}.tmp ${OLD}`,
+    ]);
     expect(r.company!.dir).toBe(dir);
   });
 
@@ -74,10 +79,10 @@ describe('resolveGrounds', () => {
   test('existing mirror is fetched, not re-cloned', async () => {
     fake.setRef('main', OLD);
     const mirror = path.join(cacheDir, 'company.mirror');
-    await fs.mkdir(mirror);
+    await fake.seedMirror(mirror, URL);
     await resolveGrounds(specs, opts());
-    expect(fake.calls[0]).toBe(`fetch ${mirror}`);
-    expect(fake.calls).not.toContain(`clone ${URL} ${mirror}`);
+    expect(fake.calls).toContain(`fetch ${mirror}`);
+    expect(fake.calls).not.toContain(`clone --mirror ${URL} ${mirror}`);
   });
 
   test('moved branch keeps locked commit until update', async () => {
@@ -123,5 +128,47 @@ describe('resolveGrounds', () => {
     const p = resolveGrounds({ mine: { path: '~/x' } }, { ...opts(), home });
     await expect(p).rejects.toThrow(/ground "mine": path ~\/x does not exist/);
     await expect(p).rejects.toBeInstanceOf(ConfigError);
+  });
+
+  test('failed checkout leaves no final dir and no tmp dir behind', async () => {
+    fake.setRef('main', OLD);
+    fake.checkoutError = new Error('boom');
+    await expect(resolveGrounds(specs, opts())).rejects.toThrow(/boom/);
+    const entries = await fs.readdir(cacheDir);
+    expect(entries).not.toContain('company@abc123def456');
+    expect(entries.filter((e) => e.includes('.tmp'))).toEqual([]);
+    expect((await readLock(lockFile)).grounds).toEqual({});
+  });
+
+  test('changing the git url re-creates the mirror from the new url', async () => {
+    const mirror = path.join(cacheDir, 'company.mirror');
+    await fake.seedMirror(mirror, 'https://old.example.com/company.git');
+    fake.setRef('main', NEW);
+    await resolveGrounds(specs, opts());
+    expect(fake.calls).toContain(`clone --mirror ${URL} ${mirror}`);
+    expect(fake.calls).not.toContain(`fetch ${mirror}`);
+    expect(fake.urls.get(mirror)).toBe(URL);
+  });
+
+  test('pinned ground with missing dir uses an existing mirror without fetching', async () => {
+    await lockedOld();
+    const mirror = path.join(cacheDir, 'company.mirror');
+    await fake.seedMirror(mirror, URL);
+    const r = await resolveGrounds(specs, opts());
+    expect(fake.calls.filter((c) => c.startsWith('fetch'))).toEqual([]);
+    expect((await fs.stat(r.company!.dir)).isDirectory()).toBe(true);
+  });
+
+  test('pinned ground fetches only when the mirror lacks the commit', async () => {
+    await lockedOld();
+    const mirror = path.join(cacheDir, 'company.mirror');
+    await fake.seedMirror(mirror, URL);
+    fake.missing.add(OLD);
+    const r = await resolveGrounds(specs, opts());
+    const kinds = norm(fake.calls).map((c) => c.split(' ')[0]);
+    expect(kinds.filter((k) => k === 'fetch')).toHaveLength(1);
+    expect(kinds.lastIndexOf('checkout')).toBeGreaterThan(kinds.indexOf('fetch'));
+    expect((await fs.stat(r.company!.dir)).isDirectory()).toBe(true);
+    expect((await fs.readdir(cacheDir)).filter((e) => e.includes('.tmp'))).toEqual([]);
   });
 });

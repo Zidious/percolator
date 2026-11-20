@@ -19,19 +19,25 @@ async function git(args: string[], cwd?: string): Promise<string> {
     const { stdout } = await execFileP('git', args, cwd === undefined ? {} : { cwd });
     return stdout.trim();
   } catch (err) {
-    const stderr = (err as { stderr?: string }).stderr?.trim() ?? (err as Error).message;
+    const stderr = (err as { stderr?: string }).stderr?.trim() || (err as Error).message;
     throw new Error(`git ${args.join(' ')} failed: ${stderr}`);
   }
 }
 
+// `--` cannot protect rev arguments, so a value that git would read as an option is refused.
+function assertNotOption(label: string, value: string): void {
+  if (value.startsWith('-')) throw new Error(`git ${label} must not start with "-": ${value}`);
+}
+
 export const cliGit: Git = {
   async clone(url, dir, opts) {
-    await git(['clone', '--quiet', ...(opts?.mirror ? ['--mirror'] : []), url, dir]);
+    await git(['clone', '--quiet', ...(opts?.mirror ? ['--mirror'] : []), '--', url, dir]);
   },
   async fetch(dir) {
     await git(['fetch', '--quiet', '--prune', 'origin'], dir);
   },
   async resolveRef(dir, ref) {
+    assertNotOption('ref', ref);
     for (const candidate of [`origin/${ref}`, ref]) {
       try {
         return await git(['rev-parse', '--verify', '--quiet', `${candidate}^{commit}`], dir);
@@ -42,6 +48,7 @@ export const cliGit: Git = {
     throw new Error(`git: cannot resolve ref "${ref}" in ${dir}`);
   },
   async checkout(dir, commit) {
+    assertNotOption('commit', commit);
     await git(['checkout', '--quiet', '--detach', commit], dir);
   },
   async remoteUrl(cwd) {

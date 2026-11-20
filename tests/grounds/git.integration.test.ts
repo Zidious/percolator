@@ -51,6 +51,17 @@ test('cliGit clones a real bare repo, pins it, and moves only on update', async 
   expect((await fs.readFile(path.join(u.company!.dir, 'policy.md'), 'utf8')).trim()).toBe('two');
 });
 
+test('a url that looks like an option is treated as a repository, not a flag', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-git-'));
+  await expect(cliGit.clone('--upload-pack=echo', path.join(tmp, 'x'))).rejects.toThrow(/does not exist/);
+});
+
+test('refs and commits starting with a dash are rejected before reaching git', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-git-'));
+  await expect(cliGit.checkout(tmp, '--orphan=x')).rejects.toThrow(/must not start with "-"/);
+  await expect(cliGit.resolveRef(tmp, '-x')).rejects.toThrow(/must not start with "-"/);
+});
+
 test('remoteUrl is undefined without an origin or outside a repo, and the url otherwise', async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-git-'));
   const repo = path.join(tmp, 'repo');
