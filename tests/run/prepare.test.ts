@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
 import { loadState } from '../../src/engine/state.ts';
@@ -11,79 +10,12 @@ import type { DriverDeps } from '../../src/run/prepare.ts';
 import { FakeHerdrApp } from '../helpers/fake-app.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { FakeHc } from '../helpers/fake-hc.ts';
-import { git, makeRepo } from '../helpers/git-repo.ts';
+import { git } from '../helpers/git-repo.ts';
+import { ENTRY, NOW, setupRunEnv } from '../helpers/run-env.ts';
+import type { RunEnv } from '../helpers/run-env.ts';
 
-const NOW = new Date('2026-03-04T05:06:07Z');
-const ENTRY = path.resolve('/opt/perc/dist/cli.js');
-
-type Env = {
-  root: string;
-  home: string;
-  configFile: string;
-  deps: DriverDeps & { hc: FakeHc; app: FakeHerdrApp };
-  writeConfig(extra?: string): Promise<void>;
-  cleanup(): Promise<void>;
-};
-
-/**
- * A repo whose origin url is `github.com/o/r.git`: a relative path to a bare repo inside the clone,
- * so `normalizeRemote` gives `github.com/o/r` and `git fetch origin` still works offline.
- */
-async function setup(): Promise<Env> {
-  const repo = await makeRepo();
-  const bare = path.join(repo.root, 'github.com', 'o', 'r.git');
-  await fs.mkdir(path.dirname(bare), { recursive: true });
-  await fs.rename(repo.origin, bare);
-  await git(repo.root, 'remote', 'set-url', 'origin', 'github.com/o/r.git');
-  const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'perc-home-')));
-  const cfgDir = path.join(home, 'cfg');
-  await fs.mkdir(path.join(cfgDir, 'team', 'policies'), { recursive: true });
-  await fs.writeFile(path.join(cfgDir, 'team', 'policies', 'sdlc.md'), 'be careful\n');
-  const configFile = path.join(cfgDir, 'config.yaml');
-  const writeConfig = (extra = '') =>
-    fs.writeFile(
-      configFile,
-      [
-        'version: 1',
-        'grounds:',
-        '  team: { path: ./team }',
-        'profiles:',
-        '  work:',
-        '    use:',
-        '      - { from: team, file: policies/sdlc.md, as: policy }',
-        '    bindings:',
-        '      intake: { builtin: github.intake }',
-        '      groom: { command: [echo, groom] }',
-        '      plan: { command: [echo, plan] }',
-        '      implement: { command: [echo, implement] }',
-        '      review: { command: [echo, review] }',
-        '      deliver: { builtin: github.open_pr }',
-        extra,
-        '',
-      ].join('\n'),
-    );
-  await writeConfig();
-  const deps = {
-    hc: new FakeHc(),
-    app: new FakeHerdrApp(),
-    gh: new FakeGh(),
-    home,
-    now: () => NOW,
-    out: () => {},
-    entry: ENTRY,
-  };
-  return {
-    root: repo.root,
-    home,
-    configFile,
-    deps,
-    writeConfig,
-    cleanup: async () => {
-      await repo.cleanup();
-      await fs.rm(home, { recursive: true, force: true, maxRetries: 5 });
-    },
-  };
-}
+type Env = RunEnv;
+const setup = () => setupRunEnv();
 
 const exists = (p: string) => fs.lstat(p).then(() => true, () => false);
 

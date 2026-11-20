@@ -107,6 +107,15 @@ function previousStepOutputs(step: Step, ctx: RunContext): Record<string, string
 }
 
 const escalate = (reason: string): NodeOutcome => ({ status: 'escalate', outputs: {}, reason });
+
+/** A rejected `sleep` means the driver is being stopped: it propagates instead of escalating. */
+class Aborted {
+  readonly cause: unknown;
+  constructor(cause: unknown) {
+    this.cause = cause;
+  }
+}
+
 const msg = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export function githubGate(o: {
@@ -212,7 +221,9 @@ export function githubGate(o: {
           }
           if (decision) break;
         }
-        await sleep(pollMs);
+        await sleep(pollMs).catch((err: unknown) => {
+          throw new Aborted(err);
+        });
       }
 
       await fs.rm(waitingPath, { force: true });
@@ -232,6 +243,7 @@ export function githubGate(o: {
       if ('error' in collected) return escalate(`gate ${step.id}: ${collected.error}`);
       return { status, outputs: collected.outputs };
     } catch (err) {
+      if (err instanceof Aborted) throw err.cause;
       return escalate(`gate ${step.id}: ${msg(err)}`);
     } finally {
       if (wroteWaiting) await fs.rm(waitingPath, { force: true }).catch(() => {});

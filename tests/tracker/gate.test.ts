@@ -193,6 +193,22 @@ test('a crash after posting reuses the existing comment', async () => {
   }
 });
 
+test('an error from sleep aborts the gate (a killed driver), keeping gate.json for the resume', async () => {
+  const e = await setup();
+  try {
+    e.onSleep.fn = () => {
+      throw new Error('driver killed');
+    };
+    const gate = githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts });
+    await assert.rejects(gate(e.step, e.ctx, e.io), { message: 'driver killed' });
+    assert.equal(e.gh.calls.filter((c) => c.method === 'comment').length, 1);
+    const g = JSON.parse(await fsp.readFile(path.join(e.io.stepDir, 'gate.json'), 'utf8'));
+    assert.equal(g.commentUrl, (await e.gh.issue(REPO, 7)).comments[0]!.url);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
 test('a local decision wins without the tracker', async () => {
   const e = await setup();
   try {
