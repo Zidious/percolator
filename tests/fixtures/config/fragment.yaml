@@ -1,0 +1,4 @@
+nodes:
+  lint:
+    command: [npm, run, lint]
+    after: implement

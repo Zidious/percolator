@@ -1,0 +1,8 @@
+version: 1
+profiles:
+  work:
+    use:
+      - from: base
+        file: x.md
+        dir: y
+        as: policy

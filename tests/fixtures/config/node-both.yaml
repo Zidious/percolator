@@ -1,0 +1,5 @@
+bindings:
+  implement:
+    agent: coder
+    before: plan
+    after: plan

@@ -1,0 +1,10 @@
+version: 1
+profiles:
+  work:
+    use:
+      - from: base
+        file: policy.md
+        as: policy
+    bindings:
+      implement:
+        agent: coder

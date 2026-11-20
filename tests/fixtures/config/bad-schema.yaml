@@ -1,0 +1,7 @@
+version: 1
+profiles:
+  work:
+    use:
+      - from: base
+        as: polcy
+        file: x.md
