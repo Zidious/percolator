@@ -74,13 +74,17 @@ function ioFor(runDir: string, stepId: string, attempt: number): StepIo {
 
 const escalate = (reason: string): NodeOutcome => ({ status: 'escalate', outputs: {}, reason });
 
-/** A terminal not labelled with this run is never re-attached to, adopted, killed or removed. */
-function notOurs(t: Terminal, n: string, runId: string): NodeOutcome | undefined {
+/** Why terminal `n`, labelled `percolator.run=<owner>`, is left alone; undefined when it belongs to `runId`. */
+export function foreignTerminal(t: Terminal, n: string, runId: string): string | undefined {
   const owner = t.labels['percolator.run'];
   if (owner === runId) return undefined;
-  return escalate(
-    `terminal ${n} is not part of run ${runId} (percolator.run=${owner ?? 'none'}); remove it with hc rm or rename it, then resume`,
-  );
+  return `terminal ${n} is not part of run ${runId} (percolator.run=${owner ?? 'none'}); remove it with hc rm or rename it, then resume`;
+}
+
+/** A terminal not labelled with this run is never re-attached to, adopted, killed or removed. */
+function notOurs(t: Terminal, n: string, runId: string): NodeOutcome | undefined {
+  const reason = foreignTerminal(t, n, runId);
+  return reason === undefined ? undefined : escalate(reason);
 }
 
 /**
