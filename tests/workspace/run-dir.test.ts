@@ -170,3 +170,19 @@ test('materializeGrounds copies a whole dir even when a file inside it is mapped
   assert.deepEqual((await fs.readdir(out[1]!.runPath)).sort(), ['a.md', 'b.md']);
   assert.equal(await fs.readFile(out[0]!.runPath, 'utf8'), 'A');
 });
+
+test("a sub-dir mapping listed before its parent keeps the parent's other files", async (t) => {
+  const base = await tmp(t);
+  const g = ground('g', path.join(base, 'g'));
+  await put(path.join(g.dir, 'policies', 'top.md'), 'T');
+  await put(path.join(g.dir, 'policies', 'sub', 'a.md'), 'A');
+  const ms = [mapping(g, 'policy', 'policies/sub', 'dir'), mapping(g, 'policy', 'policies', 'dir')];
+  const run = path.join(base, 'run');
+  const out = await materializeGrounds(run, ms, { g });
+  assert.deepEqual(out.map((m) => m.runPath), [
+    path.join(run, 'grounds', 'g', 'policies', 'sub'),
+    path.join(run, 'grounds', 'g', 'policies'),
+  ]);
+  assert.equal(await fs.readFile(path.join(run, 'grounds', 'g', 'policies', 'top.md'), 'utf8'), 'T');
+  assert.equal(await fs.readFile(path.join(run, 'grounds', 'g', 'policies', 'sub', 'a.md'), 'utf8'), 'A');
+});

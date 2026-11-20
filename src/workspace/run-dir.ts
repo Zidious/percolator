@@ -5,6 +5,7 @@ import type { ResolvedMapping } from '../grounds/mappings.ts';
 import type { ResolvedGround } from '../grounds/resolve.ts';
 import { copyContained } from '../util/copy.ts';
 import { exists, renameRetry, writeFileAtomic } from '../util/fs.ts';
+import { toPosix } from '../util/paths.ts';
 
 export type MaterializedMapping = ResolvedMapping & { runPath: string };
 
@@ -37,6 +38,7 @@ function groundOf(m: ResolvedMapping, grounds: Record<string, ResolvedGround>): 
  * atomic, so an existing one is complete and is reused. Other kinds are used where they are.
  * `dir` mappings are copied before `file` mappings: a file inside a copied dir is the same content
  * from the same pinned ground and is reused, whereas a file copied first would hide the rest of its dir.
+ * Dirs go parents first (by depth, stable) for the same reason.
  * The result keeps the mappings' order.
  */
 export async function materializeGrounds(
@@ -46,7 +48,9 @@ export async function materializeGrounds(
 ): Promise<MaterializedMapping[]> {
   const out: MaterializedMapping[] = mappings.map((m) => ({ ...m, runPath: m.absPath }));
   const copied = out.filter((m) => m.as === 'policy' || m.as === 'context');
-  for (const m of [...copied.filter((m) => m.dir !== undefined), ...copied.filter((m) => m.dir === undefined)]) {
+  const depth = (m: ResolvedMapping): number => toPosix(m.dir!).split('/').filter(Boolean).length;
+  const dirs = copied.filter((m) => m.dir !== undefined).sort((a, b) => depth(a) - depth(b));
+  for (const m of [...dirs, ...copied.filter((m) => m.dir === undefined)]) {
     m.runPath = path.join(dir, 'grounds', m.ground, (m.file ?? m.dir)!);
     if (await exists(m.runPath)) continue;
     try {
