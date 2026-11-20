@@ -78,7 +78,7 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | `tests/helpers/fake-runtime.ts` | `FakeRuntime` (scripted outcomes per step id; records `calls`, rounds and `maxRoundsSeen`; `roundsOf`/`maxRoundsOf`) and the `pass`/`fail`/`esc` helpers |
 | `tests/helpers/fake-hc.ts` | `FakeHc` (in-memory `Hc`; records `calls`, `terminals` by name; `behave(t, waitCall)` runs on each `wait`, which then rejects `finished` (11) / `blocked` (9) like the real client; `add` pre-creates a terminal; `taskFileOf(t)`; `firstMessageSent`; live duplicate `run` throws `name_taken`) |
 | `tests/helpers/exec-recorder.ts` | `ExecRecorder` (records `calls`; `respond(match, result)`; unmatched calls resolve `{}`); never run the real `hc` or `herdr-app` in tests |
-| `tests/source-files.test.ts` | walks `src/` and `tests/`: no file may contain a NUL byte (git would treat it as binary and skip EOL normalization); write ` ` escapes |
+| `tests/source-files.test.ts` | walks the repo root files, `src/`, `tests/` and `schema/`: no file may contain a NUL byte (git would treat it as binary and skip EOL normalization); write `\0` escapes |
 | `.github/workflows/ci.yml` | test matrix, 3 OSes × Node 24 |
 
 ## Design decisions to keep

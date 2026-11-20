@@ -15,10 +15,20 @@ async function filesUnder(dir: string): Promise<string[]> {
   return out;
 }
 
+/** Plain files at the repo root (AGENTS.md, package.json, …); dot-dirs, dist/ and node_modules/ are not walked. */
+async function rootFiles(): Promise<string[]> {
+  return (await fs.readdir(ROOT, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => path.join(ROOT, e.name));
+}
+
 // A raw NUL makes git treat a file as binary, which also turns off its EOL normalization.
-test('no file under src/ or tests/ contains a NUL byte', async () => {
-  const files = [...(await filesUnder(path.join(ROOT, 'src'))), ...(await filesUnder(path.join(ROOT, 'tests')))];
-  assert.ok(files.length > 0);
+test('no file under src/, tests/, schema/ or the repo root contains a NUL byte', async () => {
+  const files = [
+    ...(await rootFiles()),
+    ...(await filesUnder(path.join(ROOT, 'src'))),
+    ...(await filesUnder(path.join(ROOT, 'tests'))),
+    ...(await filesUnder(path.join(ROOT, 'schema'))),
+  ];
+  assert.ok(files.some((f) => path.basename(f) === 'AGENTS.md'));
   const withNul: string[] = [];
   for (const f of files) if ((await fs.readFile(f)).indexOf(0) !== -1) withNul.push(path.relative(ROOT, f));
   assert.deepEqual(withNul, []);
