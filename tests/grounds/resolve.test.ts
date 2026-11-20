@@ -7,7 +7,7 @@ import { readLock, writeLock } from '../../src/grounds/lock.ts';
 import { resolveGrounds } from '../../src/grounds/resolve.ts';
 import type { GroundSpec } from '../../src/config/schema.ts';
 import { ConfigError } from '../../src/config/load.ts';
-import { exists } from '../../src/util/fs.ts';
+import { exists, sweepLeftovers } from '../../src/util/fs.ts';
 import { FakeGit } from '../helpers/fake-git.ts';
 
 const OLD = 'abc123def4567890abc123def4567890abc12345';
@@ -239,6 +239,25 @@ describe('resolveGrounds', () => {
         `ground mirror ${mirror} was replaced concurrently by a mirror of https://example.com/other.git; run perc again`,
       ),
     );
+  });
+
+  test('a mirror renamed aside during a url swap survives a concurrent sweep', async (t) => {
+    fake.setRef('main', OLD);
+    const mirror = path.join(cacheDir, 'company.mirror');
+    await fake.seedMirror(mirror, 'https://example.com/old-url.git');
+    const aged = new Date(Date.now() - 5 * 3_600_000);
+    await fs.utimes(mirror, aged, aged);
+    const realRename = fs.rename;
+    let after: string[] = [];
+    t.mock.method(fs, 'rename', async (from: string, to: string) => {
+      await realRename(from, to);
+      if (from === mirror) {
+        await sweepLeftovers(cacheDir);
+        after = await fs.readdir(cacheDir);
+      }
+    });
+    await resolveGrounds(specs, opts());
+    assert.equal(after.some((e) => e.startsWith('company.mirror.old-')), true);
   });
 
   test('resolveGrounds sweeps old leftovers in the cache', async () => {

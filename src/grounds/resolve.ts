@@ -144,6 +144,9 @@ async function openMirror(git: Git, url: string, mirror: string): Promise<boolea
   const tmp = await cloneMirror(git, url, mirror);
   const old = tmpSibling(mirror, 'old');
   try {
+    // a rename keeps the mtime; touch first so a concurrent sweep never sees the aside copy as stale
+    const now = new Date();
+    await fs.utimes(mirror, now, now).catch(() => {});
     await fs.rename(mirror, old);
   } catch (err) {
     await fs.rm(tmp, { recursive: true, force: true });
