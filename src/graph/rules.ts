@@ -1,3 +1,4 @@
+import { ConfigError } from '../config/load.ts';
 import { effectiveKind } from '../config/schema.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
 import { CORE_STAGES } from './core.ts';
@@ -132,4 +133,16 @@ export function checkRules(merged: Merged): Violation[] {
     }
   });
   return out;
+}
+
+/** Rule violations found by `validate`: one per line in the message, reported against the config file. */
+export class RuleViolationError extends ConfigError {
+  violations: Violation[];
+
+  constructor(violations: Violation[], file: string) {
+    const message = violations.map((v) => v.message).join('\n');
+    super(violations[0]?.message ?? 'rule violations', file, undefined, undefined, message);
+    this.name = 'RuleViolationError';
+    this.violations = violations;
+  }
 }

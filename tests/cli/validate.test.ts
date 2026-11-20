@@ -3,6 +3,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { ConfigError } from '../../src/config/load.ts';
+import { RuleViolationError } from '../../src/graph/rules.ts';
 import { validate } from '../../src/validate.ts';
 import { FakeGit } from '../helpers/fake-git.ts';
 
@@ -30,7 +32,7 @@ test('e2e fixture validates and lists steps (relative ground paths resolve again
   assert.ok(r.graph.steps.map((s) => s.id).includes('approve-groom'));
   assert.match(r.mappings.find((m) => m.as === 'policy')!.absPath, /policies[\\/]sdlc\.md$/);
   assert.deepEqual(r.groundVersions, { company: 'local', team: 'local' });
-  assert.deepEqual(r.violations, []);
+  assert.equal('violations' in r, false);
 });
 
 test('profile overriding locked review fails with locking ground named', async () => {
@@ -91,7 +93,7 @@ test('a repo layer that cannot be read for a reason other than absence is an err
   }
 });
 
-test('rule violations are returned, not thrown', async () => {
+test('rule violations are thrown as one RuleViolationError against the config file', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-cfg-'));
   try {
     const cfg = path.join(dir, 'config.yaml');
@@ -102,9 +104,20 @@ test('rule violations are returned, not thrown', async () => {
       cfg,
       `${base.replace('./grounds/company', abs('company')).replace('./grounds/team', abs('team'))}    rules:\n      allowed_agents: [groomer]\n`,
     );
-    const r = await validate({ ...opts(), configFile: cfg });
-    assert.ok(r.violations.length > 0);
-    assert.equal(r.violations[0]!.rule, 'allowed_agents');
+    const err = await validate({ ...opts(), configFile: cfg }).catch((e) => e);
+    assert.ok(err instanceof RuleViolationError);
+    assert.ok(err instanceof ConfigError);
+    assert.equal(err.name, 'RuleViolationError');
+    assert.equal(err.file, cfg);
+    assert.deepEqual(
+      err.violations.map((v) => v.target),
+      ['bindings.plan', 'bindings.implement', 'bindings.review'],
+    );
+    assert.deepEqual(err.message.split('\n'), [
+      'bindings.plan uses agent "planner", but allowed_agents (from profile:work) allows: groomer',
+      'bindings.implement uses agent "coder", but allowed_agents (from profile:work) allows: groomer',
+      'bindings.review uses agent "reviewer", but allowed_agents (from profile:work) allows: groomer',
+    ]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

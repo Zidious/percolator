@@ -60,10 +60,6 @@ async function runValidate(args: string[], io: Io): Promise<number> {
     ...(values.profile !== undefined ? { profile: values.profile } : {}),
     ...(values.update ? { update: true } : {}),
   });
-  if (r.violations.length > 0) {
-    io.stderr(`${r.violations.map((v) => v.message).join('\n')}\n`);
-    return 1;
-  }
   io.stdout(describe(r));
   return 0;
 }
@@ -76,7 +72,7 @@ async function runSchema(args: string[], io: Io): Promise<number> {
   return 0;
 }
 
-/** Runs the CLI and returns the exit code: 0 ok, 1 config error or violations, 2 usage error. */
+/** Runs the CLI and returns the exit code: 0 ok, 1 config error or rule violations (RuleViolationError, printed one per line), 2 usage error. */
 export async function main(argv: string[], io: Io): Promise<number> {
   const [command, ...rest] = argv;
   if (command === undefined || command === '--help' || command === '-h' || command === 'help') {

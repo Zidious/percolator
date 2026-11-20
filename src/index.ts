@@ -21,7 +21,7 @@ export type { ResolvedMapping, Layer } from './grounds/mappings.ts';
 export { CORE_STAGES, STAGE_CONTRACTS, CORE_GROOM_GATE } from './graph/core.ts';
 export { mergeLayers, LockViolation } from './graph/merge.ts';
 export type { Merged, Sourced } from './graph/merge.ts';
-export { checkRules } from './graph/rules.ts';
+export { checkRules, RuleViolationError } from './graph/rules.ts';
 export type { Violation } from './graph/rules.ts';
 export { buildGraph, GraphError } from './graph/build.ts';
 export type { Graph, Step, BackEdge } from './graph/build.ts';

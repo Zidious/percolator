@@ -52,7 +52,16 @@ test('validate prints rule violations and exits 1', async () => {
   await fs.writeFile(cfg, `${base}    rules:\n      allowed_agents: [groomer]\n`);
   const r = await run(['validate', '--config', cfg, '--profile', 'work']);
   assert.equal(r.code, 1);
-  assert.match(r.err, /allowed_agents/);
+  assert.equal(r.out, '');
+  assert.equal(
+    r.err,
+    [
+      'bindings.plan uses agent "planner", but allowed_agents (from profile:work) allows: groomer',
+      'bindings.implement uses agent "coder", but allowed_agents (from profile:work) allows: groomer',
+      'bindings.review uses agent "reviewer", but allowed_agents (from profile:work) allows: groomer',
+      '',
+    ].join('\n'),
+  );
 });
 
 test('unknown command prints usage and exits 2', async () => {

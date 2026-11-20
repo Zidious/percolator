@@ -6,8 +6,7 @@ import { selectProfile } from './config/profile.ts';
 import { buildGraph } from './graph/build.ts';
 import type { Graph } from './graph/build.ts';
 import { mergeLayers } from './graph/merge.ts';
-import { checkRules } from './graph/rules.ts';
-import type { Violation } from './graph/rules.ts';
+import { checkRules, RuleViolationError } from './graph/rules.ts';
 import { cliGit } from './grounds/git.ts';
 import type { Git } from './grounds/git.ts';
 import { fragmentLayers, resolveMappings } from './grounds/mappings.ts';
@@ -30,7 +29,6 @@ export type ValidateResult = {
   graph: Graph;
   mappings: ResolvedMapping[];
   groundVersions: Record<string, string>;
-  violations: Violation[];
 };
 
 export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
@@ -82,12 +80,12 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
 
   const merged = mergeLayers(layers);
   const violations = checkRules(merged);
+  if (violations.length > 0) throw new RuleViolationError(violations, opts.configFile);
   const graph = buildGraph(merged);
   return {
     profile: name,
     graph,
     mappings,
     groundVersions: Object.fromEntries(Object.values(grounds).map((g) => [g.name, g.commit === 'local' ? 'local' : g.commit.slice(0, 12)])),
-    violations,
   };
 }
