@@ -33,7 +33,12 @@ Executed with superpowers:subagent-driven-development: one implementer and one s
      - The argv launch gave `firstMessageSent=undefined`, the same as the plan 2 result.
      - The labelled terminal `perc-smoke-…-sp` was listed by `herdr-app ls` in the space.
      - This closes the carry-over "the smoke `--space` branch has never run".
-   - `hc.smoke.ts --boot`: pending.
+   - `hc.smoke.ts --boot`: **run 2026-11-20** (cancelled after about 28 s).
+     - **The plain idle program reported `status=null` at turn 0 throughout.** A plain program never reports `idle` at turn 0, so the boot grace is not needed for programs. It is kept for agents.
+     - **`claude` in a fresh folder sat at turn 0 with a status object** `{app:"claude-code", kind:"permission", msg:"trust this folder", state:"blocked"}` (seen with `hc get`). Two consequences:
+       1. **Bug, fixed in `fix(hc)`:** `hc get` (and possibly `wait`) reports `status` as an object, while `hc ls` reports a string. `cliHc` had passed the object through, so the runtime's status checks never matched against the real hc. It now maps the object to its `state`.
+       2. **Plan-4 item:** every agent step runs in a fresh worktree, so claude will stop at the folder-trust prompt before its first turn. Attention now reports it as `blocked`, but the owner must answer it in each terminal. Pre-trusting the worktree, or surfacing `msg` in the attention line, is plan-4 work.
+     - The cancel (Ctrl-C) skipped the smoke's `finally`, leaving its two terminals live. They were removed by hand. The smoke should also clean up on SIGINT (plan 4).
    - `hc.smoke.ts --codex`: pending.
    - `gh.smoke.ts --issue <a real issue>`: **passed 2026-11-20** on `Zidious/percolator#1`.
      - The URL form parsed to `github.com/zidious/percolator` #1, lower-cased as ruled.
