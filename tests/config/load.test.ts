@@ -180,3 +180,22 @@ test('agent nodes, explicit or inferred, keep agent/model/skills', async () => {
     });
   });
 });
+
+for (const name of ['../x', '1', 'a.b', '-x']) {
+  test(`node name ${JSON.stringify(name)} is rejected`, async () => {
+    await withYaml(`nodes:\n  ${JSON.stringify(name)}:\n    kind: gate\n    after: plan\n`, async (file) => {
+      const err = await loadFragment(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(
+        err.message,
+        `${file}:3: nodes.${name}: node names must start with a letter and contain only letters, digits, "_" and "-"`,
+      );
+    });
+  });
+}
+
+test('ordinary node names are accepted', async () => {
+  await withYaml('nodes:\n  approve-groom:\n    kind: gate\n    after: groom\n  threat_model:\n    agent: a\n    after: plan\n', async (file) => {
+    assert.deepEqual(Object.keys((await loadFragment(file)).nodes!), ['approve-groom', 'threat_model']);
+  });
+});

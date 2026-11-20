@@ -118,9 +118,24 @@ export const RulesSchema = z.strictObject({
 });
 export type Rules = z.infer<typeof RulesSchema>;
 
+// Node names become step ids (`stage.i` uses "."), so they are plain identifiers; a leading letter
+// also keeps integer-like keys from reordering in JS objects.
+const NODE_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
+export const NodesSchema = z.record(z.string(), NodeDefSchema).superRefine((nodes, ctx) => {
+  for (const name of Object.keys(nodes)) {
+    if (!NODE_NAME.test(name)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [name],
+        message: 'node names must start with a letter and contain only letters, digits, "_" and "-"',
+      });
+    }
+  }
+});
+
 const graphFragmentShape = {
   bindings: z.partialRecord(StageSchema, BindingSchema).optional(),
-  nodes: z.record(z.string(), NodeDefSchema).optional(),
+  nodes: NodesSchema.optional(),
   rules: RulesSchema.optional(),
 };
 
