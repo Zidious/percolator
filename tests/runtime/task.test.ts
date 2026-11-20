@@ -125,3 +125,8 @@ test('buildTask omits the hc send line without a parent terminal', () => {
   const t = buildTask(input({ parentTerminal: undefined }));
   assert.doesNotMatch(t, /hc send/);
 });
+
+test('the groom brief tells the agent to address approval-gate findings', () => {
+  const t = buildTask(input({ step: step({ id: 'groom', name: 'groom', stage: 'groom' }) }));
+  assert.match(t, /If the inputs include findings from an approval gate, revise the groomed ticket to address them\./);
+});

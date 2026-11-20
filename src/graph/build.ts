@@ -66,6 +66,9 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
     for (const h of before) pushHook(h, stage);
     const binding = merged.bindings[stage]!;
     const slot = binding.value;
+    if (stage === 'deliver' && slot.some((d) => d.kind === 'agent' || d.agent !== undefined)) {
+      throw new GraphError('deliver cannot be an agent node: Percolator opens the PR itself (use { builtin: github.open_pr })', 'bindings.deliver');
+    }
     slot.forEach((def, i) => {
       steps.push({
         id: slot.length > 1 ? `${stage}.${i}` : stage,

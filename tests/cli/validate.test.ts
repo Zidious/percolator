@@ -176,7 +176,7 @@ profiles:
       - { from: company, file: percolator.yaml, as: graph }
       - { from: team, file: policies/sdlc.md, as: policy, applies_to: ${extra.applies ?? '["*"]'} }
     bindings:
-      intake: { builtin: read-ticket }
+      intake: { builtin: github.intake }
       groom: { agent: claude, prompt: { from: team, file: policies/sdlc.md } }
       plan: ${extra.plan ?? '{ agent: claude }'}
       implement: ${extra.implement ?? '{ agent: claude }'}
@@ -306,7 +306,7 @@ profiles:
       - { from: x, file: percolator.yaml, as: graph }
       - { from: team, file: policies/sdlc.md, as: policy, applies_to: ["*"] }
     bindings:
-      intake: { builtin: read-ticket }
+      intake: { builtin: github.intake }
       groom: { agent: claude }
       plan: { agent: claude }
       implement: { agent: claude }

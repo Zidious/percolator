@@ -22,7 +22,7 @@ function graph(nodes: GraphFragment['nodes'] = {}, bindings: GraphFragment['bind
             plan: [{ agent: 'claude' }, { agent: 'codex' }],
             implement: { agent: 'claude' },
             review: { agent: 'claude' },
-            deliver: { agent: 'claude' },
+            deliver: { builtin: 'github.open_pr' },
             ...bindings,
           },
           nodes,

@@ -1,3 +1,4 @@
+import { BUILTIN_NAMES } from '../tracker/index.ts';
 import { effectiveKind } from '../config/schema.ts';
 import type { Graph } from '../graph/build.ts';
 import { mappingsFor, throwProblems } from '../grounds/mappings.ts';
@@ -10,8 +11,16 @@ export async function checkAgents(graph: Graph, mappings: ResolvedMapping[], con
   const problems: string[] = [];
   const known = Object.keys(ADAPTERS);
   for (const step of graph.steps) {
-    if (effectiveKind(step.def) !== 'agent') continue;
+    const kind = effectiveKind(step.def);
     const target = `${step.role === 'slot' ? 'bindings' : 'nodes'}.${step.id}`;
+    if (kind === 'builtin') {
+      const name = step.def.builtin!;
+      if (!(BUILTIN_NAMES as readonly string[]).includes(name)) {
+        problems.push(`${target}: unknown builtin "${name}" (known: ${BUILTIN_NAMES.join(', ')})`);
+      }
+      continue;
+    }
+    if (kind !== 'agent') continue;
     const agent = step.def.agent!;
     if (!Object.hasOwn(ADAPTERS, agent)) {
       problems.push(`${target}: unknown agent "${agent}" (known: ${known.join(', ')})`);

@@ -24,16 +24,15 @@ export function renderTemplate(text: string, vars: Record<string, string>): stri
   return out;
 }
 
-export const STAGE_BRIEFS: Readonly<Record<Stage, string>> = Object.freeze({
+export const STAGE_BRIEFS: Readonly<Record<Exclude<Stage, 'deliver'>, string>> = Object.freeze({
   intake: 'Read ticket {{ticket}} and write its title, body and existing comments to ticket.md.',
   groom:
-    'Groom the ticket in the inputs into a ready-to-plan ticket and write it to groomed_ticket.md. Percolator posts it on the issue for approval.',
+    'Groom the ticket in the inputs into a ready-to-plan ticket and write it to groomed_ticket.md. Percolator posts it on the issue for approval. If the inputs include findings from an approval gate, revise the groomed ticket to address them.',
   plan: 'Write an implementation plan for the approved groomed ticket to plan.md.',
   implement:
     'Implement the plan in the worktree and commit on the current branch. If the inputs include review findings, address them. Write a short summary of your changes to summary.md.',
   review:
     'Review the branch diff (git diff {{base}}...HEAD) against the plan. Write your findings to findings.md. If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.',
-  deliver: 'Write the URL of the opened pull request to pr_url.md.',
 });
 
 export type TaskInput = {
@@ -78,7 +77,7 @@ export function buildTask(t: TaskInput): string {
   ];
 
   if (isSlot) {
-    sections.push(`## Stage contract\n\n${renderTemplate(STAGE_BRIEFS[step.stage as Stage], vars)}`);
+    sections.push(`## Stage contract\n\n${renderTemplate(STAGE_BRIEFS[step.stage as Exclude<Stage, 'deliver'>], vars)}`);
   }
 
   const fallback = isSlot ? 'Carry out the stage contract above.' : "Carry out the node's purpose.";

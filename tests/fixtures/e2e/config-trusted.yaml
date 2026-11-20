@@ -9,7 +9,7 @@ profiles:
       - { from: company, file: percolator.yaml, as: graph }
       - { from: team, file: policies/sdlc.md, as: policy }
     bindings:
-      intake: { builtin: read-ticket }
+      intake: { builtin: github.intake }
       groom: { agent: claude }
       plan: { agent: claude }
       implement: { agent: claude }

@@ -11,7 +11,7 @@ import { mergeLayers } from '../../src/graph/merge.ts';
 import type { ResolvedMapping } from '../../src/grounds/mappings.ts';
 
 const base: NonNullable<GraphFragment['bindings']> = {
-  intake: { builtin: 'read-ticket' },
+  intake: { builtin: 'github.intake' },
   groom: { agent: 'claude' },
   plan: { agent: 'claude' },
   implement: { agent: 'claude' },
@@ -82,4 +82,17 @@ test('skills mappings must use dir', async () => {
   assert.deepEqual(await problems(checkAgents(graphOf({}), [m], 'cfg.yaml')), [
     'cfg.yaml: mapping g:a.md: skills mappings must use dir',
   ]);
+});
+
+test('an unknown builtin is reported with the known names, alongside other problems', async () => {
+  const g = graphOf({ intake: { builtin: 'read-ticket' }, review: { agent: 'gemini' } }, { audit: { after: 'review', builtin: 'nope' } });
+  assert.deepEqual(await problems(checkAgents(g, [], 'cfg.yaml')), [
+    'cfg.yaml: bindings.intake: unknown builtin "read-ticket" (known: github.intake, github.open_pr)',
+    'cfg.yaml: bindings.review: unknown agent "gemini" (known: claude, codex, command)',
+    'cfg.yaml: nodes.audit: unknown builtin "nope" (known: github.intake, github.open_pr)',
+  ]);
+});
+
+test('the known builtins pass', async () => {
+  await checkAgents(graphOf({ deliver: { builtin: 'github.open_pr' } }), [], 'cfg.yaml');
 });

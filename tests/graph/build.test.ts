@@ -17,7 +17,7 @@ function full(extra: Pick<GraphFragment, 'nodes'> = {}, bindings: GraphFragment[
           plan: [{ agent: 'claude' }, { agent: 'codex' }],
           implement: { agent: 'claude' },
           review: { agent: 'claude' },
-          deliver: { agent: 'claude' },
+          deliver: { builtin: 'github.open_pr' },
           ...bindings,
         },
         ...extra,
@@ -247,7 +247,7 @@ test('steps carry the source and lock of their binding', () => {
           plan: { agent: 'claude', required: true },
           implement: { agent: 'claude' },
           review: { agent: 'claude' },
-          deliver: { agent: 'claude' },
+          deliver: { builtin: 'github.open_pr' },
         },
       },
     },
@@ -267,4 +267,21 @@ test('mappingsFor matches *, stage (slots only), node name and step id', () => {
   assert.deepEqual(at('plan.0'), ['*', 'plan']);
   assert.deepEqual(at('plan.1'), ['*', 'plan', 'plan.1']);
   assert.deepEqual(at('threat-model'), ['*', 'threat-model']);
+});
+
+test('deliver cannot be an agent node; script and builtin are fine', () => {
+  assert.throws(
+    () => buildGraph(full({}, { deliver: { agent: 'claude' } })),
+    (e: unknown) => {
+      assert.ok(e instanceof GraphError);
+      assert.equal(
+        (e as Error).message,
+        'bindings.deliver: deliver cannot be an agent node: Percolator opens the PR itself (use { builtin: github.open_pr })',
+      );
+      assert.equal((e as GraphError).path, 'bindings.deliver');
+      return true;
+    },
+  );
+  assert.throws(() => buildGraph(full({}, { deliver: [{ command: ['x'] }, { agent: 'claude' }] })), /deliver cannot be an agent node/);
+  buildGraph(full({}, { deliver: { command: ['x'] } }));
 });
