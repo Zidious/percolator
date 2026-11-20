@@ -9,8 +9,9 @@ Read this before you change anything. Update it when you add a convention, a mod
 ```sh
 npm ci              # install (lockfile is committed; CI uses npm ci)
 npm run typecheck   # tsc -p tsconfig.test.json (src + tests, no emit)
-npm test            # vitest run (all tests under tests/**/*.test.ts)
-npx vitest run tests/util   # focused run while iterating
+npm test            # node --test (all tests under tests/**/*.test.ts)
+npm run test:watch  # node --test --watch
+node --test tests/util/paths.test.ts   # focused run while iterating
 npm run build       # tsc → dist/ (src only)
 npm run schema      # regenerate schema/percolator.schema.json
 ```
@@ -18,7 +19,7 @@ npm run schema      # regenerate schema/percolator.schema.json
 ## Hard rules
 
 - **Node ≥ 24 only.** `engines` is `>=24`; CI runs Node 24 on ubuntu, windows and macos.
-- **Minimal dependencies.** Runtime deps are `zod` and `yaml` only. Prefer Node built-ins:
+- **Minimal dependencies.** Runtime deps are `zod` and `yaml` only; dev deps are `typescript` and `@types/node` only. Prefer Node built-ins:
   - argv parsing → `node:util` `parseArgs`
   - child processes → `node:child_process` `execFile` / `spawn`
   - globbing → `path.posix.matchesGlob`
@@ -43,6 +44,7 @@ npm run schema      # regenerate schema/percolator.schema.json
   No production code without a failing test first. If you wrote code before the test, delete it and start from the test.
 
   Agents load the `superpowers:test-driven-development` skill before implementing. Reports include the RED and GREEN commands with their **pasted** output (a prose summary such as "RED: module missing" is not evidence), and a review treats missing RED evidence as a blocking finding. Tests assert behaviour, including error message text where users will see it. Don't write tests that only exercise mocks.
+- **Test style.** `node:test` plus `node:assert/strict` (no vitest). Plan sketches written in vitest style (`expect`, `vi`, `test.each`) get translated when implemented.
 - **Test layout.** Tests live in `tests/`, mirroring `src/`. Fixtures go in `tests/fixtures/`. Temp dirs come from `fs.mkdtemp(path.join(os.tmpdir(), ...))`, never a fixed path. Test output must be pristine (no stray warnings).
 - Commit messages are conventional (`feat(scope): …`, `chore: …`).
 

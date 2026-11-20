@@ -1,12 +1,23 @@
+import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { after, test } from 'node:test';
 import { promisify } from 'node:util';
-import { expect, test } from 'vitest';
 import { cliGit } from '../../src/grounds/git.ts';
 import { readLock } from '../../src/grounds/lock.ts';
 import { resolveGrounds } from '../../src/grounds/resolve.ts';
+
+const tmps: string[] = [];
+const mktmp = async () => {
+  const d = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-git-'));
+  tmps.push(d);
+  return d;
+};
+after(async () => {
+  await Promise.all(tmps.map((d) => fs.rm(d, { recursive: true, force: true })));
+});
 
 const run = promisify(execFile);
 const git = async (cwd: string, ...args: string[]) =>
@@ -17,7 +28,7 @@ const git = async (cwd: string, ...args: string[]) =>
   ).stdout.trim();
 
 test('cliGit clones a real bare repo, pins it, and moves only on update', async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-git-'));
+  const tmp = await mktmp();
   const work = path.join(tmp, 'work');
   const bare = path.join(tmp, 'origin.git');
   await fs.mkdir(work);
@@ -34,9 +45,9 @@ test('cliGit clones a real bare repo, pins it, and moves only on update', async 
   const opts = { lockFile, cacheDir, git: cliGit };
 
   const r = await resolveGrounds(specs, opts);
-  expect(r.company!.commit).toBe(first);
-  expect((await fs.readFile(path.join(r.company!.dir, 'policy.md'), 'utf8')).trim()).toBe('one');
-  expect((await readLock(lockFile)).grounds.company!.commit).toBe(first);
+  assert.equal(r.company!.commit, first);
+  assert.equal((await fs.readFile(path.join(r.company!.dir, 'policy.md'), 'utf8')).trim(), 'one');
+  assert.equal((await readLock(lockFile)).grounds.company!.commit, first);
 
   // upstream moves
   await fs.writeFile(path.join(work, 'policy.md'), 'two\n');
@@ -45,30 +56,30 @@ test('cliGit clones a real bare repo, pins it, and moves only on update', async 
   const branch = await git(work, 'rev-parse', '--abbrev-ref', 'HEAD');
   await git(work, 'push', bare, `HEAD:refs/heads/${branch}`);
 
-  expect((await resolveGrounds(specs, opts)).company!.commit).toBe(first);
+  assert.equal((await resolveGrounds(specs, opts)).company!.commit, first);
   const u = await resolveGrounds(specs, { ...opts, update: true });
-  expect(u.company!.commit).toBe(second);
-  expect((await fs.readFile(path.join(u.company!.dir, 'policy.md'), 'utf8')).trim()).toBe('two');
+  assert.equal(u.company!.commit, second);
+  assert.equal((await fs.readFile(path.join(u.company!.dir, 'policy.md'), 'utf8')).trim(), 'two');
 });
 
 test('a url that looks like an option is treated as a repository, not a flag', async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-git-'));
-  await expect(cliGit.clone('--upload-pack=echo', path.join(tmp, 'x'))).rejects.toThrow(/does not exist/);
+  const tmp = await mktmp();
+  await assert.rejects(cliGit.clone('--upload-pack=echo', path.join(tmp, 'x')), /does not exist/);
 });
 
 test('refs and commits starting with a dash are rejected before reaching git', async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-git-'));
-  await expect(cliGit.checkout(tmp, '--orphan=x')).rejects.toThrow(/must not start with "-"/);
-  await expect(cliGit.resolveRef(tmp, '-x')).rejects.toThrow(/must not start with "-"/);
+  const tmp = await mktmp();
+  await assert.rejects(cliGit.checkout(tmp, '--orphan=x'), /must not start with "-"/);
+  await assert.rejects(cliGit.resolveRef(tmp, '-x'), /must not start with "-"/);
 });
 
 test('remoteUrl is undefined without an origin or outside a repo, and the url otherwise', async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-git-'));
+  const tmp = await mktmp();
   const repo = path.join(tmp, 'repo');
   await fs.mkdir(repo);
-  expect(await cliGit.remoteUrl(tmp)).toBeUndefined();
+  assert.equal(await cliGit.remoteUrl(tmp), undefined);
   await git(repo, 'init');
-  expect(await cliGit.remoteUrl(repo)).toBeUndefined();
+  assert.equal(await cliGit.remoteUrl(repo), undefined);
   await git(repo, 'remote', 'add', 'origin', 'https://example.com/x.git');
-  expect(await cliGit.remoteUrl(repo)).toBe('https://example.com/x.git');
+  assert.equal(await cliGit.remoteUrl(repo), 'https://example.com/x.git');
 });

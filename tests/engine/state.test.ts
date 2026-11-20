@@ -1,7 +1,8 @@
+import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, test } from 'node:test';
 import { loadState, newState, saveState } from '../../src/engine/state.ts';
 
 let dir: string;
@@ -15,7 +16,7 @@ afterEach(async () => {
 const init = { runId: 'r1', ticket: 'T-1', profile: 'default', groundVersions: { spec: 'abc' } };
 
 test('newState starts at cursor 0, running, empty history', () => {
-  expect(newState(init)).toEqual({
+  assert.deepEqual(newState(init), {
     version: 1,
     runId: 'r1',
     ticket: 'T-1',
@@ -46,14 +47,14 @@ test('round-trips state', async () => {
   s.pausedReason = 'needs human';
   s.unresolvedFindings = 'f1';
   await saveState(dir, s);
-  expect(await loadState(dir)).toEqual(s);
+  assert.deepEqual(await loadState(dir), s);
 });
 
 test('a stray partial tmp file does not affect load', async () => {
   const s1 = newState(init);
   await saveState(dir, s1);
   await fs.writeFile(path.join(dir, 'state.json.123.x.tmp'), '{"trunc');
-  expect(await loadState(dir)).toEqual(s1);
+  assert.deepEqual(await loadState(dir), s1);
 });
 
 test('later save replaces earlier and leaves no tmp files', async () => {
@@ -61,20 +62,20 @@ test('later save replaces earlier and leaves no tmp files', async () => {
   await saveState(dir, s);
   s.cursor = 5;
   await saveState(dir, s);
-  expect((await loadState(dir)).cursor).toBe(5);
-  expect(await fs.readdir(dir)).toEqual(['state.json']);
+  assert.equal((await loadState(dir)).cursor, 5);
+  assert.deepEqual(await fs.readdir(dir), ['state.json']);
 });
 
 test('unknown version is rejected naming the file', async () => {
   await fs.writeFile(path.join(dir, 'state.json'), JSON.stringify({ ...newState(init), version: 2 }));
-  await expect(loadState(dir)).rejects.toThrow(/state\.json.*version/);
+  await assert.rejects(loadState(dir), /state\.json.*version/);
 });
 
 test('missing state.json is rejected naming the file', async () => {
-  await expect(loadState(dir)).rejects.toThrow(/state\.json/);
+  await assert.rejects(loadState(dir), /state\.json/);
 });
 
 test('invalid JSON is rejected naming the file', async () => {
   await fs.writeFile(path.join(dir, 'state.json'), '{"trunc');
-  await expect(loadState(dir)).rejects.toThrow(/state\.json.*not valid JSON/);
+  await assert.rejects(loadState(dir), /state\.json.*not valid JSON/);
 });
