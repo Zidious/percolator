@@ -65,6 +65,8 @@ Detailed behaviour lives in the code and in `docs/superpowers/specs/2026-11-20-p
 | `src/adapters/` | agent argv builders (`claude`, `codex`, `command`) and config checks |
 | `src/workspace/` | worktrees, run/step dirs, ground materialization, skill plugins |
 | `src/util/` | paths, atomic fs, argv-only exec |
+| `templates/` | recommended config written by `perc init` |
+| `skills/` | agent-agnostic skills shipped in the package |
 | `src/validate.ts` | full config → graph validation pipeline |
 | `tests/helpers/` | fakes and fixtures builders (see Testing conventions) |
 | `tests/smoke/` | manual smoke tests against the real `hc`/`gh`; never run by `pnpm test` |
@@ -78,7 +80,7 @@ Detailed behaviour lives in the code and in `docs/superpowers/specs/2026-11-20-p
 
 ## Design decisions to keep
 
-- **Six core stages, in order:** `intake`, `groom`, `plan`, `implement`, `review`, `deliver`. All must be bound or the engine refuses to start. Percolator ships no bindings for `groom`, `plan`, `implement`, `review`.
+- **Six core stages, in order:** `intake`, `groom`, `plan`, `implement`, `review`, `deliver`. All must be bound or the engine refuses to start. The engine has no built-in bindings for `groom`, `plan`, `implement`, `review`; `perc init` writes a recommended config into the user's file.
 - **Review loop:** default cap 3 rounds, then proceed to `deliver` with an unresolved-findings summary.
 - **Back-edges** (`on_fail: { back_to, max_rounds }`): at the cap the run escalates (pauses for the owner).
 - **Locks:** `required: true` locks always win over merge order. A locked target may only be restated deep-equal; otherwise `LockViolation` (`"<target> is locked by <src>; <attempt> cannot change it"`), naming the locking source.

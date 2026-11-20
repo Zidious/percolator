@@ -21,12 +21,14 @@ async function rootFiles(): Promise<string[]> {
 }
 
 // A raw NUL makes git treat a file as binary, which also turns off its EOL normalization.
-test('no file under src/, tests/, schema/ or the repo root contains a NUL byte', async () => {
+test('no file under src/, tests/, schema/, skills/, templates/ or the repo root contains a NUL byte', async () => {
   const files = [
     ...(await rootFiles()),
     ...(await filesUnder(path.join(ROOT, 'src'))),
     ...(await filesUnder(path.join(ROOT, 'tests'))),
     ...(await filesUnder(path.join(ROOT, 'schema'))),
+    ...(await filesUnder(path.join(ROOT, 'skills'))),
+    ...(await filesUnder(path.join(ROOT, 'templates'))),
   ];
   assert.ok(files.some((f) => path.basename(f) === 'AGENTS.md'));
   const withNul: string[] = [];

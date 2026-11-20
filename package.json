@@ -9,7 +9,9 @@
   "main": "dist/index.js",
   "files": [
     "dist",
-    "schema"
+    "schema",
+    "skills",
+    "templates"
   ],
   "exports": {
     ".": "./dist/index.js",

@@ -7,9 +7,9 @@ import { writeJsonSchema } from '../src/config/json-schema.ts';
 
 const root = path.resolve(import.meta.dirname, '..');
 
-test('package.json publishes dist and schema with explicit exports', async () => {
+test('package.json publishes dist, schema, skills and templates with explicit exports', async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
-  assert.deepEqual(pkg.files, ['dist', 'schema']);
+  assert.deepEqual(pkg.files, ['dist', 'schema', 'skills', 'templates']);
   assert.deepEqual(pkg.exports, {
     '.': './dist/index.js',
     './schema.json': './schema/percolator.schema.json',
