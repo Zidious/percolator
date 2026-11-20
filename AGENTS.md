@@ -43,26 +43,27 @@ pnpm schema                      # regenerate schema/percolator.schema.json
 | Path | Purpose |
 |---|---|
 | `src/util/paths.ts` | `expandHome` (`~/` and `~\`), `toPosix`, `samePath` |
-| `src/util/fs.ts` | `writeFileAtomic`, `readYamlFile` (keeps line info for located errors) |
-| `src/config/schema.ts` | zod schemas + inferred types, `STAGES`, `effectiveKind`. All objects strict: new config keys must be added here |
-| `src/config/load.ts` | `loadUserConfig`, `loadFragment`, `ConfigError`; reports every YAML/schema issue as `file:line: path: msg`, one per line |
-| `src/config/json-schema.ts` | `writeJsonSchema`; rerun `pnpm schema` whenever `schema.ts` changes |
+| `src/util/entry.ts` | `isDirectRun` (entry-point check through symlinked bins; used by `cli.ts` and `json-schema.ts`) |
+| `src/util/fs.ts` | `writeFileAtomic` (fsync, then rename retried on EPERM/EBUSY/EACCES), `readYamlFile` (keeps line info for located errors) |
+| `src/config/schema.ts` | zod schemas + inferred types, `STAGES`, `effectiveKind`, `groundRecord`. All objects strict: new config keys must be added here. Agent nodes need `agent`; `agent`/`model`/`skill`/`skills` only on agent nodes. Node names `^[A-Za-z][A-Za-z0-9_-]*$` |
+| `src/config/load.ts` | `loadUserConfig`, `loadFragment`, `loadYaml(file, schema)`, `ConfigError`; reports every YAML/schema issue as `file:line: path: msg`, one per line |
+| `src/config/json-schema.ts` | `writeJsonSchema`; rerun `pnpm schema [out]` whenever `schema.ts` changes (refinements are not in the JSON schema) |
 | `src/config/profile.ts` | `normalizeRemote` (→ lower-case `host/owner/repo`), `selectProfile` (override, else first matching `match.remote`/`match.path` glob; `/**` also matches its base dir) |
-| `src/grounds/git.ts` | `Git` interface + `cliGit` (argv arrays, `--`, rejects leading `-`) |
-| `src/grounds/lock.ts` | `readLock`/`writeLock` for `percolator.lock` (YAML, atomic) |
-| `src/grounds/resolve.ts` | `resolveGrounds`; locked commit + cached dir = no git calls; only `update: true` moves a pin; mirror keyed by url |
-| `src/grounds/mappings.ts` | `resolveMappings` (validates all mappings up front, one ConfigError, no escaping the ground), `fragmentLayers`, `Layer = { source, fragment }` with source `ground:<name>/<file>@<commit12 or local>` |
+| `src/grounds/git.ts` | `Git` interface (incl. `toplevel`) + `cliGit` (argv arrays, `--`, rejects leading `-`, `redactUrls` hides url credentials in errors) |
+| `src/grounds/lock.ts` | `readLock`/`writeLock` for `percolator.lock` (YAML, atomic); `LockSchema` (full hex commits), located ConfigError |
+| `src/grounds/resolve.ts` | `resolveGrounds`; locked commit + cached dir = no git calls; only `update: true` moves a pin; mirror keyed by name; re-created (atomically) when its url changes; a lost rename race reuses the winner's dir |
+| `src/grounds/mappings.ts` | `resolveMappings` (validates all mappings up front, one ConfigError), `resolveInGround` (no `:`, no escaping by `..`/absolute/symlink), `checkGraphReferences` (node prompt files, `applies_to`), `fragmentLayers`, `Layer = { source, fragment }` with source `ground:<name>/<file>@<commit12 or local>` |
 | `src/graph/core.ts` | `CORE_STAGES`, `STAGE_CONTRACTS` (required outputs), `CORE_GROOM_GATE` (`approve-groom`, locked by `core`); deep-frozen |
 | `src/graph/merge.ts` | `mergeLayers` → `Merged` (`Sourced<T>` = value + source + locked); never aliases inputs or core constants; violations throw `LockViolation` |
-| `src/graph/rules.ts` | `checkRules(merged)` → `Violation[]` (require_skills, allowed_agents/models, max_rounds_ceiling, required_nodes); the core gate is exempt from the ceiling here because `buildGraph` clamps it |
+| `src/graph/rules.ts` | `checkRules(merged)` → `Violation[]` (require_skills, allowed_agents/models, max_rounds_ceiling, required_nodes); `allowed_models` fails closed (no model is a violation); the core gate is exempt from the ceiling here because `buildGraph` clamps it. `RuleViolationError` (a ConfigError carrying `violations`) |
 | `src/graph/build.ts` | `buildGraph(merged)` → `Graph` (`steps`, `regionStart`, `backEdges` keyed by `fromStepId`); `GraphError`. Step ids are unique. Each `BackEdge` has `jumpAfterIndex`: the review edge fires on review's fail but jumps after the last `after: review` hook |
-| `src/engine/state.ts` | `RunState`, `newState`, `saveState`/`loadState` (`<dir>/state.json`, version 1; `pendingJump` persists a review fail awaiting its jump) |
+| `src/engine/state.ts` | `RunState`, `newState`, `saveState`/`loadState` (`<dir>/state.json`, version 1, shape checked; `pendingJump` persists a review fail awaiting its jump; `graphFingerprint`) |
 | `src/engine/runtime.ts` | `Runtime` interface, `NodeOutcome` (`pass`/`fail`/`escalate`), `RunContext` |
-| `src/engine/engine.ts` | `runGraph`: saves after every step; caps enforced in code (counters clamp at `maxRounds`); `once` hooks skip only after a `pass`; escalate pauses with the cursor on that step; contracts get one retry. The caller owns `RunState` and lowers `rounds[edgeId]` to grant another round |
-| `src/validate.ts` | `validate`: config → profile → grounds (lock beside config; relative `path:` grounds resolve against the config dir) → mappings → layers (mappings, profile, repo `.percolator/percolator.yaml`) → merge → rules → graph; returns `violations`, throws ConfigError/LockViolation/GraphError |
+| `src/engine/engine.ts` | `runGraph`: refuses a state recorded against a different graph (`graphFingerprint`); saves after every step; caps enforced in code (counters clamp at `maxRounds`); `once` hooks skip only after a `pass`; escalate pauses with the cursor on that step; contracts get one retry. The caller owns `RunState` and lowers `rounds[edgeId]` to grant another round |
+| `src/validate.ts` | `validate`: config → profile → grounds (lock beside config; relative `path:` grounds resolve against the config dir) → mappings → layers (mappings, profile, repo `<git toplevel ?? cwd>/.percolator/percolator.yaml`; only ENOENT means absent) → merge → rules → graph → prompt files/`applies_to`; throws `RuleViolationError`/ConfigError/LockViolation/GraphError, never returns a graph with violations |
 | `src/cli.ts` | `main(argv, io)` → exit code (0 ok, 1 error/violations, 2 usage); `perc validate`, `perc schema`; `parseArgs`, no CLI deps |
 | `src/index.ts` | public exports |
-| `tests/helpers/fake-git.ts` | `FakeGit` (records `calls`); use instead of real git in unit tests |
+| `tests/helpers/fake-git.ts` | `FakeGit` (records `calls`; origin url kept in a marker file so it follows renames; `toplevels`, `cloneError`, `onClone` hooks); use instead of real git in unit tests |
 | `tests/helpers/fake-runtime.ts` | `FakeRuntime` (scripted outcomes per step id; records `calls` and rounds) and the `pass`/`fail`/`esc` helpers |
 | `.github/workflows/ci.yml` | test matrix, 3 OSes × Node 24 |
 
