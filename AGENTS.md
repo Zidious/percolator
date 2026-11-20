@@ -12,7 +12,7 @@ pnpm typecheck                   # tsc -p tsconfig.test.json (src + tests, no em
 pnpm test                        # node --test "tests/**/*.test.ts"
 pnpm test:watch
 node --test tests/util/paths.test.ts   # focused run
-pnpm build                       # tsc → dist/ (src only)
+pnpm build                       # tsc → dist/ (src only; dist/ is gitignored, published via package.json files)
 pnpm schema                      # regenerate schema/percolator.schema.json
 perc run <ticket> [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]   # start a run (driver in its own hc terminal unless --foreground)
 perc resume <run-id> [--foreground]   # continue a paused/interrupted run; checks run here before the driver launches
@@ -101,7 +101,8 @@ node tests/smoke/hc.smoke.ts [--space <id>]   # manual: talks to the real hc (ne
 | `tests/helpers/fake-gh.ts` | `FakeGh` (in-memory `Gh`: `addIssue`/`addComment` seed, `comment()` appends a comment by `userLogin` with increasing `createdAt` from an injectable clock, `createPr` makes `findPr` find it; records `calls`; `fail(method, message)` throws `GhError`; `readFile` option captures body files into `bodies`) |
 | `tests/helpers/fake-app.ts` | `FakeHerdrApp` (in-memory `HerdrApp`: records `newSpace` calls as `[name, folder]`, returns `spaceId` (default `space-1`); `fail(message)` makes `newSpace` throw `message`) |
 | `tests/source-files.test.ts` | walks the repo root files, `src/`, `tests/` and `schema/`: no file may contain a NUL byte (git would treat it as binary and skip EOL normalization); write `\0` escapes |
-| `.github/workflows/ci.yml` | test matrix, 3 OSes × Node 24 |
+| `tests/package.test.ts` | `package.json` `files`/`exports`/`bin`/`main` asserted exactly; regenerated schema equals committed `schema/percolator.schema.json` byte for byte (local twin of the CI schema-sync step; `.gitattributes` keeps LF) |
+| `.github/workflows/ci.yml` | test matrix, 3 OSes × Node 24: typecheck, test, `pnpm build`, then schema-sync (`pnpm schema` + `git diff --exit-code -- schema/`) |
 
 ## Design decisions to keep
 
