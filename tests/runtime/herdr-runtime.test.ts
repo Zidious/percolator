@@ -465,6 +465,33 @@ test('resume after a timeout re-attaches to the live attempt-1 terminal and coll
   assert.ok(await fs.stat(path.join(e.runDir, 'steps', 'plan', '1', 'transcript.txt')));
 });
 
+test('a later resume still adopts the newest live attempt, not just attempt N-1', async () => {
+  let phase = 1;
+  let clock = 0;
+  const e = await env(async (t) => {
+    if (phase === 1) {
+      t.status = 'working';
+      clock += 20_000;
+    } else {
+      await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+    }
+  });
+  const s = step({ def: { agent: 'claude', timeout_s: 10 } as Step['def'] });
+  const rt = runtime(e, { now: () => clock });
+  assert.equal((await rt.executeStep(s, ctx())).status, 'escalate');
+  // attempt 2 adopted attempt 1 and timed out again: the engine counted it, so the next resume is attempt 3
+  assert.equal((await rt.executeStep(s, ctx({ plan: 1 }))).status, 'escalate');
+  const first = terminalName(RUN_ID, '#123', 'plan', 1);
+  assert.equal(e.hc.terminals.get(first)!.state, 'live');
+
+  phase = 2;
+  e.hc.calls = [];
+  const out = await rt.executeStep(s, ctx({ plan: 2 }));
+  assert.deepEqual(out, { status: 'pass', outputs: { plan: 'steps/plan/1/outputs/plan.md' } });
+  assert.ok(!subs(e.hc).includes('run'));
+  assert.equal(e.hc.terminals.size, 0);
+});
+
 test('a live prior-attempt terminal that already wrote done.json is not adopted', async () => {
   const e = await env(async (t, n) => {
     if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p2' });
