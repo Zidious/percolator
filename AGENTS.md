@@ -14,6 +14,7 @@ pnpm test:watch
 node --test tests/util/paths.test.ts   # focused run
 pnpm build                       # tsc → dist/ (src only; dist/ is gitignored, published via package.json files)
 pnpm schema                      # regenerate schema/percolator.schema.json
+perc init [--config <file>] [--force]   # write the recommended config (templates/config.yaml)
 perc run <ticket> [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]   # start a run (driver in its own hc terminal unless --foreground)
 perc resume <run-id> [--foreground]   # continue a paused/interrupted run; checks run here before the driver launches
 perc status [<run-id>]                # list runs, or show one (detail, last 10 history records)
