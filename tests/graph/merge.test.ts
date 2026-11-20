@@ -79,9 +79,9 @@ test('core groom gate is present and locked', () => {
 
 test('rules from all layers are kept with sources', () => {
   const m = mergeLayers([
-    L('ground:co', { rules: { global: ['a'] } as never }),
+    L('ground:co', { rules: { allowed_agents: ['a'] } }),
     L('profile:work', {}),
-    L('repo', { rules: { global: ['b'] } as never }),
+    L('repo', { rules: { allowed_agents: ['b'] } }),
   ]);
   assert.equal(m.rules.length, 2);
   assert.deepEqual(
@@ -118,4 +118,72 @@ test('core constants', () => {
   assert.deepEqual(CORE_STAGES, ['intake', 'groom', 'plan', 'implement', 'review', 'deliver']);
   assert.deepEqual(STAGE_CONTRACTS.deliver.requiredOutputs, ['pr_url']);
   assert.equal(CORE_GROOM_GATE.name, 'approve-groom');
+});
+
+test('mutating a merged core gate does not corrupt later merges or the constant', () => {
+  const first = mergeLayers([]);
+  first.nodes['approve-groom']!.value.required = false;
+  first.nodes['approve-groom']!.value.on_fail!.max_rounds = 99;
+  const second = mergeLayers([]);
+  assert.deepEqual(second.nodes['approve-groom']!.value, {
+    kind: 'gate',
+    after: 'groom',
+    required: true,
+    on_fail: { back_to: 'groom', max_rounds: 3 },
+  });
+  assert.equal(CORE_GROOM_GATE.def.required, true);
+});
+
+test('merged values do not alias layer inputs', () => {
+  const binding = { agent: 'claude', skills: ['a'] };
+  const node = { kind: 'gate' as const, after: 'plan' as const };
+  const rules = { allowed_agents: ['claude'] };
+  const m = mergeLayers([L('ground:co', { bindings: { plan: binding }, nodes: { g: node }, rules })]);
+  binding.skills.push('b');
+  binding.agent = 'changed';
+  node.after = 'review' as never;
+  rules.allowed_agents.push('codex');
+  assert.deepEqual(m.bindings.plan!.value, [{ agent: 'claude', skills: ['a'] }]);
+  assert.equal(m.nodes.g!.value.after, 'plan');
+  assert.deepEqual(m.rules[0]!.value.allowed_agents, ['claude']);
+});
+
+test('core constants are frozen', () => {
+  assert.ok(Object.isFrozen(CORE_STAGES));
+  assert.ok(Object.isFrozen(STAGE_CONTRACTS));
+  assert.ok(Object.isFrozen(STAGE_CONTRACTS.plan.requiredOutputs));
+  assert.ok(Object.isFrozen(CORE_GROOM_GATE.def));
+  assert.ok(Object.isFrozen(CORE_GROOM_GATE.def.on_fail));
+});
+
+const LOCKED = { agent: 'claude', skill: 'co:review', required: true };
+
+test('an empty layer does not disturb a locked binding, and a later empty-binding is rejected', () => {
+  assert.throws(
+    () => mergeLayers([L('ground:co', { bindings: { review: LOCKED } }), L('profile:work', { bindings: { review: [] } })]),
+    /bindings\.review is locked by ground:co; profile:work cannot change it/,
+  );
+});
+
+test('restating a locked binding with a different value plus required: true is rejected', () => {
+  assert.throws(
+    () =>
+      mergeLayers([
+        L('ground:co', { bindings: { review: LOCKED } }),
+        L('profile:work', { bindings: { review: { agent: 'codex', required: true } } }),
+      ]),
+    /bindings\.review is locked by ground:co; profile:work cannot change it/,
+  );
+});
+
+test('a no-op restatement does not transfer the lock; a later change still names the first locker', () => {
+  assert.throws(
+    () =>
+      mergeLayers([
+        L('ground:co', { bindings: { review: { ...LOCKED } } }),
+        L('profile:work', { bindings: { review: { ...LOCKED } } }),
+        L('repo', { bindings: { review: { agent: 'codex' } } }),
+      ]),
+    /bindings\.review is locked by ground:co; repo cannot change it/,
+  );
 });

@@ -35,12 +35,12 @@ export class LockViolation extends ConfigError {
 export function mergeLayers(layers: Layer[]): Merged {
   const merged: Merged = {
     bindings: {},
-    nodes: { [CORE_GROOM_GATE.name]: { value: CORE_GROOM_GATE.def, source: 'core', locked: true } },
+    nodes: { [CORE_GROOM_GATE.name]: { value: structuredClone(CORE_GROOM_GATE.def) as NodeDef, source: 'core', locked: true } },
     rules: [],
   };
   for (const { source, fragment } of layers) {
     for (const [stage, binding] of Object.entries(fragment.bindings ?? {}) as [Stage, NodeDef | NodeDef[]][]) {
-      const value = Array.isArray(binding) ? binding : [binding];
+      const value = structuredClone(Array.isArray(binding) ? binding : [binding]);
       const existing = merged.bindings[stage];
       if (existing?.locked) {
         if (isDeepStrictEqual(existing.value, value)) continue;
@@ -54,9 +54,9 @@ export function mergeLayers(layers: Layer[]): Merged {
         if (isDeepStrictEqual(existing.value, def)) continue;
         throw new LockViolation(`nodes.${name}`, existing.source, source);
       }
-      merged.nodes[name] = { value: def, source, locked: def.required === true };
+      merged.nodes[name] = { value: structuredClone(def), source, locked: def.required === true };
     }
-    if (fragment.rules) merged.rules.push({ value: fragment.rules, source, locked: false });
+    if (fragment.rules) merged.rules.push({ value: structuredClone(fragment.rules), source, locked: false });
   }
   return merged;
 }
