@@ -325,3 +325,22 @@ test('validate exposes the selected profile runtime and tracker blocks (undefine
   assert.equal(r.runtime, undefined);
   assert.equal(r.tracker, undefined);
 });
+
+test('validate passes the selected profile runtime and tracker blocks through as written', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-vrt-'));
+  try {
+    const text = (await fs.readFile(fx('e2e/config.yaml'), 'utf8'))
+      .replaceAll('./grounds', JSON.stringify(fx('e2e/grounds')).slice(1, -1))
+      .replace(
+        '  work:\n',
+        '  work:\n    tracker: { kind: github, approvers: [bob] }\n    runtime: { worktree_root: ~/wt, base: origin/dev, keep_terminals: true, space: false }\n',
+      );
+    const cfg = path.join(dir, 'config.yaml');
+    await fs.writeFile(cfg, text);
+    const r = await validate({ ...opts(), configFile: cfg });
+    assert.deepEqual(r.runtime, { worktree_root: '~/wt', base: 'origin/dev', keep_terminals: true, space: false });
+    assert.deepEqual(r.tracker, { kind: 'github', approvers: ['bob'] });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
