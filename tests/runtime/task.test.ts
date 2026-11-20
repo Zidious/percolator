@@ -1,0 +1,127 @@
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { test } from 'node:test';
+import type { RunContext } from '../../src/engine/runtime.ts';
+import type { Step } from '../../src/graph/build.ts';
+import { buildTask, renderTemplate, STAGE_BRIEFS, TemplateError, type TaskInput } from '../../src/runtime/task.ts';
+import type { MaterializedMapping } from '../../src/workspace/run-dir.ts';
+
+function step(over: Partial<Step> = {}): Step {
+  return {
+    id: 'review',
+    name: 'review',
+    stage: 'review',
+    role: 'slot',
+    def: { kind: 'agent', agent: 'claude' } as Step['def'],
+    slotLast: true,
+    source: 'core',
+    locked: false,
+    ...over,
+  };
+}
+
+function ctx(over: Partial<RunContext> = {}): RunContext {
+  return {
+    state: {} as RunContext['state'],
+    graph: {
+      steps: [step({ id: 'plan', stage: 'plan' }), step({ id: 'implement', stage: 'implement' }), step()],
+    } as RunContext['graph'],
+    round: 2,
+    maxRounds: 3,
+    previousOutputs: {
+      implement: { summary: 'steps/implement/1/outputs/summary.md' },
+      plan: { plan: 'steps/plan/1/outputs/plan.md' },
+    },
+    ...over,
+  };
+}
+
+const worktree = 'C:\\Users\\a b\\wt';
+const runDir = 'C:\\Users\\a b\\.percolator\\runs\\r1';
+
+function input(over: Partial<TaskInput> = {}): TaskInput {
+  return {
+    step: step(),
+    ctx: ctx(),
+    runId: 'r1',
+    ticket: 'o/r#7',
+    worktree,
+    branch: 'perc/7',
+    base: 'main',
+    runDir,
+    outputsDir: `${runDir}\\steps\\review\\2\\outputs`,
+    doneFile: `${runDir}\\steps\\review\\2\\done.json`,
+    mappings: [
+      { as: 'policy', runPath: '/run/grounds/g/policy.md' } as MaterializedMapping,
+      { as: 'context', runPath: '/run/grounds/g/ctx.md' } as MaterializedMapping,
+    ],
+    skills: { native: ['a', 'b'] },
+    parentTerminal: 'herdr-1',
+    ...over,
+  };
+}
+
+test('renderTemplate substitutes vars and rejects unknown ones', () => {
+  assert.equal(renderTemplate('a {{ x }} b {{y}}', { x: '1', y: '2' }), 'a 1 b 2');
+  assert.throws(
+    () => renderTemplate('{{ a }} {{b}}', {}),
+    (e: unknown) => {
+      assert.ok(e instanceof TemplateError);
+      assert.equal((e as Error).message, 'unknown template variable(s): a, b');
+      return true;
+    },
+  );
+  assert.match(STAGE_BRIEFS.intake, /\{\{ticket\}\}/);
+});
+
+test('buildTask for review lists policies with the compliance instruction, inputs with absolute paths, and the done protocol', () => {
+  const t = buildTask(input());
+  assert.match(t, /^# Percolator task: review \(review, round 2\/3\)\n/);
+  assert.match(t, /Do not push, open pull requests or comment on the tracker; Percolator does that\./);
+  assert.match(t, /## Stage contract\n\nReview the branch diff \(git diff main\.\.\.HEAD\)/);
+  assert.match(t, /## Task\n\nCarry out the stage contract above\./);
+  assert.match(t, /Use these skills: a, b\./);
+  assert.match(
+    t,
+    /## Policies \(binding\)\n\nFollow every policy below\. Check the change against each one and add a "Policy compliance" section to findings\.md\.\n\n- \/run\/grounds\/g\/policy\.md/,
+  );
+  assert.match(t, /## Context \(reference\)\n\n- \/run\/grounds\/g\/ctx\.md/);
+  const planLine = `- plan (from plan): ${path.join(runDir, 'steps/plan/1/outputs/plan.md')}`;
+  const summaryLine = `- summary (from implement): ${path.join(runDir, 'steps/implement/1/outputs/summary.md')}`;
+  assert.ok(t.includes(planLine));
+  assert.ok(t.indexOf(planLine) < t.indexOf(summaryLine));
+  assert.ok(t.includes(`Worktree: ${worktree} (branch perc/7, base main).`));
+  assert.ok(t.includes(`Write each output as a Markdown file in ${runDir}\\steps\\review\\2\\outputs, named <key>.md.`));
+  assert.match(t, /Required: findings\.md/);
+  assert.ok(t.includes(`Write ${runDir}\\steps\\review\\2\\done.json last, as one JSON object: {"status":"pass"}`));
+  assert.ok(t.includes('Then run: hc send herdr-1 "review done"'));
+});
+
+test('buildTask lists skill files for non-native adapters and omits empty sections', () => {
+  const t = buildTask(
+    input({
+      step: step({ id: 'hook1', stage: 'implement', role: 'hook', slotLast: false }),
+      skills: { files: ['/s/one/SKILL.md'] },
+      mappings: [],
+      ctx: ctx({ previousOutputs: {} }),
+    }),
+  );
+  assert.match(t, /Read and follow these skill files before you start:\n\n- \/s\/one\/SKILL\.md/);
+  assert.match(t, /Carry out the node's purpose\./);
+  assert.doesNotMatch(t, /## Stage contract/);
+  assert.doesNotMatch(t, /## Policies/);
+  assert.doesNotMatch(t, /## Context/);
+  assert.doesNotMatch(t, /Required:/);
+  const none = buildTask(input({ skills: { native: [] }, mappings: [] }));
+  assert.doesNotMatch(none, /## Skills/);
+});
+
+test('buildTask renders a prompt with template vars', () => {
+  const t = buildTask(input({ prompt: 'Look at {{ticket}} on {{branch}}' }));
+  assert.match(t, /## Task\n\nLook at o\/r#7 on perc\/7/);
+});
+
+test('buildTask omits the hc send line without a parent terminal', () => {
+  const t = buildTask(input({ parentTerminal: undefined }));
+  assert.doesNotMatch(t, /hc send/);
+});
