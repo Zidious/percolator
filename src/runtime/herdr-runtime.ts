@@ -91,11 +91,10 @@ export async function sweepTerminals(hc: Hc, runId: string, o: { exceptRole?: st
   const removed: string[] = [];
   for (const t of await hc.list({ labels: { 'percolator.run': runId }, all: true })) {
     const n = t.name ?? t.address;
-    if (o.exceptRole !== undefined) {
-      // hc ls returns no labels: get tells the role
-      const labels = Object.keys(t.labels).length > 0 ? t.labels : (await hc.get(n))?.labels;
-      if (labels === undefined || labels['percolator.role'] === o.exceptRole) continue;
-    }
+    // hc ls returns no labels: get them, and re-check ownership rather than trusting the server-side filter
+    const labels = Object.keys(t.labels).length > 0 ? t.labels : (await hc.get(n))?.labels;
+    if (labels?.['percolator.run'] !== runId) continue;
+    if (o.exceptRole !== undefined && labels['percolator.role'] === o.exceptRole) continue;
     await hc.kill(n);
     await hc.rm(n);
     removed.push(n);

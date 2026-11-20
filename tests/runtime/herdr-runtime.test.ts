@@ -757,10 +757,10 @@ test('sweepTerminals removes the run\'s terminals but not the driver', async () 
   ]);
   assert.deepEqual([...hc.terminals.keys()], ['driver', 'other-run']);
 
-  // without exceptRole every terminal of the run goes, driver included, and nothing needs classifying
+  // without exceptRole every terminal of the run goes, driver included (still fetched: ownership is re-checked)
   hc.calls = [];
   assert.deepEqual(await sweepTerminals(hc, RUN_ID), ['driver']);
-  assert.deepEqual(hc.calls, [['list', { labels: ours, all: true }], ['kill', 'driver'], ['rm', 'driver']]);
+  assert.deepEqual(hc.calls, [['list', { labels: ours, all: true }], ['get', 'driver'], ['kill', 'driver'], ['rm', 'driver']]);
   assert.deepEqual([...hc.terminals.keys()], ['other-run']);
 });
 
@@ -779,4 +779,27 @@ test('a finished terminal of another run is neither removed nor relaunched over'
   });
   assert.deepEqual(subs(e.hc), ['get']);
   assert.ok(e.hc.terminals.has(name));
+});
+
+/** An hc whose `ls` ignores the label filter and returns no labels. */
+class LsIgnoringLabels extends FakeHc {
+  override async list(o?: { labels?: Record<string, string>; all?: boolean }): Promise<Terminal[]> {
+    return (await super.list({ ...(o?.all !== undefined ? { all: o.all } : {}) })).map((t) => ({ ...t, labels: {} }));
+  }
+}
+
+test('sweepTerminals re-checks run ownership: a terminal of another run listed by hc is left alone', async () => {
+  for (const o of [undefined, { exceptRole: 'driver' }]) {
+    const hc = new LsIgnoringLabels();
+    hc.add({ name: 'plan-live', labels: { ...ours, 'percolator.step': 'plan' } });
+    hc.add({ name: 'other-run', labels: { 'percolator.run': 'other' } });
+    hc.add({ name: 'unlabelled' });
+    assert.deepEqual(await sweepTerminals(hc, RUN_ID, o), ['plan-live']);
+    assert.deepEqual(
+      hc.calls.filter((c) => c[0] === 'kill' || c[0] === 'rm'),
+      [['kill', 'plan-live'], ['rm', 'plan-live']],
+    );
+    assert.deepEqual([...hc.terminals.keys()], ['other-run', 'unlabelled']);
+    assert.equal(hc.terminals.get('other-run')!.state, 'live');
+  }
 });
