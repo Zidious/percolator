@@ -42,7 +42,7 @@ export function checkRules(merged: Merged): Violation[] {
     for (const req of rules.require_skills ?? []) {
       for (const { target, node, stage } of all) {
         if (!isAgent(node)) continue;
-        if (req.stage === '*' ? false : stage !== req.stage) continue;
+        if (req.stage !== '*' && stage !== req.stage) continue;
         const have = [...(node.skills ?? []), ...(node.skill !== undefined ? [node.skill] : [])];
         const missing = req.skills.filter((s) => !have.includes(s));
         if (missing.length > 0) {
@@ -82,7 +82,8 @@ export function checkRules(merged: Merged): Violation[] {
       const exceededEarlier = (rounds: number) =>
         sets.slice(0, idx).some((s) => s.value.max_rounds_ceiling !== undefined && rounds > s.value.max_rounds_ceiling);
       for (const { target, node, stage, core } of all) {
-        // The locked core groom gate is not user-configurable; a ceiling below its cap must stay satisfiable.
+        // Only nodes whose merged source is 'core' (never keyed by name) are exempt. The ceiling is
+        // enforced on the core gate by buildGraph clamping its back-edge, not here.
         if (core) continue;
         if (stage === 'review') {
           const rounds = node.max_rounds ?? DEFAULT_REVIEW_ROUNDS;

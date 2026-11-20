@@ -123,6 +123,22 @@ test('on_fail.max_rounds over the ceiling is a violation, on extension nodes too
   assert.match(v[0]!.message, /5/);
 });
 
+test('max_rounds_ceiling does not flag the core approve-groom gate', () => {
+  const merged = m({ review: { agent: 'claude', max_rounds: 2 } }, [{ max_rounds_ceiling: 2 }]);
+  assert.equal(merged.nodes['approve-groom']!.source, 'core');
+  assert.equal(merged.nodes['approve-groom']!.value.on_fail!.max_rounds, 3);
+  assert.deepEqual(checkRules(merged), []);
+});
+
+test('max_rounds_ceiling still flags a non-core node with on_fail.max_rounds above it', () => {
+  const v = checkRules(
+    m({ review: { agent: 'claude', max_rounds: 2 } }, [{ max_rounds_ceiling: 2 }], {
+      gate2: { kind: 'gate', after: 'groom', on_fail: { back_to: 'groom', max_rounds: 3 } },
+    }),
+  );
+  assert.deepEqual(v.map((x) => x.target), ['nodes.gate2.on_fail']);
+});
+
 test('max_rounds_ceiling names the first rule set whose ceiling is exceeded', () => {
   const v = checkRules(
     m({ review: { agent: 'claude', max_rounds: 3 } }, [{ max_rounds_ceiling: 5 }, { max_rounds_ceiling: 2 }, { max_rounds_ceiling: 1 }]),
