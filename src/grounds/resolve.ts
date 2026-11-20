@@ -89,25 +89,73 @@ function sameUrl(a: string | undefined, b: string): boolean {
   return a !== undefined && (a === b || toPosix(a) === toPosix(b));
 }
 
+const tmpSibling = (target: string, tag = 'tmp') => `${target}.${tag}-${process.pid}-${randomBytes(4).toString('hex')}`;
+
+/**
+ * Rename the finished `tmp` dir to `target`. If a concurrent run got there first (the rename fails
+ * because `target` now exists), ours is discarded and theirs is used.
+ */
+async function renameIntoPlace(tmp: string, target: string): Promise<void> {
+  try {
+    await fs.rename(tmp, target);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if ((code === 'EEXIST' || code === 'ENOTEMPTY' || code === 'EPERM') && (await exists(target))) {
+      await fs.rm(tmp, { recursive: true, force: true });
+      return;
+    }
+    throw err;
+  }
+}
+
+/** Clone `url` as a mirror into a tmp sibling of `mirror`; the caller moves it into place. */
+async function cloneMirror(git: Git, url: string, mirror: string): Promise<string> {
+  const tmp = tmpSibling(mirror);
+  try {
+    await git.clone(url, tmp, { mirror: true });
+  } catch (err) {
+    await fs.rm(tmp, { recursive: true, force: true });
+    throw err;
+  }
+  return tmp;
+}
+
 /** Make sure `mirror` is a mirror of `url`. Returns true when it was cloned just now. */
 async function openMirror(git: Git, url: string, mirror: string): Promise<boolean> {
   await fs.mkdir(path.dirname(mirror), { recursive: true });
-  if (await exists(mirror)) {
-    if (sameUrl(await git.remoteUrl(mirror), url)) return false;
-    await fs.rm(mirror, { recursive: true, force: true }); // ground now points elsewhere
+  if (!(await exists(mirror))) {
+    await renameIntoPlace(await cloneMirror(git, url, mirror), mirror);
+    return true;
   }
-  await git.clone(url, mirror, { mirror: true });
+  if (sameUrl(await git.remoteUrl(mirror), url)) return false;
+  // the ground now points elsewhere: build the new mirror first, then swap it in
+  const tmp = await cloneMirror(git, url, mirror);
+  const old = tmpSibling(mirror, 'old');
+  try {
+    await fs.rename(mirror, old);
+  } catch (err) {
+    await fs.rm(tmp, { recursive: true, force: true });
+    throw err;
+  }
+  try {
+    await renameIntoPlace(tmp, mirror);
+  } catch (err) {
+    await fs.rename(old, mirror).catch(() => {});
+    await fs.rm(tmp, { recursive: true, force: true });
+    throw err;
+  }
+  await fs.rm(old, { recursive: true, force: true });
   return true;
 }
 
 /** Build `dir` at `commit` in a temp sibling and rename it in, so a partial checkout never looks pinned. */
 async function materialise(git: Git, mirror: string, dir: string, commit: string): Promise<void> {
   if (await exists(dir)) return;
-  const tmp = `${dir}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
+  const tmp = tmpSibling(dir);
   try {
     await git.clone(mirror, tmp);
     await git.checkout(tmp, commit);
-    await fs.rename(tmp, dir);
+    await renameIntoPlace(tmp, dir);
   } catch (err) {
     await fs.rm(tmp, { recursive: true, force: true });
     throw err;

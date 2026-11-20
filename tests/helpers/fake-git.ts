@@ -1,15 +1,24 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import type { Git } from '../../src/grounds/git.ts';
 
-/** Records every call and serves fixed refs; clone creates the target dir. */
+const ORIGIN = '.fake-origin';
+
+/**
+ * Records every call and serves fixed refs; clone creates the target dir with an origin marker
+ * file inside, so the origin url follows the dir through renames.
+ */
 export class FakeGit implements Git {
   calls: string[] = [];
   refs = new Map<string, string>();
-  /** origin url per cloned dir */
+  /** origin url per dir that has no marker file (e.g. a repo cwd) */
   urls = new Map<string, string>();
   /** commits the mirror lacks until the next fetch */
   missing = new Set<string>();
   checkoutError: Error | undefined;
+  cloneError: Error | undefined;
+  /** runs after a clone has created its dir (e.g. to simulate a concurrent run) */
+  onClone: ((url: string, dir: string) => Promise<void>) | undefined;
 
   setRef(ref: string, commit: string): void {
     this.refs.set(ref, commit);
@@ -18,13 +27,24 @@ export class FakeGit implements Git {
   /** Pre-existing mirror dir cloned from `url`, without recording a call. */
   async seedMirror(dir: string, url: string): Promise<void> {
     await fs.mkdir(dir, { recursive: true });
-    this.urls.set(dir, url);
+    await fs.writeFile(path.join(dir, ORIGIN), url);
+  }
+
+  /** Origin url of `dir`, without recording a call. */
+  async originOf(dir: string): Promise<string | undefined> {
+    try {
+      return await fs.readFile(path.join(dir, ORIGIN), 'utf8');
+    } catch {
+      return this.urls.get(dir);
+    }
   }
 
   async clone(url: string, dir: string, opts?: { mirror?: boolean }): Promise<void> {
     this.calls.push(`clone ${opts?.mirror ? '--mirror ' : ''}${url} ${dir}`);
+    if (this.cloneError) throw this.cloneError;
     await fs.mkdir(dir, { recursive: true });
-    this.urls.set(dir, url);
+    await fs.writeFile(path.join(dir, ORIGIN), url);
+    await this.onClone?.(url, dir);
   }
 
   async fetch(dir: string): Promise<void> {
@@ -47,6 +67,6 @@ export class FakeGit implements Git {
 
   async remoteUrl(cwd: string): Promise<string | undefined> {
     this.calls.push(`remoteUrl ${cwd}`);
-    return this.urls.get(cwd);
+    return this.originOf(cwd);
   }
 }

@@ -97,7 +97,7 @@ describe('resolveGrounds', () => {
     const mirror = path.join(cacheDir, 'company.mirror');
     const dir = path.join(cacheDir, 'company@abc123def456');
     assert.deepEqual(norm(fake.calls), [
-      `clone --mirror ${URL} ${mirror}`,
+      `clone --mirror ${URL} ${mirror}.tmp`,
       `clone ${mirror} ${dir}.tmp`,
       `checkout ${dir}.tmp ${OLD}`,
     ]);
@@ -118,7 +118,7 @@ describe('resolveGrounds', () => {
     await fake.seedMirror(mirror, URL);
     await resolveGrounds(specs, opts());
     assert.ok(fake.calls.includes(`fetch ${mirror}`));
-    assert.ok(!fake.calls.includes(`clone --mirror ${URL} ${mirror}`));
+    assert.ok(!norm(fake.calls).includes(`clone --mirror ${URL} ${mirror}.tmp`));
   });
 
   test('moved branch keeps locked commit until update', async () => {
@@ -181,9 +181,52 @@ describe('resolveGrounds', () => {
     await fake.seedMirror(mirror, 'https://old.example.com/company.git');
     fake.setRef('main', NEW);
     await resolveGrounds(specs, opts());
-    assert.ok(fake.calls.includes(`clone --mirror ${URL} ${mirror}`));
+    assert.ok(norm(fake.calls).includes(`clone --mirror ${URL} ${mirror}.tmp`));
     assert.ok(!fake.calls.includes(`fetch ${mirror}`));
-    assert.equal(fake.urls.get(mirror), URL);
+    assert.equal(await fake.originOf(mirror), URL);
+    assert.deepEqual((await fs.readdir(cacheDir)).filter((e) => e.includes('.tmp') || e.includes('.old')), []);
+  });
+
+  test('a changed git url keeps the old mirror when the new clone fails', async () => {
+    const mirror = path.join(cacheDir, 'company.mirror');
+    const OLD_URL = 'https://old.example.com/company.git';
+    await fake.seedMirror(mirror, OLD_URL);
+    fake.setRef('main', NEW);
+    fake.cloneError = new Error('network down');
+    await assert.rejects(resolveGrounds(specs, opts()), /network down/);
+    assert.equal(await fake.originOf(mirror), OLD_URL);
+    assert.deepEqual(await fs.readdir(cacheDir), ['company.mirror']);
+  });
+
+  test('a new mirror is cloned into a tmp sibling, so a failed clone leaves nothing', async () => {
+    fake.setRef('main', OLD);
+    fake.cloneError = new Error('network down');
+    await assert.rejects(resolveGrounds(specs, opts()), /network down/);
+    assert.deepEqual(await fs.readdir(cacheDir), []);
+  });
+
+  test('losing the mirror race to a concurrent run uses the mirror it created', async () => {
+    fake.setRef('main', OLD);
+    const mirror = path.join(cacheDir, 'company.mirror');
+    fake.onClone = async (url, dir) => {
+      if (dir.startsWith(`${mirror}.tmp`)) await fake.seedMirror(mirror, url);
+    };
+    const r = await resolveGrounds(specs, opts());
+    assert.equal(r.company!.commit, OLD);
+    assert.equal(await fake.originOf(mirror), URL);
+    assert.deepEqual((await fs.readdir(cacheDir)).filter((e) => e.includes('.tmp')), []);
+  });
+
+  test('losing the materialise race to a concurrent run uses the dir it created', async () => {
+    fake.setRef('main', OLD);
+    const dir = path.join(cacheDir, 'company@abc123def456');
+    fake.onClone = async (url, target) => {
+      if (target.startsWith(`${dir}.tmp`)) await fake.seedMirror(dir, url);
+    };
+    const r = await resolveGrounds(specs, opts());
+    assert.equal(r.company!.dir, dir);
+    assert.equal((await fs.stat(dir)).isDirectory(), true);
+    assert.deepEqual((await fs.readdir(cacheDir)).filter((e) => e.includes('.tmp')), []);
   });
 
   test('pinned ground with missing dir uses an existing mirror without fetching', async () => {
