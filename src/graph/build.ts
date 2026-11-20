@@ -1,6 +1,6 @@
 import { ConfigError } from '../config/load.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
-import { CORE_STAGES } from './core.ts';
+import { CORE_GROOM_GATE, CORE_STAGES } from './core.ts';
 import type { Merged } from './merge.ts';
 
 export type Step = {
@@ -17,6 +17,8 @@ export type BackEdge = {
   id: string;
   fromStepId: string;
   toStepIndex: number;
+  /** the engine performs the jump after running the step at this index */
+  jumpAfterIndex: number;
   maxRounds: number;
   onCap: 'continue' | 'escalate';
 };
@@ -71,8 +73,18 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
   }
   for (const h of hooks.filter((h) => h.def.after === 'all')) pushHook(h, 'after-all');
 
+  const seen = new Set<string>();
+  for (const s of steps) {
+    if (seen.has(s.id)) {
+      throw new GraphError(`node "${s.id}" clashes with a core step id; rename it`, `nodes.${s.id}`);
+    }
+    seen.add(s.id);
+  }
+
+  const ceiling = Math.min(...merged.rules.map((r) => r.value.max_rounds_ceiling ?? Infinity));
   const reviewSlot = merged.bindings.review!.value;
   const lastReview = steps.findLast((s) => s.role === 'slot' && s.stage === 'review')!;
+  const lastReviewRegion = steps.findLastIndex((s) => s.stage === 'review');
 
   const backEdges: Record<string, BackEdge> = {};
   for (const step of steps) {
@@ -94,7 +106,9 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
       id: step.id,
       fromStepId: step.id,
       toStepIndex: regionStart[onFail.back_to],
-      maxRounds: onFail.max_rounds,
+      jumpAfterIndex: steps.indexOf(step),
+      // rule checks exempt the core gate, so its cap is clamped to the ceiling here
+      maxRounds: step.role === 'hook' && step.id === CORE_GROOM_GATE.name ? Math.min(onFail.max_rounds, ceiling) : onFail.max_rounds,
       onCap: 'escalate',
     };
   }
@@ -103,6 +117,8 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
     id: lastReview.id,
     fromStepId: lastReview.id,
     toStepIndex: regionStart.implement,
+    // after:review hooks run every round, so the jump happens after the last review-region step
+    jumpAfterIndex: lastReviewRegion,
     maxRounds: reviewSlot[reviewSlot.length - 1]!.max_rounds ?? 3,
     onCap: 'continue',
   };

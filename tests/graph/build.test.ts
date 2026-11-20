@@ -125,6 +125,7 @@ test('core gate back-edge goes to groom region, max 3, escalates', () => {
     id: 'approve-groom',
     fromStepId: 'approve-groom',
     toStepIndex: g.regionStart.groom,
+    jumpAfterIndex: g.steps.findIndex((s) => s.id === 'approve-groom'),
     maxRounds: 3,
     onCap: 'escalate',
   });
@@ -142,6 +143,67 @@ test('step name is the stage for slot nodes and the node name for hooks', () => 
   const g = buildGraph(full());
   assert.equal(g.steps.find((s) => s.id === 'plan.1')!.name, 'plan');
   assert.equal(g.steps.find((s) => s.id === 'approve-groom')!.name, 'approve-groom');
+});
+
+test('hook named like a core step id is rejected (review)', () => {
+  assert.throws(
+    () => buildGraph(full({ nodes: { review: { before: 'deliver', kind: 'script', command: ['x'] } } })),
+    (e: unknown) =>
+      e instanceof GraphError &&
+      e.path === 'nodes.review' &&
+      e.message === 'nodes.review: node "review" clashes with a core step id; rename it',
+  );
+});
+
+test('hook named like a multi-node slot step id is rejected (plan.0)', () => {
+  assert.throws(
+    () => buildGraph(full({ nodes: { 'plan.0': { after: 'plan', kind: 'script', command: ['x'] } } })),
+    (e: unknown) => e instanceof GraphError && e.path === 'nodes.plan.0' && /clashes with a core step id/.test(e.message),
+  );
+});
+
+test('review back-edge jumps after the last after:review hook', () => {
+  const g = buildGraph(full({ nodes: { rep: { after: 'review', kind: 'script', command: ['x'] } } }));
+  const e = g.backEdges['review']!;
+  assert.equal(e.fromStepId, 'review');
+  assert.equal(e.jumpAfterIndex, g.steps.findIndex((s) => s.id === 'rep'));
+});
+
+test('review jumpAfterIndex is the review step when no after:review hooks', () => {
+  const g = buildGraph(full());
+  assert.equal(g.backEdges['review']!.jumpAfterIndex, g.steps.findIndex((s) => s.id === 'review'));
+});
+
+test('on_fail edge jumps after its own step', () => {
+  const g = buildGraph(
+    full({ nodes: { qa: { before: 'deliver', kind: 'script', command: ['qa'], on_fail: { back_to: 'implement', max_rounds: 2 } } } }),
+  );
+  assert.equal(g.backEdges['qa']!.jumpAfterIndex, g.steps.findIndex((s) => s.id === 'qa'));
+});
+
+test('max_rounds_ceiling clamps the core gate cap; no ceiling leaves 3', () => {
+  const withRules = (ceilings: number[]) =>
+    mergeLayers([
+      { source: 'a', fragment: { bindings: full().bindings as never, rules: { max_rounds_ceiling: ceilings[0]! } } },
+      ...(ceilings[1] ? [{ source: 'b', fragment: { rules: { max_rounds_ceiling: ceilings[1] } } }] : []),
+    ]);
+  assert.equal(buildGraph(withRules([2])).backEdges['approve-groom']!.maxRounds, 2);
+  assert.equal(buildGraph(withRules([5, 2])).backEdges['approve-groom']!.maxRounds, 2);
+  assert.equal(buildGraph(withRules([9])).backEdges['approve-groom']!.maxRounds, 3);
+  assert.equal(buildGraph(full()).backEdges['approve-groom']!.maxRounds, 3);
+});
+
+test('after:X hook may back_to X', () => {
+  const g = buildGraph(
+    full({ nodes: { chk: { after: 'plan', kind: 'script', command: ['x'], on_fail: { back_to: 'plan', max_rounds: 2 } } } }),
+  );
+  assert.equal(g.backEdges['chk']!.toStepIndex, g.regionStart.plan);
+});
+
+test('on_fail on a non-review slot node is allowed', () => {
+  const g = buildGraph(full({}, { implement: { agent: 'claude', on_fail: { back_to: 'plan', max_rounds: 2 } } }));
+  assert.equal(g.backEdges['implement']!.toStepIndex, g.regionStart.plan);
+  assert.equal(g.backEdges['implement']!.onCap, 'escalate');
 });
 
 test('buildGraph does not mutate Merged', () => {
