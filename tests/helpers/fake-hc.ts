@@ -71,7 +71,16 @@ export class FakeHc implements Hc {
     this.calls.push(['get', name]);
     const t = this.terminals.get(name);
     if (!t) return undefined;
-    return { address: t.address, name: t.name, state: t.state, status: t.status, exitCode: t.exitCode, turn: t.turn };
+    return { address: t.address, name: t.name, state: t.state, status: t.status, exitCode: t.exitCode, turn: t.turn, labels: { ...t.labels } };
+  }
+
+  /** Emulates hc's server-side label filter; live terminals only unless `all`. */
+  async list(o?: { labels?: Record<string, string>; all?: boolean }): Promise<Terminal[]> {
+    this.calls.push(['list', o]);
+    const want = Object.entries(o?.labels ?? {});
+    return [...this.terminals.values()]
+      .filter((t) => (o?.all || t.state === 'live') && want.every(([k, v]) => t.labels[k] === v))
+      .map((t) => ({ address: t.address, name: t.name, state: t.state, status: t.status, exitCode: t.exitCode, turn: t.turn, labels: { ...t.labels } }));
   }
 
   async wait(name: string, o?: { timeoutS?: number }): Promise<WaitResult> {

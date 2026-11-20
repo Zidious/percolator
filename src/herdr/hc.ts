@@ -9,6 +9,8 @@ export type Terminal = {
   status: AgentStatus | null;
   exitCode: number | null;
   turn: number;
+  /** `{}` when hc omits it (`ls` does not return labels; `get` does) */
+  labels: Record<string, string>;
 };
 export type HcRunOptions = {
   name: string;
@@ -22,6 +24,7 @@ export type WaitResult = { reason: string; ended: boolean; exitCode: number | nu
 export interface Hc {
   run(o: HcRunOptions): Promise<{ address: string; firstMessageSent?: boolean }>;
   get(t: string): Promise<Terminal | undefined>;
+  list(o?: { labels?: Record<string, string>; all?: boolean }): Promise<Terminal[]>;
   wait(t: string, o?: { timeoutS?: number }): Promise<WaitResult>;
   read(t: string, lines: number): Promise<string>;
   kill(t: string): Promise<void>;
@@ -51,6 +54,23 @@ function toError(sub: string, code: number, stderr: string): HcError {
     // not JSON: fall through to the raw text
   }
   return new HcError(sub, 'unknown', stderr.trim(), code);
+}
+
+function toTerminal(j: Record<string, unknown>): Terminal {
+  const labels: Record<string, string> = {};
+  const raw = j['labels'];
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw)) labels[k] = String(v);
+  }
+  return {
+    address: String(j['address']),
+    ...(typeof j['name'] === 'string' ? { name: j['name'] } : {}),
+    state: j['state'] as Terminal['state'],
+    status: (j['status'] ?? null) as AgentStatus | null,
+    exitCode: (j['exit_code'] ?? null) as number | null,
+    turn: Number(j['turn'] ?? 0),
+    labels,
+  };
 }
 
 function parseJson(sub: string, stdout: string): Record<string, unknown> {
@@ -106,14 +126,13 @@ export function cliHc(o: { exec?: Exec; bin?: string } = {}): Hc {
         if (err instanceof HcError && err.kind === 'not_found') return undefined;
         throw err;
       }
-      return {
-        address: String(j['address']),
-        ...(typeof j['name'] === 'string' ? { name: j['name'] } : {}),
-        state: j['state'] as Terminal['state'],
-        status: (j['status'] ?? null) as AgentStatus | null,
-        exitCode: (j['exit_code'] ?? null) as number | null,
-        turn: Number(j['turn'] ?? 0),
-      };
+      return toTerminal(j);
+    },
+    async list(opts) {
+      const labels = Object.entries(opts?.labels ?? {}).flatMap(([k, v]) => ['--label', `${k}=${v}`]);
+      const j = await call('ls', ['ls', '--json', ...(opts?.all ? ['--all'] : []), ...labels]);
+      const ts = Array.isArray(j['terminals']) ? (j['terminals'] as Record<string, unknown>[]) : [];
+      return ts.map(toTerminal);
     },
     async wait(t, opts) {
       const j = await call('wait', [
