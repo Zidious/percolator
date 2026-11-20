@@ -27,8 +27,8 @@ test('validate prints profile, grounds, mappings, steps and back-edges', async (
   assert.equal(r.code, 0, r.err);
   const lines = r.out.split('\n');
   assert.ok(lines.includes('profile: work'));
-  assert.ok(lines.includes('ground company@local'));
-  assert.ok(lines.includes('ground team@local'));
+  assert.ok(lines.includes('ground company local'));
+  assert.ok(lines.includes('ground team local'));
   assert.ok(lines.some((l) => /^policy .*policies[\\/]sdlc\.md$/.test(l)));
   assert.ok(lines.includes('1. intake'));
   assert.ok(lines.includes('3. approve-groom (after groom)'));

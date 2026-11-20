@@ -114,6 +114,11 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
     graph,
     mappings,
     grounds,
-    groundVersions: Object.fromEntries(Object.values(grounds).map((g) => [g.name, g.commit === 'local' ? 'local' : g.commit.slice(0, 12)])),
+    groundVersions: Object.fromEntries(Object.values(grounds).map((g) => [g.name, groundVersion(g)])),
   };
+}
+
+/** Human-readable ground version: `<ref> (<commit12>)` for git grounds, `local` for path grounds. */
+export function groundVersion(g: ResolvedGround): string {
+  return 'git' in g.source ? `${g.source.ref} (${g.commit.slice(0, 12)})` : 'local';
 }

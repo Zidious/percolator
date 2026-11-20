@@ -5,7 +5,8 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { ConfigError } from '../../src/config/load.ts';
 import { RuleViolationError } from '../../src/graph/rules.ts';
-import { validate } from '../../src/validate.ts';
+import { groundVersion, validate } from '../../src/validate.ts';
+import type { ResolvedGround } from '../../src/grounds/resolve.ts';
 import { FakeGit } from '../helpers/fake-git.ts';
 
 const fx = (p: string) => path.resolve(import.meta.dirname, '..', 'fixtures', p);
@@ -276,4 +277,45 @@ test('validate walks fragment use', async () => {
   } finally {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
+});
+
+test('groundVersion is "<ref> (<commit12>)" for git grounds and "local" for path grounds', () => {
+  const commit = 'c0123456789abcdef0123456789abcdef0123456';
+  const git: ResolvedGround = { name: 'x', dir: '/d', commit, source: { git: 'https://example.com/x.git', ref: 'v2.3.1' } };
+  const local: ResolvedGround = { name: 'y', dir: '/d', commit: 'local', source: { path: '/d' } };
+  assert.equal(groundVersion(git), 'v2.3.1 (c0123456789a)');
+  assert.equal(groundVersion(local), 'local');
+});
+
+test('validate records a git ground version with its ref', async () => {
+  const git = new FakeGit();
+  const commit = 'c0123456789abcdef0123456789abcdef0123456';
+  git.setRef('main', commit);
+  git.onClone = async (_url, dir) => {
+    if (dir.endsWith('.mirror')) return;
+    await fs.cp(fx('e2e/grounds/company'), dir, { recursive: true });
+  };
+  await withConfig(
+    (abs) => `version: 1
+grounds:
+  x: { git: https://example.com/x.git, ref: main }
+  team: { path: ${abs('team')} }
+profiles:
+  work:
+    use:
+      - { from: x, file: percolator.yaml, as: graph }
+      - { from: team, file: policies/sdlc.md, as: policy, applies_to: ["*"] }
+    bindings:
+      intake: { builtin: read-ticket }
+      groom: { agent: claude }
+      plan: { agent: claude }
+      implement: { agent: claude }
+      deliver: { command: [echo, deliver] }
+`,
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg, git });
+      assert.equal(r.groundVersions.x, 'main (c0123456789a)');
+      assert.equal(r.groundVersions.team, 'local');
+    },
+  );
 });

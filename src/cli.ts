@@ -34,7 +34,7 @@ function parse<T extends Record<string, { type: 'string' | 'boolean' }>>(args: s
 
 function describe(r: ValidateResult): string {
   const lines = [`profile: ${r.profile}`];
-  for (const [name, version] of Object.entries(r.groundVersions)) lines.push(`ground ${name}@${version}`);
+  for (const [name, version] of Object.entries(r.groundVersions)) lines.push(`ground ${name} ${version}`);
   for (const m of r.mappings) lines.push(`${m.as} ${m.absPath}`);
   lines.push('', 'steps:');
   r.graph.steps.forEach((s, i) => {
