@@ -38,7 +38,8 @@ Executed with superpowers:subagent-driven-development: one implementer and one s
    - `gh.smoke.ts --issue <a real issue>`: **passed 2026-11-20** on `Zidious/percolator#1`.
      - The URL form parsed to `github.com/zidious/percolator` #1, lower-cased as ruled.
      - `number`, `title`, `body`, `url`, `state` (`OPEN`) and `author` (a login string) all mapped.
-     - The issue had no comments, so the comment fields (`author`, `body`, `createdAt`, `url`) and comment pagination on long issues are still unverified. Re-run on an issue with comments.
+     - A re-run with two comments showed each comment's `author` (login string), `body`, `createdAt` (ISO UTC, second precision, e.g. `2026-11-20T22:44:24Z`) and `url` (`…/issues/1#issuecomment-<id>`). The comments came in time order, which is the shape the gate and intake consume.
+     - Still unverified: pagination on long issues (100+ comments).
 2. Push `main` and watch the 3-OS CI matrix.
 
 **Rulings that bind later tasks:**
