@@ -203,7 +203,7 @@ test('after:review hook runs every round, including failing ones', async () => {
   assert.equal(s.pendingJump, undefined);
   // the save right after review's first fail records the pending jump
   const firstFail = saved.find((x) => x.history.at(-1)!.stepId === 'review')!;
-  assert.deepEqual(firstFail.pendingJump, { edgeId: 'review', findings: 'f1' });
+  assert.deepEqual(firstFail.pendingJump, { edgeId: 'review', stepId: 'review', findings: 'f1' });
 });
 
 test('review cap with an after:review hook continues with the last findings', async () => {
@@ -224,7 +224,7 @@ test('pause while a jump is pending: resume applies the jump', async () => {
   const s1 = await runGraph(g, newState(init), { runtime: rt1, save });
   assert.equal(s1.status, 'paused');
   assert.equal(s1.pausedReason, 'hold');
-  assert.deepEqual(saved.at(-1)!.pendingJump, { edgeId: 'review', findings: 'f2' });
+  assert.deepEqual(saved.at(-1)!.pendingJump, { edgeId: 'review', stepId: 'review', findings: 'f2' });
   assert.equal(saved.at(-1)!.rounds['review'], 1);
 
   const rt2 = new FakeRuntime();
@@ -424,7 +424,7 @@ test('resuming against a changed graph throws before running anything', async ()
 test('a pending jump for a back-edge not in the graph is a clear error', async () => {
   const s = newState(init);
   s.cursor = 3;
-  s.pendingJump = { edgeId: 'nope' };
+  s.pendingJump = { edgeId: 'nope', stepId: 'nope' };
   const rt = new FakeRuntime();
   await assert.rejects(runGraph(graph(), s, { runtime: rt, save: async () => {} }), (e: Error) => {
     assert.ok(!(e instanceof TypeError));
@@ -432,4 +432,87 @@ test('a pending jump for a back-edge not in the graph is a clear error', async (
     return true;
   });
   assert.deepEqual(rt.calls, []);
+});
+
+const twoReviewers = { review: [{ agent: 'claude' }, { agent: 'codex' }] };
+
+test('a fail on a non-last review node loops back to implement after the rest of review runs', async () => {
+  const g = graph({}, twoReviewers);
+  const { save, saved } = saver();
+  const rt = new FakeRuntime({ 'review.0': [fail('f1'), pass()] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save });
+  assert.deepEqual(rt.calls.slice(rt.calls.indexOf('review.0')), ['review.0', 'review.1', 'implement', 'review.0', 'review.1', 'deliver']);
+  assert.equal(s.status, 'completed');
+  assert.equal(s.rounds['review.1'], 1);
+  assert.equal(s.pendingJump, undefined);
+  assert.equal(s.unresolvedFindings, undefined);
+  const firstFail = saved.find((x) => x.history.at(-1)!.stepId === 'review.0')!;
+  assert.deepEqual(firstFail.pendingJump, { edgeId: 'review.1', stepId: 'review.0', findings: 'f1' });
+});
+
+test('non-last review fails every round → deliver with unresolved findings', async () => {
+  const g = graph({}, twoReviewers);
+  const rt = new FakeRuntime({ 'review.0': [fail('f'), fail('f'), fail('f')] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'completed');
+  assert.equal(s.unresolvedFindings, 'f');
+  assert.equal(s.rounds['review.1'], 3);
+  assert.equal(rt.calls.filter((id) => id === 'review.1').length, 3);
+  assert.equal(rt.calls.filter((id) => id === 'deliver').length, 1);
+});
+
+test('both review nodes failing count one round, and the last findings win', async () => {
+  const g = graph({}, twoReviewers);
+  const rt = new FakeRuntime({ 'review.0': [fail('a1'), fail('a2'), fail('a3')], 'review.1': [fail('b1'), fail('b2'), fail('b3')] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'completed');
+  assert.equal(s.rounds['review.1'], 3);
+  assert.equal(rt.calls.filter((id) => id === 'implement').length, 3);
+  assert.equal(rt.calls.filter((id) => id === 'deliver').length, 1);
+  assert.equal(s.unresolvedFindings, 'b3');
+  assert.equal(s.pendingJump, undefined);
+});
+
+test('a later non-last review fail overwrites the pending findings', async () => {
+  const g = graph({}, { review: [{ agent: 'claude' }, { agent: 'codex' }, { agent: 'claude' }] });
+  const { save, saved } = saver();
+  const rt = new FakeRuntime({ 'review.0': [fail('a1')], 'review.1': [fail('b1')] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save });
+  const second = saved.find((x) => x.history.at(-1)!.stepId === 'review.1')!;
+  assert.deepEqual(second.pendingJump, { edgeId: 'review.2', stepId: 'review.1', findings: 'b1' });
+  assert.equal(s.rounds['review.2'], 1);
+  assert.equal(s.status, 'completed');
+});
+
+test('ctx.round is clamped at a cap on resume', async () => {
+  const g = graph({ qa: { before: 'deliver', kind: 'script', command: ['qa'], on_fail: { back_to: 'implement', max_rounds: 2 } } });
+  const rt1 = new FakeRuntime({ qa: [fail('q1'), fail('q2')] });
+  const s1 = await runGraph(g, newState(init), { runtime: rt1, save: saver().save });
+  assert.equal(s1.pausedReason, 'cap: qa reached 2 rounds');
+  const rt2 = new FakeRuntime({ qa: [fail('q3')] });
+  await runGraph(g, { ...s1, status: 'running' }, { runtime: rt2, save: saver().save });
+  assert.deepEqual(rt1.roundsOf('qa'), [1, 2]);
+  assert.deepEqual(rt2.roundsOf('qa'), [2]);
+  assert.deepEqual(rt1.maxRoundsOf('qa'), [2, 2]);
+  assert.deepEqual(rt2.maxRoundsOf('qa'), [2]);
+});
+
+test('ctx.maxRounds is 1 outside any loop and the review cap inside review', async () => {
+  const rt = new FakeRuntime();
+  await runGraph(graph({}, { review: { agent: 'claude', max_rounds: 4 } }), newState(init), { runtime: rt, save: saver().save });
+  assert.deepEqual(rt.maxRoundsOf('intake'), [1]);
+  assert.deepEqual(rt.maxRoundsOf('review'), [4]);
+  assert.deepEqual(rt.maxRoundsOf('deliver'), [1]);
+});
+
+test('a pending jump without stepId (older state) is triggered by its edge step', async () => {
+  const g = graph({ audit: { after: 'review', agent: 'claude' } });
+  const s = newState(init);
+  s.cursor = g.steps.findIndex((x) => x.id === 'audit');
+  s.pendingJump = { edgeId: 'review', findings: 'f1' } as RunState['pendingJump'];
+  const rt = new FakeRuntime();
+  const out = await runGraph(g, s, { runtime: rt, save: saver().save });
+  assert.deepEqual(rt.calls, ['audit', 'implement', 'review', 'audit', 'deliver']);
+  assert.equal(out.rounds['review'], 1);
+  assert.equal(out.status, 'completed');
 });

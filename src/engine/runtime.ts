@@ -10,8 +10,10 @@ export type NodeOutcome = {
 export type RunContext = {
   state: RunState;
   graph: Graph;
-  /** round of the innermost back-edge loop containing the step, 1-based */
+  /** round of the innermost back-edge loop containing the step, 1-based, at most `maxRounds` */
   round: number;
+  /** `maxRounds` of the innermost back-edge loop containing the step; 1 outside any loop */
+  maxRounds: number;
   /** latest outputs per stepId */
   previousOutputs: Record<string, Record<string, string>>;
 };

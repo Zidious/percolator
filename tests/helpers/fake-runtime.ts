@@ -10,6 +10,7 @@ export const esc = (reason: string): NodeOutcome => ({ status: 'escalate', outpu
 export class FakeRuntime implements Runtime {
   calls: string[] = [];
   rounds: number[] = [];
+  maxRoundsSeen: number[] = [];
   previous: Record<string, Record<string, string>>[] = [];
   readonly #script: Record<string, NodeOutcome[]>;
   readonly #used = new Map<string, number>();
@@ -21,6 +22,7 @@ export class FakeRuntime implements Runtime {
   async executeStep(step: Step, ctx: RunContext): Promise<NodeOutcome> {
     this.calls.push(step.id);
     this.rounds.push(ctx.round);
+    this.maxRoundsSeen.push(ctx.maxRounds);
     this.previous.push(structuredClone(ctx.previousOutputs));
     const n = this.#used.get(step.id) ?? 0;
     this.#used.set(step.id, n + 1);
@@ -32,6 +34,11 @@ export class FakeRuntime implements Runtime {
   /** ctx.round seen by each call of `stepId`, in order */
   roundsOf(stepId: string): number[] {
     return this.rounds.filter((_, i) => this.calls[i] === stepId);
+  }
+
+  /** ctx.maxRounds seen by each call of `stepId`, in order */
+  maxRoundsOf(stepId: string): number[] {
+    return this.maxRoundsSeen.filter((_, i) => this.calls[i] === stepId);
   }
 }
 

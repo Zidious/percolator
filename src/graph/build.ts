@@ -27,6 +27,8 @@ export type Graph = {
   steps: Step[];
   regionStart: Record<Stage, number>;
   backEdges: Record<string, BackEdge>;
+  /** stepId → id of the back-edge its `fail` triggers; a step with no route fails the run */
+  failRoutes: Record<string, string>;
 };
 
 export class GraphError extends ConfigError {
@@ -123,5 +125,10 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
     onCap: 'continue',
   };
 
-  return { steps, regionStart, backEdges };
+  const failRoutes: Record<string, string> = {};
+  // any review slot node's fail is a review round; a step's own on_fail is more specific
+  for (const s of steps) if (s.role === 'slot' && s.stage === 'review') failRoutes[s.id] = lastReview.id;
+  for (const id of Object.keys(backEdges)) failRoutes[id] = id;
+
+  return { steps, regionStart, backEdges, failRoutes };
 }

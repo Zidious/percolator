@@ -24,8 +24,11 @@ export type RunState = {
   status: 'running' | 'paused' | 'failed' | 'completed';
   pausedReason?: string;
   unresolvedFindings?: string;
-  /** a back-edge was triggered but its jump waits for the step at `jumpAfterIndex` */
-  pendingJump?: { edgeId: string; findings?: string };
+  /**
+   * a back-edge was triggered by the fail of `stepId` but its jump waits for the step at `jumpAfterIndex`.
+   * States saved before `stepId` existed lack it; the engine then uses the edge's `fromStepId`.
+   */
+  pendingJump?: { edgeId: string; stepId: string; findings?: string };
   /** sha256 of the graph this run started on; set by `runGraph` on a new run, checked on resume */
   graphFingerprint?: string;
 };

@@ -48,7 +48,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       continue;
     }
 
-    const ctx: RunContext = { state, graph, round: roundAt(i), previousOutputs: latestOutputs(state) };
+    const ctx: RunContext = { state, graph, ...roundAt(i), previousOutputs: latestOutputs(state) };
     const startedAt = now();
     const outcome = await deps.runtime.executeStep(step, ctx);
     const endedAt = now();
@@ -82,15 +82,19 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       state.status = 'paused';
       state.pausedReason = outcome.reason ?? `escalate: ${step.id}`;
     } else if (outcome.status === 'fail') {
-      const edge = graph.backEdges[step.id];
+      const route = graph.failRoutes[step.id];
+      const edge = route === undefined ? undefined : graph.backEdges[route];
       if (!edge) {
         state.status = 'failed';
       } else if (edge.jumpAfterIndex === i) {
+        // this fail decides the round; an earlier trigger on the same edge is folded into it
+        if (state.pendingJump?.edgeId === edge.id) delete state.pendingJump;
         state.cursor = i + 1;
         decide(edge, i, outcome.outputs['findings']);
       } else {
-        // triggered now, decided once the step at jumpAfterIndex has run (hooks run every round)
-        state.pendingJump = { edgeId: edge.id, findings: outcome.outputs['findings'] };
+        // triggered now, decided once the step at jumpAfterIndex has run (hooks run every round);
+        // a later trigger on the same edge overwrites, so the latest findings win
+        state.pendingJump = { edgeId: edge.id, stepId: step.id, findings: outcome.outputs['findings'] };
         state.cursor = i + 1;
       }
     } else {
@@ -102,14 +106,18 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
   }
   return state;
 
-  /** 1 + rounds of the smallest back-edge span containing step `i`; 1 outside any loop. */
-  function roundAt(i: number): number {
+  /**
+   * Round and cap of the smallest back-edge span containing step `i`; 1 of 1 outside any loop.
+   * The round is clamped: a resume at the cap re-runs the step in the last round, not past it.
+   */
+  function roundAt(i: number): { round: number; maxRounds: number } {
     let inner: BackEdge | undefined;
     for (const e of Object.values(graph.backEdges)) {
       if (e.toStepIndex > i || i > e.jumpAfterIndex) continue;
       if (!inner || e.jumpAfterIndex - e.toStepIndex < inner.jumpAfterIndex - inner.toStepIndex) inner = e;
     }
-    return inner ? 1 + (state.rounds[inner.id] ?? 0) : 1;
+    if (!inner) return { round: 1, maxRounds: 1 };
+    return { round: Math.min(1 + (state.rounds[inner.id] ?? 0), inner.maxRounds), maxRounds: inner.maxRounds };
   }
 
   /** After the step at `i`: resolve a pending jump that is due or overtaken, and detect completion. */
@@ -117,8 +125,9 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
     const pending = state.pendingJump;
     if (state.status === 'running' && pending) {
       const edge = graph.backEdges[pending.edgeId]!;
-      if (state.cursor <= indexOf(edge.fromStepId)) {
-        // a later step's own edge jumped back before the trigger: the pending round is void
+      // older states have no stepId: their trigger was the edge's own step
+      if (state.cursor <= indexOf(pending.stepId ?? edge.fromStepId)) {
+        // a later step's own edge jumped back to or before the trigger: the pending round is void
         delete state.pendingJump;
       } else if (edge.jumpAfterIndex === i) {
         delete state.pendingJump;

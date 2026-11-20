@@ -82,9 +82,9 @@ test('invalid JSON is rejected naming the file', async () => {
 
 test('round-trips a pending back-edge jump', async () => {
   const s = newState(init);
-  s.pendingJump = { edgeId: 'review', findings: 'f1' };
+  s.pendingJump = { edgeId: 'review', stepId: 'review', findings: 'f1' };
   await saveState(dir, s);
-  assert.deepEqual((await loadState(dir)).pendingJump, { edgeId: 'review', findings: 'f1' });
+  assert.deepEqual((await loadState(dir)).pendingJump, { edgeId: 'review', stepId: 'review', findings: 'f1' });
 });
 
 for (const [field, value] of [
@@ -112,4 +112,10 @@ test('round-trips a graph fingerprint', async () => {
   const s = { ...newState(init), graphFingerprint: 'abc' };
   await saveState(dir, s);
   assert.equal((await loadState(dir)).graphFingerprint, 'abc');
+});
+
+test('pendingJump without stepId still loads', async () => {
+  const file = path.join(dir, 'state.json');
+  await fs.writeFile(file, JSON.stringify({ ...newState(init), pendingJump: { edgeId: 'review', findings: 'f1' } }));
+  assert.deepEqual((await loadState(dir)).pendingJump, { edgeId: 'review', findings: 'f1' });
 });

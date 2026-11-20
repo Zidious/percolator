@@ -212,3 +212,24 @@ test('buildGraph does not mutate Merged', () => {
   buildGraph(m);
   assert.deepEqual(m, snapshot);
 });
+
+test('failRoutes routes every review slot step to the review edge', () => {
+  const g = buildGraph(full({}, { review: [{ agent: 'a' }, { agent: 'b' }] }));
+  assert.equal(g.failRoutes['review.0'], 'review.1');
+  assert.equal(g.failRoutes['review.1'], 'review.1');
+  assert.deepEqual(Object.keys(g.backEdges).sort(), ['approve-groom', 'review.1']);
+});
+
+test('failRoutes routes a step with its own on_fail to its own edge', () => {
+  const g = buildGraph(
+    full(
+      { nodes: { qa: { before: 'deliver', kind: 'script', command: ['qa'], on_fail: { back_to: 'implement', max_rounds: 2 } } } },
+      { review: [{ agent: 'a', on_fail: { back_to: 'plan', max_rounds: 2 } }, { agent: 'b' }] },
+    ),
+  );
+  assert.equal(g.failRoutes['qa'], 'qa');
+  assert.equal(g.failRoutes['review.0'], 'review.0');
+  assert.equal(g.failRoutes['review.1'], 'review.1');
+  assert.equal(g.failRoutes['approve-groom'], 'approve-groom');
+  assert.equal(g.failRoutes['implement'], undefined);
+});
