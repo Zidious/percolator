@@ -487,30 +487,13 @@ export function terminalAddress(live, term) {
   return live.find((x) => x.address === term || x.name === term)?.address ?? null;
 }
 
-/** The show/hide-driver-pane action for a run's driver terminal, or null when it can't be offered (no space, a finished
- *  run, a driver not among the live terminals, an unsafe name). `argv` is for `hc`; an empty label value removes it. */
-export function driverToggle(run) {
+/** The run's live driver terminal, to peek at (closing a peek leaves it running; closing a pane would end it), or
+ *  null when there is none (a finished run, a driver not among the live terminals). */
+export function driverPeek(run) {
   if (!run || run.status === 'unreadable') return null;
-  const { space, terminal } = run.driver;
-  if (typeof space !== 'string' || space === '') return null;
-  if (run.terminals?.driver !== terminal || typeof terminal !== 'string' || terminal.startsWith('-')) return null;
-  const show = !run.driver.shown;
-  return {
-    show,
-    terminal,
-    label: show ? 'driver pane ↗' : 'hide driver pane',
-    argv: ['label', '--', terminal, show ? `herdr.space=${space}` : 'herdr.space='],
-  };
-}
-
-/** Whether `hc get --json` stdout is this run's own live driver terminal (the guard before relabelling it). */
-export function ownedDriver(stdout, runId) {
-  try {
-    const t = JSON.parse(stdout);
-    return t?.labels?.['percolator.run'] === runId && t.labels['percolator.role'] === 'driver' && t.state === 'live';
-  } catch {
-    return false;
-  }
+  const { terminal } = run.driver;
+  if (typeof terminal !== 'string' || run.terminals?.driver !== terminal) return null;
+  return { terminal, label: 'Driver pane ↗' };
 }
 
 /** The run's title: the issue's, else its ref (no issue.json yet: before intake, or a run that failed in it). */
@@ -568,7 +551,7 @@ export function deleteFinishedConfirm(runs) {
 }
 
 /**
- * The notice beside Delete finished runs…: "No finished runs" when it was just pressed (`asked`) with none;
+ * The notice beside Delete finished runs ↗: "No finished runs" when it was just pressed (`asked`) with none;
  * on a refresh, kept until a finished run is listed.
  */
 export function finishedNotice(notice, runs, asked) {

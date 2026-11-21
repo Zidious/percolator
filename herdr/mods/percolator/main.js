@@ -8,7 +8,6 @@ import {
   checking,
   closeOverlay,
   exec,
-  hc,
   layout,
   nextCommand,
   openOverlay,
@@ -32,11 +31,10 @@ import {
   deleteFinishedConfirm,
   finishedNotice,
   dragBoard,
-  driverToggle,
+  driverPeek,
   fillHeight,
   findNode,
   nextBoxH,
-  ownedDriver,
   titleLayout,
   moveRow,
   moveStop,
@@ -87,7 +85,7 @@ export default class Percolator extends View {
     this.busy = null;
     this.actError = null;
     this.said = null;
-    this.notice = null; // beside Delete finished runs…, seen with or without a selection
+    this.notice = null; // beside Delete finished runs ↗, seen with or without a selection
     this.deleting = null; // { ids, next, doneAt? }: the delete the owner confirmed and the row to select after it
     this.fetches = 0;
     this.copied = null;
@@ -103,6 +101,7 @@ export default class Percolator extends View {
     this.detailH = 400; // the detail's viewport
     this.rest = 0; // what the detail's content takes besides the reader
     this.boxH = MIN_BOX; // the reader's height, as drawn in the last frame
+    this.boxDrawn = false; // whether the reader was drawn in the last frame
     this.drag = null; // { y, px } while the divider is held
     this.boardScroll = ScrollHandle.new();
     const f = shared('percolator.focus');
@@ -289,46 +288,19 @@ export default class Percolator extends View {
     if (terminal) command('pane.focus', { terminal });
   }
 
-  /** Shows or hides the run's driver terminal in its Herdr space (a label change; the driver keeps running). */
-  toggleDriver(cx) {
-    const r = this.current();
-    const tog = driverToggle(r);
-    if (!tog || this.busy || checking()) return;
+  /** Peeks at the run's driver terminal: closing a peek leaves the driver running (closing a pane would end it). */
+  peekDriver() {
+    const peek = driverPeek(this.current());
+    if (!peek) return;
     this.actError = null;
     this.said = null;
     if (this.conn === 'fixtures') {
-      this.said = `fixtures: would run hc ${tog.argv.join(' ')}`;
+      this.said = `fixtures: would peek at ${peek.terminal}`;
       return;
     }
-    this.busy = 'driver';
-    const failed = (e) => ({ code: -1, stdout: '', stderr: String(e?.message ?? e) });
-    cx.spawn(async (cx) => {
-      try {
-        const got = await hc(['get', '--json', '--', tog.terminal]).catch(failed);
-        if (!(got.code === 0 && ownedDriver(got.stdout, r.id))) {
-          this.actError = `${tog.terminal} is not run ${r.id}'s live driver; nothing was changed`;
-          return;
-        }
-        const res = await hc(tog.argv).catch(failed);
-        if (res.code !== 0) {
-          this.actError = `hc label ${tog.terminal} failed: ${firstLine(res.stderr) || `exit ${res.code}`}; check hc and the Herdr app are running`;
-          return;
-        }
-        if (tog.show) {
-          let address = null;
-          for (let i = 0; i < 20 && !address; i++) {
-            address = addressOf(tog.terminal);
-            if (!address) await cx.sleep(150);
-          }
-          if (address) command('pane.focus', { terminal: address });
-          else this.said = "driver shown in the run's space";
-        }
-      } finally {
-        this.busy = null;
-        this.refresh(cx);
-        cx.notify();
-      }
-    });
+    const terminal = addressOf(peek.terminal);
+    if (terminal) command('terminal.peek', { terminal });
+    else this.actError = `${peek.terminal} is not a live terminal; refresh the panel`;
   }
 
   // ── acting ──────────────────────────────────────────────────────────
@@ -371,7 +343,7 @@ export default class Percolator extends View {
     this.perform(action, actionArgv(action, r), cx);
   }
 
-  /** The All tab's Delete finished runs…: one confirm listing them, or a line saying there are none. */
+  /** The All tab's Delete finished runs ↗: one confirm listing them, or a line saying there are none. */
   deleteFinished(cx) {
     if (this.busy) return;
     this.actError = null;
@@ -533,15 +505,15 @@ export default class Percolator extends View {
     this.revealRow();
   }
 
-  /** The reader's (or history's) height: what the detail has left over, at least MIN_BOX. Worked out
+  /** The reader's height: what the detail has left over, at least MIN_BOX. Worked out
    *  from the viewport and `rest` only (neither depends on it), and kept unless it moves 2px, so it cannot oscillate. */
   boxHeight() {
     return this.rest ? nextBoxH(this.boxH, fillHeight(this.detailH, this.rest, 0, MIN_BOX)) : this.boxH;
   }
 
-  /** The detail's content was laid out with the box drawn last: what the rest takes is the content minus that box. */
+  /** The detail's content was laid out with the box drawn last (if any): what the rest takes is the content minus that box. */
   measureContent(size, cx) {
-    const rest = Math.round(size.height / zoom()) - this.boxH;
+    const rest = Math.round(size.height / zoom()) - (this.boxDrawn ? this.boxH : 0);
     if (rest === this.rest) return;
     this.rest = rest;
     cx.notify();
@@ -658,7 +630,7 @@ export default class Percolator extends View {
       .items_center()
       .child(tab('active', 'Active'))
       .child(tab('all', 'All'))
-      .when(this.filter === 'all', (el) => el.child(link(t, 'delete-finished', 'Delete finished runs…', (_e, cx) => this.deleteFinished(cx))))
+      .when(this.filter === 'all', (el) => el.child(link(t, 'delete-finished', 'Delete finished runs ↗', (_e, cx) => this.deleteFinished(cx))))
       .when(Boolean(this.notice), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(this.notice)));
     const bar = h_flex()
       .h(38)
@@ -731,6 +703,7 @@ export default class Percolator extends View {
     const rows = ready ? this.rows() : [];
     const boardMax = boardHeight(this.boardRatio(), this.area, this.minBoard(narrow));
     this.boxH = this.boxHeight(); // the box drawn in this frame; measureContent subtracts it after layout
+    this.boxDrawn = Boolean(r && this.file); // only the reader is drawn at boxH
     return v_flex()
       .id('area')
       .flex_1()

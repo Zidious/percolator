@@ -72,4 +72,5 @@ Read the module before changing it.
 - **Locks:** `required: true` wins over merge order. A locked target may only be restated deep-equal; otherwise `LockViolation` (`"<target> is locked by <src>; <attempt> cannot change it"`).
 - **Completion** = `done.json` + `outputs/<key>.md`; hc status is only for attention.
 - **Worktrees in the repo:** `<repo>/.worktrees/<run-id>`, listed in `.git/info/exclude`, so the repo's agent trust covers them. Run dirs stay in `~/.percolator/runs`, reached via `--add-dir` (`~/.percolator` must be trusted in Claude Code once).
-- **Terminal ownership:** a terminal not labelled `percolator.run` = this run is never re-attached, adopted, killed or removed.
+- **Terminal ownership:** a terminal not labelled `percolator.run` = this run is never re-attached, adopted, killed or removed. One exception: `perc delete` ends live terminals whose cwd is inside the run's worktree (the run space's own shell, ones opened there), which would otherwise hold it open on Windows.
+- **Driver pane:** the panel peeks at the driver (`terminal.peek`), never puts it in a pane: closing a Herdr pane ends its terminal, and with it the run.

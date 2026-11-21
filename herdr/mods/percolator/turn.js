@@ -17,11 +17,10 @@ const LABELS = {
 const tag = (label, c) =>
   div().flex_none().px(6).py(1).rounded(4).text_size(10).font_semibold().border(1).border_color(c).text_color(c).child(label);
 
-// The reader and the history fill what the detail has left over (p.boxH, at least a few lines; below that
+// The reader fills what the detail has left over (p.boxH, at least a few lines; below that
 // the detail scrolls), and scroll on their own past that.
 const frame = (p, t, id) =>
   v_flex().id(id).flex_none().h(p.boxH).rounded(6).bg(t.background).border(1).border_color(t.border);
-const box = (p, t, id, inner) => frame(p, t, `${id}-frame`).child(scrollY(id, inner));
 
 function reader(p, t) {
   const md = p.files[p.file];
@@ -68,16 +67,7 @@ function historyList(t, r) {
     );
 }
 
-/** "Run history" as the body: fills what the detail has left over, like the reader. */
-function history(p, t, r) {
-  return v_flex()
-    .flex_none()
-    .gap(4)
-    .child(div().text_size(11).text_color(t.muted).child('Run history'))
-    .child(own(box(p, t, 'history', historyList(t, r))));
-}
-
-/** "Run history" under the reader: a disclosure row; open, a fixed 150px scrolling box (so the reader keeps the height). */
+/** "Run history": a disclosure row like Terminal commands, closed by default; open, a fixed 150px scrolling box (so the reader keeps the height). */
 function historySection(p, t, r) {
   const open = p.historyOpen;
   return v_flex()
@@ -223,7 +213,7 @@ function banner(p, t, r, narrow) {
       .items_center()
       .child(tag('RUNNING', t.working))
       .child(div().text_size(13).child(runningText(r, now)))
-      .when(Boolean(p.addressOf(term)), (el) => el.child(link(t, 'watch', 'watch agent ↗', () => p.focusTerminal(term))));
+      .when(Boolean(p.addressOf(term)), (el) => el.child(link(t, 'watch', 'Watch agent ↗', () => p.focusTerminal(term))));
   }
   if (r.status === 'completed') {
     const pr = r.pr?.url;
@@ -242,7 +232,6 @@ function banner(p, t, r, narrow) {
 export function turn(p, t, r, narrow) {
   const a = r.attention;
   const acts = a?.actions ?? [];
-  const body = p.file ? reader(p, t) : history(p, t, r);
   const cmds = terminalCommands(r);
   const say = p.said ? div().text_size(11).text_color(t.accent).child(p.said) : null;
   const buttons = h_flex()
@@ -266,11 +255,11 @@ export function turn(p, t, r, narrow) {
     .gap(10)
     .child(banner(p, t, r, narrow))
     .when(Boolean(a?.detail), (el) => el.child(div().text_size(12).text_color(t.muted).child(a.detail)))
-    .child(body)
+    .when(Boolean(p.file), (el) => el.child(reader(p, t)))
     .when(p.rejecting, (el) => el.child(rejectBox(p, t)))
     .when(acts.length > 0, (el) => el.child(buttons))
     .when(Boolean(p.actError), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(p.actError)))
     .when(Boolean(say), (el) => el.child(say))
-    .when(Boolean(p.file), (el) => el.child(historySection(p, t, r)))
+    .child(historySection(p, t, r))
     .when(cmds.length > 0, (el) => el.child(commandsSection(p, t, cmds, narrow)));
 }

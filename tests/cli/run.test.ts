@@ -121,7 +121,7 @@ test('run without --foreground launches the driver and prints the start block', 
       [
         `run ${id} started`,
         `  terminal ${driver}`,
-        `  space "r #5 · ${id.slice(-4)}" (the driver stays hidden; "driver pane ↗" in the Percolator panel shows it)`,
+        `  space "r #5 · ${id.slice(-4)}" (the driver stays hidden; "Driver pane ↗" in the Percolator panel peeks at it)`,
         `  worktree ${worktree}`,
         `  follow with: perc status ${id}`,
         '',

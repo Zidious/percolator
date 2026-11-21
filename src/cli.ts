@@ -169,7 +169,7 @@ async function runRun(args: string[], deps: DriverDeps): Promise<number> {
   deps.out(`run ${meta.runId} started`);
   deps.out(`  terminal ${driver}`);
   if (meta.space !== undefined) {
-    deps.out(`  space "${spaceName(meta)}" (the driver stays hidden; "driver pane ↗" in the Percolator panel shows it)`);
+    deps.out(`  space "${spaceName(meta)}" (the driver stays hidden; "Driver pane ↗" in the Percolator panel peeks at it)`);
   }
   deps.out(`  worktree ${meta.worktree}`);
   deps.out(`  follow with: perc status ${meta.runId}`);
