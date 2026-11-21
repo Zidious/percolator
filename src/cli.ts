@@ -10,7 +10,7 @@ import type { RunState } from './engine/state.ts';
 import { cliHerdrApp } from './herdr/app.ts';
 import { cliHc } from './herdr/hc.ts';
 import { herdrAppHome, linkHerdr } from './herdr/link.ts';
-import { deleteRun, planDelete } from './run/delete.ts';
+import { deleteRun, isFinished, planDelete } from './run/delete.ts';
 import type { DeletePlan } from './run/delete.ts';
 import { checkResumable, drive, prUrl } from './run/drive.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
@@ -326,14 +326,44 @@ function deleteSummary(p: DeletePlan, deps: DriverDeps): void {
   deps.out(`  keeps branch ${p.meta?.branch ?? `percolator/${p.id}`}`);
 }
 
-async function runDelete(args: string[], deps: DriverDeps): Promise<number> {
+async function deleteFinished(yes: boolean, deps: DriverDeps, io: Io): Promise<number> {
+  const plans: DeletePlan[] = [];
+  for (const l of await listRuns(deps.home)) {
+    const p = await planDelete(path.basename(l.dir), deps);
+    if (isFinished(p.status)) plans.push(p);
+  }
+  if (plans.length === 0) {
+    deps.out('no finished runs');
+    return 0;
+  }
+  if (!yes) {
+    deps.out(`perc delete will remove ${plans.length} finished run(s)`);
+    for (const p of plans) deps.out(`  ${p.id}  ${p.ticket?.ref ?? '-'}  ${p.status}  worktree ${p.worktree?.state ?? 'unknown'}`);
+    deps.out('  keeps their branches');
+    await confirmed(deps, `delete ${plans.length} run(s)? [y/N] `);
+  }
+  let failed = 0;
+  for (const p of plans) {
+    try {
+      deps.out(await deleteRun(p, deps));
+    } catch (err) {
+      failed++;
+      io.stderr(`${(err as Error).message}
+`);
+    }
+  }
+  return failed > 0 ? 1 : 0;
+}
+
+async function runDelete(args: string[], deps: DriverDeps, io: Io): Promise<number> {
   const { values, positionals } = parseWith(args, { yes: { type: 'boolean' }, finished: { type: 'boolean' } });
   if (values.finished === true && positionals.length > 0) throw new UsageError('delete takes <run-id> or --finished, not both');
-  if (positionals.length === 0) throw new UsageError('delete needs <run-id> or --finished');
+  if (values.finished !== true && positionals.length === 0) throw new UsageError('delete needs <run-id> or --finished');
   if (positionals.length > 1) throw new UsageError('delete takes one <run-id>');
-  const runId = runIdArg(positionals[0]!);
+  const runId = values.finished === true ? undefined : runIdArg(positionals[0]!);
   const yes = values.yes === true;
   if (!yes && (deps.ask ?? null) === null) throw new UsageError('delete needs --yes when stdin is not a terminal');
+  if (runId === undefined) return deleteFinished(yes, deps, io);
   const plan = await planDelete(runId, deps);
   if (!yes) {
     deleteSummary(plan, deps);
@@ -405,7 +435,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     if (command === 'status') return await runStatus(rest, d());
     if (command === 'approve' || command === 'reject') return await runDecide(command, rest, d());
     if (command === 'clean') return await runClean(rest, d());
-    if (command === 'delete') return await runDelete(rest, d());
+    if (command === 'delete') return await runDelete(rest, d(), io);
     if (command === 'drive') return await runDrive(rest, d());
     io.stderr(`unknown command: ${command}\n\n${USAGE}`);
     return 2;

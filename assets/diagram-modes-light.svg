@@ -16,7 +16,7 @@
 <rect x="20" y="50" width="490" height="76" rx="8" class="box"/>
 <text x="36" y="76" class="t13 ink">you, in any terminal</text>
 <text x="36" y="98" class="tm mut">perc run · perc status · perc approve / reject</text>
-<text x="36" y="114" class="tm mut">perc resume · perc clean</text>
+<text x="36" y="114" class="tm mut">perc resume · perc clean · perc delete</text>
 <line x1="265" y1="130" x2="265" y2="170" class="s-mut" stroke-width="1.5" marker-end="url(#am)"/>
 <rect x="570" y="50" width="490" height="76" rx="8" class="box-acc" stroke-width="1.5"/>
 <text x="586" y="76" class="t13 ink">Herdr app · Percolator panel + status-bar cup</text>

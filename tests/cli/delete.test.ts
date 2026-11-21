@@ -188,3 +188,100 @@ test('delete refuses a foreground driver', async () => {
     await e.cleanup();
   }
 });
+
+const fline = (m: RunMeta) => `  ${m.runId}  ${m.ticket}  `;
+
+test('delete --finished deletes only completed and failed runs', async () => {
+  const e = await setup();
+  try {
+    const completed = await e.prepare({ status: 'completed' });
+    const failed = await e.prepare({ status: 'failed' });
+    const paused = await e.prepare({ status: 'paused' });
+    const stalled = await e.prepare();
+    const broken = path.join(e.home, '.percolator', 'runs', 'broken');
+    await fs.mkdir(broken);
+    const r = await e.perc(['delete', '--finished', '--yes']);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(r.out, `${line(failed)}\n${line(completed)}\n`);
+    for (const m of [paused, stalled]) assert.equal(await exists(e.dir(m)), true);
+    assert.equal(await exists(broken), true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('delete --finished lists runs and asks once', async () => {
+  const e = await setup();
+  try {
+    const completed = await e.prepare({ status: 'completed' });
+    const failed = await e.prepare({ status: 'failed' });
+    await e.prepare({ status: 'paused' });
+    await fs.writeFile(path.join(failed.worktree, 'x.txt'), 'x');
+    const a = asker('yes');
+    const r = await e.perc(['delete', '--finished'], { ...e.deps, ask: a.ask });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(
+      r.out,
+      [
+        'perc delete will remove 2 finished run(s)',
+        `${fline(failed)}failed  worktree dirty`,
+        `${fline(completed)}completed  worktree clean`,
+        '  keeps their branches',
+        line(failed),
+        line(completed),
+        '',
+      ].join('\n'),
+    );
+    assert.deepEqual(a.asked, ['delete 2 run(s)? [y/N] ']);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('delete --finished with none prints no finished runs', async () => {
+  const e = await setup();
+  try {
+    await e.prepare({ status: 'paused' });
+    const a = asker('y');
+    const r = await e.perc(['delete', '--finished'], { ...e.deps, ask: a.ask });
+    assert.equal(r.code, 0);
+    assert.equal(r.out, 'no finished runs\n');
+    assert.deepEqual(a.asked, []);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('delete --finished aborts on no', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare({ status: 'completed' });
+    const r = await e.perc(['delete', '--finished'], { ...e.deps, ask: asker('n').ask });
+    assert.equal(r.code, 1);
+    assert.equal(r.err, 'aborted; nothing deleted\n');
+    assert.equal(await exists(e.dir(m)), true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('delete --finished carries on past a failure and exits 1', async () => {
+  const e = await setup();
+  try {
+    const held = await e.prepare({ status: 'completed' });
+    const other = await e.prepare({ status: 'failed' });
+    await fs.writeFile(
+      path.join(e.dir(held), 'driver.json'),
+      JSON.stringify({ pid: 4242, host: os.hostname(), terminal: null, startedAt: NOW.toISOString() }),
+    );
+    const r = await e.perc(['delete', '--finished', '--yes'], { ...e.deps, pidAlive: () => true });
+    assert.equal(r.code, 1);
+    assert.equal(r.out, `${line(other)}\n`);
+    assert.equal(r.err, `run ${held.runId} is being driven by process 4242; stop it (Ctrl-C) and run perc delete ${held.runId} again\n`);
+    assert.equal(await exists(e.dir(held)), true);
+    assert.equal(await exists(e.dir(other)), false);
+  } finally {
+    await e.cleanup();
+  }
+});
