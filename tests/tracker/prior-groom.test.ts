@@ -151,3 +151,14 @@ test('an edited comment for another gate step is not a groomed ticket', () => {
   const g = c('bot', edited('r1', 'the plan', { stepId: 'approve-plan' }));
   assert.equal(findPriorGroom([g], ['bot']), undefined);
 });
+
+test('a legacy decision note does not decide an edited comment', () => {
+  const g = c('bot', edited('r1', 'x', {}));
+  assert.deepEqual(findPriorGroom([g, c('bot', note('r1', 1, 'reject', 'z'))], ['bot']), { text: 'x', gateUrl: g.url });
+});
+
+test('a truncated edited ticket is skipped, and hides an older groom', () => {
+  const cut = 'the tick\n… (truncated; full text in steps/groom/1/outputs/groomed_ticket.md of run r1)';
+  assert.equal(findPriorGroom([c('bot', edited('r1', cut, {}))], ['bot']), undefined);
+  assert.equal(findPriorGroom([c('bot', gate('r0', 'old')), c('bot', edited('r1', cut, {}))], ['bot']), undefined);
+});
