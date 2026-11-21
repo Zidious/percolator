@@ -343,3 +343,91 @@ test('isFinished is true only for completed and failed', () => {
   for (const s of ['completed', 'failed'] as const) assert.equal(isFinished(s), true);
   for (const s of ['running', 'waiting', 'paused', 'unreadable'] as const) assert.equal(isFinished(s), false);
 });
+
+test('deleteRun removes a worktree dir that git no longer lists', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await removeWorktree({ repoRoot: m.repoRoot, dir: m.worktree, force: true });
+    await fs.mkdir(m.worktree, { recursive: true });
+    await fs.writeFile(path.join(m.worktree, 'left.txt'), 'x');
+    assert.equal(await del(e, m), line(m, 0));
+    await assertDeleted(e, m);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('deleteRun refuses a live foreground lock even when an unlabelled terminal has the driver name', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    e.deps.hc.add({ name: m.driver, labels: {} });
+    await writeLock(e, m, os.hostname());
+    await assert.rejects(del(e, m), {
+      message: `run ${m.runId} is being driven by process 4242; stop it (Ctrl-C) and run perc delete ${m.runId} again`,
+    });
+    assert.equal(await exists(m.worktree), true);
+    assert.equal(await exists(e.dir(m)), true);
+    assert.equal(e.deps.hc.calls.some((c) => c[0] === 'kill'), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('deleteRun names the run and what to do when hc fails', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const plan = await planDelete(m.runId, e.deps);
+    const fail = async (): Promise<never> => {
+      throw new Error('hc: cannot reach herdr');
+    };
+    e.deps.hc.get = fail;
+    e.deps.hc.list = fail;
+    await assert.rejects(deleteRun(plan, e.deps), {
+      message: `run ${m.runId}: hc: cannot reach herdr; start herdr and run perc delete ${m.runId} again`,
+    });
+    assert.equal(await exists(e.dir(m)), true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('deleteRun finishes when the repo is no longer a git repo and the worktree is gone', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const plain = path.join(e.home, 'plain');
+    await fs.mkdir(plain);
+    await fs.writeFile(path.join(e.dir(m), 'run.json'), JSON.stringify({ ...m, repoRoot: plain, worktree: path.join(plain, '.worktrees', m.runId) }));
+    assert.equal(
+      await del(e, m),
+      `deleted run ${m.runId}: 0 terminal(s), worktree already removed; repo ${plain} is not a git repo, nothing to prune; kept branch ${m.branch}`,
+    );
+    assert.equal(await exists(e.dir(m)), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+for (const self of ['driver', 'step'] as const) {
+  test(`deleteRun refuses to run from the run's own ${self} terminal`, async () => {
+    const e = await setup();
+    try {
+      const m = await e.prepare();
+      const t =
+        self === 'driver'
+          ? e.deps.hc.add({ name: m.driver, labels: { 'percolator.run': m.runId, 'percolator.role': 'driver' } })
+          : e.deps.hc.add({ name: `${m.runId}-plan`, labels: { 'percolator.run': m.runId, 'percolator.step': 'plan' } });
+      e.deps.selfTerminal = t.address;
+      await assert.rejects(del(e, m), {
+        message: `run ${m.runId}: this terminal belongs to the run; run perc delete ${m.runId} from another terminal`,
+      });
+      assert.equal(e.deps.hc.calls.some((c) => c[0] === 'kill'), false);
+      assert.equal(await exists(e.dir(m)), true);
+    } finally {
+      await e.cleanup();
+    }
+  });
+}
