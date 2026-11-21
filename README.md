@@ -34,7 +34,7 @@ Percolator isn't on npm yet: install it from a checkout as in [Local development
 | 2 | `perc validate` | Loads the config, resolves and pins grounds, and prints the graph a run would walk. |
 | 3 | `perc run owner/repo#42` | Starts a run. It stops once, after groom, for you to approve the ticket. |
 
-`perc run` starts the run's driver in a terminal of its own; add `--foreground` to drive it in yours. `perc status` lists runs and `perc status <id>` shows one. `perc delete <id>` removes a run you no longer need, and `perc delete --finished` every completed or failed one; both keep the branch. Run `perc --help` for every command and its options.
+`perc run` starts the run's driver in a terminal of its own; add `--foreground` to drive it in yours. `perc status` lists runs and `perc status <id>` shows one. `perc delete <id>…` removes the runs you name, and `perc delete --finished` every completed or failed one; both keep the branch. Run `perc --help` for every command and its options.
 
 > [!IMPORTANT]
 > **Before your first run with `claude` agents,** trust the repo and `~/.percolator` once in Claude Code. Each agent starts with `--add-dir ~/.percolator/runs/<run-id>` to read its task and write its outputs. If that folder is not trusted, Claude Code asks whether to trust it, and answering no ends the agent and pauses the run.

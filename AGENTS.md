@@ -14,7 +14,7 @@ node --test tests/util/paths.test.ts  # focused run
 pnpm build                            # tsc → dist/ (gitignored)
 pnpm schema                           # regenerate schema/percolator.schema.json after changing the zod schema
 node src/cli.ts <command> …           # run perc from a checkout; `perc --help` lists commands
-node src/cli.ts delete <id>|--finished [--yes]  # remove runs; keeps branches
+node src/cli.ts delete <id>...|--finished [--yes]  # remove runs; keeps branches
 node tests/smoke/hc.smoke.ts          # manual smoke tests against the real hc / gh (gh.smoke.ts); flags in each file's header; never in pnpm test
 ```
 

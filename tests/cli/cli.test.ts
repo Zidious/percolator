@@ -109,7 +109,7 @@ test('--help lists the run commands', async () => {
         '      answer the approval gate a run is waiting at',
         '  clean <run-id> [--force]',
         "      remove a finished run's terminals and worktree (keeps the branch and the run record; perc delete removes it all)",
-        '  delete <run-id> [--yes] | delete --finished [--yes]',
+        '  delete <run-id>... [--yes] | delete --finished [--yes]',
         '      remove a run entirely: stop it, its terminals, worktree and record (keeps the branch)',
         '  herdr link',
         '      tell the Percolator Herdr panel how to run perc (writes perc.json)',

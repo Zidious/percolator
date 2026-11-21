@@ -147,7 +147,6 @@ test('delete usage errors', async () => {
   try {
     const cases: [string[], string][] = [
       [['delete'], 'delete needs <run-id> or --finished'],
-      [['delete', 'a', 'b'], 'delete takes one <run-id>'],
       [['delete', 'a', '--finished'], 'delete takes <run-id> or --finished, not both'],
       [['delete', '../x'], 'invalid run id "../x"'],
     ];
@@ -281,6 +280,50 @@ test('delete --finished carries on past a failure and exits 1', async () => {
     assert.equal(r.err, `run ${held.runId} is being driven by process 4242; stop it (Ctrl-C) and run perc delete ${held.runId} again\n`);
     assert.equal(await exists(e.dir(held)), true);
     assert.equal(await exists(e.dir(other)), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('delete takes several run ids and deletes only those', async () => {
+  const e = await setup();
+  try {
+    const a = await e.prepare({ status: 'completed' });
+    const b = await e.prepare({ status: 'failed' });
+    const kept = await e.prepare({ status: 'completed' });
+    const r = await e.perc(['delete', a.runId, b.runId, '--yes']);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(r.out, `${line(a)}\n${line(b)}\n`);
+    assert.equal(await exists(e.dir(kept)), true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('delete of several ids carries on past an unknown one and exits 1', async () => {
+  const e = await setup();
+  try {
+    const a = await e.prepare({ status: 'completed' });
+    const r = await e.perc(['delete', 'nope', a.runId, '--yes']);
+    assert.equal(r.code, 1);
+    assert.equal(r.out, `${line(a)}\n`);
+    assert.equal(r.err, 'no run nope; perc status lists runs\n');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('delete of several ids without --yes lists each and asks once', async () => {
+  const e = await setup();
+  try {
+    const a = await e.prepare({ status: 'completed' });
+    const b = await e.prepare({ status: 'failed' });
+    const k = asker('y');
+    const r = await e.perc(['delete', a.runId, b.runId], { ...e.deps, ask: k.ask });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, `${summary(a, 'completed', 'clean')}\n${summary(b, 'failed', 'clean')}\n${line(a)}\n${line(b)}\n`);
+    assert.deepEqual(k.asked, ['delete 2 run(s)? [y/N] ']);
   } finally {
     await e.cleanup();
   }

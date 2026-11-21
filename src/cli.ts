@@ -50,7 +50,7 @@ commands:
       answer the approval gate a run is waiting at
   clean <run-id> [--force]
       remove a finished run's terminals and worktree (keeps the branch and the run record; perc delete removes it all)
-  delete <run-id> [--yes] | delete --finished [--yes]
+  delete <run-id>... [--yes] | delete --finished [--yes]
       remove a run entirely: stop it, its terminals, worktree and record (keeps the branch)
   herdr link
       tell the Percolator Herdr panel how to run perc (writes perc.json)
@@ -326,6 +326,20 @@ function deleteSummary(p: DeletePlan, deps: DriverDeps): void {
   deps.out(`  keeps branch ${p.meta?.branch ?? `percolator/${p.id}`}`);
 }
 
+/** Deletes each plan, carrying on past a failure (one stderr line each); 1 when any failed. */
+async function deleteAll(plans: DeletePlan[], failed: number, deps: DriverDeps, io: Io): Promise<number> {
+  for (const p of plans) {
+    try {
+      deps.out(await deleteRun(p, deps));
+    } catch (err) {
+      failed++;
+      io.stderr(`${(err as Error).message}
+`);
+    }
+  }
+  return failed > 0 ? 1 : 0;
+}
+
 async function deleteFinished(yes: boolean, deps: DriverDeps, io: Io): Promise<number> {
   const plans: DeletePlan[] = [];
   for (const l of await listRuns(deps.home)) {
@@ -342,35 +356,47 @@ async function deleteFinished(yes: boolean, deps: DriverDeps, io: Io): Promise<n
     deps.out('  keeps their branches');
     await confirmed(deps, `delete ${plans.length} run(s)? [y/N] `);
   }
+  return deleteAll(plans, 0, deps, io);
+}
+
+/** Exactly the runs named (the panel passes the ones its confirm listed); an unknown id is reported and skipped. */
+async function deleteIds(ids: string[], yes: boolean, deps: DriverDeps, io: Io): Promise<number> {
+  if (ids.length === 1) {
+    const plan = await planDelete(ids[0]!, deps);
+    if (!yes) {
+      deleteSummary(plan, deps);
+      await confirmed(deps, `delete run ${plan.id}? [y/N] `);
+    }
+    deps.out(await deleteRun(plan, deps));
+    return 0;
+  }
+  const plans: DeletePlan[] = [];
   let failed = 0;
-  for (const p of plans) {
+  for (const id of new Set(ids)) {
     try {
-      deps.out(await deleteRun(p, deps));
+      plans.push(await planDelete(id, deps));
     } catch (err) {
       failed++;
       io.stderr(`${(err as Error).message}
 `);
     }
   }
-  return failed > 0 ? 1 : 0;
+  if (!yes && plans.length > 0) {
+    for (const p of plans) deleteSummary(p, deps);
+    await confirmed(deps, `delete ${plans.length} run(s)? [y/N] `);
+  }
+  return deleteAll(plans, failed, deps, io);
 }
 
 async function runDelete(args: string[], deps: DriverDeps, io: Io): Promise<number> {
   const { values, positionals } = parseWith(args, { yes: { type: 'boolean' }, finished: { type: 'boolean' } });
   if (values.finished === true && positionals.length > 0) throw new UsageError('delete takes <run-id> or --finished, not both');
   if (values.finished !== true && positionals.length === 0) throw new UsageError('delete needs <run-id> or --finished');
-  if (positionals.length > 1) throw new UsageError('delete takes one <run-id>');
-  const runId = values.finished === true ? undefined : runIdArg(positionals[0]!);
+  const ids = positionals.map((p) => runIdArg(p));
   const yes = values.yes === true;
   if (!yes && (deps.ask ?? null) === null) throw new UsageError('delete needs --yes when stdin is not a terminal');
-  if (runId === undefined) return deleteFinished(yes, deps, io);
-  const plan = await planDelete(runId, deps);
-  if (!yes) {
-    deleteSummary(plan, deps);
-    await confirmed(deps, `delete run ${runId}? [y/N] `);
-  }
-  deps.out(await deleteRun(plan, deps));
-  return 0;
+  if (values.finished === true) return deleteFinished(yes, deps, io);
+  return deleteIds(ids, yes, deps, io);
 }
 
 async function runHerdr(args: string[], io: Io, home: string): Promise<number> {
