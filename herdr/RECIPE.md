@@ -19,7 +19,7 @@ The layout is Herdr's `main` (sidebar with spaces and agents, tabs, work area, s
 3. Run header: `#n title`; links "issue ↗", "PR ↗" (if any), "driver pane ↗" (if its terminal is live); then branch, started ago, short id.
 4. Train: six equal zones. Inside a zone, the stage's steps in execution order (`before:<stage>` hooks, the stage's own steps, `after:<stage>` hooks; `before-all` hooks first in intake, `after-all` hooks last in deliver). Core steps are 18px round stops, hook steps ("nodes") 10px round, gates square. One marker (a ring with a train glyph; square at a gate) sits at the current step. The stage name is under each zone, coloured when current; under a core stop its duration, under a node its id. Loop arcs above the track run from the step the loop returns to, labelled "↺ review → implement · round 2 of 3"; red and "· cap" at the cap. Narrow: nodes fold into "+n" under their stop.
 5. Lower half, by state:
-   - Needs you: a tag (GATE, PAUSED, FAILED or STALLED), the message, the age, an optional detail line; the first review file rendered as markdown; the action buttons; a line with the equivalent `perc` commands.
+   - Needs you: a tag (GATE, PAUSED, FAILED or STALLED), the message, the age, an optional detail line; the first review file rendered as markdown; the action buttons; a "Terminal commands" row (click to open, closed by default, the choice kept while the panel lives) listing the equivalent `perc` commands, each with a Copy button.
    - Running: "RUNNING · <step> is running for 3m. Nothing for you yet." with a "watch agent ↗" link and the agent's last 8 lines.
    - Delivered: "DELIVERED · Opened <pr>" and the history.
    - History (newest first): status mark, step id, kind, status, attempts, time taken.

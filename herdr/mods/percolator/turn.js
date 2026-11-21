@@ -3,7 +3,7 @@
 import { div } from 'gpui-kit';
 import { v_flex, h_flex, TextView, Textarea } from 'gpui-base';
 import { terminals } from 'herdr';
-import { ago, attentionTag, cliLines, took } from './model.js';
+import { ago, attentionTag, terminalCommands, took } from './model.js';
 import { stepColor, link, button, own } from './ui.js';
 
 const LABELS = {
@@ -114,6 +114,62 @@ function rejectBox(p, t) {
     );
 }
 
+/** "Terminal commands": a disclosure row; open, one copyable command per line. The choice lives on the panel. */
+function commandsSection(p, t, cmds, narrow) {
+  const open = p.cmdsOpen;
+  return v_flex()
+    .flex_none()
+    .gap(6)
+    .child(
+      own(
+        h_flex()
+          .id('cmds-toggle')
+          .gap(6)
+          .items_center()
+          .cursor_pointer()
+          .text_size(11)
+          .text_color(t.muted)
+          .hover((s) => s.text_color(t.foreground))
+          .on_click((_e, cx) => {
+            p.cmdsOpen = !p.cmdsOpen;
+            cx.notify();
+          })
+          .child(div().w(10).flex_none().child(open ? '⌄' : '›'))
+          .child('Terminal commands'),
+      ),
+    )
+    .when(open, (el) =>
+      el.children(
+        cmds.map((c, i) =>
+          h_flex()
+            .gap(8)
+            .items_center()
+            .child(
+              div()
+                .flex_1()
+                .min_w(0)
+                .px(8)
+                .py(4)
+                .rounded(4)
+                .bg(t.raised)
+                .text_size(11)
+                .font_family('monospace')
+                .text_color(t.foreground)
+                .when(!narrow, (el) => el.truncate())
+                .child(c),
+            )
+            .child(
+              link(t, `copy-${i}`, p.copied === c ? 'Copied' : 'Copy', (_e, cx) => {
+                cx.write_to_clipboard(c);
+                p.copied = c;
+                cx.notify();
+              }),
+            ),
+        ),
+      ),
+    );
+}
+
 function banner(p, t, r, narrow) {
   const a = r.attention;
   const now = Date.now();
@@ -163,9 +219,8 @@ export function turn(p, t, r, narrow) {
       : tailText
         ? tail(t, r, tailText)
         : history(t, r);
-  const cli = cliLines(r);
+  const cmds = terminalCommands(r);
   const say = p.said ? div().text_size(11).text_color(t.accent).child(p.said) : null;
-  const cliText = cli.length ? `or in a terminal: ${cli.join('   ·   ')}` : '';
   const buttons = h_flex()
     .flex_wrap()
     .gap(8)
@@ -178,10 +233,7 @@ export function turn(p, t, r, narrow) {
         }),
       ),
     )
-    .when(Boolean(a?.commentUrl), (el) => el.child(button(t, 'github', 'GitHub ↗', '', (_e, cx) => cx.open_url(a.commentUrl))))
-    .when(!narrow && Boolean(cliText), (el) =>
-      el.child(div().flex_1().min_w(0).text_size(11).text_color(t.dim).truncate().child(cliText)),
-    );
+    .when(Boolean(a?.commentUrl), (el) => el.child(button(t, 'github', 'GitHub ↗', '', (_e, cx) => cx.open_url(a.commentUrl))));
   return v_flex()
     .flex_1()
     .min_h(0)
@@ -196,35 +248,5 @@ export function turn(p, t, r, narrow) {
     .when(acts.length > 0, (el) => el.child(buttons))
     .when(Boolean(p.actError), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(p.actError)))
     .when(Boolean(say), (el) => el.child(say))
-    .when(narrow && Boolean(cliText), (el) => el.child(div().text_size(10.5).text_color(t.dim).child(cliText)))
-    .when(Boolean(a?.commands?.length), (el) =>
-      el.children(
-        a.commands.map((c, i) =>
-          h_flex()
-            .gap(8)
-            .items_center()
-            .child(
-              div()
-                .flex_1()
-                .min_w(0)
-                .px(8)
-                .py(4)
-                .rounded(4)
-                .bg(t.raised)
-                .text_size(11)
-                .font_family('monospace')
-                .text_color(t.foreground)
-                .when(!narrow, (el) => el.truncate())
-                .child(c),
-            )
-            .child(
-              link(t, `copy-${i}`, p.copied === c ? 'Copied' : 'Copy', (_e, cx) => {
-                cx.write_to_clipboard(c);
-                p.copied = c;
-                cx.notify();
-              }),
-            ),
-        ),
-      ),
-    );
+    .when(cmds.length > 0, (el) => el.child(commandsSection(p, t, cmds, narrow)));
 }

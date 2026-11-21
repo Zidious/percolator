@@ -27,6 +27,7 @@ export declare function took(step: Step, now: number): string;
 export declare function stepTone(status: string): 'done' | 'working' | 'blocked' | null;
 export declare function resolvePath(base: string, p: string): string;
 export declare function cliLines(run: RunStatusJson): string[];
+export declare function terminalCommands(run: RunStatusJson): string[];
 export declare function attentionTag(kind: string): string;
 export declare function shownLoops(run: RunStatusJson): Loop[];
 export declare function loopAtCap(loop: Loop): boolean;

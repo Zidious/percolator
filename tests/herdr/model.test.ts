@@ -8,6 +8,7 @@ import {
   ago,
   attentionTag,
   cliLines,
+  terminalCommands,
   cupLabel,
   cupMoves,
   duration,
@@ -308,6 +309,17 @@ test('cliLines gives the perc commands for a run actions, once each', () => {
   const both = { ...readable('t4'), attention: { ...readable('t4').attention!, actions: ['grant', 'resume', 'clean', 'open-pane'] } } as Readable;
   assert.deepEqual(cliLines(both), ['perc resume t4-20261121-061230-77ab', 'perc clean t4-20261121-061230-77ab']);
   assert.deepEqual(cliLines(byId('t8')), []);
+});
+
+test('terminalCommands lists the action equivalents, then the attention commands, once each', () => {
+  assert.deepEqual(terminalCommands(byId('t2')), cliLines(byId('t2')));
+  const failed = readable('t9');
+  const cmds = failed.attention!.commands!;
+  assert.ok(cmds.length > 0);
+  assert.deepEqual(terminalCommands(failed), [...cliLines(failed), ...cmds]);
+  const dup = { ...failed, attention: { ...failed.attention!, commands: [...cmds, ...cmds] } } as Readable;
+  assert.deepEqual(terminalCommands(dup), [...cliLines(failed), ...cmds]);
+  assert.deepEqual(terminalCommands(byId('t8')), []);
 });
 
 test('attentionTag names each attention kind', () => {

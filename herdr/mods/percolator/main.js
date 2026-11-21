@@ -62,6 +62,7 @@ export default class Percolator extends View {
     this.actError = null;
     this.said = null;
     this.copied = null;
+    this.cmdsOpen = false;
     this.rejecting = false;
     this.rejectError = null;
     this.typing = false;

@@ -191,6 +191,11 @@ export function cliLines(run) {
   return [...new Set(lines)];
 }
 
+/** Every terminal command for a run's attention: the actions' perc equivalents, then its own commands, once each. */
+export function terminalCommands(run) {
+  return [...new Set([...cliLines(run), ...(run.attention?.commands ?? [])])];
+}
+
 const TAGS = { gate: 'GATE', cap: 'PAUSED', paused: 'PAUSED', failed: 'FAILED', stalled: 'STALLED', agent: 'AGENT' };
 
 /** The tag shown before an attention message. */
