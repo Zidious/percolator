@@ -517,3 +517,87 @@ export function ownedDriver(stdout, runId) {
 export function ticketTitle(run) {
   return run.ticket?.title ?? run.ticket?.ref ?? run.id;
 }
+
+// ── delete ──
+
+/** The `perc delete` argv for exactly these runs: the ones the owner confirmed, never a set worked out again later. */
+export function deleteArgv(ids) {
+  return ['delete', ...ids, '--yes'];
+}
+
+/** The `percolator.*` command a delete confirm sends: it carries the ids the dialog listed. */
+export function deleteCommand(ids) {
+  return `delete/${ids.join(',')}`;
+}
+
+/** The ids in a `delete/<id>,<id>` command; null for any other command. */
+export function deleteCommandIds(command) {
+  if (!command.startsWith('delete/')) return null;
+  const ids = command.slice(7).split(',').filter((id) => id !== '');
+  return ids.length > 0 ? ids : null;
+}
+
+/** What `perc delete --finished` removes: completed and failed runs. */
+export function isFinished(run) {
+  return run.status === 'completed' || run.status === 'failed';
+}
+
+const ACTIVE = new Set(['running', 'waiting', 'paused']);
+
+/** The confirm dialog for deleting one run. */
+export function deleteConfirm(run) {
+  if (run.status === 'unreadable') {
+    return { title: `Delete ${run.id}?`, detail: `Deletes run ${run.id}: its terminals, its worktree if its record still names one (uncommitted changes there are lost), and its record. The branch percolator/${run.id} is kept.` };
+  }
+  const stopped = ACTIVE.has(run.status) ? ' The run is stopped first.' : '';
+  return {
+    title: `Delete #${run.ticket.number}?`,
+    detail: `Deletes run ${run.id} (${run.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${run.branch} is kept.${stopped}`,
+  };
+}
+
+/** The confirm dialog for deleting every finished run, or null when none is finished. */
+export function deleteFinishedConfirm(runs) {
+  const done = runs.filter(isFinished);
+  if (done.length === 0) return null;
+  return {
+    title: `Delete ${done.length} finished run(s)?`,
+    detail: `Deletes ${done.map((r) => `${r.id} (#${r.ticket.number})`).join(', ')}: their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    ids: done.map((r) => r.id),
+  };
+}
+
+/**
+ * The notice beside Delete finished runs…: "No finished runs" when it was just pressed (`asked`) with none;
+ * on a refresh, kept until a finished run is listed.
+ */
+export function finishedNotice(notice, runs, asked) {
+  const none = !runs.some(isFinished);
+  if (asked) return none ? 'No finished runs' : null;
+  return notice === 'No finished runs' && !none ? null : notice;
+}
+
+/** The action error when a confirmed delete arrives while `busy` (another action) runs; null when free. */
+export function deleteBusyError(busy) {
+  return busy ? 'Another action is running; try Delete again' : null;
+}
+
+/** The selection after `deletedIds` are gone: `selId` if it stays, else the next row left, else the previous, else null. */
+export function selectAfterDelete(rows, deletedIds, selId) {
+  const gone = new Set(deletedIds);
+  if (!gone.has(selId)) return selId;
+  const at = rows.findIndex((r) => r.id === selId);
+  const after = rows.slice(at + 1).find((r) => !gone.has(r.id));
+  if (after) return after.id;
+  return rows.slice(0, Math.max(at, 0)).findLast((r) => !gone.has(r.id))?.id ?? null;
+}
+
+/**
+ * The selection once fresh runs arrive: `selId` while it is still listed; else `pending.next`, the row worked out
+ * when the owner confirmed a delete (later rows no longer hold the deleted ones), if listed; else the first row.
+ */
+export function selectAfterRefresh(runs, rows, selId, pending) {
+  if (runs.some((r) => r.id === selId)) return selId;
+  if (pending && rows.some((r) => r.id === pending.next)) return pending.next;
+  return rows[0]?.id ?? null;
+}

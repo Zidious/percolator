@@ -24,6 +24,13 @@ import {
   BOARD_RATIO,
   actionArgv,
   boardHeight,
+  deleteArgv,
+  deleteCommand,
+  deleteCommandIds,
+  deleteConfirm,
+  deleteBusyError,
+  deleteFinishedConfirm,
+  finishedNotice,
   dragBoard,
   driverToggle,
   fillHeight,
@@ -39,6 +46,8 @@ import {
   readerPath,
   resolvePath,
   runningCount,
+  selectAfterDelete,
+  selectAfterRefresh,
   showsHere,
   sortRuns,
   visibleRuns,
@@ -47,7 +56,7 @@ import { mark } from './mark.js';
 import { board } from './board.js';
 import { header, train, stopStrip } from './train.js';
 import { turn } from './turn.js';
-import { addressOf, own } from './ui.js';
+import { addressOf, link, own } from './ui.js';
 import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
 
 const NARROW = 720;
@@ -78,6 +87,9 @@ export default class Percolator extends View {
     this.busy = null;
     this.actError = null;
     this.said = null;
+    this.notice = null; // beside Delete finished runs…, seen with or without a selection
+    this.deleting = null; // { ids, next, doneAt? }: the delete the owner confirmed and the row to select after it
+    this.fetches = 0;
     this.copied = null;
     this.cmdsOpen = false;
     this.historyOpen = false;
@@ -174,13 +186,18 @@ export default class Percolator extends View {
       return;
     }
     this.loading = true;
+    const seq = ++this.fetches;
     cx.spawn(async (cx) => {
       const got = await fetchStatus(this);
       if (got.ok) {
         this.runs = sortRuns(got.data.runs);
+        this.notice = finishedNotice(this.notice, this.runs, false);
         this.error = null;
         this.loaded = true;
-        if (!this.current()) this.select(this.rows()[0]?.id ?? null, cx);
+        const pick = selectAfterRefresh(this.runs, this.rows(), this.sel, this.deleting);
+        // a fetch started after the delete finished has seen all of it
+        if (this.deleting?.doneAt !== undefined && seq > this.deleting.doneAt) this.deleting = null;
+        if (!this.current()) this.select(pick, cx);
         else this.syncReader(cx); // the run moved on: new review files, or none
       } else {
         this.error = got.error; // keep the last good runs
@@ -341,7 +358,49 @@ export default class Percolator extends View {
       });
       return;
     }
+    if (action === 'delete') {
+      openOverlay({
+        mod: 'confirm',
+        kind: 'dialog',
+        width: 440,
+        height: 220,
+        props: { ...deleteConfirm(r), command: { name: `percolator.${deleteCommand([r.id])}` } },
+      });
+      return;
+    }
     this.perform(action, actionArgv(action, r), cx);
+  }
+
+  /** The All tab's Delete finished runs…: one confirm listing them, or a line saying there are none. */
+  deleteFinished(cx) {
+    if (this.busy) return;
+    this.actError = null;
+    const confirm = deleteFinishedConfirm(this.runs);
+    this.notice = finishedNotice(this.notice, this.runs, true);
+    if (confirm === null) {
+      cx.notify();
+      return;
+    }
+    openOverlay({
+      mod: 'confirm',
+      kind: 'dialog',
+      width: 440,
+      height: 220,
+      // the command carries the ids listed here: a run that finishes while the dialog is open is not deleted
+      props: { title: confirm.title, detail: confirm.detail, command: { name: `percolator.${deleteCommand(confirm.ids)}` } },
+    });
+  }
+
+  /** Deletes exactly `ids`; the row to select after is worked out now, from the rows the owner saw. */
+  deleteRuns(ids, cx) {
+    if (this.busy) {
+      // the dialog has closed: say the delete didn't run rather than drop it
+      this.actError = deleteBusyError(this.busy);
+      cx.notify();
+      return;
+    }
+    if (this.conn !== 'fixtures') this.deleting = { ids, next: selectAfterDelete(this.rows(), ids, this.sel) };
+    this.perform('delete', deleteArgv(ids), cx);
   }
 
   perform(action, argv, cx) {
@@ -359,9 +418,11 @@ export default class Percolator extends View {
         stderr: String(e?.message ?? e),
       }));
       this.busy = null;
+      if (action === 'delete' && this.deleting) this.deleting.doneAt = this.fetches;
+      // a delete of several runs that exits 1 still removed some: refresh either way
+      if (res.code === 0 || action === 'delete') this.refresh(cx);
       if (res.code === 0) {
         if (action === 'reject') this.closeReject();
-        this.refresh(cx);
       } else {
         const why = firstLine(res.stderr) || `perc ${argv[0]} exited ${res.code}`;
         if (action === 'reject') this.rejectError = why;
@@ -429,7 +490,8 @@ export default class Percolator extends View {
     if (c.startsWith('clean/')) {
       const r = this.runs.find((x) => x.id === c.slice(6));
       if (r) this.perform('clean', actionArgv('clean', r), cx);
-    } else if (c.startsWith('key/')) this.key(c.slice(4), cx);
+    } else if (deleteCommandIds(c)) this.deleteRuns(deleteCommandIds(c), cx);
+    else if (c.startsWith('key/')) this.key(c.slice(4), cx);
     else if (c === 'focus') this.handle.focus();
     else if (c === 'place' && this.inWindow()) this.dockBack();
     else if (c === 'place') this.popOut();
@@ -566,6 +628,7 @@ export default class Percolator extends View {
           .when(this.filter === id, (el) => el.bg(t.raised))
           .on_click((_e, cx) => {
             this.filter = id;
+            this.notice = null;
             if (!this.rows().some((r) => r.id === this.sel)) this.select(this.rows()[0]?.id ?? null, cx);
             cx.notify();
           })
@@ -589,7 +652,14 @@ export default class Percolator extends View {
     const window = this.inWindow();
     // ⧉ and ✕ never leave: the title truncates, the chip shortens to "N", then the tabs take a row of their own.
     const fit = titleLayout(this.width / zoom(), needs);
-    const tabs = h_flex().flex_none().gap(8).items_center().child(tab('active', 'Active')).child(tab('all', 'All'));
+    const tabs = h_flex()
+      .flex_none()
+      .gap(8)
+      .items_center()
+      .child(tab('active', 'Active'))
+      .child(tab('all', 'All'))
+      .when(this.filter === 'all', (el) => el.child(link(t, 'delete-finished', 'Delete finished runs…', (_e, cx) => this.deleteFinished(cx))))
+      .when(Boolean(this.notice), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(this.notice)));
     const bar = h_flex()
       .h(38)
       .flex_none()

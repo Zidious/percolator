@@ -17,7 +17,8 @@ export function header(p, t, r, narrow) {
       .pt(14)
       .gap(5)
       .child(div().text_size(15).font_semibold().child(r.id))
-      .child(div().text_size(11).text_color(t.dim).child('This run could not be read.'));
+      .child(div().text_size(11).text_color(t.dim).child('This run could not be read.'))
+      .child(h_flex().gap(6).items_center().child(link(t, 'delete', 'Delete…', (_e, cx) => p.act('delete', cx))));
   }
   const drv = driverToggle(r);
   const now = Date.now();
@@ -39,6 +40,7 @@ export function header(p, t, r, narrow) {
         .when(Boolean(r.ticket.url), (el) => el.child(link(t, 'issue', 'issue ↗', (_e, cx) => cx.open_url(r.ticket.url))))
         .when(Boolean(r.pr?.url), (el) => el.child(link(t, 'pr', 'PR ↗', (_e, cx) => cx.open_url(r.pr.url))))
         .when(Boolean(drv), (el) => el.child(link(t, 'driver', drv.label, (_e, cx) => p.toggleDriver(cx))))
+        .child(link(t, 'delete', 'Delete…', (_e, cx) => p.act('delete', cx)))
         .child(
           div()
             .min_w(0)

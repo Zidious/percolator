@@ -34,7 +34,7 @@ Percolator isn't on npm yet: install it from a checkout as in [Local development
 | 2 | `perc validate` | Loads the config, resolves and pins grounds, and prints the graph a run would walk. |
 | 3 | `perc run owner/repo#42` | Starts a run. It stops once, after groom, for you to approve the ticket. |
 
-`perc run` starts the run's driver in a terminal of its own. With Herdr, the driver stays out of the run's space, and the panel's **driver pane ↗** shows or hides it. Add `--foreground` to drive it in yours. `perc status` lists runs and `perc status <id>` shows one. Run `perc --help` for every command and its options.
+`perc run` starts the run's driver in a terminal of its own. With Herdr, the driver stays out of the run's space, and the panel's **driver pane ↗** shows or hides it. Add `--foreground` to drive it in yours. `perc status` lists runs and `perc status <id>` shows one. `perc delete <id>…` removes the runs you name, and `perc delete --finished` every completed or failed one; both keep the branch. Run `perc --help` for every command and its options.
 
 > [!IMPORTANT]
 > **Before your first run with `claude` agents,** trust the repo and `~/.percolator` once in Claude Code. Each agent starts with `--add-dir ~/.percolator/runs/<run-id>` to read its task and write its outputs. If that folder is not trusted, Claude Code asks whether to trust it, and answering no ends the agent and pauses the run.
@@ -87,7 +87,7 @@ Each run works in its own git worktree at `<repo>/.worktrees/<run-id>`, on a bra
 
 | Integration | Adds | Lives in |
 |---|---|---|
-| [Herdr](#herdr) | A space per run, a live board of runs, Approve / Reject / Resume buttons, notices | [`herdr/`](herdr/) |
+| [Herdr](#herdr) | A space per run, a live board of runs, Approve / Reject / Resume / Delete buttons, notices | [`herdr/`](herdr/) |
 
 ### Herdr
 
@@ -284,11 +284,11 @@ Anything that needs you shows up in `perc status`, and in any [integration](#int
 | **your turn · approve-groom** | The groomed ticket is ready. | `perc approve <id>` or `perc reject <id> "what to change"`, or an approver replies `/percolator approve` or `/percolator reject <what to change>` on the issue |
 | **paused · review at cap** | A back-edge used all its rounds. | `perc resume <id>` grants one more round |
 | **paused · plan** | A step escalated: it timed out, or twice finished without the outputs its stage needs. | Read its step dir, then `perc resume <id>` re-runs the step |
-| **failed · implement** | A step failed and has no loop to go back through. | A failed run can't be resumed: read its step dir, then `perc clean <id>` and start a new run |
+| **failed · implement** | A step failed and has no loop to go back through. | A failed run can't be resumed: read its step dir, then `perc delete <id>` (or `perc clean <id>` to keep the record) and start a new run |
 | **stalled · driver stopped** | The driver terminal exited mid-run. | `perc resume <id>` |
 | **agent blocked** | The agent is asking something in its terminal. | Answer it in the agent's terminal |
 
-Each step's files are in `~/.percolator/runs/<run-id>/steps/<step>/<attempt>/`: its `done.json` and its `outputs/`. `perc clean` removes the worktree and terminals but keeps this record and the branch.
+Each step's files are in `~/.percolator/runs/<run-id>/steps/<step>/<attempt>/`: its `done.json` and its `outputs/`. `perc clean` removes the worktree and terminals but keeps this record and the branch; `perc delete` removes the record too and keeps only the branch.
 
 ## Local development
 

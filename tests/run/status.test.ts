@@ -538,7 +538,7 @@ test('failed run with worktree → failed attention (clean)', async () => {
           kind: 'failed',
           since: T2,
           message: 'implement failed',
-          detail: "A failed run can't be resumed. Start a new run for the ticket, or clean this one up.",
+          detail: "A failed run can't be resumed. Start a new run for the ticket, then delete this one (or clean it up to keep its record).",
           review: [{ step: 'implement', key: 'summary', path: path.join(e.dir(m), summary) }],
           actions: ['clean'],
           commands: [`perc run ${TICKET} --repo ${m.repoRoot}`],
@@ -1084,8 +1084,8 @@ test('yourTurn paused', () => {
 test('yourTurn failed', () => {
   assert.deepEqual(yourTurn({ ...TURN, kind: 'failed' }), {
     message: 'groom failed',
-    detail: "A failed run can't be resumed. Start a new run for the ticket, or clean this one up.",
-    next: ['perc run github.com/o/r#5 --repo /repo', 'perc clean r1'],
+    detail: "A failed run can't be resumed. Start a new run for the ticket, then delete this one (or clean it up to keep its record).",
+    next: ['perc run github.com/o/r#5 --repo /repo', 'perc delete r1', 'perc clean r1'],
   });
 });
 

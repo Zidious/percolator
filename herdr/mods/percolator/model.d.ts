@@ -95,3 +95,18 @@ export declare function driverToggle(
 ): { show: boolean; terminal: string; label: 'driver pane ↗' | 'hide driver pane'; argv: string[] } | null;
 export declare function ownedDriver(stdout: string, runId: string): boolean;
 export declare function ticketTitle(run: Readable): string;
+export declare function deleteArgv(ids: string[]): string[];
+export declare function deleteCommand(ids: string[]): string;
+export declare function deleteCommandIds(command: string): string[] | null;
+export declare function isFinished(run: RunStatusJson): boolean;
+export declare function deleteConfirm(run: RunStatusJson): { title: string; detail: string };
+export declare function deleteFinishedConfirm(runs: RunStatusJson[]): { title: string; detail: string; ids: string[] } | null;
+export declare function finishedNotice(notice: string | null, runs: RunStatusJson[], asked: boolean): string | null;
+export declare function deleteBusyError(busy: string | null): string | null;
+export declare function selectAfterDelete(rows: { id: string }[], deletedIds: string[], selId: string | null): string | null;
+export declare function selectAfterRefresh(
+  runs: { id: string }[],
+  rows: { id: string }[],
+  selId: string | null,
+  pending: { ids: string[]; next: string | null } | null,
+): string | null;

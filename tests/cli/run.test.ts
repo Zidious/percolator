@@ -775,7 +775,7 @@ test('clean refuses a live driver', async () => {
     e.deps.hc.add({ name: meta.driver, labels: { 'percolator.run': meta.runId, 'percolator.role': 'driver' } });
     const r = await e.perc(['clean', meta.runId]);
     assert.equal(r.code, 1);
-    assert.equal(r.err, `run ${meta.runId} is being driven by terminal ${meta.driver}; stop it first\n`);
+    assert.equal(r.err, `run ${meta.runId} is being driven by terminal ${meta.driver}; stop it first (or perc delete ${meta.runId})\n`);
     assert.equal(await exists(meta.worktree), true);
     assert.equal(e.deps.hc.terminals.has(meta.driver), true);
   } finally {
@@ -797,7 +797,7 @@ test('clean of a running or paused run needs --force', async () => {
       await setStatus(e.dir(meta.runId), status);
       const r = await e.perc(['clean', meta.runId]);
       assert.equal(r.code, 1);
-      assert.equal(r.err, `run ${meta.runId} is ${status}; finish it or use perc clean ${meta.runId} --force` + NL);
+      assert.equal(r.err, `run ${meta.runId} is ${status}; finish it or use perc clean ${meta.runId} --force, or perc delete ${meta.runId} to remove it entirely` + NL);
       assert.equal(await exists(meta.worktree), true);
     }
     const forced = await e.perc(['clean', meta.runId, '--force']);

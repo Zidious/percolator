@@ -24,7 +24,17 @@ import {
   cupLabel,
   cupMoves,
   driverToggle,
+  deleteArgv,
+  deleteConfirm,
+  deleteBusyError,
+  deleteFinishedConfirm,
+  finishedNotice,
   duration,
+  isFinished,
+  selectAfterDelete,
+  selectAfterRefresh,
+  deleteCommand,
+  deleteCommandIds,
   findNode,
   ownedDriver,
   ownsCommands,
@@ -765,4 +775,94 @@ test('ownedDriver accepts only this run\'s live driver', () => {
 test('driverToggle is null when no run is selected', () => {
   assert.equal(driverToggle(null), null);
   assert.equal(driverToggle(undefined), null);
+});
+
+test('deleteArgv deletes exactly the ids given, always with --yes', () => {
+  assert.deepEqual(deleteArgv(['r1']), ['delete', 'r1', '--yes']);
+  assert.deepEqual(deleteArgv(['r1', 'r2']), ['delete', 'r1', 'r2', '--yes']);
+});
+
+test('deleteCommand carries the confirmed ids, and deleteCommandIds reads them back', () => {
+  assert.equal(deleteCommand(['r1']), 'delete/r1');
+  assert.equal(deleteCommand(['r1', 'r2']), 'delete/r1,r2');
+  assert.deepEqual(deleteCommandIds('delete/r1,r2'), ['r1', 'r2']);
+  assert.deepEqual(deleteCommandIds('delete/r1'), ['r1']);
+  assert.equal(deleteCommandIds('delete/'), null);
+  assert.equal(deleteCommandIds('clean/r1'), null);
+});
+
+test('isFinished is true for completed and failed runs only', () => {
+  assert.deepEqual(
+    runs().filter(isFinished).map((r) => r.id.split('-')[0]),
+    ['t3', 't9', 't15'],
+  );
+});
+
+test('deleteConfirm names the run, says what is lost and kept, and that an active run is stopped', () => {
+  const done = readable('t3');
+  assert.deepEqual(deleteConfirm(done), {
+    title: 'Delete #3?',
+    detail: `Deletes run ${done.id} (${done.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${done.branch} is kept.`,
+  });
+  for (const id of ['t8', 't2', 't4']) {
+    const r = readable(id);
+    assert.equal(
+      deleteConfirm(r).detail,
+      `Deletes run ${r.id} (${r.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${r.branch} is kept. The run is stopped first.`,
+      id,
+    );
+  }
+  const bad = byId('t5');
+  assert.deepEqual(deleteConfirm(bad), {
+    title: `Delete ${bad.id}?`,
+    detail: `Deletes run ${bad.id}: its terminals, its worktree if its record still names one (uncommitted changes there are lost), and its record. The branch percolator/${bad.id} is kept.`,
+  });
+});
+
+test('deleteFinishedConfirm lists the finished runs, or is null when there are none', () => {
+  const [a, b, c] = ['t3', 't9', 't15'].map((id) => byId(id).id);
+  assert.deepEqual(deleteFinishedConfirm(runs()), {
+    title: 'Delete 3 finished run(s)?',
+    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    ids: [a, b, c],
+  });
+  assert.equal(deleteFinishedConfirm(runs().filter((r) => !isFinished(r))), null);
+});
+
+test('finishedNotice says No finished runs until a finished run is listed; another notice stays', () => {
+  const unfinished = runs().filter((r) => !isFinished(r));
+  assert.equal(finishedNotice(null, unfinished, true), 'No finished runs');
+  assert.equal(finishedNotice(null, runs(), true), null);
+  assert.equal(finishedNotice('No finished runs', unfinished, false), 'No finished runs');
+  assert.equal(finishedNotice('No finished runs', runs(), false), null);
+  assert.equal(finishedNotice(null, unfinished, false), null);
+});
+
+test('deleteBusyError tells the owner a confirmed delete did not run', () => {
+  assert.equal(deleteBusyError('approve'), 'Another action is running; try Delete again');
+  assert.equal(deleteBusyError(null), null);
+});
+
+test('selectAfterDelete moves to the next row, else the previous, else none; an unrelated selection stays', () => {
+  const rows = ['a', 'b', 'c'].map((id) => ({ id }) as RunStatusJson);
+  assert.equal(selectAfterDelete(rows, ['b'], 'b'), 'c');
+  assert.equal(selectAfterDelete(rows, ['c'], 'c'), 'b');
+  assert.equal(selectAfterDelete(rows, ['b', 'c'], 'b'), 'a');
+  assert.equal(selectAfterDelete([rows[0]!], ['a'], 'a'), null);
+  assert.equal(selectAfterDelete(rows, ['b'], 'a'), 'a');
+  assert.equal(selectAfterDelete(rows, ['b'], null), null);
+});
+
+test('selectAfterRefresh keeps a listed selection, else takes the one planned at the delete, else the first row', () => {
+  const rows = (...ids: string[]) => ids.map((id) => ({ id }) as RunStatusJson);
+  // the deleted run is gone from fresh runs: the row planned when the owner confirmed, not the first row
+  assert.equal(selectAfterRefresh(rows('a', 'c'), rows('a', 'c'), 'b', { ids: ['b'], next: 'c' }), 'c');
+  // a refresh that still lists the deleted run keeps it selected until it goes
+  assert.equal(selectAfterRefresh(rows('a', 'b', 'c'), rows('a', 'b', 'c'), 'b', { ids: ['b'], next: 'c' }), 'b');
+  // the planned row went too: the first row
+  assert.equal(selectAfterRefresh(rows('a'), rows('a'), 'b', { ids: ['b'], next: 'c' }), 'a');
+  assert.equal(selectAfterRefresh(rows('a', 'c'), rows('a', 'c'), 'b', null), 'a');
+  assert.equal(selectAfterRefresh([], [], 'b', null), null);
+  // listed in all runs but filtered out of the rows: still the selection, as before
+  assert.equal(selectAfterRefresh(rows('a', 'b'), rows('a'), 'b', null), 'b');
 });

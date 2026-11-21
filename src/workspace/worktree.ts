@@ -90,6 +90,24 @@ export async function removeWorktree(o: { repoRoot: string; dir: string; force: 
   return true;
 }
 
+/**
+ * Whether the worktree has uncommitted changes or untracked files; undefined when `dir` does not exist.
+ * Throws when `dir` is not the top of a work tree: git would walk up and answer for the enclosing repo.
+ */
+export async function worktreeDirty(dir: string): Promise<boolean | undefined> {
+  if (!(await exists(dir))) return undefined;
+  let top: string;
+  try {
+    top = await runGit(['rev-parse', '--show-toplevel'], dir);
+  } catch {
+    top = '';
+  }
+  if (top === '' || !(samePath(top, dir) || samePath(await real(top), await real(dir)))) {
+    throw new Error(`${dir} is not a git worktree; check it by hand`);
+  }
+  return (await runGit(['status', '--porcelain'], dir)) !== '';
+}
+
 // Idempotent, so resume can call it again. git builds and cleans up the worktree itself and
 // renaming one breaks its metadata, so this is the one exception to the atomic-dir rule.
 export async function ensureWorktree(o: {
