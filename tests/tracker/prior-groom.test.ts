@@ -5,6 +5,7 @@ import { decisionNote, findPriorGroom } from '../../src/tracker/prior-groom.ts';
 
 let n = 0;
 const c = (author: string, body: string): IssueComment => ({
+  id: n + 1,
   author,
   body,
   createdAt: '2026-01-01T00:00:00.000Z',

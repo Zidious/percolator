@@ -18,7 +18,7 @@ test('issue runs gh issue view and parses the result', async () => {
   assert.equal(rec.calls[0]!.file, 'gh');
   assert.deepEqual(issue, {
     number: 5, title: 'T', body: 'B', url: 'u', state: 'OPEN', author: 'me',
-    comments: [{ author: 'bob', body: 'hi', createdAt: '2026-01-01T00:00:00Z', url: 'cu' }],
+    comments: [{ id: 0, author: 'bob', body: 'hi', createdAt: '2026-01-01T00:00:00Z', url: 'cu' }],
   });
 });
 
@@ -92,4 +92,49 @@ test('invalid JSON from gh is reported', async () => {
   const rec = new ExecRecorder();
   rec.respond(() => true, { stdout: 'nope' });
   await assert.rejects(cliGh({ exec: rec.exec }).issue(R, 5), { message: 'gh issue view returned invalid JSON: nope' });
+});
+
+test('issue gives each comment the REST id from its url', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, {
+    stdout: JSON.stringify({
+      number: 5, title: 'T', body: 'B', url: 'u', state: 'OPEN', author: { login: 'me' },
+      comments: [
+        { author: { login: 'bob' }, body: 'a', createdAt: 't', url: 'https://github.com/o/r/issues/5#issuecomment-123' },
+        { author: { login: 'bob' }, body: 'b', createdAt: 't', url: 'cu' },
+      ],
+    }),
+  });
+  const issue = await cliGh({ exec: rec.exec }).issue(R, 5);
+  assert.deepEqual(issue.comments.map((c) => c.id), [123, 0]);
+});
+
+test('editComment PATCHes the comment through gh api and returns updated_at', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '2026-01-01T00:00:09Z\n' });
+  assert.equal(await cliGh({ exec: rec.exec }).editComment('github.com/o/r', 42, 'f.md'), '2026-01-01T00:00:09Z');
+  assert.deepEqual(rec.calls[0]!.args, [
+    'api', '--hostname', 'github.com', '-X', 'PATCH', 'repos/o/r/issues/comments/42', '-F', 'body=@f.md', '--jq', '.updated_at',
+  ]);
+});
+
+test('editComment on an owner/repo omits --hostname', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '2026-01-01T00:00:09Z\n' });
+  await cliGh({ exec: rec.exec }).editComment('o/r', 42, 'f.md');
+  assert.deepEqual(rec.calls[0]!.args, [
+    'api', '-X', 'PATCH', 'repos/o/r/issues/comments/42', '-F', 'body=@f.md', '--jq', '.updated_at',
+  ]);
+});
+
+test('editComment refuses a dash-leading repo', async () => {
+  await assert.rejects(cliGh({ exec: new ExecRecorder().exec }).editComment('-x/o/r', 1, 'f.md'),
+    { message: 'gh api comment edit: repo must not start with "-": -x/o/r' });
+});
+
+test('editComment with no updated_at in the reply fails', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '\n' });
+  await assert.rejects(cliGh({ exec: rec.exec }).editComment('o/r', 42, 'f.md'),
+    { message: 'gh api comment edit returned no updated_at for comment 42' });
 });
