@@ -24,6 +24,9 @@ import {
   duration,
   isFinished,
   selectAfterDelete,
+  selectAfterRefresh,
+  deleteCommand,
+  deleteCommandIds,
   findNode,
   ownsCommands,
   loopAtCap,
@@ -551,9 +554,18 @@ test('fillHeight converges: from what the rest takes (content minus the box draw
   assert.deepEqual(seen, [220, 220, 220, 220]);
 });
 
-test('deleteArgv deletes one run, or every finished run for null, always with --yes', () => {
-  assert.deepEqual(deleteArgv({ id: 'r1' }), ['delete', 'r1', '--yes']);
-  assert.deepEqual(deleteArgv(null), ['delete', '--finished', '--yes']);
+test('deleteArgv deletes exactly the ids given, always with --yes', () => {
+  assert.deepEqual(deleteArgv(['r1']), ['delete', 'r1', '--yes']);
+  assert.deepEqual(deleteArgv(['r1', 'r2']), ['delete', 'r1', 'r2', '--yes']);
+});
+
+test('deleteCommand carries the confirmed ids, and deleteCommandIds reads them back', () => {
+  assert.equal(deleteCommand(['r1']), 'delete/r1');
+  assert.equal(deleteCommand(['r1', 'r2']), 'delete/r1,r2');
+  assert.deepEqual(deleteCommandIds('delete/r1,r2'), ['r1', 'r2']);
+  assert.deepEqual(deleteCommandIds('delete/r1'), ['r1']);
+  assert.equal(deleteCommandIds('delete/'), null);
+  assert.equal(deleteCommandIds('clean/r1'), null);
 });
 
 test('isFinished is true for completed and failed runs only', () => {
@@ -589,6 +601,7 @@ test('deleteFinishedConfirm lists the finished runs, or is null when there are n
   assert.deepEqual(deleteFinishedConfirm(runs()), {
     title: 'Delete 3 finished run(s)?',
     detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    ids: [a, b, c],
   });
   assert.equal(deleteFinishedConfirm(runs().filter((r) => !isFinished(r))), null);
 });
@@ -601,4 +614,18 @@ test('selectAfterDelete moves to the next row, else the previous, else none; an 
   assert.equal(selectAfterDelete([rows[0]!], ['a'], 'a'), null);
   assert.equal(selectAfterDelete(rows, ['b'], 'a'), 'a');
   assert.equal(selectAfterDelete(rows, ['b'], null), null);
+});
+
+test('selectAfterRefresh keeps a listed selection, else takes the one planned at the delete, else the first row', () => {
+  const rows = (...ids: string[]) => ids.map((id) => ({ id }) as RunStatusJson);
+  // the deleted run is gone from fresh runs: the row planned when the owner confirmed, not the first row
+  assert.equal(selectAfterRefresh(rows('a', 'c'), rows('a', 'c'), 'b', { ids: ['b'], next: 'c' }), 'c');
+  // a refresh that still lists the deleted run keeps it selected until it goes
+  assert.equal(selectAfterRefresh(rows('a', 'b', 'c'), rows('a', 'b', 'c'), 'b', { ids: ['b'], next: 'c' }), 'b');
+  // the planned row went too: the first row
+  assert.equal(selectAfterRefresh(rows('a'), rows('a'), 'b', { ids: ['b'], next: 'c' }), 'a');
+  assert.equal(selectAfterRefresh(rows('a', 'c'), rows('a', 'c'), 'b', null), 'a');
+  assert.equal(selectAfterRefresh([], [], 'b', null), null);
+  // listed in all runs but filtered out of the rows: still the selection, as before
+  assert.equal(selectAfterRefresh(rows('a', 'b'), rows('a'), 'b', null), 'b');
 });

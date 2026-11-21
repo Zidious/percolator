@@ -60,8 +60,16 @@ export declare function nextBoxH(prev: number, target: number): number;
 export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
 export declare function terminalAddress(live: { address: string; name?: string | null }[], term: string | null | undefined): string | null;
 export declare function ticketTitle(run: Readable): string;
-export declare function deleteArgv(run: { id: string } | null): string[];
+export declare function deleteArgv(ids: string[]): string[];
+export declare function deleteCommand(ids: string[]): string;
+export declare function deleteCommandIds(command: string): string[] | null;
 export declare function isFinished(run: RunStatusJson): boolean;
 export declare function deleteConfirm(run: RunStatusJson): { title: string; detail: string };
-export declare function deleteFinishedConfirm(runs: RunStatusJson[]): { title: string; detail: string } | null;
+export declare function deleteFinishedConfirm(runs: RunStatusJson[]): { title: string; detail: string; ids: string[] } | null;
 export declare function selectAfterDelete(rows: { id: string }[], deletedIds: string[], selId: string | null): string | null;
+export declare function selectAfterRefresh(
+  runs: { id: string }[],
+  rows: { id: string }[],
+  selId: string | null,
+  pending: { ids: string[]; next: string | null } | null,
+): string | null;

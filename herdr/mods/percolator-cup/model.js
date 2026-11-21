@@ -358,9 +358,21 @@ export function ticketTitle(run) {
 
 // ── delete ──
 
-/** The `perc delete` argv for one run, or for every finished run when `run` is null. */
-export function deleteArgv(run) {
-  return run === null ? ['delete', '--finished', '--yes'] : ['delete', run.id, '--yes'];
+/** The `perc delete` argv for exactly these runs: the ones the owner confirmed, never a set worked out again later. */
+export function deleteArgv(ids) {
+  return ['delete', ...ids, '--yes'];
+}
+
+/** The `percolator.*` command a delete confirm sends: it carries the ids the dialog listed. */
+export function deleteCommand(ids) {
+  return `delete/${ids.join(',')}`;
+}
+
+/** The ids in a `delete/<id>,<id>` command; null for any other command. */
+export function deleteCommandIds(command) {
+  if (!command.startsWith('delete/')) return null;
+  const ids = command.slice(7).split(',').filter((id) => id !== '');
+  return ids.length > 0 ? ids : null;
 }
 
 /** What `perc delete --finished` removes: completed and failed runs. */
@@ -389,6 +401,7 @@ export function deleteFinishedConfirm(runs) {
   return {
     title: `Delete ${done.length} finished run(s)?`,
     detail: `Deletes ${done.map((r) => `${r.id} (#${r.ticket.number})`).join(', ')}: their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    ids: done.map((r) => r.id),
   };
 }
 
@@ -400,4 +413,14 @@ export function selectAfterDelete(rows, deletedIds, selId) {
   const after = rows.slice(at + 1).find((r) => !gone.has(r.id));
   if (after) return after.id;
   return rows.slice(0, Math.max(at, 0)).findLast((r) => !gone.has(r.id))?.id ?? null;
+}
+
+/**
+ * The selection once fresh runs arrive: `selId` while it is still listed; else `pending.next`, the row worked out
+ * when the owner confirmed a delete (later rows no longer hold the deleted ones), if listed; else the first row.
+ */
+export function selectAfterRefresh(runs, rows, selId, pending) {
+  if (runs.some((r) => r.id === selId)) return selId;
+  if (pending && rows.some((r) => r.id === pending.next)) return pending.next;
+  return rows[0]?.id ?? null;
 }
