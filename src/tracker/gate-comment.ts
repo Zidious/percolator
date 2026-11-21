@@ -13,7 +13,8 @@ export type GateComment = {
 const REPLY_PREFIX = 'Reply `/percolator approve`';
 const DETAILS_OPEN = '<details><summary>Rejected rounds</summary>';
 const DETAILS_CLOSE = '</details>';
-const MARKER_RE = new RegExp(`^${GATE_MARKER} run=(\\S+) step=(\\S+) -->$`);
+// built on use: intake imports prior-groom, which imports this file, so GATE_MARKER is not set at load
+const markerRe = () => new RegExp(`^${GATE_MARKER} run=(\\S+) step=(\\S+) -->$`);
 const HEADER_RE = /^\*\*Percolator\*\* needs approval to continue run `(\S+)` \(step `(\S+)`, round (\d+)\)\.$/;
 const ENTRY_RE = /^- Round (\d+) rejected by @(\S+?)(?:\.|: (.*))$/;
 const APPROVED_RE = /^Approved by @(\S+)$/;
@@ -69,7 +70,7 @@ function parseRejected(block: string[]): RejectedRound[] | undefined {
 
 export function parseGateComment(body: string): GateComment | undefined {
   const lines = body.replace(/\r\n/g, '\n').split('\n');
-  const marker = MARKER_RE.exec(lines[0] ?? '');
+  const marker = markerRe().exec(lines[0] ?? '');
   const header = HEADER_RE.exec(lines[1] ?? '');
   if (!marker || !header) return undefined;
   const [, runId, stepId] = marker as unknown as [string, string, string];

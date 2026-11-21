@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { IssueComment } from '../../src/tracker/gh.ts';
-import { decisionNote, findPriorGroom } from '../../src/tracker/prior-groom.ts';
+import { renderGateComment } from '../../src/tracker/gate-comment.ts';
+import type { GateComment } from '../../src/tracker/gate-comment.ts';
+import { findPriorGroom } from '../../src/tracker/prior-groom.ts';
 
 let n = 0;
 const c = (author: string, body: string): IssueComment => ({
@@ -26,6 +28,16 @@ const gate = (run: string, text: string, round = 1, extra = '') =>
     `Locally: \`perc approve ${run}\` or \`perc reject ${run} "<what to change>"\`.`,
     '',
   ].join('\n');
+
+const edited = (run: string, text: string, extra: Partial<GateComment>) =>
+  renderGateComment({ runId: run, stepId: 'approve-groom', round: 1, outputs: `### groomed_ticket
+
+${text}`, rejected: [], ...extra });
+
+const note = (run: string, round: number, decision: 'approve' | 'reject', by: string) =>
+  `<!-- percolator:decision run=${run} step=approve-groom round=${round} decision=${decision} -->
+${decision === 'approve' ? 'Approved' : 'Rejected'} locally by @${by} via \`perc ${decision}\`.
+`;
 
 test('no gate comment: no prior groom', () => {
   assert.equal(findPriorGroom([c('alice', 'hello'), c('bot', '/percolator approve')], ['bot']), undefined);
@@ -71,12 +83,12 @@ test('the first command decides; a rejection carries its feedback', () => {
 
 test('a local decision note for the same run and round decides it, whoever approves', () => {
   const g = c('perc-bot', gate('r1', 'the ticket', 2));
-  const other = c('perc-bot', decisionNote({ runId: 'r0', stepId: 'approve-groom', round: 2, decision: 'reject', by: 'x' }));
-  const note = c('perc-bot', decisionNote({ runId: 'r1', stepId: 'approve-groom', round: 2, decision: 'approve', by: 'gabe' }));
-  assert.deepEqual(findPriorGroom([g, other, note], ['alice']), {
+  const other = c('perc-bot', note('r0', 2, 'reject', 'x'));
+  const mine = c('perc-bot', note('r1', 2, 'approve', 'gabe'));
+  assert.deepEqual(findPriorGroom([g, other, mine], ['alice']), {
     text: 'the ticket',
     gateUrl: g.url,
-    decision: { decision: 'approve', by: 'gabe', url: note.url },
+    decision: { decision: 'approve', by: 'gabe', url: mine.url },
   });
 });
 
@@ -96,13 +108,46 @@ test('a truncated groomed ticket is skipped', () => {
   assert.equal(findPriorGroom([g], ['bot']), undefined);
 });
 
-test('decisionNote is marked and is not itself a command', () => {
-  assert.equal(
-    decisionNote({ runId: 'r1', stepId: 'approve-groom', round: 1, decision: 'reject', by: 'gabe', feedback: 'more tests' }),
-    '<!-- percolator:decision run=r1 step=approve-groom round=1 decision=reject -->\nRejected locally by @gabe via `perc reject`: more tests\n',
-  );
-  assert.equal(
-    decisionNote({ runId: 'r1', stepId: 'approve-groom', round: 1, decision: 'approve', by: 'gabe' }),
-    '<!-- percolator:decision run=r1 step=approve-groom round=1 decision=approve -->\nApproved locally by @gabe via `perc approve`.\n',
-  );
+test('an edited comment approved in place is approved', () => {
+  const g = c('bot', edited('r1', 'the ticket', { approvedBy: 'gabe', round: 2 }));
+  assert.deepEqual(findPriorGroom([g], ['alice']), {
+    text: 'the ticket',
+    gateUrl: g.url,
+    decision: { decision: 'approve', by: 'gabe', url: g.url },
+  });
+});
+
+test('an edited comment whose current round was rejected carries that feedback', () => {
+  const g = c('bot', edited('r1', 'the ticket', {
+    round: 2,
+    rejected: [{ round: 1, by: 'a', feedback: 'old' }, { round: 2, by: 'b', feedback: 'new' }],
+  }));
+  assert.deepEqual(findPriorGroom([g], ['bot']), {
+    text: 'the ticket',
+    gateUrl: g.url,
+    decision: { decision: 'reject', by: 'b', url: g.url, feedback: 'new' },
+  });
+});
+
+test('an undecided edited comment ignores later rejects but takes a later approve', () => {
+  const g = c('bot', edited('r1', 'the ticket', {}));
+  const ok = c('bot', '/percolator approve');
+  assert.deepEqual(findPriorGroom([g, c('bot', '/percolator reject old'), ok], ['bot']), {
+    text: 'the ticket',
+    gateUrl: g.url,
+    decision: { decision: 'approve', by: 'bot', url: ok.url },
+  });
+  assert.deepEqual(findPriorGroom([g, c('bot', '/percolator reject old')], ['bot']), { text: 'the ticket', gateUrl: g.url });
+});
+
+test('an old multi-comment run followed by an edited comment: the newest wins', () => {
+  const old = c('bot', gate('r0', 'one'));
+  const oldNote = c('bot', note('r0', 1, 'approve', 'x'));
+  const g = c('bot', edited('r1', 'two', {}));
+  assert.deepEqual(findPriorGroom([old, oldNote, g], ['bot']), { text: 'two', gateUrl: g.url });
+});
+
+test('an edited comment for another gate step is not a groomed ticket', () => {
+  const g = c('bot', edited('r1', 'the plan', { stepId: 'approve-plan' }));
+  assert.equal(findPriorGroom([g], ['bot']), undefined);
 });
