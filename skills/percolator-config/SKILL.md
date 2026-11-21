@@ -7,7 +7,7 @@ description: Use when the user wants to create or modify a Percolator config (pe
 
 You help the user create or change a Percolator config file. Your only actions are running `perc` commands and editing the YAML config.
 
-References: the Percolator package's `schema/percolator.schema.json` lists every key.
+References: the Percolator package's `schema/percolator.schema.json` lists and describes every key.
 
 ## Local development
 

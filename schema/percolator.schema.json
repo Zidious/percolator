@@ -4,9 +4,11 @@
   "properties": {
     "version": {
       "type": "number",
-      "const": 1
+      "const": 1,
+      "description": "Config format version; must be 1."
     },
     "grounds": {
+      "description": "Named sources of policies, skills, prompts and graph fragments: git repos or local paths.",
       "type": "object",
       "propertyNames": {
         "type": "string"
@@ -17,10 +19,12 @@
             "type": "object",
             "properties": {
               "git": {
-                "type": "string"
+                "type": "string",
+                "description": "URL of the git repo the ground is cloned from."
               },
               "ref": {
-                "type": "string"
+                "type": "string",
+                "description": "Branch, tag or commit to use; perc validate pins it to a commit in percolator.lock."
               }
             },
             "required": [
@@ -33,7 +37,8 @@
             "type": "object",
             "properties": {
               "path": {
-                "type": "string"
+                "type": "string",
+                "description": "Local directory used as the ground; ~ is expanded."
               }
             },
             "required": [
@@ -41,7 +46,8 @@
             ],
             "additionalProperties": false
           }
-        ]
+        ],
+        "description": "One ground: a git repo at a ref ({ git, ref }) or a local path ({ path })."
       }
     },
     "profiles": {
@@ -53,6 +59,7 @@
         "type": "object",
         "properties": {
           "bindings": {
+            "description": "What runs each core stage (intake, groom, plan, implement, review, deliver); all six must be bound.",
             "type": "object",
             "propertyNames": {
               "type": "string",
@@ -71,6 +78,7 @@
                   "type": "object",
                   "properties": {
                     "kind": {
+                      "description": "agent, builtin, script or gate; inferred from agent, builtin or command when left out.",
                       "type": "string",
                       "enum": [
                         "agent",
@@ -80,12 +88,15 @@
                       ]
                     },
                     "agent": {
+                      "description": "Which agent runs the step (agent nodes only).",
                       "type": "string"
                     },
                     "model": {
+                      "description": "Model the agent uses (agent nodes only); default the agent's own.",
                       "type": "string"
                     },
                     "effort": {
+                      "description": "Reasoning effort for the agent (agent nodes only); default the agent's own.",
                       "type": "string",
                       "enum": [
                         "low",
@@ -96,15 +107,18 @@
                       ]
                     },
                     "skill": {
+                      "description": "One skill the agent loads (agent nodes only).",
                       "type": "string"
                     },
                     "skills": {
+                      "description": "Skills the agent loads (agent nodes only).",
                       "type": "array",
                       "items": {
                         "type": "string"
                       }
                     },
                     "prompt": {
+                      "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; default the stage contract.",
                       "anyOf": [
                         {
                           "type": "string"
@@ -113,10 +127,12 @@
                           "type": "object",
                           "properties": {
                             "from": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "Name of the ground the prompt file comes from."
                             },
                             "file": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "Prompt file inside the ground."
                             }
                           },
                           "required": [
@@ -128,15 +144,18 @@
                       ]
                     },
                     "builtin": {
+                      "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
                       "type": "string"
                     },
                     "command": {
+                      "description": "Argv array for a script node, never a shell string; {run_dir}, {outputs_dir} and {worktree} are filled in.",
                       "type": "array",
                       "items": {
                         "type": "string"
                       }
                     },
                     "before": {
+                      "description": "Hook point: run this node before a stage, or before all; at most one of before/after.",
                       "type": "string",
                       "enum": [
                         "intake",
@@ -149,6 +168,7 @@
                       ]
                     },
                     "after": {
+                      "description": "Hook point: run this node after a stage, or after all; at most one of before/after.",
                       "type": "string",
                       "enum": [
                         "intake",
@@ -161,9 +181,11 @@
                       ]
                     },
                     "once": {
+                      "description": "Skip the hook once it has passed in this run, so a loop does not re-run it; default false.",
                       "type": "boolean"
                     },
                     "on_fail": {
+                      "description": "Bounded back-edge: on fail, loop back to an earlier stage, up to max_rounds times.",
                       "type": "object",
                       "properties": {
                         "back_to": {
@@ -175,12 +197,14 @@
                             "implement",
                             "review",
                             "deliver"
-                          ]
+                          ],
+                          "description": "Earlier stage the run loops back to when this node fails."
                         },
                         "max_rounds": {
                           "type": "integer",
                           "minimum": 1,
-                          "maximum": 9007199254740991
+                          "maximum": 9007199254740991,
+                          "description": "Most rounds the loop may run before escalating to you; required."
                         }
                       },
                       "required": [
@@ -190,18 +214,22 @@
                       "additionalProperties": false
                     },
                     "max_rounds": {
+                      "description": "Round cap for the review loop; default 3.",
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 9007199254740991
                     },
                     "timeout_s": {
+                      "description": "Escalate to you if the step is not done after this many seconds; default no timeout.",
                       "type": "number",
                       "exclusiveMinimum": 0
                     },
                     "escalation": {
+                      "description": "Accepted but not used yet; has no effect.",
                       "type": "boolean"
                     },
                     "required": {
+                      "description": "Locks the node: later layers may only restate it unchanged; default false.",
                       "type": "boolean"
                     }
                   },
@@ -213,6 +241,7 @@
                     "type": "object",
                     "properties": {
                       "kind": {
+                        "description": "agent, builtin, script or gate; inferred from agent, builtin or command when left out.",
                         "type": "string",
                         "enum": [
                           "agent",
@@ -222,12 +251,15 @@
                         ]
                       },
                       "agent": {
+                        "description": "Which agent runs the step (agent nodes only).",
                         "type": "string"
                       },
                       "model": {
+                        "description": "Model the agent uses (agent nodes only); default the agent's own.",
                         "type": "string"
                       },
                       "effort": {
+                        "description": "Reasoning effort for the agent (agent nodes only); default the agent's own.",
                         "type": "string",
                         "enum": [
                           "low",
@@ -238,15 +270,18 @@
                         ]
                       },
                       "skill": {
+                        "description": "One skill the agent loads (agent nodes only).",
                         "type": "string"
                       },
                       "skills": {
+                        "description": "Skills the agent loads (agent nodes only).",
                         "type": "array",
                         "items": {
                           "type": "string"
                         }
                       },
                       "prompt": {
+                        "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; default the stage contract.",
                         "anyOf": [
                           {
                             "type": "string"
@@ -255,10 +290,12 @@
                             "type": "object",
                             "properties": {
                               "from": {
-                                "type": "string"
+                                "type": "string",
+                                "description": "Name of the ground the prompt file comes from."
                               },
                               "file": {
-                                "type": "string"
+                                "type": "string",
+                                "description": "Prompt file inside the ground."
                               }
                             },
                             "required": [
@@ -270,15 +307,18 @@
                         ]
                       },
                       "builtin": {
+                        "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
                         "type": "string"
                       },
                       "command": {
+                        "description": "Argv array for a script node, never a shell string; {run_dir}, {outputs_dir} and {worktree} are filled in.",
                         "type": "array",
                         "items": {
                           "type": "string"
                         }
                       },
                       "before": {
+                        "description": "Hook point: run this node before a stage, or before all; at most one of before/after.",
                         "type": "string",
                         "enum": [
                           "intake",
@@ -291,6 +331,7 @@
                         ]
                       },
                       "after": {
+                        "description": "Hook point: run this node after a stage, or after all; at most one of before/after.",
                         "type": "string",
                         "enum": [
                           "intake",
@@ -303,9 +344,11 @@
                         ]
                       },
                       "once": {
+                        "description": "Skip the hook once it has passed in this run, so a loop does not re-run it; default false.",
                         "type": "boolean"
                       },
                       "on_fail": {
+                        "description": "Bounded back-edge: on fail, loop back to an earlier stage, up to max_rounds times.",
                         "type": "object",
                         "properties": {
                           "back_to": {
@@ -317,12 +360,14 @@
                               "implement",
                               "review",
                               "deliver"
-                            ]
+                            ],
+                            "description": "Earlier stage the run loops back to when this node fails."
                           },
                           "max_rounds": {
                             "type": "integer",
                             "minimum": 1,
-                            "maximum": 9007199254740991
+                            "maximum": 9007199254740991,
+                            "description": "Most rounds the loop may run before escalating to you; required."
                           }
                         },
                         "required": [
@@ -332,28 +377,34 @@
                         "additionalProperties": false
                       },
                       "max_rounds": {
+                        "description": "Round cap for the review loop; default 3.",
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 9007199254740991
                       },
                       "timeout_s": {
+                        "description": "Escalate to you if the step is not done after this many seconds; default no timeout.",
                         "type": "number",
                         "exclusiveMinimum": 0
                       },
                       "escalation": {
+                        "description": "Accepted but not used yet; has no effect.",
                         "type": "boolean"
                       },
                       "required": {
+                        "description": "Locks the node: later layers may only restate it unchanged; default false.",
                         "type": "boolean"
                       }
                     },
                     "additionalProperties": false
                   }
                 }
-              ]
+              ],
+              "description": "The node that runs this stage, or a list of nodes run in order."
             }
           },
           "nodes": {
+            "description": "Extra nodes by name: hooks, gates and nodes required by rules.",
             "type": "object",
             "propertyNames": {
               "type": "string"
@@ -362,6 +413,7 @@
               "type": "object",
               "properties": {
                 "kind": {
+                  "description": "agent, builtin, script or gate; inferred from agent, builtin or command when left out.",
                   "type": "string",
                   "enum": [
                     "agent",
@@ -371,12 +423,15 @@
                   ]
                 },
                 "agent": {
+                  "description": "Which agent runs the step (agent nodes only).",
                   "type": "string"
                 },
                 "model": {
+                  "description": "Model the agent uses (agent nodes only); default the agent's own.",
                   "type": "string"
                 },
                 "effort": {
+                  "description": "Reasoning effort for the agent (agent nodes only); default the agent's own.",
                   "type": "string",
                   "enum": [
                     "low",
@@ -387,15 +442,18 @@
                   ]
                 },
                 "skill": {
+                  "description": "One skill the agent loads (agent nodes only).",
                   "type": "string"
                 },
                 "skills": {
+                  "description": "Skills the agent loads (agent nodes only).",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "prompt": {
+                  "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; default the stage contract.",
                   "anyOf": [
                     {
                       "type": "string"
@@ -404,10 +462,12 @@
                       "type": "object",
                       "properties": {
                         "from": {
-                          "type": "string"
+                          "type": "string",
+                          "description": "Name of the ground the prompt file comes from."
                         },
                         "file": {
-                          "type": "string"
+                          "type": "string",
+                          "description": "Prompt file inside the ground."
                         }
                       },
                       "required": [
@@ -419,15 +479,18 @@
                   ]
                 },
                 "builtin": {
+                  "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
                   "type": "string"
                 },
                 "command": {
+                  "description": "Argv array for a script node, never a shell string; {run_dir}, {outputs_dir} and {worktree} are filled in.",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "before": {
+                  "description": "Hook point: run this node before a stage, or before all; at most one of before/after.",
                   "type": "string",
                   "enum": [
                     "intake",
@@ -440,6 +503,7 @@
                   ]
                 },
                 "after": {
+                  "description": "Hook point: run this node after a stage, or after all; at most one of before/after.",
                   "type": "string",
                   "enum": [
                     "intake",
@@ -452,9 +516,11 @@
                   ]
                 },
                 "once": {
+                  "description": "Skip the hook once it has passed in this run, so a loop does not re-run it; default false.",
                   "type": "boolean"
                 },
                 "on_fail": {
+                  "description": "Bounded back-edge: on fail, loop back to an earlier stage, up to max_rounds times.",
                   "type": "object",
                   "properties": {
                     "back_to": {
@@ -466,12 +532,14 @@
                         "implement",
                         "review",
                         "deliver"
-                      ]
+                      ],
+                      "description": "Earlier stage the run loops back to when this node fails."
                     },
                     "max_rounds": {
                       "type": "integer",
                       "minimum": 1,
-                      "maximum": 9007199254740991
+                      "maximum": 9007199254740991,
+                      "description": "Most rounds the loop may run before escalating to you; required."
                     }
                   },
                   "required": [
@@ -481,28 +549,35 @@
                   "additionalProperties": false
                 },
                 "max_rounds": {
+                  "description": "Round cap for the review loop; default 3.",
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 9007199254740991
                 },
                 "timeout_s": {
+                  "description": "Escalate to you if the step is not done after this many seconds; default no timeout.",
                   "type": "number",
                   "exclusiveMinimum": 0
                 },
                 "escalation": {
+                  "description": "Accepted but not used yet; has no effect.",
                   "type": "boolean"
                 },
                 "required": {
+                  "description": "Locks the node: later layers may only restate it unchanged; default false.",
                   "type": "boolean"
                 }
               },
-              "additionalProperties": false
+              "additionalProperties": false,
+              "description": "One named node: a hook (with before/after), a gate or a node rules require."
             }
           },
           "rules": {
+            "description": "Checks on the merged graph; rules from every layer all apply.",
             "type": "object",
             "properties": {
               "require_skills": {
+                "description": "Skills that agent nodes in a stage must load.",
                 "type": "array",
                 "items": {
                   "type": "object",
@@ -524,13 +599,15 @@
                           "type": "string",
                           "const": "*"
                         }
-                      ]
+                      ],
+                      "description": "Stage whose agent nodes must load the skills, or * for every stage."
                     },
                     "skills": {
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "description": "Skills each agent node in that stage must load."
                     }
                   },
                   "required": [
@@ -541,23 +618,27 @@
                 }
               },
               "allowed_agents": {
+                "description": "Agents nodes may use; default any agent.",
                 "type": "array",
                 "items": {
                   "type": "string"
                 }
               },
               "allowed_models": {
+                "description": "Models agent nodes may use; default any model.",
                 "type": "array",
                 "items": {
                   "type": "string"
                 }
               },
               "max_rounds_ceiling": {
+                "description": "Highest round cap allowed for the review loop and on_fail back-edges; default no ceiling.",
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 9007199254740991
               },
               "required_nodes": {
+                "description": "Nodes that must be defined: a name, or { name, before | after } to also fix where it attaches.",
                 "type": "array",
                 "items": {
                   "anyOf": [
@@ -568,9 +649,11 @@
                       "type": "object",
                       "properties": {
                         "name": {
-                          "type": "string"
+                          "type": "string",
+                          "description": "Name of the node that must exist."
                         },
                         "before": {
+                          "description": "The node must be attached before this stage (or all); exactly one of before/after.",
                           "type": "string",
                           "enum": [
                             "intake",
@@ -583,6 +666,7 @@
                           ]
                         },
                         "after": {
+                          "description": "The node must be attached after this stage (or all); exactly one of before/after.",
                           "type": "string",
                           "enum": [
                             "intake",
@@ -607,17 +691,21 @@
             "additionalProperties": false
           },
           "use": {
+            "description": "Files or dirs from grounds mapped into the run as policy, context, skills, plugins, prompt or graph.",
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
                 "from": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Name of the ground (under grounds) the file or dir comes from."
                 },
                 "file": {
+                  "description": "File inside the ground to map; exactly one of file or dir.",
                   "type": "string"
                 },
                 "dir": {
+                  "description": "Directory inside the ground to map; exactly one of file or dir.",
                   "type": "string"
                 },
                 "as": {
@@ -629,12 +717,14 @@
                     "plugins",
                     "prompt",
                     "graph"
-                  ]
+                  ],
+                  "description": "What the mapping is: policy (binding rules), context (reference), skills, plugins, prompt, or graph (a config fragment layer)."
                 },
                 "applies_to": {
                   "default": [
                     "*"
                   ],
+                  "description": "Stages or node names the mapping applies to; default all stages ([\"*\"]).",
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -642,6 +732,7 @@
                 },
                 "required": {
                   "default": false,
+                  "description": "Locks the mapping: later layers may only restate it unchanged; default false.",
                   "type": "boolean"
                 }
               },
@@ -653,9 +744,11 @@
             }
           },
           "match": {
+            "description": "Which repos use this profile; the first matching profile wins; without it, only --profile picks it.",
             "type": "object",
             "properties": {
               "remote": {
+                "description": "Glob or globs matched against the repo's remote URL.",
                 "anyOf": [
                   {
                     "type": "string"
@@ -669,6 +762,7 @@
                 ]
               },
               "path": {
+                "description": "Glob or globs matched against the repo's path; ~ is expanded.",
                 "anyOf": [
                   {
                     "type": "string"
@@ -685,13 +779,16 @@
             "additionalProperties": false
           },
           "tracker": {
+            "description": "Issue tracker used for tickets, gates and pull requests.",
             "type": "object",
             "properties": {
               "kind": {
                 "type": "string",
-                "const": "github"
+                "const": "github",
+                "description": "Tracker type; only github."
               },
               "approvers": {
+                "description": "GitHub logins whose approve/reject comments count at a gate; default the gh user running perc.",
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -704,29 +801,37 @@
             "additionalProperties": false
           },
           "runtime": {
+            "description": "How runs are set up: worktrees, base branch, terminals and the Herdr space.",
             "type": "object",
             "properties": {
               "worktree_root": {
+                "description": "Put worktrees here; default <repo>/.worktrees.",
                 "type": "string"
               },
               "base": {
+                "description": "Branch the run starts from and opens its PR against; detected from the repo when left out.",
                 "type": "string"
               },
               "keep_terminals": {
+                "description": "Keep step terminals open after they finish; default false.",
                 "type": "boolean"
               },
               "space": {
+                "description": "Create a Herdr space per run; default true (false skips it).",
                 "type": "boolean"
               }
             },
             "additionalProperties": false
           },
           "trust_repo_config": {
+            "description": "Load the repo's own config file as the last layer; default false (refused).",
             "type": "boolean"
           }
         },
-        "additionalProperties": false
-      }
+        "additionalProperties": false,
+        "description": "One profile: the graph, tracker and runtime settings for the repos it matches."
+      },
+      "description": "Named profiles; the first whose match fits the repo wins, or pick one with --profile."
     }
   },
   "required": [
