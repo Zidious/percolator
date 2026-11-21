@@ -279,7 +279,9 @@ async function attentionOf(o: {
     }
     return { kind: 'paused', since: lastEnd, ...turn('paused', state.currentStep, { reason: state.pausedReason ?? '' }), review: failing(state.currentStep), actions: ['resume'] };
   }
+  // after `perc clean` (no worktree) there is nothing left to do for a failed run
   if (state.status === 'failed') {
+    if (!(await exists(meta.worktree))) return undefined;
     return {
       kind: 'failed',
       since: lastEnd,
@@ -312,7 +314,9 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps): Pro
   const live = state.status === 'running' || state.status === 'paused';
   const waiting = live ? await readWaiting(dir) : undefined;
   const stepDefs = graph?.steps ?? (await historySteps(dir, state, waiting));
-  const alive = await driverAlive(dir, meta, deps);
+  // a finished run has no driver or terminals worth asking hc about
+  const finished = state.status === 'completed' || state.status === 'failed';
+  const alive = finished ? false : await driverAlive(dir, meta, deps);
   const steps: StepJson[] = stepDefs.map((s) => {
     const h = latest(state, s.id);
     const status: StepJson['status'] =
@@ -344,7 +348,7 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps): Pro
     ...(attention !== undefined ? { attention } : {}),
     steps,
     loops: loopDefs.map((lp) => ({ ...lp, round: state.rounds[lp.id] ?? 0 })),
-    terminals: await liveTerminals(meta, deps),
+    terminals: finished ? {} : await liveTerminals(meta, deps),
     pr: url === undefined ? null : { url },
     graph: graph === undefined ? 'history' : 'full',
   };
@@ -361,9 +365,19 @@ export async function runStatusJson(l: RunListing, deps: DriverDeps): Promise<Ru
   }
 }
 
-/** Every run under `deps.home`, in `listRuns` order. Reads run dirs only, never the config. */
+const READ_AT_ONCE = 4;
+
+/** Every run under `deps.home`, in `listRuns` order, read a few at a time. Reads run dirs only, never the config. */
 export async function statusJson(deps: DriverDeps): Promise<StatusJson> {
-  const runs: RunStatusJson[] = [];
-  for (const l of await listRuns(deps.home)) runs.push(await runStatusJson(l, deps));
+  const listed = await listRuns(deps.home);
+  const runs: RunStatusJson[] = new Array(listed.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < listed.length) {
+      const i = next++;
+      runs[i] = await runStatusJson(listed[i]!, deps);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(READ_AT_ONCE, listed.length) }, worker));
   return { schema: 1, runs };
 }

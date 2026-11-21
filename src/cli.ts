@@ -189,17 +189,18 @@ async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: Driv
     // a killed driver leaves waiting.json and attention.json behind, so liveness is always reported
     const a = await readAttention(dir);
     const what = waitingText ?? (a !== undefined && a.stepId === state.currentStep ? `${a.kind}: attend terminal ${a.terminal}` : undefined);
+    // the same judgement as the JSON's driver.alive: true live, false stopped, null unknown
     const d = await driverLiveness(dir, meta, deps);
     // a foreground drive has no driver terminal; its driver.json says it is alive
-    const live = d.lock === undefined ? `driver ${meta.driver}` : `driver pid ${d.lock.pid}${d.lock.host === os.hostname() ? '' : ` on ${d.lock.host}`}`;
-    const unknown = d.hcError !== undefined && d.lock === undefined && d.alive !== true;
-    const driver = unknown
-      ? `driver unknown (hc: ${d.hcError})`
-      : d.alive !== false
+    const live = d.lock === undefined ? `driver ${meta.driver}` : `driver pid ${d.lock.pid}`;
+    const driver =
+      d.alive === true
         ? undefined
-        : d.hcError !== undefined
-          ? `driver unknown (hc: ${d.hcError})`
-          : `driver not running; perc resume ${meta.runId}`;
+        : d.alive === false
+          ? `driver not running; perc resume ${meta.runId}`
+          : d.lock !== undefined
+            ? `driver unknown (pid ${d.lock.pid} on ${d.lock.host})`
+            : `driver unknown (hc: ${d.hcError})`;
     if (what === undefined) return driver ?? live;
     return driver === undefined ? what : `${what}; ${driver}`;
   }
@@ -231,6 +232,7 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
     deps.out(`  status ${state.status}`);
     deps.out(`  step ${state.currentStep ?? '-'}`);
     deps.out(`  detail ${await runDetail(dir, meta, state, deps)}`);
+    if (run.status === 'unreadable') deps.out(`error: ${run.error}`);
     if ('attention' in run && run.attention !== undefined) {
       const a = run.attention;
       deps.out(`your turn: ${a.message}`);

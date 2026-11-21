@@ -70,3 +70,16 @@ test('readRunGraph rejects a corrupt file', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('readRunGraph names a root-level problem "value"', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-graph-'));
+  try {
+    const file = path.join(dir, 'graph.json');
+    await fs.writeFile(file, '[]\n');
+    await assert.rejects(readRunGraph(dir), {
+      message: `Run graph ${file} is invalid: value: Invalid input: expected object, received array; start a new run`,
+    });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

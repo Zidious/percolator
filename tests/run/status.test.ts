@@ -273,7 +273,7 @@ test('paused on escalate', async () => {
   }
 });
 
-test('failed', async () => {
+test('failed run with worktree → failed attention (clean)', async () => {
   const e = await setup();
   try {
     const m = await e.prepare();
@@ -283,6 +283,7 @@ test('failed', async () => {
       s.currentStep = 'implement';
       s.history.push(rec('implement', 1, 'fail', { summary }));
     });
+    e.deps.hc.calls.length = 0;
     assert.deepEqual(
       await e.status(m),
       expected(m, {
@@ -297,6 +298,31 @@ test('failed', async () => {
           actions: ['clean'],
           commands: [`perc run ${TICKET} --repo ${m.repoRoot}`],
         },
+        steps: steps({ implement: { status: 'fail', attempts: 1, startedAt: T1, endedAt: T2, outputs: { summary: path.join(e.dir(m), summary) } } }),
+      }),
+    );
+    assert.deepEqual(e.deps.hc.calls, [], 'a failed run asks hc nothing');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('failed run after clean → no attention', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const summary = rel('implement', 1, 'summary');
+    await e.edit(m, (s) => {
+      s.status = 'failed';
+      s.currentStep = 'implement';
+      s.history.push(rec('implement', 1, 'fail', { summary }));
+    });
+    await fs.rm(m.worktree, { recursive: true, force: true });
+    assert.deepEqual(
+      await e.status(m),
+      expected(m, {
+        status: 'failed',
+        currentStep: 'implement',
         steps: steps({ implement: { status: 'fail', attempts: 1, startedAt: T1, endedAt: T2, outputs: { summary: path.join(e.dir(m), summary) } } }),
       }),
     );
@@ -381,6 +407,8 @@ test('completed', async () => {
     });
     await fs.mkdir(path.dirname(path.join(e.dir(m), prFile)), { recursive: true });
     await fs.writeFile(path.join(e.dir(m), prFile), `https://${REPO}/pull/3\n`);
+    e.liveDriver(m); // a leftover driver terminal is not looked up
+    e.deps.hc.calls.length = 0;
     assert.deepEqual(
       await e.status(m),
       expected(m, {
@@ -389,6 +417,7 @@ test('completed', async () => {
         pr: { url: `https://${REPO}/pull/3` },
       }),
     );
+    assert.deepEqual(e.deps.hc.calls, [], 'a completed run asks hc nothing');
   } finally {
     await e.cleanup();
   }
@@ -599,6 +628,35 @@ test('status json keeps going past a broken run', async () => {
         { id: 't9-broken', status: 'unreadable', error: `Run metadata ${path.join(broken, 'run.json')} is missing or invalid: file not found` },
       ],
     });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status json reads runs four at a time, in listRuns order', async () => {
+  const e = await setup();
+  try {
+    for (let i = 0; i < 6; i++) {
+      await e.prepare();
+      e.clock.t += 1000;
+    }
+    let inFlight = 0;
+    let most = 0;
+    const get = e.deps.hc.get.bind(e.deps.hc);
+    e.deps.hc.get = async (name) => {
+      inFlight++;
+      most = Math.max(most, inFlight);
+      await new Promise((r) => setTimeout(r, 20));
+      inFlight--;
+      return get(name);
+    };
+    const j = await statusJson(e.deps);
+    assert.deepEqual(
+      j.runs.map((r) => r.id),
+      (await listRuns(e.home)).map((l) => l.meta!.runId),
+    );
+    assert.equal(j.runs.length, 6);
+    assert.equal(most, 4);
   } finally {
     await e.cleanup();
   }

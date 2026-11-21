@@ -78,7 +78,7 @@ export async function readRunGraph(dir: string): Promise<RunGraph | undefined> {
   const r = RunGraphSchema.safeParse(raw);
   if (!r.success) {
     const i = r.error.issues[0]!;
-    throw invalid(`${i.path.join('.')}: ${i.message}`);
+    throw invalid(`${i.path.join('.') || 'value'}: ${i.message}`);
   }
   return r.data as RunGraph;
 }

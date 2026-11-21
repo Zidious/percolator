@@ -276,6 +276,60 @@ test('status <id> when hc is missing', async () => {
   }
 });
 
+/** `perc status <id>`'s detail line and its JSON's driver.alive, for a running run at plan. */
+async function driverDetail(e: Env, meta: RunMeta, deps: DriverDeps): Promise<[string | undefined, unknown]> {
+  const r = await e.perc(['status', meta.runId], deps);
+  assert.equal(r.code, 0, r.err);
+  const j = await e.perc(['status', meta.runId, '--json'], deps);
+  return [r.out.split('\n')[7], (JSON.parse(j.out) as { driver: { alive: unknown } }).driver.alive];
+}
+
+test('status <id> says the driver stopped when hc fails but a dead lock decides, like the JSON', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const s = await loadState(e.dir(meta.runId));
+    s.currentStep = 'plan';
+    await saveState(e.dir(meta.runId), s);
+    await writeJson(path.join(e.dir(meta.runId), 'driver.json'), { pid: 4242, host: os.hostname(), terminal: null, startedAt: NOW.toISOString() });
+    const hc = cliHc({ exec: async () => Promise.reject(new Error('hc not found on PATH')) });
+    assert.deepEqual(await driverDetail(e, meta, { ...e.deps, hc, pidAlive: () => false }), [
+      `  detail driver not running; perc resume ${meta.runId}`,
+      false,
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> says the driver is unknown when its lock is on another host, like the JSON', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const s = await loadState(e.dir(meta.runId));
+    s.currentStep = 'plan';
+    await saveState(e.dir(meta.runId), s);
+    await writeJson(path.join(e.dir(meta.runId), 'driver.json'), { pid: 4242, host: 'elsewhere', terminal: null, startedAt: NOW.toISOString() });
+    assert.deepEqual(await driverDetail(e, meta, e.deps), ['  detail driver unknown (pid 4242 on elsewhere)', null]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> of a run whose graph.json is corrupt prints the error', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const graph = path.join(e.dir(meta.runId), 'graph.json');
+    await fs.writeFile(graph, '{"version": 2}');
+    const r = await e.perc(['status', meta.runId]);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out.split('\n')[8], `error: Run graph ${graph} is invalid: version: Invalid input: expected 1; start a new run`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('status <id> of a run waiting at a gate whose driver died says so', async () => {
   const e = await setup();
   try {
