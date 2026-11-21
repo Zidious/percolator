@@ -25,7 +25,7 @@ export type Loop = Readable['loops'][number];
 export declare function readStatus(stdout: string): { ok: true; data: StatusJson } | { ok: false; error: string };
 export declare function duration(seconds: number): string;
 export declare function ago(iso: string | undefined, now: number): string;
-export declare function took(step: Step, now: number): string;
+export declare function took(step: { startedAt?: string; endedAt?: string; status: string }, now: number): string;
 export declare function stepTone(status: string): 'done' | 'working' | 'blocked' | null;
 export declare function resolvePath(base: string, p: string): string;
 export declare function cliLines(run: RunStatusJson): string[];
@@ -36,7 +36,18 @@ export declare function loopAtCap(loop: Loop): boolean;
 export declare function loopLabel(loop: Loop, narrow: boolean): string;
 export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number): string | null;
 export declare function moveRow(rows: RunStatusJson[], selId: string | null, dir: number): string | null;
-export declare function readerPath(run: RunStatusJson, stopSel: string | null): string | null;
+export type RoundView = {
+  attempt: Attempt;
+  n: number;
+  of: number;
+  mark: 'running' | 'waiting' | 'latest' | null;
+  prev: number | null;
+  next: number | null;
+};
+export declare function timelineOf(run: RunStatusJson): TimelineEntry[];
+export declare function stepAttempts(run: RunStatusJson, stepId: string): Attempt[];
+export declare function roundView(run: RunStatusJson, stepId: string, roundSel: number | null): RoundView | null;
+export declare function readerPath(run: RunStatusJson, stopSel: string | null, roundSel?: number | null): string | null;
 export declare function cupLabel(runs: RunStatusJson[]): { text: string; tone: 'blocked' | 'working' | 'muted' };
 export declare function notice(run: RunStatusJson): {
   title: string;

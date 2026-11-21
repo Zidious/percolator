@@ -69,6 +69,7 @@ export default class Percolator extends View {
     this.filter = 'active';
     this.sel = null;
     this.stopSel = null;
+    this.roundSel = null; // the attempt number picked in the stop strip; null = the latest
     this.file = null;
     this.files = {};
     this.tail = {};
@@ -218,6 +219,7 @@ export default class Percolator extends View {
     }
     this.sel = id;
     this.stopSel = null;
+    this.roundSel = null;
     this.outPick = null;
     this.syncReader(cx);
     this.readTail(cx);
@@ -226,6 +228,14 @@ export default class Percolator extends View {
   /** Selects a stop (null closes the strip and goes back to the run's review file). */
   pickStop(id, cx) {
     this.stopSel = id;
+    this.roundSel = null;
+    this.outPick = null;
+    this.syncReader(cx);
+  }
+
+  /** An earlier (or later) round of the selected stop, from the strip: its outputs show in the reader. */
+  pickRound(n, cx) {
+    this.roundSel = n;
     this.outPick = null;
     this.syncReader(cx);
   }
@@ -240,7 +250,7 @@ export default class Percolator extends View {
    *  the same path can hold new text (a re-groom rewrites groomed_ticket.md). */
   syncReader(cx) {
     const r = this.current();
-    const raw = (this.stopSel && this.outPick) || (r ? readerPath(r, this.stopSel) : null);
+    const raw = (this.stopSel && this.outPick) || (r ? readerPath(r, this.stopSel, this.roundSel) : null);
     const path = raw ? this.resolve(raw) : null;
     this.file = path;
     if (!path) return;

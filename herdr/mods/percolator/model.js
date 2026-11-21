@@ -237,10 +237,52 @@ export function moveRow(rows, selId, dir) {
   return rows[Math.max(0, Math.min(rows.length - 1, at + dir))].id;
 }
 
-/** What the reader shows: the selected stop's first output, else the first file to review, else null (as perc gave it). */
-export function readerPath(run, stopSel) {
-  const step = stopSel ? (run.steps ?? []).find((s) => s.id === stopSel) : undefined;
-  const out = step ? Object.values(step.outputs ?? {})[0] : undefined;
+/** The run's attempts in order (with gate decisions and loop caps): its `timeline`; an older perc sends none, so one
+ *  attempt per step that ran, from the step's own data. [] for an unreadable run. */
+export function timelineOf(run) {
+  if (Array.isArray(run.timeline)) return run.timeline;
+  return (run.steps ?? [])
+    .filter((s) => s.status !== 'pending')
+    .map((s) => ({
+      kind: 'attempt',
+      step: s.id,
+      attempt: s.attempts,
+      status: s.status,
+      ...(s.startedAt ? { startedAt: s.startedAt } : {}),
+      ...(s.endedAt ? { endedAt: s.endedAt } : {}),
+      outputs: s.outputs ?? {},
+    }));
+}
+
+/** One step's attempts, in order. */
+export function stepAttempts(run, stepId) {
+  return timelineOf(run).filter((e) => e.kind === 'attempt' && e.step === stepId);
+}
+
+/** The round of a step the strip shows: `roundSel` (an attempt number), else the last attempt, with its place among
+ *  the rounds and its neighbours' numbers. `mark` is set on the last round only. Null when the step has not run. */
+export function roundView(run, stepId, roundSel) {
+  const all = stepAttempts(run, stepId);
+  if (all.length === 0) return null;
+  const found = all.findIndex((a) => a.attempt === roundSel);
+  const i = found < 0 ? all.length - 1 : found;
+  const attempt = all[i];
+  const last = i === all.length - 1;
+  return {
+    attempt,
+    n: i + 1,
+    of: all.length,
+    mark: last ? (attempt.status === 'running' || attempt.status === 'waiting' ? attempt.status : 'latest') : null,
+    prev: i > 0 ? all[i - 1].attempt : null,
+    next: last ? null : all[i + 1].attempt,
+  };
+}
+
+/** What the reader shows: the selected stop's (picked, else latest) round's first output, else the first file to
+ *  review, else null (as perc gave it). */
+export function readerPath(run, stopSel, roundSel = null) {
+  const view = stopSel ? roundView(run, stopSel, roundSel) : null;
+  const out = view ? Object.values(view.attempt.outputs ?? {})[0] : undefined;
   return out ?? run.attention?.review?.[0]?.path ?? null;
 }
 

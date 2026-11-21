@@ -2,7 +2,7 @@
 
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { STAGES, ago, loopAtCap, loopLabel, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
+import { STAGES, ago, loopAtCap, loopLabel, roundView, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
 import { stepColor, link, own } from './ui.js';
 
 const TOP = 40; // room above the rail for loop arcs
@@ -229,7 +229,16 @@ export function stopStrip(p, t, r) {
   const st = (r.steps ?? []).find((s) => s.id === p.stopSel);
   if (!st) return div();
   const kv = (k, v) => h_flex().gap(4).child(div().text_color(t.dim).child(k)).child(div().text_color(t.foreground).child(v));
-  const spent = took(st, Date.now());
+  const rv = roundView(r, st.id, p.roundSel); // null for a step that has not run: its own values show
+  const shown = rv?.attempt ?? st;
+  const spent = took(shown, Date.now());
+  const step = (glyph, to, id) =>
+    to === null
+      ? div().flex_none().px(4).text_color(t.dim).child(glyph)
+      : link(t, id, glyph, (_e, cx) => {
+          p.pickRound(to, cx);
+          cx.notify();
+        });
   return h_flex()
     .flex_wrap()
     .mx(16)
@@ -242,14 +251,20 @@ export function stopStrip(p, t, r) {
     .bg(t.raised)
     .text_size(11.5)
     .child(div().font_semibold().child(st.id))
+    .when(rv !== null && rv.of > 1, (el) =>
+      el
+        .child(step('‹', rv.prev, 'round-prev'))
+        .child(div().text_color(t.dim).child(`round ${rv.n} of ${rv.of}${rv.mark ? ` · ${rv.mark}` : ''}`))
+        .child(step('›', rv.next, 'round-next')),
+    )
     .child(kv('kind', st.kind))
     .child(kv('stage', st.stage))
-    .child(kv('status', st.status))
+    .child(kv('status', shown.status))
     .child(kv('attempts', String(st.attempts ?? 0)))
     .when(Boolean(spent), (el) => el.child(kv('took', spent)))
     .child(div().flex_1())
     .children(
-      Object.entries(st.outputs ?? {}).map(([k, path]) =>
+      Object.entries(shown.outputs ?? {}).map(([k, path]) =>
         link(t, `out-${k}`, `${k}.md`, (_e, cx) => {
           p.pickOutput(path, cx);
           cx.notify();

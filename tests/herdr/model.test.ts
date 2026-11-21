@@ -31,6 +31,9 @@ import {
   parseStatus,
   readStatus,
   readerPath,
+  roundView,
+  stepAttempts,
+  timelineOf,
   resolvePath,
   rowState,
   runningCount,
@@ -419,7 +422,8 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
 test('readerPath shows the selected stop first output, else the first review file, else nothing', () => {
   const gate = readable('t2');
   assert.equal(readerPath(gate, null), 'samples/groomed_ticket.md');
-  const out = { ...gate, steps: gate.steps.map((s) => (s.id === 'groom' ? { ...s, outputs: { groomed_ticket: '/abs/g.md' } } : s)) };
+  const { timeline: _t, ...older } = gate; // an older perc: the steps' own outputs are read
+  const out = { ...older, steps: gate.steps.map((s) => (s.id === 'groom' ? { ...s, outputs: { groomed_ticket: '/abs/g.md' } } : s)) } as unknown as Readable;
   assert.equal(readerPath(out, 'groom'), '/abs/g.md');
   assert.equal(readerPath(out, 'intake'), 'samples/groomed_ticket.md', 'a stop without outputs falls back to the review');
   assert.equal(readerPath(out, 'gone'), 'samples/groomed_ticket.md');
@@ -427,6 +431,57 @@ test('readerPath shows the selected stop first output, else the first review fil
   delete passed.attention;
   assert.equal(readerPath(passed, null), null, 'once the gate passes there is nothing to read');
   assert.equal(readerPath(byId('t5'), null), null);
+});
+
+test('the fixture has timelines for t8, t3, t2 and t4, and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4']);
+});
+
+test('roundView defaults to the latest round and marks it running', () => {
+  const v = roundView(readable('t8'), 'review', null)!;
+  assert.deepEqual([v.attempt.attempt, v.n, v.of, v.mark, v.prev, v.next], [3, 3, 3, 'running', 2, null]);
+});
+
+test('roundView shows a picked earlier round, unmarked, with both neighbours', () => {
+  const v = roundView(readable('t8'), 'review', 2)!;
+  assert.deepEqual([v.attempt.status, v.n, v.mark, v.prev, v.next], ['fail', 2, null, 1, 3]);
+});
+
+test('roundView marks a finished last round latest, and a waiting one waiting', () => {
+  assert.equal(roundView(readable('t3'), 'review', null)!.mark, 'latest');
+  assert.equal(roundView(readable('t2'), 'approve-groom', null)!.mark, 'waiting');
+});
+
+test('roundView falls back to the latest round when the picked one is not there', () => {
+  assert.equal(roundView(readable('t8'), 'review', 9)!.n, 3);
+});
+
+test('roundView is null for a step that has not run', () => {
+  assert.equal(roundView(readable('t2'), 'plan', null), null);
+});
+
+test('without a timeline (older perc) a step that ran is one round from its own data', () => {
+  const v = roundView(readable('t9'), 'implement', null)!; // t9 has no timeline
+  assert.deepEqual([v.attempt.status, v.of, v.mark], ['contract_error', 1, 'latest']);
+});
+
+test('timelineOf is the run timeline, else one attempt per step that ran, in order; empty when unreadable', () => {
+  assert.deepEqual(timelineOf(readable('t8')), readable('t8').timeline);
+  assert.deepEqual(
+    timelineOf(readable('t9')).map((e) => e.kind === 'attempt' && [e.step, e.attempt, e.status]),
+    [['intake', 1, 'pass'], ['groom', 1, 'pass'], ['approve-groom', 1, 'pass'], ['plan', 1, 'pass'], ['implement', 1, 'contract_error']],
+  );
+  assert.deepEqual(timelineOf(byId('t5')), []);
+});
+
+test('stepAttempts is one step attempts in order', () => {
+  assert.deepEqual(stepAttempts(readable('t8'), 'review').map((a) => a.attempt), [1, 2, 3]);
+  assert.deepEqual(stepAttempts(readable('t8'), 'deliver'), []);
+});
+
+test('readerPath shows the picked round first output', () => {
+  assert.equal(readerPath(readable('t8'), 'review', 2), 'samples/findings.md');
+  assert.equal(readerPath(readable('t8'), 'review', null), null, 'the running round has no outputs yet');
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
