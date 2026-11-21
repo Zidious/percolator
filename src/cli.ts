@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,12 +9,12 @@ import { loadState } from './engine/state.ts';
 import type { RunState } from './engine/state.ts';
 import { cliHerdrApp } from './herdr/app.ts';
 import { cliHc } from './herdr/hc.ts';
-import { checkResumable, drive, liveness, prUrl } from './run/drive.ts';
-import { lockIsLive, readDriverLock } from './run/lock.ts';
+import { checkResumable, drive, prUrl } from './run/drive.ts';
 import { listRuns, readRunMeta } from './run/meta.ts';
 import type { RunMeta } from './run/meta.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
 import type { DriverDeps } from './run/prepare.ts';
+import { driverLiveness, readAttention } from './run/status.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
 import { readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
@@ -179,16 +178,6 @@ async function runResume(args: string[], deps: DriverDeps): Promise<number> {
   return 0;
 }
 
-type AttentionRecord = { stepId?: unknown; terminal?: unknown; kind?: unknown };
-
-async function readAttention(dir: string): Promise<AttentionRecord | undefined> {
-  try {
-    return JSON.parse(await fs.readFile(path.join(dir, 'attention.json'), 'utf8')) as AttentionRecord;
-  } catch {
-    return undefined;
-  }
-}
-
 /** What a run is doing or waiting for, in one line; an hc failure is reported, never thrown. */
 async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: DriverDeps): Promise<string> {
   const waiting = await readWaiting(dir).catch(() => undefined);
@@ -197,22 +186,11 @@ async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: Driv
     // a killed driver leaves waiting.json and attention.json behind, so liveness is always reported
     const a = await readAttention(dir);
     const what = waitingText ?? (a !== undefined && a.stepId === state.currentStep ? `${a.kind}: attend terminal ${a.terminal}` : undefined);
-    let driver: string | undefined;
-    let live = `driver ${meta.driver}`;
-    try {
-      const t = await deps.hc.get(meta.driver);
-      driver = t?.state === 'live' ? undefined : `driver not running; perc resume ${meta.runId}`;
-    } catch (err) {
-      driver = `driver unknown (hc: ${(err as Error).message})`;
-    }
-    if (driver !== undefined) {
-      // a foreground drive has no driver terminal; its driver.json says it is alive
-      const lock = await readDriverLock(dir);
-      if (lock !== undefined && lockIsLive(lock, liveness(deps))) {
-        driver = undefined;
-        live = `driver pid ${lock.pid}${lock.host === os.hostname() ? '' : ` on ${lock.host}`}`;
-      }
-    }
+    const d = await driverLiveness(dir, meta, deps);
+    // a foreground drive has no driver terminal; its driver.json says it is alive
+    const live = d.lock === undefined ? `driver ${meta.driver}` : `driver pid ${d.lock.pid}${d.lock.host === os.hostname() ? '' : ` on ${d.lock.host}`}`;
+    const driver =
+      d.alive !== false ? undefined : d.hcError !== undefined ? `driver unknown (hc: ${d.hcError})` : `driver not running; perc resume ${meta.runId}`;
     if (what === undefined) return driver ?? live;
     return driver === undefined ? what : `${what}; ${driver}`;
   }
