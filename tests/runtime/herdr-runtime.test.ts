@@ -165,6 +165,15 @@ test('agent step: launches claude in the worktree with space label, collects out
   assert.equal(e.hc.terminals.size, 0);
 });
 
+test('a claude step with model and effort launches with --model and --effort', async () => {
+  const e = await env(async (t, n) => {
+    if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+  });
+  await runtime(e).executeStep(step({ def: { agent: 'claude', model: 'opus', effort: 'medium' } as Step['def'] }), ctx());
+  const run = e.hc.calls.find((c) => c[0] === 'run')![1] as { argv: string[] };
+  assert.deepEqual(run.argv.slice(0, 5), ['claude', '--model', 'opus', '--effort', 'medium']);
+});
+
 test('codex step argv has --no-daemon and skill files listed in task.md', async () => {
   const e = await env(async (t, n) => {
     if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });

@@ -45,6 +45,13 @@ test('the built-in agents pass', async () => {
   await checkAgents(graphOf({ review: { agent: 'codex' }, plan: { agent: 'command', command: ['x'] } }), [], 'cfg.yaml');
 });
 
+test('effort on an agent that cannot take it is reported; on claude it passes', async () => {
+  const g = graphOf({ review: { agent: 'codex', effort: 'high' }, plan: { agent: 'claude', effort: 'medium' } });
+  assert.deepEqual(await problems(checkAgents(g, [], 'cfg.yaml')), [
+    'cfg.yaml: bindings.review: agent "codex" does not take "effort"; remove it or use agent "claude"',
+  ]);
+});
+
 test('unknown agent, missing command and a dashed command are all reported, hooks as nodes.<id>', async () => {
   const g = graphOf(
     { review: { agent: 'gemini' }, plan: { agent: 'command' }, implement: { agent: 'command', command: ['-rf'] } },

@@ -48,13 +48,14 @@ export type Mapping = z.infer<typeof MappingSchema>;
 
 const StageOrAllSchema = z.enum([...STAGES, 'all']);
 
-const AGENT_ONLY = ['agent', 'model', 'skill', 'skills'] as const;
+const AGENT_ONLY = ['agent', 'model', 'skill', 'skills', 'effort'] as const;
 
 export const NodeDefSchema = z
   .strictObject({
     kind: z.enum(['agent', 'builtin', 'script', 'gate']).optional(),
     agent: z.string().optional(),
     model: z.string().optional(),
+    effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
     skill: z.string().optional(),
     skills: z.array(z.string()).optional(),
     prompt: z.union([z.string(), z.strictObject({ from: z.string(), file: z.string() })]).optional(),

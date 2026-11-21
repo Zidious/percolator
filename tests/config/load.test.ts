@@ -144,9 +144,17 @@ test('kind: agent without "agent" is rejected', async () => {
   });
 });
 
-test('a script node may not set agent, model, skill or skills', async () => {
+test('an unknown effort level is rejected at its line', async () => {
+  await withYaml('bindings:\n  plan:\n    agent: claude\n    effort: extreme\n', async (file) => {
+    const err = await loadFragment(file).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.match(err.message, new RegExp(`^${file.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}:4: bindings\\.plan\\.effort: .*"low"\\|"medium"\\|"high"\\|"xhigh"\\|"max"`));
+  });
+});
+
+test('a script node may not set agent, model, effort, skill or skills', async () => {
   await withYaml(
-    'bindings:\n  plan:\n    kind: script\n    command: [x]\n    agent: codex\n    model: gpt-x\n    skill: s\n    skills: [t]\n',
+    'bindings:\n  plan:\n    kind: script\n    command: [x]\n    agent: codex\n    model: gpt-x\n    skill: s\n    skills: [t]\n    effort: high\n',
     async (file) => {
       const err = await loadFragment(file).catch((e) => e);
       assert.ok(err instanceof ConfigError);
@@ -155,6 +163,7 @@ test('a script node may not set agent, model, skill or skills', async () => {
         `${file}:6: bindings.plan.model: "model" only applies to agent nodes (this node is kind "script")`,
         `${file}:7: bindings.plan.skill: "skill" only applies to agent nodes (this node is kind "script")`,
         `${file}:8: bindings.plan.skills: "skills" only applies to agent nodes (this node is kind "script")`,
+        `${file}:9: bindings.plan.effort: "effort" only applies to agent nodes (this node is kind "script")`,
       ]);
     },
   );

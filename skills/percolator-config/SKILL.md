@@ -24,7 +24,7 @@ The config is `~/.percolator/config.yaml`, unless the user names another file.
 
 Ask one question at a time and wait for the answer. Topics:
 
-- the agent and model for each stage
+- the agent, model and effort for each stage (`effort`: low, medium, high, xhigh or max; `claude` only)
 - the prompt for each stage
 - which repositories the profile matches (`match.remote` or `match.path`)
 - who may approve at the gate (`tracker.approvers`). The tracker needs its kind too, so write it as `tracker: { kind: github, approvers: [<github-login>, …] }`. Without approvers, the GitHub user running `perc` approves.

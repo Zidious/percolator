@@ -1,5 +1,6 @@
 export type LaunchSpec = {
   model?: string;
+  effort?: string;
   pluginDirs: string[];
   addDirs: string[];
   /** The program for the generic `command` agent. */
@@ -13,5 +14,7 @@ export type AgentAdapter = {
   nativeSkills: boolean;
   /** The agent accepts plugin directories. */
   plugins: boolean;
+  /** The agent accepts an effort level. */
+  effort: boolean;
   argv(s: LaunchSpec): string[];
 };

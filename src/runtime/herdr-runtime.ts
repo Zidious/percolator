@@ -200,6 +200,7 @@ export class HerdrRuntime implements Runtime {
 
     return adapter.argv({
       ...(def.model !== undefined ? { model: def.model } : {}),
+      ...(def.effort !== undefined ? { effort: def.effort } : {}),
       pluginDirs: adapter.plugins ? await buildSkillPlugins(io.stepDir, mappings, o.grounds) : [],
       addDirs: [o.runDir],
       ...(def.command !== undefined ? { command: def.command } : {}),

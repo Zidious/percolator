@@ -12,6 +12,21 @@ test('claude argv puts plugins, add-dirs and -- before the message', () => {
   assert.equal(ADAPTERS.claude.plugins, true);
 });
 
+test('claude argv passes effort after the model', () => {
+  assert.deepEqual(ADAPTERS.claude.argv({ model: 'opus', effort: 'medium', pluginDirs: [], addDirs: [], message: 'm' }), [
+    'claude',
+    '--model',
+    'opus',
+    '--effort',
+    'medium',
+    '--',
+    'm',
+  ]);
+  assert.equal(ADAPTERS.claude.effort, true);
+  assert.equal(ADAPTERS.codex.effort, false);
+  assert.equal(ADAPTERS.command.effort, false);
+});
+
 test('codex argv always has --no-daemon and no plugin flags', () => {
   assert.deepEqual(ADAPTERS.codex.argv({ model: 'gpt', pluginDirs: ['/p'], addDirs: ['/a'], message: 'm' }), [
     'codex',

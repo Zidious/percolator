@@ -7,9 +7,11 @@ export const ADAPTERS: Readonly<Record<'claude' | 'codex' | 'command', AgentAdap
     name: 'claude',
     nativeSkills: true,
     plugins: true,
+    effort: true,
     argv: (s) => [
       'claude',
       ...(s.model ? ['--model', s.model] : []),
+      ...(s.effort ? ['--effort', s.effort] : []),
       ...s.pluginDirs.flatMap((d) => ['--plugin-dir', d]),
       ...s.addDirs.flatMap((d) => ['--add-dir', d]),
       '--',
@@ -20,6 +22,7 @@ export const ADAPTERS: Readonly<Record<'claude' | 'codex' | 'command', AgentAdap
     name: 'codex',
     nativeSkills: false,
     plugins: false,
+    effort: false,
     // Unverified, because codex is not installed on the dev machine (Task 22 `--codex` smoke, 2026-11-20):
     // whether `--add-dir` exists, and whether hc can launch the Windows `.cmd` shim. If hc reports
     // `spawn_failed ... not found on PATH`, codex is missing or hc cannot run its shim.
@@ -36,6 +39,7 @@ export const ADAPTERS: Readonly<Record<'claude' | 'codex' | 'command', AgentAdap
     name: 'command',
     nativeSkills: false,
     plugins: false,
+    effort: false,
     // No `--`: the generic CLI's argument parsing is unknown.
     argv: (s) => [...(s.command ?? []), s.message],
   },

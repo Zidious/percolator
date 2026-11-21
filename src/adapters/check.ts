@@ -35,6 +35,9 @@ export async function checkAgents(graph: Graph, mappings: ResolvedMapping[], con
         problems.push(`${target}: command must not start with "-"`);
       }
     }
+    if (!adapter.effort && step.def.effort !== undefined) {
+      problems.push(`${target}: agent "${agent}" does not take "effort"; remove it or use agent "claude"`);
+    }
     const applying = mappingsFor(step, mappings);
     if (!adapter.plugins) {
       for (const m of applying) {
