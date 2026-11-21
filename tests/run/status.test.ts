@@ -472,6 +472,85 @@ test('steps from history only', async () => {
   }
 });
 
+test('history only: a waiting gate with no history record yet is still a step', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await fs.rm(path.join(e.dir(m), 'graph.json'));
+    await e.waitAtGate(m);
+    const groomOut = path.join(e.dir(m), rel('groom', 1, 'groomed_ticket'));
+    assert.deepEqual(
+      await e.status(m),
+      expected(m, {
+        status: 'waiting',
+        currentStep: 'approve-groom',
+        attention: { kind: 'gate', since: NOW.toISOString(), message: 'approve-groom is waiting for approval', commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
+        steps: [
+          { id: 'intake', stage: 'intake', role: 'core', kind: 'agent', ...done() },
+          { id: 'groom', stage: 'groom', role: 'core', kind: 'agent', ...done(1, { groomed_ticket: groomOut }) },
+          { id: 'approve-groom', stage: 'groom', role: 'node', kind: 'gate', status: 'waiting', attempts: 0, outputs: {} },
+        ],
+        loops: [],
+        graph: 'history',
+      }),
+    );
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('history only: a running step with no history record yet is still a step', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await fs.rm(path.join(e.dir(m), 'graph.json'));
+    await e.edit(m, (s) => {
+      s.currentStep = 'groom';
+      s.history.push(rec('intake', 1, 'pass'));
+    });
+    e.liveDriver(m);
+    assert.deepEqual(
+      await e.status(m),
+      expected(m, {
+        currentStep: 'groom',
+        driver: { alive: true, terminal: m.driver },
+        steps: [
+          { id: 'intake', stage: 'intake', role: 'core', kind: 'agent', ...done() },
+          { id: 'groom', stage: 'groom', role: 'core', kind: 'agent', status: 'running', attempts: 0, outputs: {} },
+        ],
+        loops: [],
+        terminals: { driver: m.driver },
+        graph: 'history',
+      }),
+    );
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('history only: a custom first step gets stage before-all and role node', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await fs.rm(path.join(e.dir(m), 'graph.json'));
+    await e.edit(m, (s) => (s.currentStep = 'setup'));
+    e.liveDriver(m);
+    assert.deepEqual(
+      await e.status(m),
+      expected(m, {
+        currentStep: 'setup',
+        driver: { alive: true, terminal: m.driver },
+        steps: [{ id: 'setup', stage: 'before-all', role: 'node', kind: 'agent', status: 'running', attempts: 0, outputs: {} }],
+        loops: [],
+        terminals: { driver: m.driver },
+        graph: 'history',
+      }),
+    );
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('gate review is the groomed ticket', async () => {
   const e = await setup();
   try {

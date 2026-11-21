@@ -122,15 +122,23 @@ async function readTicket(dir: string, meta: RunMeta): Promise<{ ref: string; nu
 
 const isStage = (id: string): boolean => (STAGES as readonly string[]).includes(id);
 
-/** Without `graph.json`: one step per distinct history step id, in order; kinds and stages guessed. */
-async function historySteps(dir: string, state: RunState): Promise<RunGraphStep[]> {
+/**
+ * Without `graph.json`: one step per distinct history step id, in order; kinds and stages guessed.
+ * A live run's current step (running, waiting or paused) with no history record yet is appended, so it has a marker.
+ */
+async function historySteps(dir: string, state: RunState, waiting: Waiting | undefined): Promise<RunGraphStep[]> {
   const out: RunGraphStep[] = [];
+  const add = async (id: string, gate: boolean) => {
+    const role = isStage(id) ? 'core' : 'node';
+    const stage = (isStage(id) ? id : (out.at(-1)?.stage ?? 'before-all')) as RunGraphStep['stage'];
+    out.push({ id, stage, role, kind: gate || (await isGateStep(dir, id, state)) ? 'gate' : 'agent' });
+  };
   for (const h of state.history) {
-    if (out.some((s) => s.id === h.stepId)) continue;
-    const role = isStage(h.stepId) ? 'core' : 'node';
-    const stage = (isStage(h.stepId) ? h.stepId : (out.at(-1)?.stage ?? 'before-all')) as RunGraphStep['stage'];
-    out.push({ id: h.stepId, stage, role, kind: (await isGateStep(dir, h.stepId, state)) ? 'gate' : 'agent' });
+    if (!out.some((s) => s.id === h.stepId)) await add(h.stepId, false);
   }
+  const cur = state.currentStep;
+  const live = state.status === 'running' || state.status === 'paused';
+  if (live && cur !== undefined && !out.some((s) => s.id === cur)) await add(cur, waiting?.stepId === cur);
   return out;
 }
 
@@ -300,10 +308,10 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps): Pro
   const { dir, meta } = l;
   const state = l.state ?? (await loadState(dir));
   const graph = await readRunGraph(dir);
-  const stepDefs = graph?.steps ?? (await historySteps(dir, state));
   const loopDefs = graph?.loops ?? [];
   const live = state.status === 'running' || state.status === 'paused';
   const waiting = live ? await readWaiting(dir) : undefined;
+  const stepDefs = graph?.steps ?? (await historySteps(dir, state, waiting));
   const alive = await driverAlive(dir, meta, deps);
   const steps: StepJson[] = stepDefs.map((s) => {
     const h = latest(state, s.id);
