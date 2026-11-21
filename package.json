@@ -26,7 +26,8 @@
     "test": "node --test \"tests/**/*.test.ts\"",
     "test:watch": "node --test --watch \"tests/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.test.json",
-    "schema": "node src/config/json-schema.ts"
+    "schema": "node src/config/json-schema.ts",
+    "herdr:sync": "node -e \"const p=require('node:path'),h=process.env.HERDR_APP_HOME||p.join(require('node:os').homedir(),'.config','herdr-app');for(const m of ['percolator','percolator-cup']){require('node:fs').cpSync(p.join('herdr','mods',m),p.join(h,'mods',m),{recursive:true});console.log('synced '+m+' -> '+p.join(h,'mods',m))}\""
   },
   "dependencies": {
     "yaml": "^2.9.1",

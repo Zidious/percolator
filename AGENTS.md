@@ -15,6 +15,7 @@ pnpm build                            # tsc → dist/ (gitignored)
 pnpm schema                           # regenerate schema/percolator.schema.json after changing the zod schema
 node src/cli.ts <command> …           # run perc from a checkout; `perc --help` lists commands
 node src/cli.ts delete <id>...|--finished [--yes]  # remove runs; keeps branches
+pnpm herdr:sync                       # copy herdr/mods/* into the Herdr app (reloads live; keeps perc.json); after any panel/cup change
 node tests/smoke/hc.smoke.ts          # manual smoke tests against the real hc / gh (gh.smoke.ts); flags in each file's header; never in pnpm test
 ```
 
@@ -61,7 +62,7 @@ Read the module before changing it.
 - **Test fakes:** never spawn the real `hc`, `herdr-app` or `gh`: use `FakeHc`, `FakeHerdrApp`, `FakeGh`, `ExecRecorder` (`tests/helpers/`). Unit tests use `FakeGit`; real git only via `makeRepo()` / `setupRunEnv()`. Engine tests use `FakeRuntime`.
 - **No prompts:** git and gh run with prompt-free env (`gitEnv`, the gh client's env); credentials in URLs are redacted from errors.
 - **Errors:** one line, name the file or run, say what to do next; tests assert the exact text.
-- **Panel contract:** `perc status --json` and `herdr/mods/percolator/model.js` (its only reader) change together. Herdr refuses cross-mod imports, so the cup carries copies of the panel's `model.js`, `mark.js`, `source.js`; re-copy them, and `tests/herdr/cup.test.ts` keeps them equal.
+- **Panel contract:** `perc status --json` and `herdr/mods/percolator/model.js` (its only reader) change together. After changing either mod, run `pnpm herdr:sync` so the running app shows it (Herdr does not follow symlinks or junctions). Herdr refuses cross-mod imports, so the cup carries copies of the panel's `model.js`, `mark.js`, `source.js`; re-copy them, and `tests/herdr/cup.test.ts` keeps them equal.
 - **Resume-safe:** run ids, terminal names and posted comments are deterministic or marked so a resume finds them instead of duplicating them.
 - **README stays true:** `README.md` is the user-facing doc. A change that makes anything in it wrong (requirements, stages, the example config, config keys, statuses and how to answer them, integrations, setup) updates it in the same commit, including the diagrams in `assets/diagram-*-{light,dark}.svg` (both themes). A new integration gets a row in the Integrations table and its own `###` section. Check it before calling the work done.
 
