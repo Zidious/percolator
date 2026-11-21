@@ -10,10 +10,10 @@ import { exists, writeFileAtomic } from '../util/fs.ts';
 import { toPosix } from '../util/paths.ts';
 import { commentIdOf } from './gh.ts';
 import type { Gh, IssueComment } from './gh.ts';
-import { parseGateComment, renderGateComment } from './gate-comment.ts';
+import { parseGateComment, renderGateComment, withRejection } from './gate-comment.ts';
 import type { GateComment } from './gate-comment.ts';
 import { readIssueMeta } from './intake.ts';
-import { decisionNote, parseCommand } from './prior-groom.ts';
+import { parseCommand } from './prior-groom.ts';
 
 export type Decision = {
   decision: 'approve' | 'reject';
@@ -196,6 +196,7 @@ export function githubGate(o: {
       const gateFile = path.join(io.stepDir, 'gate.json');
 
       let commentUrl: string;
+      let commentId: number;
       let postedAt: string;
       try {
         let saved = await readGate(gateFile);
@@ -206,7 +207,7 @@ export function githubGate(o: {
           if (saved) await writeFileAtomic(gateFile, gateJson(saved));
         }
         if (saved) {
-          ({ commentUrl, postedAt } = saved);
+          ({ commentUrl, commentId, postedAt } = saved);
         } else {
           const self = (await o.gh.user()).toLowerCase();
           let found: { c: IssueComment; g: GateComment } | undefined;
@@ -237,7 +238,7 @@ export function githubGate(o: {
             saved = { commentUrl: url, commentId: commentIdOf(url), round, postedAt: posted?.createdAt ?? before };
           }
           await writeFileAtomic(gateFile, gateJson(saved));
-          ({ commentUrl, postedAt } = saved);
+          ({ commentUrl, commentId, postedAt } = saved);
         }
       } catch (err) {
         return escalate(`gate ${step.id}: ${msg(err)}`);
@@ -290,27 +291,24 @@ export function githubGate(o: {
         });
       }
 
-      if (decision.via === 'local') {
-        // best-effort: the issue records the decision so a later run can reuse this round's groomed ticket
-        const note = decisionNote({
-          runId: o.runId,
-          stepId: step.id,
-          round,
-          decision: decision.decision,
-          by: decision.by,
-          ...(decision.feedback !== undefined ? { feedback: decision.feedback } : {}),
-        });
-        const marker = note.split('\n')[0]!;
-        try {
-          const noted = (await o.gh.issue(meta.repo, meta.number)).comments.some((c) => c.body.startsWith(marker));
-          if (!noted) {
-            const noteFile = path.join(io.stepDir, 'decision-note.md');
-            await writeFileAtomic(noteFile, note);
-            await o.gh.comment(meta.repo, meta.number, noteFile);
+      // best-effort: the comment shows the outcome, and a later run reuses the round only by reading it
+      try {
+        const current = (await o.gh.issue(meta.repo, meta.number)).comments.find((c) => c.id === commentId);
+        const parsed = current && parseGateComment(current.body);
+        if (current && parsed) {
+          const next: GateComment =
+            decision.decision === 'approve'
+              ? { ...parsed, approvedBy: decision.by }
+              : withRejection(parsed, { round, by: decision.by, ...(decision.feedback !== undefined ? { feedback: decision.feedback } : {}) });
+          const body = renderGateComment(next);
+          if (body !== current.body.replace(/\r\n/g, '\n')) {
+            const bodyFile = path.join(io.stepDir, 'gate-comment.md');
+            await writeFileAtomic(bodyFile, body);
+            await o.gh.editComment(meta.repo, commentId, bodyFile);
           }
-        } catch {
-          // the run goes on: only a later run's reuse of this groomed ticket depends on the note
         }
+      } catch {
+        // the run goes on: the decision itself is already made
       }
 
       await fs.rm(waitingPath, { force: true });

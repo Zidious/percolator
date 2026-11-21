@@ -56,7 +56,8 @@ async function setup(): Promise<Env> {
   const base = await setupRunEnv({ hc, gh, bindings: BINDINGS, extra: TRACKER });
   const clock = { t: NOW.getTime() };
   // a gate posts once and edits its comment each round: answer each write, not the newest comment
-  const gateWrites = () => gh.bodies.filter((b) => b.startsWith(GATE_MARKER)).length;
+  // a decision edit rewrites the round it answers: only a new round header (or the post) is a new wait
+  const gateWrites = () => new Set(gh.bodies.filter((b) => b.startsWith(GATE_MARKER)).map((b) => b.split('\n')[1])).size;
   let replied = 0;
   Object.assign(base.deps, {
     now: () => new Date(clock.t),

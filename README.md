@@ -54,7 +54,7 @@ The diagram shows the example config mid-run: intake and groom are done, and the
 |---|---|---|
 | **intake** | builtin `github.intake` | The issue is read and the run has a ticket. |
 | **groom … review** | an `agent`, `script` or `builtin` node, or a list of them | The step wrote `done.json` and its `outputs/<key>.md`. |
-| **approve-groom** | `gate`, built in and locked, always after groom | You approve, locally or with a `/percolator approve` comment on the issue. A rejection re-runs groom, 3 times at most. |
+| **approve-groom** | `gate`, built in and locked, always after groom | You approve, locally or with a `/percolator approve` comment on the issue. The gate keeps one comment on the issue and edits it each round; rejected rounds stay in a collapsed history, and approval adds "Approved by @you". A rejection re-runs groom, 3 times at most. |
 | **deliver** | builtin `github.open_pr` | The branch is pushed and the PR is open. |
 
 ## The engine
@@ -161,7 +161,7 @@ profiles:
 
 Profiles are checked in order; the first whose `match.remote` or `match.path` fits the repo wins, and `--profile <name>` picks one by hand. Each profile must bind all six stages, itself or through a `graph` ground.
 
-`tracker.approvers` lists the GitHub logins whose `/percolator approve` or `/percolator reject` comments count at a gate. Without it, only the GitHub user running `perc` counts.
+`tracker.approvers` lists the GitHub logins whose `/percolator approve` or `/percolator reject` comments count at a gate. Without it, only the GitHub user running `perc` counts. Local `perc approve`/`reject` record your `gh` login (the OS user if gh is not logged in).
 
 | `runtime` key | What it does |
 |---|---|

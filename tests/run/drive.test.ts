@@ -69,7 +69,8 @@ async function setup(extra = TRACKER): Promise<Env> {
   const clock = { t: NOW.getTime() };
   const onSleep = { fn: (): void | Promise<void> => {} };
   // a gate posts once and edits its comment each round: count its writes, not the comments
-  const gateWrites = () => gh.bodies.filter((b) => b.startsWith(GATE_MARKER)).length;
+  // a decision edit rewrites the round it answers: only a new round header (or the post) is a new wait
+  const gateWrites = () => new Set(gh.bodies.filter((b) => b.startsWith(GATE_MARKER)).map((b) => b.split('\n')[1])).size;
   let replied = 0;
   Object.assign(base.deps, {
     out: (s: string) => out.push(s),
@@ -182,7 +183,8 @@ test('a rejected groom goes back to groom with the feedback as input', async () 
     assert.equal(runs(e, 'groom').length, 2);
     // one gate comment per run and step: the approved round edited the rejected one's
     assert.equal(gateComments(e).length, 1);
-    assert.equal(calls(e, 'editComment').length, 1);
+    // the rejection, round 2, then the approval
+    assert.equal(calls(e, 'editComment').length, 3);
     const task = await fs.readFile(path.join(e.runDir(meta), 'steps', 'groom', '2', 'task.md'), 'utf8');
     const findings = path.join(e.runDir(meta), 'steps', 'approve-groom', '1', 'outputs', 'findings.md');
     assert.ok(task.includes(`findings (from approve-groom): ${findings}`), task);
@@ -319,7 +321,8 @@ test('resume at a cap grants one round', async () => {
     assert.equal(state.status, 'completed');
     assert.equal(runs(e, 'groom').length, 4);
     assert.equal(gateComments(e).length, 1);
-    assert.equal(calls(e, 'editComment').length, 3);
+    // per round: its edit and the rejection, then the approval
+    assert.equal(calls(e, 'editComment').length, 7);
   } finally {
     await e.cleanup();
   }

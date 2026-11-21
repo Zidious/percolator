@@ -7,8 +7,7 @@ import { test } from 'node:test';
 import type { RunContext } from '../../src/engine/runtime.ts';
 import type { Step } from '../../src/graph/build.ts';
 import { deciderLogin, githubGate, readWaiting, writeDecision } from '../../src/tracker/gate.ts';
-import { renderGateComment } from '../../src/tracker/gate-comment.ts';
-import { decisionNote } from '../../src/tracker/prior-groom.ts';
+import { parseGateComment, renderGateComment } from '../../src/tracker/gate-comment.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 
 const REPO = 'github.com/o/r';
@@ -189,7 +188,11 @@ test('a crash after posting edits the found comment instead of posting again', a
     const existing = e.gh.addComment(REPO, 7, OWNER, OLD);
     let editedAt: string | undefined;
     const realEdit = e.gh.editComment.bind(e.gh);
-    e.gh.editComment = async (repo, id, bodyFile) => (editedAt = await realEdit(repo, id, bodyFile));
+    e.gh.editComment = async (repo, id, bodyFile) => {
+      const at = await realEdit(repo, id, bodyFile);
+      editedAt ??= at; // the first edit is the round's; a later one records the decision
+      return at;
+    };
     e.onSleep.fn = () => {
       e.gh.addComment(REPO, 7, OWNER, '/percolator approve');
     };
@@ -197,7 +200,8 @@ test('a crash after posting edits the found comment instead of posting again', a
     const out = await gate(e.step, e.ctx, e.io);
     assert.equal(out.status, 'pass');
     assert.equal(count(e, 'comment'), 0);
-    assert.equal(count(e, 'editComment'), 1);
+    // the round edit, then the approval
+    assert.equal(count(e, 'editComment'), 2);
     assert.equal(e.gh.bodies[0], EXPECTED_BODY);
     assert.deepEqual(await readGate(e.io.stepDir), { commentUrl: existing.url, commentId: existing.id, round: 1, postedAt: editedAt });
   } finally {
@@ -239,43 +243,75 @@ test('a local decision wins without the tracker', async () => {
       await fsp.readFile(path.join(e.io.outputsDir, 'approval.md'), 'utf8'),
       'Approved by @alice via perc approve.\n',
     );
-    // the issue records the local decision, so a later run can tell this groomed ticket was approved
-    assert.equal(e.gh.bodies.length, 2);
-    assert.equal(
-      e.gh.bodies[1],
-      decisionNote({ runId: 'r1', stepId: 'approve-groom', round: 1, decision: 'approve', by: 'alice' }),
-    );
+    assert.equal(e.gh.calls.filter((c) => c.method === 'comment').length, 1);
   } finally {
     await rm(e.runDir);
   }
 });
 
-test('a local decision already noted on the issue is not noted again', async () => {
+test('a local approval closes the gate comment', async () => {
   const e = await setup();
   try {
-    const by = OWNER;
-    const note = decisionNote({ runId: 'r1', stepId: 'approve-groom', round: 1, decision: 'reject', by, feedback: 'split it' });
     e.onSleep.fn = async (n) => {
-      if (n === 1) {
-        await writeDecision(e.runDir, { decision: 'reject', feedback: 'split it', by: OWNER });
-        e.gh.addComment(REPO, 7, OWNER, note);
-      }
+      if (n === 1) await writeDecision(e.runDir, { decision: 'approve', by: OWNER });
+    };
+    const out = await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, e.io);
+    assert.equal(out.status, 'pass');
+    assert.equal(count(e, 'comment'), 1);
+    assert.equal(count(e, 'editComment'), 1);
+    const posted = parseGateComment(e.gh.bodies[0]!)!;
+    assert.equal(e.gh.bodies[1], renderGateComment({ ...posted, approvedBy: OWNER }));
+    assert.ok(e.gh.bodies[1]!.endsWith('\n\nApproved by @owner\n'));
+    assert.equal((await e.gh.issue(REPO, 7)).comments.length, 1);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test("a comment rejection is kept in the comment's history", async () => {
+  const e = await setup();
+  try {
+    e.onSleep.fn = () => {
+      e.gh.addComment(REPO, 7, OWNER, '/percolator reject  split it up \nand add tests\n');
     };
     const out = await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, e.io);
     assert.equal(out.status, 'fail');
-    assert.equal(e.gh.bodies.length, 1);
+    assert.equal(count(e, 'editComment'), 1);
+    const edited = parseGateComment(e.gh.bodies.at(-1)!)!;
+    assert.deepEqual(edited.rejected, [{ round: 1, by: OWNER, feedback: 'split it up\nand add tests' }]);
+    assert.equal('approvedBy' in edited, false);
   } finally {
     await rm(e.runDir);
   }
 });
 
-test('a failure to note a local decision does not stop the gate', async () => {
+test('a decision already in the comment is not written again', async () => {
+  const e = await setup();
+  try {
+    const c = e.gh.addComment(
+      REPO, 7, OWNER,
+      renderGateComment({ runId: 'r1', stepId: 'approve-groom', round: 1, outputs: 'old', rejected: [], approvedBy: OWNER }),
+    );
+    await fsp.writeFile(
+      path.join(e.io.stepDir, 'gate.json'),
+      JSON.stringify({ commentUrl: c.url, commentId: c.id, round: 1, postedAt: c.createdAt }),
+    );
+    await fsp.writeFile(path.join(e.io.stepDir, 'decision.json'), JSON.stringify({ decision: 'approve', by: OWNER, via: 'local' }));
+    const out = await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, e.io);
+    assert.equal(out.status, 'pass');
+    assert.equal(count(e, 'editComment'), 0);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test('a failure to record the decision does not stop the gate', async () => {
   const e = await setup();
   try {
     e.onSleep.fn = async (n) => {
       if (n === 1) {
         await writeDecision(e.runDir, { decision: 'approve', by: OWNER });
-        e.gh.fail('comment', 'HTTP 502');
+        e.gh.fail('editComment', 'HTTP 502');
       }
     };
     const out = await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, e.io);
@@ -409,7 +445,8 @@ test('an escalation after posting, then a new attempt, edits nothing and reuses 
     const io2 = await attemptIo(e, 2);
     const out = await gate(e.step, e.ctx, io2);
     assert.equal(out.status, 'pass');
-    assert.equal(count(e, 'comment') + count(e, 'editComment'), writes);
+    // only the approval is written
+    assert.equal(count(e, 'comment') + count(e, 'editComment'), writes + 1);
     assert.deepEqual(await readGate(io2.stepDir), g1);
   } finally {
     await rm(e.runDir);
@@ -467,7 +504,9 @@ test('a legacy gate.json from before the upgrade is still used', async () => {
     });
     const out = await gate(e.step, e.ctx, e.io);
     assert.equal(out.status, 'pass');
-    assert.equal(count(e, 'comment') + count(e, 'editComment'), 0);
+    // only the approval is written
+    assert.equal(count(e, 'comment'), 0);
+    assert.equal(count(e, 'editComment'), 1);
     assert.equal(waitingUrl, existing.url);
   } finally {
     await rm(e.runDir);
