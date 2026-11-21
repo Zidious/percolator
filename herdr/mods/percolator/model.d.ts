@@ -5,6 +5,8 @@ import type { Action, RunStatusJson, StatusJson } from '../../../src/run/status.
 type Readable = Exclude<RunStatusJson, { status: 'unreadable' }>;
 export type Step = Readable['steps'][number];
 export type Stage = 'intake' | 'groom' | 'plan' | 'implement' | 'review' | 'deliver';
+export type TimelineEntry = Readable['timeline'][number];
+export type Attempt = Extract<TimelineEntry, { kind: 'attempt' }>;
 export type Zone = { stage: Stage; shown: Step[]; hidden: Step[] };
 export type Tone = 'blocked' | 'working' | 'dim' | 'muted';
 

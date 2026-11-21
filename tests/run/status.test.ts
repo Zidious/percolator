@@ -10,7 +10,7 @@ import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
 import { driverAlive, runStatusJson, statusJson, yourTurn } from '../../src/run/status.ts';
-import type { RunStatusJson } from '../../src/run/status.ts';
+import type { RunStatusJson, TimelineJson } from '../../src/run/status.ts';
 import { NOW, setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
 
@@ -36,6 +36,9 @@ type Env = RunEnv & {
   liveDriver(m: RunMeta): void;
   /** `waiting.json` at approve-groom attempt 1, after a groom that produced `groomed_ticket` */
   waitAtGate(m: RunMeta): Promise<void>;
+  /** the whole status JSON, `timeline` included */
+  full(m: RunMeta): Promise<RunStatusJson>;
+  /** `full` without `timeline` (the timeline has its own tests) */
   status(m: RunMeta): Promise<RunStatusJson>;
 };
 
@@ -70,9 +73,14 @@ async function setup(): Promise<Env> {
         commentUrl: URL,
       });
     },
-    status: async (m) => {
+    full: async (m) => {
       const l = (await listRuns(base.home)).find((x) => x.meta?.runId === m.runId)!;
       return runStatusJson(l, base.deps);
+    },
+    status: async (m) => {
+      const l = (await listRuns(base.home)).find((x) => x.meta?.runId === m.runId)!;
+      const { timeline: _t, ...rest } = (await runStatusJson(l, base.deps)) as Record<string, unknown>;
+      return rest as RunStatusJson;
     },
   };
 }
@@ -87,6 +95,12 @@ const rel = (step: string, attempt: number, key: string) => path.join('steps', s
 function rec(stepId: string, attempt: number, status: StepRecord['status'], outputs: Record<string, string> = {}): StepRecord {
   return { stepId, attempt, startedAt: T1, endedAt: T2, status, outputs };
 }
+
+type Readable = Exclude<RunStatusJson, { status: 'unreadable' }>;
+const timelineOf = async (e: Env, m: RunMeta): Promise<TimelineJson[]> => ((await e.full(m)) as Readable).timeline;
+
+/** The timeline of a fresh prepared run: the live intake attempt. */
+const freshTimeline = (m: RunMeta) => [{ kind: 'attempt', step: 'intake', attempt: 1, status: 'running', startedAt: m.createdAt, outputs: {} }];
 
 const GRAPH: [string, string, 'core' | 'node', 'agent' | 'builtin' | 'script' | 'gate'][] = [
   ['intake', 'intake', 'core', 'builtin'],
@@ -146,6 +160,106 @@ function gateSteps(e: Env, m: RunMeta, gate: Step = { status: 'waiting' }): Step
 function groomReview(e: Env, m: RunMeta) {
   return [{ step: 'groom', key: 'groomed_ticket', path: path.join(e.dir(m), rel('groom', 1, 'groomed_ticket')) }];
 }
+
+test('timeline lists every attempt in history order with absolute outputs', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'approve-groom';
+      s.history.push(
+        rec('intake', 1, 'pass'),
+        rec('groom', 1, 'pass', { groomed_ticket: rel('groom', 1, 'groomed_ticket') }),
+        rec('approve-groom', 1, 'fail', { findings: rel('approve-groom', 1, 'findings') }),
+        rec('groom', 2, 'pass', { groomed_ticket: rel('groom', 2, 'groomed_ticket') }),
+      );
+    });
+    const tl = await timelineOf(e, m);
+    assert.deepEqual(
+      tl.map((x) => x.kind === 'attempt' && `${x.step}#${x.attempt}:${x.status}`),
+      ['intake#1:pass', 'groom#1:pass', 'approve-groom#1:fail', 'groom#2:pass'],
+    );
+    assert.deepEqual(tl[3], {
+      kind: 'attempt',
+      step: 'groom',
+      attempt: 2,
+      status: 'pass',
+      startedAt: T1,
+      endedAt: T2,
+      outputs: { groomed_ticket: path.join(e.dir(m), rel('groom', 2, 'groomed_ticket')) },
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('timeline ends with the live attempt of a running step, started when the last record ended', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.currentStep = 'plan';
+      s.executed = { intake: 1, groom: 1 };
+      s.history.push(rec('intake', 1, 'pass'), rec('groom', 1, 'pass'));
+    });
+    assert.deepEqual((await timelineOf(e, m)).at(-1), { kind: 'attempt', step: 'plan', attempt: 1, status: 'running', startedAt: T2, outputs: {} });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('timeline ends with a waiting gate attempt, started when it began waiting', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.waitAtGate(m);
+    await e.edit(m, (s) => {
+      s.executed = { intake: 1, groom: 1 };
+    });
+    assert.deepEqual((await timelineOf(e, m)).at(-1), {
+      kind: 'attempt',
+      step: 'approve-groom',
+      attempt: 1,
+      status: 'waiting',
+      startedAt: NOW.toISOString(),
+      outputs: {},
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a fresh run is running intake: its timeline is the live intake attempt, started at createdAt', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    assert.deepEqual(await timelineOf(e, m), freshTimeline(m));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a completed or paused run has no live attempt', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    for (const status of ['completed', 'paused'] as const) {
+      await e.edit(m, (s) => {
+        s.status = status;
+        s.currentStep = 'plan';
+        s.history = [rec('intake', 1, 'pass'), rec('groom', 1, 'pass')];
+      });
+      assert.deepEqual(
+        (await timelineOf(e, m)).map((x) => x.kind === 'attempt' && `${x.step}#${x.attempt}:${x.status}`),
+        ['intake#1:pass', 'groom#1:pass'],
+        status,
+      );
+    }
+  } finally {
+    await e.cleanup();
+  }
+});
 
 test('gate with live driver', async () => {
   const e = await setup();
@@ -623,7 +737,7 @@ test('status json keeps going past a broken run', async () => {
           error: `Cannot read run state ${noStateFile}: ENOENT: no such file or directory, open '${noStateFile}'`,
         },
         { id: badGraph.runId, status: 'unreadable', error: `Run graph ${graphFile} is invalid: version: Invalid input: expected 1; start a new run` },
-        expected(good, { attention: { kind: 'stalled', since: good.createdAt, ...STALLED_FRESH, actions: ['resume'] } }),
+        expected(good, { attention: { kind: 'stalled', since: good.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(good) }),
         { id: badState.runId, status: 'unreadable', error: `Run state ${badStateFile} is not valid JSON` },
         { id: 't9-broken', status: 'unreadable', error: `Run metadata ${path.join(broken, 'run.json')} is missing or invalid: file not found` },
       ],
@@ -667,7 +781,7 @@ test('status json never loads config', async () => {
   try {
     const m = await e.prepare();
     await fs.rm(e.configFile);
-    assert.deepEqual(await statusJson(e.deps), { schema: 1, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] } })] });
+    assert.deepEqual(await statusJson(e.deps), { schema: 1, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(m) })] });
   } finally {
     await e.cleanup();
   }
