@@ -24,9 +24,13 @@ import {
   BOARD_RATIO,
   actionArgv,
   boardHeight,
+  deleteArgv,
+  deleteConfirm,
+  deleteFinishedConfirm,
   dragBoard,
   fillHeight,
   findNode,
+  isFinished,
   nextBoxH,
   titleLayout,
   moveRow,
@@ -37,6 +41,7 @@ import {
   readerPath,
   resolvePath,
   runningCount,
+  selectAfterDelete,
   showsHere,
   sortRuns,
   visibleRuns,
@@ -45,7 +50,7 @@ import { mark } from './mark.js';
 import { board } from './board.js';
 import { header, train, stopStrip } from './train.js';
 import { turn } from './turn.js';
-import { addressOf, own } from './ui.js';
+import { addressOf, link, own } from './ui.js';
 import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
 
 const NARROW = 720;
@@ -305,7 +310,37 @@ export default class Percolator extends View {
       });
       return;
     }
+    if (action === 'delete') {
+      openOverlay({
+        mod: 'confirm',
+        kind: 'dialog',
+        width: 440,
+        height: 220,
+        props: { ...deleteConfirm(r), command: { name: `percolator.delete/${r.id}` } },
+      });
+      return;
+    }
     this.perform(action, actionArgv(action, r), cx);
+  }
+
+  /** The All tab's Delete finished runs…: one confirm listing them, or a line saying there are none. */
+  deleteFinished(cx) {
+    if (this.busy) return;
+    this.actError = null;
+    const confirm = deleteFinishedConfirm(this.runs);
+    if (confirm === null) {
+      this.said = 'No finished runs';
+      cx.notify();
+      return;
+    }
+    this.said = null;
+    openOverlay({
+      mod: 'confirm',
+      kind: 'dialog',
+      width: 440,
+      height: 220,
+      props: { ...confirm, command: { name: 'percolator.delete-finished' } },
+    });
   }
 
   perform(action, argv, cx) {
@@ -325,6 +360,10 @@ export default class Percolator extends View {
       this.busy = null;
       if (res.code === 0) {
         if (action === 'reject') this.closeReject();
+        if (action === 'delete') {
+          const ids = argv[1] === '--finished' ? this.runs.filter(isFinished).map((r) => r.id) : [argv[1]];
+          this.select(selectAfterDelete(this.rows(), ids, this.sel), cx);
+        }
         this.refresh(cx);
       } else {
         const why = firstLine(res.stderr) || `perc ${argv[0]} exited ${res.code}`;
@@ -393,7 +432,11 @@ export default class Percolator extends View {
     if (c.startsWith('clean/')) {
       const r = this.runs.find((x) => x.id === c.slice(6));
       if (r) this.perform('clean', actionArgv('clean', r), cx);
-    } else if (c.startsWith('key/')) this.key(c.slice(4), cx);
+    } else if (c.startsWith('delete/')) {
+      const r = this.runs.find((x) => x.id === c.slice(7));
+      if (r) this.perform('delete', deleteArgv(r), cx);
+    } else if (c === 'delete-finished') this.perform('delete', deleteArgv(null), cx);
+    else if (c.startsWith('key/')) this.key(c.slice(4), cx);
     else if (c === 'focus') this.handle.focus();
     else if (c === 'place' && this.inWindow()) this.dockBack();
     else if (c === 'place') this.popOut();
@@ -553,7 +596,13 @@ export default class Percolator extends View {
     const window = this.inWindow();
     // ⧉ and ✕ never leave: the title truncates, the chip shortens to "N", then the tabs take a row of their own.
     const fit = titleLayout(this.width / zoom(), needs);
-    const tabs = h_flex().flex_none().gap(8).items_center().child(tab('active', 'Active')).child(tab('all', 'All'));
+    const tabs = h_flex()
+      .flex_none()
+      .gap(8)
+      .items_center()
+      .child(tab('active', 'Active'))
+      .child(tab('all', 'All'))
+      .when(this.filter === 'all', (el) => el.child(link(t, 'delete-finished', 'Delete finished runs…', (_e, cx) => this.deleteFinished(cx))));
     const bar = h_flex()
       .h(38)
       .flex_none()

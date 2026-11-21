@@ -87,7 +87,7 @@ Each run works in its own git worktree at `<repo>/.worktrees/<run-id>`, on a bra
 
 | Integration | Adds | Lives in |
 |---|---|---|
-| [Herdr](#herdr) | A space per run, a live board of runs, Approve / Reject / Resume buttons, notices | [`herdr/`](herdr/) |
+| [Herdr](#herdr) | A space per run, a live board of runs, Approve / Reject / Resume / Delete buttons, notices | [`herdr/`](herdr/) |
 
 ### Herdr
 
