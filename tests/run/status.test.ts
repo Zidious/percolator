@@ -9,7 +9,7 @@ import { listRuns } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
-import { driverAlive, runStatusJson, statusJson } from '../../src/run/status.ts';
+import { driverAlive, runStatusJson, statusJson, yourTurn } from '../../src/run/status.ts';
 import type { RunStatusJson } from '../../src/run/status.ts';
 import { NOW, setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
@@ -19,6 +19,14 @@ const TICKET = `${REPO}#5`;
 const URL = `https://${REPO}/issues/5#issuecomment-7`;
 const T1 = '2026-03-04T05:10:00.000Z';
 const T2 = '2026-03-04T05:20:00.000Z';
+const STALLED_FRESH = {
+  message: 'the driver stopped while intake was running',
+  detail: 'Nothing is driving this run. Resume picks up at intake.',
+};
+const STALLED_PLAN = {
+  message: 'the driver stopped while plan was running',
+  detail: 'Nothing is driving this run. Resume picks up at plan.',
+};
 
 type Env = RunEnv & {
   clock: { t: number };
@@ -153,7 +161,7 @@ test('gate with live driver', async () => {
         status: 'waiting',
         currentStep: 'approve-groom',
         driver: { alive: true, terminal: m.driver },
-        attention: { kind: 'gate', since: NOW.toISOString(), commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
+        attention: { kind: 'gate', since: NOW.toISOString(), message: 'approve-groom is waiting for approval', commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
         steps: gateSteps(e, m),
         terminals: { driver: m.driver },
       }),
@@ -173,7 +181,7 @@ test('dead-driver gate', async () => {
       expected(m, {
         status: 'waiting',
         currentStep: 'approve-groom',
-        attention: { kind: 'gate', since: NOW.toISOString(), commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
+        attention: { kind: 'gate', since: NOW.toISOString(), message: 'approve-groom is waiting for approval', commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
         steps: gateSteps(e, m),
       }),
     );
@@ -193,7 +201,7 @@ test('decided gate', async () => {
       expected(m, {
         status: 'waiting',
         currentStep: 'approve-groom',
-        attention: { kind: 'stalled', since: NOW.toISOString(), actions: ['resume'] },
+        attention: { kind: 'stalled', since: NOW.toISOString(), message: 'approved; resume to continue', actions: ['resume'] },
         steps: gateSteps(e, m),
       }),
     );
@@ -223,6 +231,8 @@ test('paused at cap', async () => {
         attention: {
           kind: 'cap',
           since: T2,
+          message: 'approve-groom hit its cap (approve-groom reached 3 rounds)',
+          detail: 'Grant one more round and the run goes back with the open findings.',
           review: [{ step: 'approve-groom', key: 'findings', path: path.join(e.dir(m), findings) }],
           actions: ['grant'],
         },
@@ -254,7 +264,7 @@ test('paused on escalate', async () => {
       expected(m, {
         status: 'paused',
         currentStep: 'plan',
-        attention: { kind: 'paused', since: T2, review: [], actions: ['resume'] },
+        attention: { kind: 'paused', since: T2, message: 'plan paused: escalate: plan', review: [], actions: ['resume'] },
         steps: steps({ plan: { status: 'escalate', attempts: 1, startedAt: T1, endedAt: T2, outputs: {} } }),
       }),
     );
@@ -281,6 +291,8 @@ test('failed', async () => {
         attention: {
           kind: 'failed',
           since: T2,
+          message: 'implement failed',
+          detail: "A failed run can't be resumed. Start a new run for the ticket, or clean this one up.",
           review: [{ step: 'implement', key: 'summary', path: path.join(e.dir(m), summary) }],
           actions: ['clean'],
           commands: [`perc run ${TICKET} --repo ${m.repoRoot}`],
@@ -302,7 +314,7 @@ test('stalled running', async () => {
       await e.status(m),
       expected(m, {
         currentStep: 'plan',
-        attention: { kind: 'stalled', since: m.createdAt, actions: ['resume'] },
+        attention: { kind: 'stalled', since: m.createdAt, ...STALLED_PLAN, actions: ['resume'] },
         steps: steps({ plan: { status: 'running' } }),
       }),
     );
@@ -325,7 +337,7 @@ test('agent blocked', async () => {
       expected(m, {
         currentStep: 'groom',
         driver: { alive: true, terminal: m.driver },
-        attention: { kind: 'agent', since: T1, terminal: term, agentState: 'blocked', actions: ['open-pane'] },
+        attention: { kind: 'agent', since: T1, terminal: term, agentState: 'blocked', message: `groom's agent is blocked in terminal ${term}`, detail: "Attend the agent's terminal.", actions: ['open-pane'] },
         steps: steps({ groom: { status: 'running' } }),
         terminals: { driver: m.driver, groom: term },
       }),
@@ -503,7 +515,7 @@ test('status json keeps going past a broken run', async () => {
           error: `Cannot read run state ${noStateFile}: ENOENT: no such file or directory, open '${noStateFile}'`,
         },
         { id: badGraph.runId, status: 'unreadable', error: `Run graph ${graphFile} is invalid: version: Invalid input: expected 1; start a new run` },
-        expected(good, { attention: { kind: 'stalled', since: good.createdAt, actions: ['resume'] } }),
+        expected(good, { attention: { kind: 'stalled', since: good.createdAt, ...STALLED_FRESH, actions: ['resume'] } }),
         { id: badState.runId, status: 'unreadable', error: `Run state ${badStateFile} is not valid JSON` },
         { id: 't9-broken', status: 'unreadable', error: `Run metadata ${path.join(broken, 'run.json')} is missing or invalid: file not found` },
       ],
@@ -518,7 +530,7 @@ test('status json never loads config', async () => {
   try {
     const m = await e.prepare();
     await fs.rm(e.configFile);
-    assert.deepEqual(await statusJson(e.deps), { schema: 1, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, actions: ['resume'] } })] });
+    assert.deepEqual(await statusJson(e.deps), { schema: 1, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] } })] });
   } finally {
     await e.cleanup();
   }
@@ -603,3 +615,59 @@ function jsonError(text: string): string {
   }
   return '';
 }
+
+const TURN = { runId: 'r1', step: 'groom', ticket: 'github.com/o/r#5', repoRoot: '/repo' };
+
+test('yourTurn gate', () => {
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'gate', step: 'approve-groom' }), {
+    message: 'approve-groom is waiting for approval',
+    next: ['perc approve r1', 'perc reject r1 "<what to change>"'],
+  });
+});
+
+test('yourTurn cap', () => {
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'cap', reason: '3 rounds' }), {
+    message: 'groom hit its cap (3 rounds)',
+    detail: 'Grant one more round and the run goes back with the open findings.',
+    next: ['perc resume r1'],
+  });
+});
+
+test('yourTurn paused', () => {
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'paused', reason: 'escalate: groom' }), {
+    message: 'groom paused: escalate: groom',
+    next: ['perc resume r1'],
+  });
+});
+
+test('yourTurn failed', () => {
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'failed' }), {
+    message: 'groom failed',
+    detail: "A failed run can't be resumed. Start a new run for the ticket, or clean this one up.",
+    next: ['perc run github.com/o/r#5 --repo /repo', 'perc clean r1'],
+  });
+});
+
+test('yourTurn stalled after a decision', () => {
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'stalled', decision: 'approve' }), {
+    message: 'approved; resume to continue',
+    next: ['perc resume r1'],
+  });
+  assert.equal(yourTurn({ ...TURN, kind: 'stalled', decision: 'reject' }).message, 'rejected; resume to continue');
+});
+
+test('yourTurn stalled while running', () => {
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'stalled' }), {
+    message: 'the driver stopped while groom was running',
+    detail: 'Nothing is driving this run. Resume picks up at groom.',
+    next: ['perc resume r1'],
+  });
+});
+
+test('yourTurn agent', () => {
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'agent', agentState: 'blocked', terminal: 't-1' }), {
+    message: "groom's agent is blocked in terminal t-1",
+    detail: "Attend the agent's terminal.",
+    next: [],
+  });
+});

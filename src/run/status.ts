@@ -21,6 +21,8 @@ export type ReviewItem = { step: string; key: string; path: string };
 export type AttentionJson = {
   kind: AttentionKind;
   since: string;
+  message: string;
+  detail?: string;
   commentUrl?: string;
   review?: ReviewItem[];
   actions: Action[];
@@ -86,6 +88,15 @@ type AttentionRecord = { stepId?: unknown; terminal?: unknown; kind?: unknown; a
 export async function readAttention(dir: string): Promise<AttentionRecord | undefined> {
   try {
     return JSON.parse(await fs.readFile(path.join(dir, 'attention.json'), 'utf8')) as AttentionRecord;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readDecision(stepDir: string): Promise<'approve' | 'reject' | undefined> {
+  try {
+    const d = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8')) as { decision?: unknown };
+    return d.decision === 'approve' || d.decision === 'reject' ? d.decision : undefined;
   } catch {
     return undefined;
   }
@@ -171,6 +182,50 @@ async function liveTerminals(meta: RunMeta, deps: DriverDeps): Promise<Record<st
   }
 }
 
+export type YourTurnInput = {
+  kind: AttentionKind;
+  runId: string;
+  step: string;
+  ticket: string;
+  repoRoot: string;
+  reason?: string;
+  decision?: 'approve' | 'reject';
+  terminal?: string;
+  agentState?: string;
+};
+
+/** What the owner has to do next, as one sentence plus the exact commands to type. Shared by `perc status` and the JSON. */
+export function yourTurn(a: YourTurnInput): { message: string; detail?: string; next: string[] } {
+  const resume = [`perc resume ${a.runId}`];
+  switch (a.kind) {
+    case 'gate':
+      return { message: `${a.step} is waiting for approval`, next: [`perc approve ${a.runId}`, `perc reject ${a.runId} "<what to change>"`] };
+    case 'cap':
+      return {
+        message: `${a.step} hit its cap (${a.reason})`,
+        detail: 'Grant one more round and the run goes back with the open findings.',
+        next: resume,
+      };
+    case 'paused':
+      return { message: `${a.step} paused: ${a.reason}`, next: resume };
+    case 'failed':
+      return {
+        message: `${a.step} failed`,
+        detail: "A failed run can't be resumed. Start a new run for the ticket, or clean this one up.",
+        next: [`perc run ${a.ticket} --repo ${a.repoRoot}`, `perc clean ${a.runId}`],
+      };
+    case 'stalled':
+      if (a.decision !== undefined) return { message: `${a.decision === 'approve' ? 'approved' : 'rejected'}; resume to continue`, next: resume };
+      return {
+        message: `the driver stopped while ${a.step} was running`,
+        detail: `Nothing is driving this run. Resume picks up at ${a.step}.`,
+        next: resume,
+      };
+    case 'agent':
+      return { message: `${a.step}'s agent is ${a.agentState} in terminal ${a.terminal}`, detail: "Attend the agent's terminal.", next: [] };
+  }
+}
+
 async function attentionOf(o: {
   dir: string;
   meta: RunMeta;
@@ -182,14 +237,20 @@ async function attentionOf(o: {
 }): Promise<AttentionJson | undefined> {
   const { dir, meta, state, waiting, alive } = o;
   const lastEnd = state.history.at(-1)?.endedAt || meta.createdAt;
+  const turn = (kind: AttentionKind, step: string | undefined, x: Partial<YourTurnInput> = {}) => {
+    const t = yourTurn({ kind, runId: meta.runId, step: step ?? STAGES[0], ticket: meta.ticket, repoRoot: meta.repoRoot, ...x });
+    return { message: t.message, ...(t.detail !== undefined ? { detail: t.detail } : {}) };
+  };
   const failing = (step: string | undefined) => (step === undefined ? [] : review(dir, step, latest(state, step)?.outputs));
   if (waiting !== undefined) {
     if (alive === false && (await exists(path.join(waiting.stepDir, 'decision.json')))) {
-      return { kind: 'stalled', since: waiting.since, actions: ['resume'] };
+      const d = await readDecision(waiting.stepDir);
+      return { kind: 'stalled', since: waiting.since, ...turn('stalled', waiting.stepId, d !== undefined ? { decision: d } : {}), actions: ['resume'] };
     }
     return {
       kind: 'gate',
       since: waiting.since,
+      ...turn('gate', waiting.stepId),
       commentUrl: waiting.commentUrl,
       review: gateReview(dir, waiting.stepId, o.steps, state),
       actions: ['approve', 'reject'],
@@ -198,27 +259,30 @@ async function attentionOf(o: {
   if (state.status === 'paused') {
     if (state.pausedCap !== undefined) {
       const from = o.loops.find((l) => l.id === state.pausedCap)?.from ?? state.currentStep;
-      return { kind: 'cap', since: lastEnd, review: failing(from), actions: ['grant'] };
+      const reason = (state.pausedReason ?? '').replace(/^cap: /, '');
+      return { kind: 'cap', since: lastEnd, ...turn('cap', state.currentStep, { reason }), review: failing(from), actions: ['grant'] };
     }
-    return { kind: 'paused', since: lastEnd, review: failing(state.currentStep), actions: ['resume'] };
+    return { kind: 'paused', since: lastEnd, ...turn('paused', state.currentStep, { reason: state.pausedReason ?? '' }), review: failing(state.currentStep), actions: ['resume'] };
   }
   if (state.status === 'failed') {
     return {
       kind: 'failed',
       since: lastEnd,
+      ...turn('failed', state.currentStep),
       review: failing(state.currentStep),
       actions: ['clean'],
       commands: [`perc run ${meta.ticket} --repo ${meta.repoRoot}`],
     };
   }
   if (state.status !== 'running') return undefined;
-  if (alive === false) return { kind: 'stalled', since: lastEnd, actions: ['resume'] };
+  if (alive === false) return { kind: 'stalled', since: lastEnd, ...turn('stalled', state.currentStep), actions: ['resume'] };
   if (alive !== true) return undefined;
   const a = await readAttention(dir);
   if (a === undefined || a.stepId !== state.currentStep || typeof a.terminal !== 'string') return undefined;
   return {
     kind: 'agent',
     since: typeof a.at === 'string' ? a.at : lastEnd,
+    ...turn('agent', state.currentStep, { terminal: a.terminal, agentState: typeof a.kind === 'string' ? a.kind : 'waiting' }),
     terminal: a.terminal,
     ...(typeof a.kind === 'string' ? { agentState: a.kind } : {}),
     actions: ['open-pane'],
