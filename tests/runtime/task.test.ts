@@ -138,3 +138,31 @@ test('the groom brief tells the agent to refine a previous groomed ticket, not s
     /If the inputs include a previous groomed ticket \(previous_groom\), start from it: keep what still holds, change what the ticket, its comments or the feedback changed; don't start over\./,
   );
 });
+
+test('the groom brief tells the agent to record the owner\'s terminal decisions', () => {
+  const t = buildTask(input({ step: step({ id: 'groom', name: 'groom', stage: 'groom' }) }));
+  assert.ok(
+    t.includes(
+      'Record in groomed_ticket.md every decision or clarification the owner gave you in the terminal: the next step sees only your outputs, not this conversation.',
+    ),
+  );
+});
+
+test('the plan brief tells the agent to record the owner\'s terminal decisions', () => {
+  const t = buildTask(input({ step: step({ id: 'plan', name: 'plan', stage: 'plan' }) }));
+  assert.ok(
+    t.includes(
+      'Record in plan.md every decision or clarification the owner gave you in the terminal: the next step sees only your outputs, not this conversation.',
+    ),
+  );
+});
+
+test('the review brief requires findings as a top-level numbered list', () => {
+  const t = buildTask(input());
+  assert.ok(
+    t.includes(
+      'Write your findings to findings.md as a top-level numbered list (1. …, 2. …), one finding per item; put any detail under its item.',
+    ),
+  );
+  assert.ok(t.includes('If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.'));
+});

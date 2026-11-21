@@ -27,12 +27,12 @@ export function renderTemplate(text: string, vars: Record<string, string>): stri
 export const STAGE_BRIEFS: Readonly<Record<Exclude<Stage, 'deliver'>, string>> = Object.freeze({
   intake: 'Read ticket {{ticket}} and write its title, body and existing comments to ticket.md.',
   groom:
-    'Groom the ticket in the inputs into a ready-to-plan ticket and write it to groomed_ticket.md. Percolator posts it on the issue for approval. If the inputs include findings from an approval gate, revise the groomed ticket to address them. If the inputs include a previous groomed ticket (previous_groom), start from it: keep what still holds, change what the ticket, its comments or the feedback changed; don\'t start over.',
-  plan: 'Write an implementation plan for the approved groomed ticket to plan.md.',
+    'Groom the ticket in the inputs into a ready-to-plan ticket and write it to groomed_ticket.md. Percolator posts it on the issue for approval. If the inputs include findings from an approval gate, revise the groomed ticket to address them. If the inputs include a previous groomed ticket (previous_groom), start from it: keep what still holds, change what the ticket, its comments or the feedback changed; don\'t start over. Record in groomed_ticket.md every decision or clarification the owner gave you in the terminal: the next step sees only your outputs, not this conversation.',
+  plan: 'Write an implementation plan for the approved groomed ticket to plan.md. Record in plan.md every decision or clarification the owner gave you in the terminal: the next step sees only your outputs, not this conversation.',
   implement:
     'Implement the plan in the worktree and commit on the current branch. If the inputs include review findings, address them. Write a short summary of your changes to summary.md.',
   review:
-    'Review the branch diff (git diff {{base}}...HEAD) against the plan. Write your findings to findings.md. If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.',
+    'Review the branch diff (git diff {{base}}...HEAD) against the plan. Write your findings to findings.md as a top-level numbered list (1. …, 2. …), one finding per item; put any detail under its item. If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.',
 });
 
 export type TaskInput = {
