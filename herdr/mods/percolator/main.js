@@ -25,9 +25,11 @@ import {
   actionArgv,
   boardHeight,
   dragBoard,
+  driverToggle,
   fillHeight,
   findNode,
   nextBoxH,
+  ownedDriver,
   titleLayout,
   moveRow,
   moveStop,
@@ -276,6 +278,48 @@ export default class Percolator extends View {
   focusTerminal(term) {
     const terminal = addressOf(term);
     if (terminal) command('pane.focus', { terminal });
+  }
+
+  /** Shows or hides the run's driver terminal in its Herdr space (a label change; the driver keeps running). */
+  toggleDriver(cx) {
+    const r = this.current();
+    const tog = driverToggle(r);
+    if (!tog || this.busy || checking()) return;
+    this.actError = null;
+    this.said = null;
+    if (this.conn === 'fixtures') {
+      this.said = `fixtures: would run hc ${tog.argv.join(' ')}`;
+      return;
+    }
+    this.busy = 'driver';
+    const failed = (e) => ({ code: -1, stdout: '', stderr: String(e?.message ?? e) });
+    cx.spawn(async (cx) => {
+      try {
+        const got = await hc(['get', '--json', '--', tog.terminal]).catch(failed);
+        if (!(got.code === 0 && ownedDriver(got.stdout, r.id))) {
+          this.actError = `${tog.terminal} is not run ${r.id}'s live driver; nothing was changed`;
+          return;
+        }
+        const res = await hc(tog.argv).catch(failed);
+        if (res.code !== 0) {
+          this.actError = `hc label ${tog.terminal} failed: ${firstLine(res.stderr) || `exit ${res.code}`}; check hc and the Herdr app are running`;
+          return;
+        }
+        if (tog.show) {
+          let address = null;
+          for (let i = 0; i < 20 && !address; i++) {
+            address = addressOf(tog.terminal);
+            if (!address) await cx.sleep(150);
+          }
+          if (address) command('pane.focus', { terminal: address });
+          else this.said = "driver shown in the run's space";
+        }
+      } finally {
+        this.busy = null;
+        this.refresh(cx);
+        cx.notify();
+      }
+    });
   }
 
   // ── acting ──────────────────────────────────────────────────────────
