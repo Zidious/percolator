@@ -108,8 +108,13 @@ test('descriptions state the defaults the code uses', () => {
     ['$.profiles.*.nodes.*.required', /in bindings, the whole stage binding/],
     ['$.profiles.*.runtime.worktree_root', /<root>\/<repo>\/; relative to the config file, ~ expanded/],
     ['$.profiles.*.rules.require_skills[].stage', /a named stage must be bound to an agent node/],
+    ['$.profiles.*.bindings', /after all layers merge, every stage must be bound/],
+    ['$.profiles.*.rules.allowed_agents', /^Agents that agent nodes may use; default any agent\.$/],
   ];
   for (const [p, re] of expected) assert.match(desc(p), re, p);
-  assert.ok(desc('$.profiles.*.nodes.*.builtin').includes(BUILTIN_NAMES.join(' or ')), 'builtin names come from BUILTIN_NAMES');
+  assert.ok(
+    desc('$.profiles.*.nodes.*.builtin').includes(BUILTIN_NAMES.join(' or ')),
+    'builtin names come from BUILTIN_NAMES',
+  );
   assert.deepEqual(at(s, '$.profiles.*.use[].applies_to')?.['default'], ['*']);
 });

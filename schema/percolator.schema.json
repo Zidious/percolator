@@ -59,7 +59,7 @@
         "type": "object",
         "properties": {
           "bindings": {
-            "description": "What runs each core stage (intake, groom, plan, implement, review, deliver); all six must be bound.",
+            "description": "What runs each core stage (intake, groom, plan, implement, review, deliver); after all layers merge, every stage must be bound.",
             "type": "object",
             "propertyNames": {
               "type": "string",
@@ -618,7 +618,7 @@
                 }
               },
               "allowed_agents": {
-                "description": "Agents nodes may use; default any agent.",
+                "description": "Agents that agent nodes may use; default any agent.",
                 "type": "array",
                 "items": {
                   "type": "string"

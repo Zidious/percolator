@@ -110,13 +110,20 @@ export const NodeDefSchema = z
     on_fail: z
       .strictObject({
         back_to: StageSchema.describe('Earlier stage the run loops back to when this node fails.'),
-        max_rounds: z.number().int().min(1).describe('Most rounds the loop may run before escalating to you; required.'),
+        max_rounds: z
+          .number()
+          .int()
+          .min(1)
+          .describe('Most rounds the loop may run before escalating to you; required.'),
       })
       .optional()
       .describe('Bounded back-edge: on fail, loop back to an earlier stage, up to max_rounds times.'),
-    max_rounds: z.number().int().min(1).optional().describe(
-      'Round cap for the review loop, read from the last node bound to review; default 3.',
-    ),
+    max_rounds: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('Round cap for the review loop, read from the last node bound to review; default 3.'),
     timeout_s: z
       .number()
       .positive()
@@ -126,7 +133,9 @@ export const NodeDefSchema = z
     required: z
       .boolean()
       .optional()
-      .describe('Locks the node (in bindings, the whole stage binding): later layers may only restate it unchanged; default false.'),
+      .describe(
+        'Locks the node (in bindings, the whole stage binding): later layers may only restate it unchanged; default false.',
+      ),
   })
   .superRefine((n, ctx) => {
     if (n.before !== undefined && n.after !== undefined) {
@@ -190,13 +199,15 @@ export const RulesSchema = z.strictObject({
       z.strictObject({
         stage: z
           .union([StageSchema, z.literal('*')])
-          .describe('Stage whose agent nodes must load the skills, or * for every stage; a named stage must be bound to an agent node.'),
+          .describe(
+            'Stage whose agent nodes must load the skills, or * for every stage; a named stage must be bound to an agent node.',
+          ),
         skills: z.array(z.string()).describe('Skills each agent node in that stage must load.'),
       }),
     )
     .optional()
     .describe('Skills that agent nodes in a stage must load.'),
-  allowed_agents: z.array(z.string()).optional().describe('Agents nodes may use; default any agent.'),
+  allowed_agents: z.array(z.string()).optional().describe('Agents that agent nodes may use; default any agent.'),
   allowed_models: z.array(z.string()).optional().describe(
     'Models agent nodes may use; when set, every agent node must name one of them; default any model.',
   ),
@@ -217,7 +228,10 @@ export type Rules = z.infer<typeof RulesSchema>;
 // also keeps integer-like keys from reordering in JS objects.
 const NODE_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
 export const NodesSchema = z
-  .record(z.string(), NodeDefSchema.describe('One named node: a hook (with before/after), a gate or a node rules require.'))
+  .record(
+    z.string(),
+    NodeDefSchema.describe('One named node: a hook (with before/after), a gate or a node rules require.'),
+  )
   .superRefine((nodes, ctx) => {
     for (const name of Object.keys(nodes)) {
       if (!NODE_NAME.test(name)) {
@@ -232,9 +246,14 @@ export const NodesSchema = z
 
 const graphFragmentShape = {
   bindings: z
-    .partialRecord(StageSchema, BindingSchema.describe('The node that runs this stage, or a list of nodes run in order.'))
+    .partialRecord(
+      StageSchema,
+      BindingSchema.describe('The node that runs this stage, or a list of nodes run in order.'),
+    )
     .optional()
-    .describe('What runs each core stage (intake, groom, plan, implement, review, deliver); all six must be bound.'),
+    .describe(
+      'What runs each core stage (intake, groom, plan, implement, review, deliver); after all layers merge, every stage must be bound.',
+    ),
   nodes: NodesSchema.optional().describe('Extra nodes by name: hooks, gates and nodes required by rules.'),
   rules: RulesSchema.optional().describe('Checks on the merged graph; rules from every layer all apply.'),
   use: z
@@ -294,7 +313,10 @@ export const UserConfigSchema = z.strictObject({
     'Named sources of policies, skills, prompts and graph fragments: git repos or local paths.',
   ),
   profiles: z
-    .record(z.string(), ProfileSchema.describe('One profile: the graph, tracker and runtime settings for the repos it matches.'))
+    .record(
+      z.string(),
+      ProfileSchema.describe('One profile: the graph, tracker and runtime settings for the repos it matches.'),
+    )
     .describe('Named profiles; the first whose match fits the repo wins, or pick one with --profile.'),
 });
 export type UserConfig = z.infer<typeof UserConfigSchema>;
