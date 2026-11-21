@@ -15,6 +15,7 @@ function stateCell(s, width, size, t) {
   return h_flex()
     .w(width)
     .flex_none()
+    .gap(4)
     .text_size(size)
     .text_color(t[s.tone])
     .child(div().min_w(0).truncate().child(s.text))
