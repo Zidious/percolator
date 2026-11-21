@@ -355,3 +355,49 @@ export function terminalAddress(live, term) {
 export function ticketTitle(run) {
   return run.ticket?.title ?? run.ticket?.ref ?? run.id;
 }
+
+// ── delete ──
+
+/** The `perc delete` argv for one run, or for every finished run when `run` is null. */
+export function deleteArgv(run) {
+  return run === null ? ['delete', '--finished', '--yes'] : ['delete', run.id, '--yes'];
+}
+
+/** What `perc delete --finished` removes: completed and failed runs. */
+export function isFinished(run) {
+  return run.status === 'completed' || run.status === 'failed';
+}
+
+const ACTIVE = new Set(['running', 'waiting', 'paused']);
+
+/** The confirm dialog for deleting one run. */
+export function deleteConfirm(run) {
+  if (run.status === 'unreadable') {
+    return { title: `Delete ${run.id}?`, detail: `Deletes run ${run.id}: its terminals and record. The branch percolator/${run.id} is kept.` };
+  }
+  const stopped = ACTIVE.has(run.status) ? ' The run is stopped first.' : '';
+  return {
+    title: `Delete #${run.ticket.number}?`,
+    detail: `Deletes run ${run.id} (${run.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${run.branch} is kept.${stopped}`,
+  };
+}
+
+/** The confirm dialog for deleting every finished run, or null when none is finished. */
+export function deleteFinishedConfirm(runs) {
+  const done = runs.filter(isFinished);
+  if (done.length === 0) return null;
+  return {
+    title: `Delete ${done.length} finished run(s)?`,
+    detail: `Deletes ${done.map((r) => `${r.id} (#${r.ticket.number})`).join(', ')}: their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+  };
+}
+
+/** The selection after `deletedIds` are gone: `selId` if it stays, else the next row left, else the previous, else null. */
+export function selectAfterDelete(rows, deletedIds, selId) {
+  const gone = new Set(deletedIds);
+  if (!gone.has(selId)) return selId;
+  const at = rows.findIndex((r) => r.id === selId);
+  const after = rows.slice(at + 1).find((r) => !gone.has(r.id));
+  if (after) return after.id;
+  return rows.slice(0, Math.max(at, 0)).findLast((r) => !gone.has(r.id))?.id ?? null;
+}

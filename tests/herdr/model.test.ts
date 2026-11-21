@@ -18,7 +18,12 @@ import {
   terminalCommands,
   cupLabel,
   cupMoves,
+  deleteArgv,
+  deleteConfirm,
+  deleteFinishedConfirm,
   duration,
+  isFinished,
+  selectAfterDelete,
   findNode,
   ownsCommands,
   loopAtCap,
@@ -544,4 +549,56 @@ test('fillHeight converges: from what the rest takes (content minus the box draw
     seen.push(box);
   }
   assert.deepEqual(seen, [220, 220, 220, 220]);
+});
+
+test('deleteArgv deletes one run, or every finished run for null, always with --yes', () => {
+  assert.deepEqual(deleteArgv({ id: 'r1' }), ['delete', 'r1', '--yes']);
+  assert.deepEqual(deleteArgv(null), ['delete', '--finished', '--yes']);
+});
+
+test('isFinished is true for completed and failed runs only', () => {
+  assert.deepEqual(
+    runs().filter(isFinished).map((r) => r.id.split('-')[0]),
+    ['t3', 't9', 't15'],
+  );
+});
+
+test('deleteConfirm names the run, says what is lost and kept, and that an active run is stopped', () => {
+  const done = readable('t3');
+  assert.deepEqual(deleteConfirm(done), {
+    title: 'Delete #3?',
+    detail: `Deletes run ${done.id} (${done.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${done.branch} is kept.`,
+  });
+  for (const id of ['t8', 't2', 't4']) {
+    const r = readable(id);
+    assert.equal(
+      deleteConfirm(r).detail,
+      `Deletes run ${r.id} (${r.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${r.branch} is kept. The run is stopped first.`,
+      id,
+    );
+  }
+  const bad = byId('t5');
+  assert.deepEqual(deleteConfirm(bad), {
+    title: `Delete ${bad.id}?`,
+    detail: `Deletes run ${bad.id}: its terminals and record. The branch percolator/${bad.id} is kept.`,
+  });
+});
+
+test('deleteFinishedConfirm lists the finished runs, or is null when there are none', () => {
+  const [a, b, c] = ['t3', 't9', 't15'].map((id) => byId(id).id);
+  assert.deepEqual(deleteFinishedConfirm(runs()), {
+    title: 'Delete 3 finished run(s)?',
+    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+  });
+  assert.equal(deleteFinishedConfirm(runs().filter((r) => !isFinished(r))), null);
+});
+
+test('selectAfterDelete moves to the next row, else the previous, else none; an unrelated selection stays', () => {
+  const rows = ['a', 'b', 'c'].map((id) => ({ id }) as RunStatusJson);
+  assert.equal(selectAfterDelete(rows, ['b'], 'b'), 'c');
+  assert.equal(selectAfterDelete(rows, ['c'], 'c'), 'b');
+  assert.equal(selectAfterDelete(rows, ['b', 'c'], 'b'), 'a');
+  assert.equal(selectAfterDelete([rows[0]!], ['a'], 'a'), null);
+  assert.equal(selectAfterDelete(rows, ['b'], 'a'), 'a');
+  assert.equal(selectAfterDelete(rows, ['b'], null), null);
 });
