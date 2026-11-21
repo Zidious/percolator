@@ -53,5 +53,7 @@ export declare function ownsCommands(place: unknown, inWindow: boolean): boolean
 export declare const BOARD_RATIO: number;
 export declare function boardHeight(ratio: number, area: number, min: number): number;
 export declare function dragBoard(startPx: number, dy: number, area: number, min: number): number;
-export declare function readRatio(stored: string | null): number;
+export declare function readRatio(stored: unknown): number;
 export declare function fillHeight(view: number, content: number, box: number, min: number): number;
+export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short' };
+export declare function nextBoxH(prev: number, target: number): number;

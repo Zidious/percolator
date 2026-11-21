@@ -11,6 +11,8 @@ import {
   boardHeight,
   dragBoard,
   fillHeight,
+  nextBoxH,
+  titleLayout,
   readRatio,
   cliLines,
   terminalCommands,
@@ -442,6 +444,7 @@ test('dragBoard: the ratio a divider drag leaves, from the height at the press p
   assert.equal(dragBoard(300, -500, 1000, 90), 0.09, 'stops at the minimum');
   assert.equal(dragBoard(300, 900, 1000, 90), 0.7, 'stops at 70%');
   assert.equal(boardHeight(dragBoard(300, 900, 1000, 90), 1000, 90), 700, 'the dragged ratio gives the dragged height back');
+  assert.ok(Number.isFinite(dragBoard(300, 50, 0, 90)), 'an area not measured yet gives a number, not Infinity');
 });
 
 test('readRatio: a stored ratio between 0 and 1, else the default', () => {
@@ -450,6 +453,8 @@ test('readRatio: a stored ratio between 0 and 1, else the default', () => {
   assert.equal(readRatio('nope'), BOARD_RATIO);
   assert.equal(readRatio('0'), BOARD_RATIO);
   assert.equal(readRatio('1.5'), BOARD_RATIO);
+  assert.equal(readRatio(0.42), 0.42, 'a number from shared state');
+  assert.equal(readRatio(undefined), BOARD_RATIO, 'nothing shared yet');
   assert.equal(BOARD_RATIO, 0.3);
 });
 
@@ -458,4 +463,35 @@ test('fillHeight: the reader takes what the detail has left over, else its minim
   assert.equal(fillHeight(600, 900, 400, 120), 120, 'the rest takes 500 of 600: the minimum');
   assert.equal(fillHeight(600, 600, 300, 120), 300, 'already filling: it stays');
   assert.equal(fillHeight(600.4, 500, 200, 120), 300, 'whole pixels');
+});
+
+test('titleLayout: the buttons always fit; the needs chip shortens, then the tabs move to a second row', () => {
+  assert.deepEqual(titleLayout(380, 2), { tabs: 'inline', chip: 'long' }, 'the default 380px panel');
+  assert.deepEqual(titleLayout(370, 2), { tabs: 'inline', chip: 'long' });
+  assert.deepEqual(titleLayout(340, 2), { tabs: 'inline', chip: 'short' });
+  assert.deepEqual(titleLayout(300, 2), { tabs: 'below', chip: 'long' });
+  assert.deepEqual(titleLayout(260, 2), { tabs: 'below', chip: 'short' });
+  assert.deepEqual(titleLayout(300, 0), { tabs: 'inline', chip: 'long' }, 'no chip: the tabs fit inline longer');
+  assert.deepEqual(titleLayout(280, 0), { tabs: 'below', chip: 'long' });
+});
+
+test('nextBoxH: the reader keeps its height for a change under 2px, so rounding cannot make it shake', () => {
+  assert.equal(nextBoxH(300, 301), 300);
+  assert.equal(nextBoxH(300, 298.6), 300);
+  assert.equal(nextBoxH(300, 302), 302);
+  assert.equal(nextBoxH(300, 250.4), 250, 'whole pixels');
+  assert.equal(nextBoxH(0, 120), 120, 'the first height');
+});
+
+test('fillHeight converges: from what the rest takes (content minus the box drawn), the next frame gives the same height', () => {
+  const view = 600;
+  const rest = 380; // header, train, buttons...: independent of the box
+  let box = 120;
+  const seen = [];
+  for (let i = 0; i < 4; i++) {
+    const content = rest + box; // what the detail measures with this box drawn
+    box = nextBoxH(box, fillHeight(view, content, box, 120));
+    seen.push(box);
+  }
+  assert.deepEqual(seen, [220, 220, 220, 220]);
 });

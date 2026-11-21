@@ -48,29 +48,30 @@ function reader(p, t) {
 function history(p, t, r) {
   const ran = (r.steps ?? []).filter((s) => s.status !== 'pending').reverse();
   const now = Date.now();
+  const list = v_flex()
+    .py(4)
+    .children(
+      ran.length === 0
+        ? [div().px(12).py(3).text_size(11.5).text_color(t.dim).child('Nothing has run yet.')]
+        : ran.map((s) =>
+            h_flex()
+              .px(12)
+              .py(3)
+              .gap(10)
+              .text_size(11.5)
+              .child(div().w(10).flex_none().text_color(stepColor(t, s.status)).child(MARKS[s.status] ?? '✕'))
+              .child(div().w(130).flex_none().truncate().text_color(t.foreground).child(s.id))
+              .child(div().w(70).flex_none().text_color(t.dim).child(s.kind))
+              .child(div().w(90).flex_none().text_color(stepColor(t, s.status)).child(s.status))
+              .child(div().w(80).flex_none().text_color(t.dim).child(s.attempts > 1 ? `${s.attempts} attempts` : ''))
+              .child(div().flex_1().text_color(t.dim).child(took(s, now))),
+          ),
+    );
   return v_flex()
     .flex_none()
     .gap(4)
     .child(div().text_size(11).text_color(t.muted).child('History'))
-    .child(
-      own(box(p, t, 'history', v_flex().py(4).children(
-        ran.length === 0
-          ? [div().px(12).py(3).text_size(11.5).text_color(t.dim).child('Nothing has run yet.')]
-          : ran.map((s) =>
-              h_flex()
-                .px(12)
-                .py(3)
-                .gap(10)
-                .text_size(11.5)
-                .child(div().w(10).flex_none().text_color(stepColor(t, s.status)).child(MARKS[s.status] ?? '✕'))
-                .child(div().w(130).flex_none().truncate().text_color(t.foreground).child(s.id))
-                .child(div().w(70).flex_none().text_color(t.dim).child(s.kind))
-                .child(div().w(90).flex_none().text_color(stepColor(t, s.status)).child(s.status))
-                .child(div().w(80).flex_none().text_color(t.dim).child(s.attempts > 1 ? `${s.attempts} attempts` : ''))
-                .child(div().flex_1().text_color(t.dim).child(took(s, now))),
-            ),
-      ))),
-    );
+    .child(own(box(p, t, 'history', list)));
 }
 
 function tail(p, t, r, text) {

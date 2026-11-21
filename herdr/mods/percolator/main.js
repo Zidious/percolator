@@ -26,6 +26,8 @@ import {
   boardHeight,
   dragBoard,
   fillHeight,
+  nextBoxH,
+  titleLayout,
   moveRow,
   moveStop,
   needsCount,
@@ -47,7 +49,8 @@ import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
 const NARROW = 720;
 const BLOCK = 'percolator-panel';
 const WINDOW = 'percolator.window'; // shared: the open window's overlay id, else null
-const RATIO = 'board.ratio'; // localStorage: the board's height as a ratio of the area under the title bar
+const RATIO = 'percolator.boardRatio'; // shared: the board's height as a ratio of the area under the title bar
+const OLD_RATIO = 'board.ratio'; // localStorage, per copy: read when nothing is shared yet
 const MIN_ROWS = { narrow: 106, wide: 92 }; // two rows of the board, in design px
 const MIN_BOX = 120; // the reader's least height; below it the detail scrolls instead
 const zoom = () => Number(settings()?.zoom) || 1;
@@ -76,13 +79,13 @@ export default class Percolator extends View {
     this.rejecting = false;
     this.rejectError = null;
     this.typing = false;
-    this.ratio = readRatio(localStorage.getItem(RATIO));
+    this.ratio = null; // the ratio while the divider is held; otherwise the shared one (boardRatio())
     // Heights in design pixels (zoom 1), measured after each layout.
     this.area = 600; // under the title bar
     this.boardPx = 0; // the board
     this.detailH = 400; // the detail's viewport
-    this.contentH = 0; // the detail's content
-    this.boxH = 0; // the reader (or history, or agent tail) as drawn in the last frame
+    this.rest = 0; // what the detail's content takes besides the reader (or history, or agent tail)
+    this.boxH = MIN_BOX; // the reader's height, as drawn in the last frame
     this.drag = null; // { y, px } while the divider is held
     this.boardScroll = ScrollHandle.new();
     const f = shared('percolator.focus');
@@ -405,9 +408,18 @@ export default class Percolator extends View {
     this.revealRow();
   }
 
-  /** The reader's (or history's, or the agent tail's) height: what the detail has left over, at least MIN_BOX. */
-  boxMax() {
-    return this.contentH ? fillHeight(this.detailH, this.contentH, this.boxH, MIN_BOX) : MIN_BOX;
+  /** The reader's (or history's, or the agent tail's) height: what the detail has left over, at least MIN_BOX. Worked out
+   *  from the viewport and `rest` only (neither depends on it), and kept unless it moves 2px, so it cannot oscillate. */
+  boxHeight() {
+    return this.rest ? nextBoxH(this.boxH, fillHeight(this.detailH, this.rest, 0, MIN_BOX)) : this.boxH;
+  }
+
+  /** The detail's content was laid out with the box drawn last: what the rest takes is the content minus that box. */
+  measureContent(size, cx) {
+    const rest = Math.round(size.height / zoom()) - this.boxH;
+    if (rest === this.rest) return;
+    this.rest = rest;
+    cx.notify();
   }
 
   /** Keeps a measured height in design pixels (Herdr reports them zoomed); a change draws again. */
@@ -430,10 +442,16 @@ export default class Percolator extends View {
     return narrow ? MIN_ROWS.narrow : MIN_ROWS.wide;
   }
 
+  /** The board's ratio: the one being dragged, else the shared one, so the docked panel and the window agree. */
+  boardRatio() {
+    return this.drag ? this.ratio : readRatio(shared(RATIO) ?? localStorage.getItem(OLD_RATIO));
+  }
+
   endDrag() {
     if (!this.drag) return false;
+    const from = this.drag.from;
     this.drag = null;
-    localStorage.setItem(RATIO, String(this.ratio));
+    if (this.ratio !== from) setShared(RATIO, this.ratio);
     return true;
   }
 
@@ -451,12 +469,14 @@ export default class Percolator extends View {
       .tooltip('Drag to resize · double-click resets')
       .on_mouse_down('left', (e, cx) => {
         cx.stop_propagation(); // a window drags on presses its mod doesn't stop
+        if (!this.typing) this.handle.focus(); // ↑/↓ work right after a drag
         if (e.click_count >= 2) {
           this.drag = null;
-          this.ratio = BOARD_RATIO;
-          localStorage.removeItem(RATIO);
+          if (this.boardRatio() !== BOARD_RATIO) setShared(RATIO, BOARD_RATIO);
         } else {
-          this.drag = { y: e.position.y, px: this.boardPx };
+          const from = this.boardRatio();
+          this.ratio = from;
+          this.drag = { y: e.position.y, px: this.boardPx, from };
         }
         cx.notify();
       })
@@ -504,22 +524,22 @@ export default class Percolator extends View {
           .child(label),
       );
     const window = this.inWindow();
-    return h_flex()
+    // ⧉ and ✕ never leave: the title truncates, the chip shortens to "N", then the tabs take a row of their own.
+    const fit = titleLayout(this.width / zoom(), needs);
+    const tabs = h_flex().flex_none().gap(8).items_center().child(tab('active', 'Active')).child(tab('all', 'All'));
+    const bar = h_flex()
       .h(38)
       .flex_none()
       .px(12)
       .gap(8)
       .items_center()
-      .border_b(1)
-      .border_color(t.border)
-      .bg(t.chrome)
       .child(mark(18, t.foreground, needs ? t.blocked : running ? t.working : t.accent, needs > 0))
-      .child(div().flex_none().font_semibold().text_size(13).child('Percolator'))
-      .when(needs > 0, (el) => el.child(chip(`${needs} need${needs === 1 ? 's' : ''} you`, t.blocked)))
+      .child(div().flex_shrink_1().min_w(0).truncate().font_semibold().text_size(13).child('Percolator'))
+      .when(needs > 0, (el) =>
+        el.child(chip(fit.chip === 'short' ? String(needs) : `${needs} need${needs === 1 ? 's' : ''} you`, t.blocked)),
+      )
       .when(running > 0 && !narrow, (el) => el.child(chip(`${running} running`, t.working)))
-      .child(div().w(4))
-      .child(tab('active', 'Active'))
-      .child(tab('all', 'All'))
+      .when(fit.tabs === 'inline', (el) => el.child(div().flex_none().w(4)).child(tabs))
       .child(div().flex_1())
       .when(this.conn === 'fixtures' && !narrow, (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child('fixtures')))
       .child(
@@ -528,6 +548,13 @@ export default class Percolator extends View {
         ),
       )
       .child(icon('close', '✕', 'Hide', () => this.hide()));
+    return v_flex()
+      .flex_none()
+      .border_b(1)
+      .border_color(t.border)
+      .bg(t.chrome)
+      .child(bar)
+      .when(fit.tabs === 'below', (el) => el.child(h_flex().h(28).px(12).pb(4).items_center().child(tabs)));
   }
 
   hints(t) {
@@ -569,8 +596,8 @@ export default class Percolator extends View {
     const ready = this.conn !== 'missing' && this.loaded;
     const r = ready ? this.current() : null;
     const rows = ready ? this.rows() : [];
-    const boardMax = boardHeight(this.ratio, this.area, this.minBoard(narrow));
-    this.boxH = this.boxMax(); // the reader's height in this frame; contentH, measured after it, includes it
+    const boardMax = boardHeight(this.boardRatio(), this.area, this.minBoard(narrow));
+    this.boxH = this.boxHeight(); // the box drawn in this frame; measureContent subtracts it after layout
     return v_flex()
       .id('area')
       .flex_1()
@@ -604,7 +631,7 @@ export default class Percolator extends View {
                 v_flex()
                   .id('detail-body')
                   .flex_none()
-                  .on_size_change((size, cx) => this.measured('contentH', size, cx))
+                  .on_size_change((size, cx) => this.measureContent(size, cx))
                   .when(!ready, (el) => el.min_h_full().child(this.placeholder(t)))
                   .when(Boolean(r), (el) =>
                     el

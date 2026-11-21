@@ -258,10 +258,11 @@ export function boardHeight(ratio, area, min) {
 
 /** The ratio a divider drag leaves: the board's height at the press plus how far the pointer moved, clamped. */
 export function dragBoard(startPx, dy, area, min) {
-  return clampBoard(startPx + dy, area, min) / area;
+  const a = Math.max(area, 1); // not measured yet
+  return clampBoard(startPx + dy, a, min) / a;
 }
 
-/** A ratio read back from storage: a number in (0, 1), else the default. */
+/** A ratio read back from shared state or storage (a number or its string): in (0, 1), else the default. */
 export function readRatio(stored) {
   const n = Number(stored);
   return stored != null && n > 0 && n < 1 ? n : BOARD_RATIO;
@@ -271,6 +272,22 @@ export function readRatio(stored) {
  *  once everything else is laid out, at least `min` (then the detail scrolls). Whole pixels. */
 export function fillHeight(view, content, box, min) {
   return Math.round(Math.max(min, view - (content - box)));
+}
+
+/** The reader's next height: `target` in whole pixels, unless it moved less than 2px (then `prev`), so measuring
+ *  and rounding cannot swing it between two heights. */
+export function nextBoxH(prev, target) {
+  const next = Math.round(target);
+  return Math.abs(next - prev) < 2 ? prev : next;
+}
+
+/** How the title bar fits `width` design px with `needs` runs needing you: ⧉ and ✕ always stay; the "N need you" chip
+ *  shortens to "N" first, then the Active/All tabs move to a row of their own. */
+export function titleLayout(width, needs) {
+  if (needs === 0) return { tabs: width >= 300 ? 'inline' : 'below', chip: 'long' };
+  if (width >= 370) return { tabs: 'inline', chip: 'long' };
+  if (width >= 320) return { tabs: 'inline', chip: 'short' };
+  return { tabs: 'below', chip: width >= 270 ? 'long' : 'short' };
 }
 
 // ── the cup (mods/percolator-cup carries a copy of this file) ──
