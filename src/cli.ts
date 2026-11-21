@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -343,7 +344,14 @@ async function deleteAll(plans: DeletePlan[], failed: number, deps: DriverDeps, 
 async function deleteFinished(yes: boolean, deps: DriverDeps, io: Io): Promise<number> {
   const plans: DeletePlan[] = [];
   for (const l of await listRuns(deps.home)) {
-    const p = await planDelete(path.basename(l.dir), deps);
+    let p: DeletePlan;
+    try {
+      p = await planDelete(path.basename(l.dir), deps);
+    } catch (err) {
+      // removed since the listing (another delete, the panel's): nothing left to delete
+      if (!(await fs.stat(l.dir).then(() => true, () => false))) continue;
+      throw err;
+    }
     if (isFinished(p.status)) plans.push(p);
   }
   if (plans.length === 0) {
@@ -360,7 +368,8 @@ async function deleteFinished(yes: boolean, deps: DriverDeps, io: Io): Promise<n
 }
 
 /** Exactly the runs named (the panel passes the ones its confirm listed); an unknown id is reported and skipped. */
-async function deleteIds(ids: string[], yes: boolean, deps: DriverDeps, io: Io): Promise<number> {
+async function deleteIds(named: string[], yes: boolean, deps: DriverDeps, io: Io): Promise<number> {
+  const ids = [...new Set(named)];
   if (ids.length === 1) {
     const plan = await planDelete(ids[0]!, deps);
     if (!yes) {
@@ -372,7 +381,7 @@ async function deleteIds(ids: string[], yes: boolean, deps: DriverDeps, io: Io):
   }
   const plans: DeletePlan[] = [];
   let failed = 0;
-  for (const id of new Set(ids)) {
+  for (const id of ids) {
     try {
       plans.push(await planDelete(id, deps));
     } catch (err) {

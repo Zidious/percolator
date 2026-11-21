@@ -328,3 +328,54 @@ test('delete of several ids without --yes lists each and asks once', async () =>
     await e.cleanup();
   }
 });
+
+test('delete summary says unknown for a worktree whose .git is gone, and deletes it', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare({ status: 'failed' });
+    await fs.rm(path.join(m.worktree, '.git'));
+    const r = await e.perc(['delete', m.runId], { ...e.deps, ask: asker('y').ask });
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(r.out, `${summary(m, 'failed', 'unknown')}\n${line(m)}\n`);
+    assert.equal(await exists(m.worktree), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('delete of a repeated id asks about the one run', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare({ status: 'completed' });
+    const k = asker('y');
+    const r = await e.perc(['delete', m.runId, m.runId], { ...e.deps, ask: k.ask });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, `${summary(m, 'completed', 'clean')}\n${line(m)}\n`);
+    assert.deepEqual(k.asked, [`delete run ${m.runId}? [y/N] `]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('delete --finished skips a run whose dir disappears after the listing', async () => {
+  const e = await setup();
+  try {
+    const gone = await e.prepare({ status: 'completed' });
+    // a paused run is planned (its live terminals listed) before the older one
+    const a = await e.prepare({ status: 'paused' });
+    const list = e.deps.hc.list.bind(e.deps.hc);
+    // meanwhile another delete (the panel's) removes gone
+    e.deps.hc.list = async (o) => {
+      if (o?.all !== true) await fs.rm(e.dir(gone), { recursive: true, force: true });
+      return list(o);
+    };
+    const r = await e.perc(['delete', '--finished', '--yes']);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(r.out, 'no finished runs\n');
+    assert.equal(await exists(e.dir(a)), true);
+  } finally {
+    await e.cleanup();
+  }
+});
