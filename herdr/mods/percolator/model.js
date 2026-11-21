@@ -354,7 +354,7 @@ export function terminalAddress(live, term) {
 /** The show/hide-driver-pane action for a run's driver terminal, or null when it can't be offered (no space, a finished
  *  run, a driver not among the live terminals, an unsafe name). `argv` is for `hc`; an empty label value removes it. */
 export function driverToggle(run) {
-  if (run.status === 'unreadable') return null;
+  if (!run || run.status === 'unreadable') return null;
   const { space, terminal } = run.driver;
   if (typeof space !== 'string' || space === '') return null;
   if (run.terminals?.driver !== terminal || typeof terminal !== 'string' || terminal.startsWith('-')) return null;

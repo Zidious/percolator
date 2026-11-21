@@ -601,3 +601,8 @@ test('ownedDriver accepts only this run\'s live driver', () => {
   assert.equal(ownedDriver(j({ 'percolator.run': 'r1', 'percolator.role': 'driver' }, 'finished'), 'r1'), false);
   assert.equal(ownedDriver('not json', 'r1'), false);
 });
+
+test('driverToggle is null when no run is selected', () => {
+  assert.equal(driverToggle(null), null);
+  assert.equal(driverToggle(undefined), null);
+});
