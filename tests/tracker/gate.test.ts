@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import type { RunContext } from '../../src/engine/runtime.ts';
 import type { Step } from '../../src/graph/build.ts';
 import { githubGate, readWaiting, writeDecision } from '../../src/tracker/gate.ts';
+import { decisionNote } from '../../src/tracker/prior-groom.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 
 const REPO = 'github.com/o/r';
@@ -228,6 +229,47 @@ test('a local decision wins without the tracker', async () => {
       await fsp.readFile(path.join(e.io.outputsDir, 'approval.md'), 'utf8'),
       `Approved by @${os.userInfo().username} via perc approve.\n`,
     );
+    // the issue records the local decision, so a later run can tell this groomed ticket was approved
+    assert.equal(e.gh.bodies.length, 2);
+    assert.equal(
+      e.gh.bodies[1],
+      decisionNote({ runId: 'r1', stepId: 'approve-groom', round: 1, decision: 'approve', by: os.userInfo().username }),
+    );
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test('a local decision already noted on the issue is not noted again', async () => {
+  const e = await setup();
+  try {
+    const by = os.userInfo().username;
+    const note = decisionNote({ runId: 'r1', stepId: 'approve-groom', round: 1, decision: 'reject', by, feedback: 'split it' });
+    e.onSleep.fn = async (n) => {
+      if (n === 1) {
+        await writeDecision(e.runDir, { decision: 'reject', feedback: 'split it' });
+        e.gh.addComment(REPO, 7, OWNER, note);
+      }
+    };
+    const out = await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, e.io);
+    assert.equal(out.status, 'fail');
+    assert.equal(e.gh.bodies.length, 1);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test('a failure to note a local decision does not stop the gate', async () => {
+  const e = await setup();
+  try {
+    e.onSleep.fn = async (n) => {
+      if (n === 1) {
+        await writeDecision(e.runDir, { decision: 'approve' });
+        e.gh.fail('comment', 'HTTP 502');
+      }
+    };
+    const out = await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, e.io);
+    assert.equal(out.status, 'pass');
   } finally {
     await rm(e.runDir);
   }

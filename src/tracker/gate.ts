@@ -10,6 +10,7 @@ import { exists, writeFileAtomic } from '../util/fs.ts';
 import { toPosix } from '../util/paths.ts';
 import type { Gh, IssueComment } from './gh.ts';
 import { GATE_MARKER, readIssueMeta } from './intake.ts';
+import { decisionNote, parseCommand } from './prior-groom.ts';
 
 export type Decision = {
   decision: 'approve' | 'reject';
@@ -82,16 +83,7 @@ export async function writeDecision(
   return waiting;
 }
 
-const COMMAND = /^\/percolator\s+(approve|reject)\b\s*(.*)$/;
-
-/** The decision a comment makes, if its first line is a command. */
-export function parseCommand(body: string): { decision: 'approve' | 'reject'; feedback: string } | undefined {
-  const lines = body.split(/\r?\n/);
-  const m = COMMAND.exec(lines[0] ?? '');
-  if (!m) return undefined;
-  const feedback = [m[2]!.trim(), ...lines.slice(1)].join('\n').trim();
-  return { decision: m[1] as 'approve' | 'reject', feedback };
-}
+export { parseCommand } from './prior-groom.ts';
 
 async function renderOutputs(runDir: string, runId: string, outputs: Record<string, string>): Promise<string> {
   const parts: string[] = [];
@@ -143,6 +135,8 @@ export function githubGate(o: {
   trackerPollMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /** called once the gate is waiting, with its comment url */
+  onWaiting?: (stepId: string, commentUrl: string) => void;
 }): StepHandler {
   const pollMs = o.pollMs ?? 2000;
   const trackerPollMs = o.trackerPollMs ?? 30000;
@@ -208,6 +202,7 @@ export function githubGate(o: {
       const waiting: Waiting = { stepId: step.id, stepDir: io.stepDir, since: new Date(now()).toISOString(), commentUrl };
       await writeFileAtomic(waitingPath, `${JSON.stringify(waiting, null, 2)}\n`);
       wroteWaiting = true;
+      o.onWaiting?.(step.id, commentUrl);
 
       const decisionFile = path.join(io.stepDir, 'decision.json');
       const postedMs = Date.parse(postedAt);
@@ -249,6 +244,29 @@ export function githubGate(o: {
         await sleep(pollMs).catch((err: unknown) => {
           throw new Aborted(err);
         });
+      }
+
+      if (decision.via === 'local') {
+        // best-effort: the issue records the decision so a later run can reuse this round's groomed ticket
+        const note = decisionNote({
+          runId: o.runId,
+          stepId: step.id,
+          round,
+          decision: decision.decision,
+          by: decision.by,
+          ...(decision.feedback !== undefined ? { feedback: decision.feedback } : {}),
+        });
+        const marker = note.split('\n')[0]!;
+        try {
+          const noted = (await o.gh.issue(meta.repo, meta.number)).comments.some((c) => c.body.startsWith(marker));
+          if (!noted) {
+            const noteFile = path.join(io.stepDir, 'decision-note.md');
+            await writeFileAtomic(noteFile, note);
+            await o.gh.comment(meta.repo, meta.number, noteFile);
+          }
+        } catch {
+          // the run goes on: only a later run's reuse of this groomed ticket depends on the note
+        }
       }
 
       await fs.rm(waitingPath, { force: true });
