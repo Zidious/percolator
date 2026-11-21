@@ -3,7 +3,7 @@
 // Data: `perc status --json`, run as perc.json says (`perc herdr link` writes it); `"fixtures"` reads a file instead.
 
 import { View, div } from 'gpui-kit';
-import { v_flex, h_flex, TextareaState } from 'gpui-base';
+import { v_flex, h_flex, ScrollHandle, Scrollbar, TextareaState } from 'gpui-base';
 import {
   checking,
   closeOverlay,
@@ -15,16 +15,22 @@ import {
   readTextFile,
   run as command,
   setShared,
+  settings,
   shared,
   terminals,
   theme,
 } from 'herdr';
 import {
+  BOARD_RATIO,
   actionArgv,
+  boardHeight,
+  dragBoard,
+  fillHeight,
   moveRow,
   moveStop,
   needsCount,
   ownsCommands,
+  readRatio,
   readerPath,
   resolvePath,
   runningCount,
@@ -41,6 +47,10 @@ import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
 const NARROW = 720;
 const BLOCK = 'percolator-panel';
 const WINDOW = 'percolator.window'; // shared: the open window's overlay id, else null
+const RATIO = 'board.ratio'; // localStorage: the board's height as a ratio of the area under the title bar
+const MIN_ROWS = { narrow: 106, wide: 92 }; // two rows of the board, in design px
+const MIN_BOX = 120; // the reader's least height; below it the detail scrolls instead
+const zoom = () => Number(settings()?.zoom) || 1;
 const folderOf = (file) => file.replace(/[\\/][^\\/]*$/, '');
 
 export default class Percolator extends View {
@@ -66,6 +76,15 @@ export default class Percolator extends View {
     this.rejecting = false;
     this.rejectError = null;
     this.typing = false;
+    this.ratio = readRatio(localStorage.getItem(RATIO));
+    // Heights in design pixels (zoom 1), measured after each layout.
+    this.area = 600; // under the title bar
+    this.boardPx = 0; // the board
+    this.detailH = 400; // the detail's viewport
+    this.contentH = 0; // the detail's content
+    this.boxH = 0; // the reader (or history, or agent tail) as drawn in the last frame
+    this.drag = null; // { y, px } while the divider is held
+    this.boardScroll = ScrollHandle.new();
     const f = shared('percolator.focus');
     this.seenFocus = f && Date.now() - f.at < 10000 ? 0 : (f?.at ?? 0);
 
@@ -322,7 +341,10 @@ export default class Percolator extends View {
     const acts = r?.attention?.actions ?? [];
     if (key === 'up' || key === 'down') {
       const id = moveRow(this.rows(), this.sel, key === 'up' ? -1 : 1);
-      if (id) this.select(id, cx);
+      if (id) {
+        this.select(id, cx);
+        this.revealRow();
+      }
     } else if ((key === 'left' || key === 'right') && r) {
       this.pickStop(moveStop(r, this.stopSel, key === 'left' ? -1 : 1), cx);
     } else if (key === 'a' && acts.includes('approve')) this.act('approve', cx);
@@ -380,6 +402,65 @@ export default class Percolator extends View {
     if (!this.runs.some((r) => r.id === f.run)) return;
     if (!this.rows().some((r) => r.id === f.run)) this.filter = 'all';
     this.select(f.run, cx);
+    this.revealRow();
+  }
+
+  /** The reader's (or history's, or the agent tail's) height: what the detail has left over, at least MIN_BOX. */
+  boxMax() {
+    return this.contentH ? fillHeight(this.detailH, this.contentH, this.boxH, MIN_BOX) : MIN_BOX;
+  }
+
+  /** Keeps a measured height in design pixels (Herdr reports them zoomed); a change draws again. */
+  measured(key, size, cx) {
+    const h = Math.round(size.height / zoom());
+    if (h === this[key]) return;
+    this[key] = h;
+    cx.notify();
+  }
+
+  /** Scrolls the board so the selected row is in view. */
+  revealRow() {
+    const at = this.rows().findIndex((r) => r.id === this.sel);
+    if (at >= 0) this.boardScroll.scroll_to_item(at);
+  }
+
+  // ── the divider between the board and the detail ──────────────────
+
+  minBoard(narrow) {
+    return narrow ? MIN_ROWS.narrow : MIN_ROWS.wide;
+  }
+
+  endDrag() {
+    if (!this.drag) return false;
+    this.drag = null;
+    localStorage.setItem(RATIO, String(this.ratio));
+    return true;
+  }
+
+  divider(t, narrow) {
+    const on = Boolean(this.drag);
+    return div()
+      .id('divider')
+      .flex_none()
+      .h(7)
+      .flex()
+      .items_center()
+      .cursor_row_resize()
+      .hover((s) => s.bg(t.hover))
+      .when(on, (el) => el.bg(t.hover))
+      .tooltip('Drag to resize · double-click resets')
+      .on_mouse_down('left', (e, cx) => {
+        cx.stop_propagation(); // a window drags on presses its mod doesn't stop
+        if (e.click_count >= 2) {
+          this.drag = null;
+          this.ratio = BOARD_RATIO;
+          localStorage.removeItem(RATIO);
+        } else {
+          this.drag = { y: e.position.y, px: this.boardPx };
+        }
+        cx.notify();
+      })
+      .child(div().w_full().h(1).bg(on ? t.accent : t.border));
   }
 
   // ── views ───────────────────────────────────────────────────────────
@@ -464,7 +545,8 @@ export default class Percolator extends View {
       .children(['↑↓ runs', '←→ stops', 'a approve', 'r reject', 'g grant / resume', 'esc close'].map((h) => div().child(h)));
   }
 
-  body(t, narrow) {
+  /** The placeholder while nothing can be shown: not linked yet, or loading. */
+  placeholder(t) {
     if (this.conn === 'missing') {
       return v_flex()
         .flex_1()
@@ -474,24 +556,66 @@ export default class Percolator extends View {
         .child(mark(32, t.dim, t.dim, false))
         .child(div().text_size(13).text_color(t.muted).child('Run perc herdr link once to connect'));
     }
-    if (!this.loaded) {
-      return v_flex()
-        .flex_1()
-        .items_center()
-        .justify_center()
-        .child(div().text_size(12).text_color(t.dim).child(this.error ? '' : 'Loading…'));
-    }
-    const r = this.current();
     return v_flex()
       .flex_1()
+      .items_center()
+      .justify_center()
+      .child(div().text_size(12).text_color(t.dim).child(this.error ? '' : 'Loading…'));
+  }
+
+  // The measured frames (area, board-frame, detail-frame, detail-body) are drawn from the first frame on, whatever the
+  // state: Herdr reports sizes only for elements it has had since the view's first frame.
+  body(t, narrow) {
+    const ready = this.conn !== 'missing' && this.loaded;
+    const r = ready ? this.current() : null;
+    const rows = ready ? this.rows() : [];
+    const boardMax = boardHeight(this.ratio, this.area, this.minBoard(narrow));
+    this.boxH = this.boxMax(); // the reader's height in this frame; contentH, measured after it, includes it
+    return v_flex()
+      .id('area')
+      .flex_1()
       .min_h(0)
-      .child(board(this, t, narrow, this.rows()))
-      .when(Boolean(r), (el) =>
-        el
-          .child(header(this, t, r, narrow))
-          .child(train(this, t, r, narrow))
-          .when(Boolean(this.stopSel), (el) => el.child(stopStrip(this, t, r)))
-          .child(turn(this, t, r, narrow)),
+      .on_size_change((size, cx) => this.measured('area', size, cx))
+      .child(
+        v_flex()
+          .id('board-frame')
+          .flex_none()
+          .when(rows.length > 0, (el) => el.max_h(boardMax))
+          .on_size_change((size, cx) => this.measured('boardPx', size, cx))
+          .when(ready, (el) => el.child(board(this, t, narrow, rows))),
+      )
+      .when(rows.length > 0, (el) => el.child(this.divider(t, narrow)))
+      .child(
+        // One scroll for the whole detail, filled absolutely: overflow_y_scrollbar() wraps the element, so its flex
+        // sizing never reaches the layout.
+        div()
+          .id('detail-frame')
+          .flex_1()
+          .min_h(0)
+          .relative()
+          .on_size_change((size, cx) => this.measured('detailH', size, cx))
+          .child(
+            v_flex()
+              .id('detail')
+              .absolute()
+              .inset_0()
+              .overflow_y_scroll()
+              .child(
+                v_flex()
+                  .id('detail-body')
+                  .flex_none()
+                  .on_size_change((size, cx) => this.measured('contentH', size, cx))
+                  .when(!ready, (el) => el.min_h_full().child(this.placeholder(t)))
+                  .when(Boolean(r), (el) =>
+                    el
+                      .child(header(this, t, r, narrow))
+                      .child(train(this, t, r, narrow))
+                      .when(Boolean(this.stopSel), (el) => el.child(stopStrip(this, t, r)))
+                      .child(turn(this, t, r, narrow)),
+                  ),
+              ),
+          )
+          .child(Scrollbar.vertical('detail').absolute().inset_0()),
       );
   }
 
@@ -509,6 +633,18 @@ export default class Percolator extends View {
           this.width = size.width;
           cx.notify();
         }
+      })
+      .on_mouse_move((e, cx) => {
+        if (!this.drag) return;
+        const dy = (e.position.y - this.drag.y) / zoom(); // the pointer moves in zoomed pixels
+        this.ratio = dragBoard(this.drag.px, dy, this.area, this.minBoard(narrow));
+        cx.notify();
+      })
+      .on_mouse_up('left', (_e, cx) => {
+        if (this.endDrag()) cx.notify();
+      })
+      .on_hover((hovered, cx) => {
+        if (!hovered && this.endDrag()) cx.notify();
       })
       .track_focus(this.handle)
       .on_key_down((e, cx) => {
@@ -548,6 +684,7 @@ export default class Percolator extends View {
           .flex_1()
           .min_h(0)
           .on_mouse_down('left', (_e, cx) => {
+            this.endDrag(); // a release the panel never heard
             if (!this.typing) this.handle.focus();
             cx.stop_propagation();
           })

@@ -50,3 +50,8 @@ export declare function cupMoves(
   why: 'click' | 'open',
 ): CupMove[];
 export declare function ownsCommands(place: unknown, inWindow: boolean): boolean;
+export declare const BOARD_RATIO: number;
+export declare function boardHeight(ratio: number, area: number, min: number): number;
+export declare function dragBoard(startPx: number, dy: number, area: number, min: number): number;
+export declare function readRatio(stored: string | null): number;
+export declare function fillHeight(view: number, content: number, box: number, min: number): number;

@@ -1,6 +1,7 @@
 // Small view pieces the panel's files share: theme colours for model tones, the spinner, links and buttons.
 
 import { div } from 'gpui-kit';
+import { Scrollbar } from 'gpui-base';
 import { stepTone } from './model.js';
 
 export const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -10,6 +11,17 @@ export const stepColor = (t, status) => t[stepTone(status)] ?? t.border;
 
 /** Stops a press from reaching the window (a window overlay drags on presses its mod doesn't stop). */
 export const own = (el) => el.on_mouse_down('left', (_e, cx) => cx.stop_propagation());
+
+/** `el` as a vertical scroll area named `id`, as tall as its content until its parent runs out, with the theme's bar.
+ *  Not overflow_y_scrollbar(): that wraps the element, so its flex sizing never reaches the layout. */
+export const scrollY = (id, el) =>
+  div()
+    .relative()
+    .flex()
+    .flex_col()
+    .min_h(0)
+    .child(el.id(id).min_h(0).overflow_y_scroll())
+    .child(Scrollbar.vertical(id).absolute().inset_0());
 
 /** A small raised link-like control. */
 export function link(t, id, label, onClick) {

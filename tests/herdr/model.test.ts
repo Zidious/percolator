@@ -7,6 +7,11 @@ import {
   actionArgv,
   ago,
   attentionTag,
+  BOARD_RATIO,
+  boardHeight,
+  dragBoard,
+  fillHeight,
+  readRatio,
   cliLines,
   terminalCommands,
   cupLabel,
@@ -421,4 +426,36 @@ test('ownsCommands: only the copy where the panel lives (shared percolator.place
   assert.equal(ownsCommands('panel', true), false, 'a window opened beside the docked panel stays out');
   assert.equal(ownsCommands(undefined, false), true, 'docked is the default place');
   assert.equal(ownsCommands(undefined, true), false);
+});
+
+test('boardHeight: the stored ratio of the area, at least the minimum, at most 70% of the area', () => {
+  assert.equal(boardHeight(0.3, 1000, 90), 300);
+  assert.equal(boardHeight(0.05, 1000, 90), 90, 'never under two rows');
+  assert.equal(boardHeight(0.95, 1000, 90), 700, 'never over 70%');
+  assert.equal(boardHeight(0.5, 100, 90), 90, 'a tiny area still shows the minimum');
+  assert.equal(boardHeight(0.333, 601, 90), 200, 'whole pixels');
+});
+
+test('dragBoard: the ratio a divider drag leaves, from the height at the press plus the pointer move, clamped', () => {
+  assert.equal(dragBoard(300, 100, 1000, 90), 0.4);
+  assert.equal(dragBoard(300, -100, 1000, 90), 0.2);
+  assert.equal(dragBoard(300, -500, 1000, 90), 0.09, 'stops at the minimum');
+  assert.equal(dragBoard(300, 900, 1000, 90), 0.7, 'stops at 70%');
+  assert.equal(boardHeight(dragBoard(300, 900, 1000, 90), 1000, 90), 700, 'the dragged ratio gives the dragged height back');
+});
+
+test('readRatio: a stored ratio between 0 and 1, else the default', () => {
+  assert.equal(readRatio('0.42'), 0.42);
+  assert.equal(readRatio(null), BOARD_RATIO);
+  assert.equal(readRatio('nope'), BOARD_RATIO);
+  assert.equal(readRatio('0'), BOARD_RATIO);
+  assert.equal(readRatio('1.5'), BOARD_RATIO);
+  assert.equal(BOARD_RATIO, 0.3);
+});
+
+test('fillHeight: the reader takes what the detail has left over, else its minimum and the detail scrolls', () => {
+  assert.equal(fillHeight(600, 500, 200, 120), 300, 'room to spare: it grows to fill');
+  assert.equal(fillHeight(600, 900, 400, 120), 120, 'the rest takes 500 of 600: the minimum');
+  assert.equal(fillHeight(600, 600, 300, 120), 300, 'already filling: it stays');
+  assert.equal(fillHeight(600.4, 500, 200, 120), 300, 'whole pixels');
 });

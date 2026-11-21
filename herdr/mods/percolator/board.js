@@ -4,7 +4,7 @@ import { div } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { STAGES, ago, rowState } from './model.js';
 import { mark } from './mark.js';
-import { SPIN, stepColor, own } from './ui.js';
+import { SPIN, stepColor, own, scrollY } from './ui.js';
 
 const title = (r) => (r.status === 'unreadable' ? r.id : r.ticket.title);
 const number = (r) => (r.status === 'unreadable' ? '?' : `#${r.ticket.number}`);
@@ -64,6 +64,7 @@ function empty(t, filter) {
     .child(div().text_size(11.5).text_color(t.dim).child('perc run <owner/repo#issue>'));
 }
 
+/** The run list; its frame in main.js takes the divider's height; it scrolls, and ↑/↓ bring the selected row into view. */
 export function board(p, t, narrow, rows) {
   if (rows.length === 0) return empty(t, p.filter);
   const now = Date.now();
@@ -85,14 +86,9 @@ export function board(p, t, narrow, rows) {
     );
   };
   if (narrow) {
-    return v_flex()
-      .id('board')
-      .flex_none()
-      .max_h(190)
-      .overflow_y_scrollbar()
+    const list = v_flex()
+      .track_scroll(p.boardScroll)
       .py(4)
-      .border_b(1)
-      .border_color(t.border)
       .children(
         rows.map((r) => {
           const s = rowState(r);
@@ -122,6 +118,7 @@ export function board(p, t, narrow, rows) {
             );
         }),
       );
+    return v_flex().min_h(0).child(scrollY('board', list));
   }
   const head = h_flex()
     .px(14)
@@ -140,40 +137,39 @@ export function board(p, t, narrow, rows) {
     .child(div().w(200).flex_none())
     .child(div().w(34).flex_none());
   return v_flex()
-    .flex_none()
+    .min_h(0)
     .pt(8)
     .pb(4)
-    .border_b(1)
-    .border_color(t.border)
-    .child(head)
+    .child(head.flex_none())
     .child(
-      v_flex()
-        .id('board')
-        .max_h(176)
-        .overflow_y_scrollbar()
-        .children(
-          rows.map((r) => {
-            const s = rowState(r);
-            return frame(r)
-              .flex()
-              .items_center()
-              .px(14)
-              .py(6)
-              .gap(12)
-              .child(icon(t, r))
-              .child(
-                h_flex()
-                  .w(220)
-                  .flex_none()
-                  .gap(6)
-                  .text_size(12)
-                  .child(div().flex_none().font_semibold().text_color(t.foreground).child(number(r)))
-                  .child(div().min_w(0).truncate().text_color(t.muted).child(title(r))),
-              )
-              .child(mini(t, r))
-              .child(div().w(200).flex_none().truncate().text_size(11.5).text_color(t[s.tone]).child(s.text))
-              .child(div().w(34).flex_none().text_size(11).text_color(t.dim).child(age(r, now)));
-          }),
-        ),
+      scrollY(
+        'board',
+        v_flex()
+          .track_scroll(p.boardScroll)
+          .children(
+            rows.map((r) => {
+              const s = rowState(r);
+              return frame(r)
+                .flex()
+                .items_center()
+                .px(14)
+                .py(6)
+                .gap(12)
+                .child(icon(t, r))
+                .child(
+                  h_flex()
+                    .w(220)
+                    .flex_none()
+                    .gap(6)
+                    .text_size(12)
+                    .child(div().flex_none().font_semibold().text_color(t.foreground).child(number(r)))
+                    .child(div().min_w(0).truncate().text_color(t.muted).child(title(r))),
+                )
+                .child(mini(t, r))
+                .child(div().w(200).flex_none().truncate().text_size(11.5).text_color(t[s.tone]).child(s.text))
+                .child(div().w(34).flex_none().text_size(11).text_color(t.dim).child(age(r, now)));
+            }),
+          ),
+      ),
     );
 }

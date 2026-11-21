@@ -244,6 +244,35 @@ export function readerPath(run, stopSel) {
   return out ?? run.attention?.review?.[0]?.path ?? null;
 }
 
+// ── the board's height (a ratio of the area under the title bar, so it follows the panel's size and zoom) ──
+
+export const BOARD_RATIO = 0.3;
+const BOARD_MAX = 0.7;
+
+const clampBoard = (px, area, min) => Math.min(Math.max(px, min), Math.max(min, area * BOARD_MAX));
+
+/** The board's height in whole pixels for a ratio of `area`: at least `min` (two rows), at most 70% of the area. */
+export function boardHeight(ratio, area, min) {
+  return Math.round(clampBoard(ratio * area, area, min));
+}
+
+/** The ratio a divider drag leaves: the board's height at the press plus how far the pointer moved, clamped. */
+export function dragBoard(startPx, dy, area, min) {
+  return clampBoard(startPx + dy, area, min) / area;
+}
+
+/** A ratio read back from storage: a number in (0, 1), else the default. */
+export function readRatio(stored) {
+  const n = Number(stored);
+  return stored != null && n > 0 && n < 1 ? n : BOARD_RATIO;
+}
+
+/** The reader's height: what the detail (`view` tall, holding `content`, of which the reader is `box`) has left over
+ *  once everything else is laid out, at least `min` (then the detail scrolls). Whole pixels. */
+export function fillHeight(view, content, box, min) {
+  return Math.round(Math.max(min, view - (content - box)));
+}
+
 // ── the cup (mods/percolator-cup carries a copy of this file) ──
 
 /** The cup's label and its theme tone: who needs you, else what runs, else the name. */

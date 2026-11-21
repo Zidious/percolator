@@ -4,7 +4,7 @@ import { div } from 'gpui-kit';
 import { v_flex, h_flex, TextView, Textarea } from 'gpui-base';
 import { terminals } from 'herdr';
 import { ago, attentionTag, terminalCommands, took } from './model.js';
-import { stepColor, link, button, own } from './ui.js';
+import { stepColor, link, button, own, scrollY } from './ui.js';
 
 const LABELS = {
   approve: ['Approve', 'ok'],
@@ -20,18 +20,21 @@ const live = (term) => Boolean(term) && terminals().some((x) => x.address === te
 const tag = (label, c) =>
   div().flex_none().px(6).py(1).rounded(4).text_size(10).font_semibold().border(1).border_color(c).text_color(c).child(label);
 
-const box = (t, id) => v_flex().id(id).flex_1().min_h(0).rounded(6).bg(t.background).border(1).border_color(t.border);
+// The reader, history and the agent tail fill what the detail has left over (p.boxH, at least a few lines; below that
+// the detail scrolls), and scroll on their own past that.
+const frame = (p, t, id) =>
+  v_flex().id(id).flex_none().h(p.boxH).rounded(6).bg(t.background).border(1).border_color(t.border);
+const box = (p, t, id, inner) => frame(p, t, `${id}-frame`).child(scrollY(id, inner));
 
 function reader(p, t) {
   const md = p.files[p.file];
   return v_flex()
-    .flex_1()
-    .min_h(90)
+    .flex_none()
     .gap(4)
     .child(div().text_size(11).text_color(t.muted).child(p.file.split(/[\\/]/).pop()))
     .child(
       own(
-        box(t, 'reader')
+        frame(p, t, 'reader')
           .overflow_y_scrollbar()
           .px(14)
           .py(10)
@@ -42,16 +45,15 @@ function reader(p, t) {
 }
 
 /** Steps that ran, newest first. */
-function history(t, r) {
+function history(p, t, r) {
   const ran = (r.steps ?? []).filter((s) => s.status !== 'pending').reverse();
   const now = Date.now();
   return v_flex()
-    .flex_1()
-    .min_h(0)
+    .flex_none()
     .gap(4)
     .child(div().text_size(11).text_color(t.muted).child('History'))
     .child(
-      own(box(t, 'history').overflow_y_scrollbar().py(4)).children(
+      own(box(p, t, 'history', v_flex().py(4).children(
         ran.length === 0
           ? [div().px(12).py(3).text_size(11.5).text_color(t.dim).child('Nothing has run yet.')]
           : ran.map((s) =>
@@ -67,19 +69,28 @@ function history(t, r) {
                 .child(div().w(80).flex_none().text_color(t.dim).child(s.attempts > 1 ? `${s.attempts} attempts` : ''))
                 .child(div().flex_1().text_color(t.dim).child(took(s, now))),
             ),
-      ),
+      ))),
     );
 }
 
-function tail(t, r, text) {
+function tail(p, t, r, text) {
   return v_flex()
-    .flex_1()
-    .min_h(0)
+    .flex_none()
     .gap(4)
     .child(div().text_size(11).text_color(t.muted).child(`${r.currentStep} agent · last lines`))
     .child(
-      own(box(t, 'tail').p(10).text_size(11).font_family('monospace').text_color(t.muted)).children(
-        text.split('\n').map((line) => div().whitespace_nowrap().child(line || ' ')),
+      own(
+        box(
+          p,
+          t,
+          'tail',
+          v_flex()
+            .p(10)
+            .text_size(11)
+            .font_family('monospace')
+            .text_color(t.muted)
+            .children(text.split('\n').map((line) => div().whitespace_nowrap().child(line || ' '))),
+        ),
       ),
     );
 }
@@ -134,7 +145,7 @@ function commandsSection(p, t, cmds, narrow) {
             p.cmdsOpen = !p.cmdsOpen;
             cx.notify();
           })
-          .child(div().w(10).flex_none().child(open ? '⌄' : '›'))
+          .child(div().w(12).flex_none().text_size(12).child(open ? '▾' : '▸'))
           .child('Terminal commands'),
       ),
     )
@@ -215,10 +226,10 @@ export function turn(p, t, r, narrow) {
   const body = p.file
     ? reader(p, t)
     : a
-      ? history(t, r)
+      ? history(p, t, r)
       : tailText
-        ? tail(t, r, tailText)
-        : history(t, r);
+        ? tail(p, t, r, tailText)
+        : history(p, t, r);
   const cmds = terminalCommands(r);
   const say = p.said ? div().text_size(11).text_color(t.accent).child(p.said) : null;
   const buttons = h_flex()
@@ -235,8 +246,7 @@ export function turn(p, t, r, narrow) {
     )
     .when(Boolean(a?.commentUrl), (el) => el.child(button(t, 'github', 'GitHub ↗', '', (_e, cx) => cx.open_url(a.commentUrl))));
   return v_flex()
-    .flex_1()
-    .min_h(0)
+    .flex_none()
     .px(16)
     .pt(12)
     .pb(12)
