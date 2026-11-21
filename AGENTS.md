@@ -72,7 +72,8 @@ Detailed behaviour lives in the code; read the module before changing it.
 | `src/validate.ts` | full config → graph validation pipeline |
 | `templates/` | recommended config written by `perc init` |
 | `skills/` | agent-agnostic skills shipped in the package |
-| `herdr/` | the Herdr side, in herdr.dev's layout listing: `mods/percolator/` (the panel mod; plain JS, no build; `model.js` is its pure logic, typed by `model.d.ts`; `source.js` runs `perc status --json`), `mods/percolator-cup/` (the status-bar cup: toggles the panel, posts notices; Herdr refuses imports across mod folders, so it carries copies of the panel's `model.js`, `mark.js`, `source.js`, kept equal by `tests/herdr/cup.test.ts`), `layouts/percolator.json` (Herdr's shipped `main` plus the `percolator-panel` side block and the cup in the status row), `fixtures/` (a sample `perc status --json` with review files; paths relative to the fixture) |
+| `herdr/` | the Herdr side, in herdr.dev's layout listing: `mods/percolator/` (the panel mod; plain JS, no build; `model.js` is its pure logic, typed by `model.d.ts`; `source.js` runs `perc status --json`), `mods/percolator-cup/` (the status-bar cup: toggles the panel, posts notices; Herdr refuses imports across mod folders, so it carries copies of the panel's `model.js`, `mark.js`, `source.js`, kept equal by `tests/herdr/cup.test.ts`), `layouts/percolator.json` (Herdr's shipped `main` plus the `percolator-panel` side block and the cup in the status row), `fixtures/` (a sample `perc status --json` with review files; paths relative to the fixture), `RECIPE.md` (Herdr's listing brief) and `preview.png` (its screenshot) |
+| `assets/` | the icon: `mark-on-dark.svg`, `mark-on-light.svg` (transparent, for the README `<picture>`), `logo-dark.svg`, `logo-light.svg` (square, for avatars); repo only, not in the npm package |
 | `tests/helpers/` | fakes and fixtures builders (see Testing conventions) |
 | `tests/herdr/` | covers `src/herdr/`, the panel model `herdr/mods/percolator/model.js` (pure, no `herdr` imports) and the cup's copies |
 | `tests/smoke/` | manual smoke tests against the real `hc`/`gh`; never run by `pnpm test` |
@@ -82,6 +83,7 @@ Detailed behaviour lives in the code; read the module before changing it.
 - **Testing:** never spawn the real `hc`, `herdr-app` or `gh` in tests: use `FakeHc`, `FakeHerdrApp`, `FakeGh`, `ExecRecorder` (`tests/helpers/`). Unit tests use `FakeGit`; real git only through `makeRepo()` / `setupRunEnv()`. Engine tests script outcomes with `FakeRuntime`.
 - **No prompts:** git and gh always run with prompt-free env (`gitEnv`, the gh client's env); credentials in URLs are redacted from errors.
 - **Errors:** one line, name the file or run, and say what to do next; tests assert the exact text.
+- **Panel contract:** the `perc status --json` contract and `herdr/mods/percolator/model.js` (its only reader) change together; the cup's copies of `model.js`, `mark.js` and `source.js` are re-copied from the panel's, and `tests/herdr/cup.test.ts` keeps them equal.
 - **Resume-safe:** run ids, terminal names and posted comments are deterministic or marked so a resume finds them instead of duplicating them.
 
 ## Design decisions to keep
