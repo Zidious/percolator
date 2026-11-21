@@ -431,3 +431,38 @@ for (const self of ['driver', 'step'] as const) {
     }
   });
 }
+
+test('deleteRun removes a worktree whose .git is gone, and planDelete shows it as unknown', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await fs.rm(path.join(m.worktree, '.git'));
+    const plan = await planDelete(m.runId, e.deps);
+    assert.deepEqual(plan.worktree, { path: m.worktree, state: 'unknown' });
+    assert.equal(await deleteRun(plan, e.deps), line(m, 0));
+    await assertDeleted(e, m);
+    assert.doesNotMatch(await git(e.root, 'worktree', 'list', '--porcelain'), new RegExp(m.runId));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('deleteRun removes the worktree dir when the repo is no longer a git repo', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const plain = path.join(e.home, 'plain');
+    const worktree = path.join(plain, '.worktrees', m.runId);
+    await fs.mkdir(worktree, { recursive: true });
+    await fs.writeFile(path.join(worktree, 'left.txt'), 'x');
+    await fs.writeFile(path.join(e.dir(m), 'run.json'), JSON.stringify({ ...m, repoRoot: plain, worktree }));
+    assert.equal(
+      await del(e, m),
+      `deleted run ${m.runId}: 0 terminal(s), worktree ${worktree}; repo ${plain} is not a git repo, nothing to prune; kept branch ${m.branch}`,
+    );
+    assert.equal(await exists(worktree), false);
+    assert.equal(await exists(e.dir(m)), false);
+  } finally {
+    await e.cleanup();
+  }
+});

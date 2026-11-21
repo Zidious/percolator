@@ -108,16 +108,13 @@ async function ownDriver(meta: RunMeta, deps: DriverDeps): Promise<Terminal | un
   return t?.state === 'live' && t.labels['percolator.run'] === meta.runId ? t : undefined;
 }
 
-async function removeHeld(meta: RunMeta, deps: DriverDeps, o: DeleteOptions): Promise<void> {
-  const remove = o.removeWorktree ?? removeWorktree;
+/** Runs `action`, retrying while a file in the worktree is still held open. */
+async function retryHeld(meta: RunMeta, deps: DriverDeps, o: DeleteOptions, action: () => Promise<unknown>): Promise<void> {
   const sleep = deps.sleep ?? ((ms: number) => delay(ms));
   const delays = o.retryDelaysMs ?? RETRY_DELAYS_MS;
   for (let i = 0; ; i++) {
     try {
-      // a dir git no longer lists (its entry pruned, or .git gone) is still the run's: remove it too
-      if (!(await remove({ repoRoot: meta.repoRoot, dir: meta.worktree, force: true }))) {
-        await fs.rm(meta.worktree, { recursive: true, force: true });
-      }
+      await action();
       return;
     } catch (err) {
       const message = (err as Error).message;
@@ -129,6 +126,16 @@ async function removeHeld(meta: RunMeta, deps: DriverDeps, o: DeleteOptions): Pr
       }
       await sleep(delays[i]!);
     }
+  }
+}
+
+/** Drops stale worktree entries; the note to add to the report when the repo can't be pruned. */
+async function prune(repoRoot: string): Promise<string> {
+  try {
+    await runGit(['worktree', 'prune'], repoRoot);
+    return '';
+  } catch {
+    return `; repo ${repoRoot} is not a git repo, nothing to prune`;
   }
 }
 
@@ -170,17 +177,20 @@ export async function deleteRun(plan: DeletePlan, deps: DriverDeps, o: DeleteOpt
     line = `deleted run ${id}: ${n} terminal(s); repo ${meta.repoRoot} not found, worktree ${meta.worktree} left as is; kept branch ${meta.branch}`;
   } else if (!(await exists(meta.worktree))) {
     // removed by hand leaves a stale entry; after perc clean prune finds nothing
-    let pruned = true;
-    try {
-      await runGit(['worktree', 'prune'], meta.repoRoot);
-    } catch {
-      pruned = false;
-    }
-    const note = pruned ? '' : `; repo ${meta.repoRoot} is not a git repo, nothing to prune`;
-    line = `deleted run ${id}: ${n} terminal(s), worktree already removed${note}; kept branch ${meta.branch}`;
-  } else {
-    await removeHeld(meta, deps, o);
+    line = `deleted run ${id}: ${n} terminal(s), worktree already removed${await prune(meta.repoRoot)}; kept branch ${meta.branch}`;
+  } else if ((await exists(path.join(meta.repoRoot, '.git'))) && (await exists(path.join(meta.worktree, '.git')))) {
+    const remove = o.removeWorktree ?? removeWorktree;
+    await retryHeld(meta, deps, o, async () => {
+      // a dir git no longer lists (its entry pruned) is still the run's: remove it too
+      if (!(await remove({ repoRoot: meta.repoRoot, dir: meta.worktree, force: true }))) {
+        await fs.rm(meta.worktree, { recursive: true, force: true });
+      }
+    });
     line = `deleted run ${id}: ${n} terminal(s), worktree ${meta.worktree}; kept branch ${meta.branch}`;
+  } else {
+    // git can't remove a dir whose .git is gone, or one in a repo that is no longer a git repo
+    await retryHeld(meta, deps, o, () => fs.rm(meta.worktree, { recursive: true, force: true }));
+    line = `deleted run ${id}: ${n} terminal(s), worktree ${meta.worktree}${await prune(meta.repoRoot)}; kept branch ${meta.branch}`;
   }
 
   await fs.rm(plan.dir, { recursive: true, force: true, maxRetries: 5 });
