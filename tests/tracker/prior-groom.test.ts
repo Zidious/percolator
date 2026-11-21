@@ -162,3 +162,30 @@ test('a truncated edited ticket is skipped, and hides an older groom', () => {
   assert.equal(findPriorGroom([c('bot', edited('r1', cut, {}))], ['bot']), undefined);
   assert.equal(findPriorGroom([c('bot', gate('r0', 'old')), c('bot', edited('r1', cut, {}))], ['bot']), undefined);
 });
+
+test('an approve from round 1 does not decide an edited comment now at a later round', () => {
+  // round 1: alice rejects (the gate takes it), bob approves too late; the run dies waiting at round 2
+  const g = c('bot', edited('r1', 'round two ticket', { round: 2, rejected: [{ round: 1, by: 'alice', feedback: 'x' }] }));
+  const bob = c('bob', '/percolator approve');
+  assert.deepEqual(findPriorGroom([g, c('alice', '/percolator reject x'), bob], ['alice', 'bob']), {
+    text: 'round two ticket',
+    gateUrl: g.url,
+  });
+  const unrejected = c('bot', edited('r1', 'round two ticket', { round: 2 }));
+  assert.deepEqual(findPriorGroom([unrejected, c('bob', '/percolator approve')], ['bob']), {
+    text: 'round two ticket',
+    gateUrl: unrejected.url,
+  });
+});
+
+test('an edited comment takes its groomed ticket from its outputs, not its rejection history', () => {
+  const g = c('bot', renderGateComment({
+    runId: 'r1',
+    stepId: 'approve-groom',
+    round: 1,
+    outputs: '### other\n\nnot a ticket',
+    rejected: [{ round: 1, by: 'a', feedback: 'x\n### groomed_ticket' }],
+    approvedBy: 'gabe',
+  }));
+  assert.equal(findPriorGroom([g], ['gabe']), undefined);
+});

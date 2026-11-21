@@ -38,17 +38,17 @@ function groomedText(body: string): string | undefined {
  * on it: the first `/percolator approve|reject` by an approver after it, or the gate's own note of a local
  * decision. A decision posted after a newer gate comment belongs to that newer one. A gate comment edited in
  * place records its own decision (approval line, rejected round); a later `/percolator approve` is only a
- * fallback for a gate that died before recording, and a later reject is already in its history.
+ * fallback for a round-1 gate that died before recording, and a later reject is already in its history.
  */
 export function findPriorGroom(comments: readonly IssueComment[], approvers: readonly string[]): PriorGroom | undefined {
   const allowed = new Set(approvers.map((a) => a.toLowerCase()));
-  let current: (PriorGroom & { run: string; round: string; edited: boolean }) | undefined;
+  let current: (PriorGroom & { run: string; round: string; edited: boolean; lateApprove: boolean }) | undefined;
   for (const c of comments) {
     const body = c.body.replace(/\r\n/g, '\n');
     const gc = parseGateComment(body);
     if (gc) {
       if (gc.stepId !== 'approve-groom') continue;
-      const text = groomedText(body);
+      const text = groomedText(gc.outputs);
       if (text === undefined) {
         current = undefined;
         continue;
@@ -60,13 +60,15 @@ export function findPriorGroom(comments: readonly IssueComment[], approvers: rea
           : rejected
             ? { decision: 'reject', by: rejected.by, url: c.url, ...(rejected.feedback ? { feedback: rejected.feedback } : {}) }
             : undefined;
-      current = { text, gateUrl: c.url, run: gc.runId, round: String(gc.round), edited: true, ...(decision ? { decision } : {}) };
+      // an edited comment keeps its round-1 createdAt: only in round 1 is a later approve this round's
+      const lateApprove = gc.round === 1 && gc.rejected.length === 0;
+      current = { text, gateUrl: c.url, run: gc.runId, round: String(gc.round), edited: true, lateApprove, ...(decision ? { decision } : {}) };
       continue;
     }
     const g = GROOM_GATE.exec(body);
     if (g) {
       const text = groomedText(body);
-      current = text === undefined ? undefined : { text, gateUrl: c.url, run: g[1]!, round: g[2]!, edited: false };
+      current = text === undefined ? undefined : { text, gateUrl: c.url, run: g[1]!, round: g[2]!, edited: false, lateApprove: true };
       continue;
     }
     if (current === undefined || current.decision !== undefined) continue;
@@ -84,11 +86,11 @@ export function findPriorGroom(comments: readonly IssueComment[], approvers: rea
     }
     if (!allowed.has(c.author.toLowerCase())) continue;
     const cmd = parseCommand(body);
-    if (cmd && !(current.edited && cmd.decision === 'reject')) {
+    if (cmd && !(current.edited && (cmd.decision === 'reject' || !current.lateApprove))) {
       current.decision = { decision: cmd.decision, by: c.author, url: c.url, ...(cmd.feedback ? { feedback: cmd.feedback } : {}) };
     }
   }
   if (current === undefined) return undefined;
-  const { run: _run, round: _round, edited: _edited, ...prior } = current;
+  const { run: _run, round: _round, edited: _edited, lateApprove: _lateApprove, ...prior } = current;
   return prior;
 }
