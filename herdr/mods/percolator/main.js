@@ -62,7 +62,7 @@ const BLOCK = 'percolator-panel';
 const WINDOW = 'percolator.window'; // shared: the open window's overlay id, else null
 const RATIO = 'percolator.boardRatio'; // shared: the board's height as a ratio of the area under the title bar
 const OLD_RATIO = 'board.ratio'; // localStorage, per copy: read when nothing is shared yet
-const MIN_ROWS = { narrow: 106, wide: 92 }; // two rows of the board, in design px
+const MIN_ROWS = { narrow: 106, wide: 72 }; // two rows of the board, in design px
 const MIN_BOX = 120; // the reader's least height; below it the detail scrolls instead
 const zoom = () => Number(settings()?.zoom) || 1;
 const folderOf = (file) => file.replace(/[\\/][^\\/]*$/, '');

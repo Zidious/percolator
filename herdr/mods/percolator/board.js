@@ -1,20 +1,21 @@
-// The board: one row per run (needing you first, then running, then newest), with a mini train and a state line.
+// The board: one row per run (needing you first, then running, then newest), with its state line; the train below shows the pipeline.
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { STAGES, ago, rowState, ticketTitle } from './model.js';
+import { ago, rowState, ticketTitle } from './model.js';
 import { mark } from './mark.js';
-import { SPIN, stepColor, own, scrollY } from './ui.js';
+import { SPIN, own, scrollY } from './ui.js';
 
 const title = (r) => (r.status === 'unreadable' ? r.id : ticketTitle(r));
 const number = (r) => (r.status === 'unreadable' ? '?' : `#${r.ticket.number}`);
 const age = (r, now) => (r.status === 'unreadable' ? '' : ago(r.attention?.since ?? r.createdAt, now));
 
-// the state text truncates alone; the round (when there is one) is a separate child, so it is never cut
+// the state text truncates alone; the round (when there is one) is a separate child, so it is never cut.
+// `width` fixes the cell (wide: states line up); null lets it take the rest of the line (narrow).
 function stateCell(s, width, size, t) {
   return h_flex()
-    .w(width)
-    .flex_none()
+    .when(width !== null, (el) => el.w(width).flex_none())
+    .when(width === null, (el) => el.flex_1().min_w(0))
     .gap(4)
     .text_size(size)
     .text_color(t[s.tone])
@@ -33,29 +34,6 @@ function icon(t, r) {
   if (r.status === 'failed') return box.text_color(t.blocked).child('✕');
   if (r.status === 'unreadable') return box.text_color(t.muted).child('!');
   return box.text_color(t.dim).child('·');
-}
-
-/** Six equal columns, one segment per step in each stage, coloured by status. */
-function mini(t, r) {
-  const steps = r.steps ?? [];
-  const stageOf = (s) => (s.stage === 'before-all' ? 'intake' : s.stage === 'after-all' ? 'deliver' : s.stage);
-  return h_flex()
-    .flex_1()
-    .min_w(0)
-    .gap(5)
-    .children(
-      STAGES.map((stage) =>
-        h_flex()
-          .flex_1()
-          .h(6)
-          .gap(1)
-          .children(
-            steps
-              .filter((st) => stageOf(st) === stage)
-              .map((st) => div().flex_1().h_full().rounded(2).bg(stepColor(t, st.status))),
-          ),
-      ),
-    );
 }
 
 function empty(t, filter) {
@@ -120,39 +98,14 @@ export function board(p, t, narrow, rows) {
                 .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(title(r)))
                 .child(div().flex_none().text_size(10.5).text_color(t.dim).child(age(r, now))),
             )
-            .child(
-              h_flex()
-                .pl(20)
-                .gap(8)
-                .items_center()
-                .child(mini(t, r))
-                .child(stateCell(s, 130, 10.5, t)),
-            );
+            .child(h_flex().pl(20).items_center().child(stateCell(s, null, 10.5, t)));
         }),
       );
     return v_flex().min_h(0).child(scrollY('board', list));
   }
-  const head = h_flex()
-    .px(14)
-    .pb(3)
-    .gap(12)
-    .text_size(9)
-    .text_color(t.dim)
-    .child(div().w(14).flex_none())
-    .child(div().w(220).flex_none())
-    .child(
-      h_flex()
-        .flex_1()
-        .gap(5)
-        .children(STAGES.map((s) => div().flex_1().min_w(0).text_center().truncate().child(s.toUpperCase()))),
-    )
-    .child(div().w(200).flex_none())
-    .child(div().w(34).flex_none());
   return v_flex()
     .min_h(0)
-    .pt(8)
-    .pb(4)
-    .child(head.flex_none())
+    .py(4)
     .child(
       scrollY(
         'board',
@@ -170,15 +123,14 @@ export function board(p, t, narrow, rows) {
                 .child(icon(t, r))
                 .child(
                   h_flex()
-                    .w(220)
-                    .flex_none()
+                    .flex_1()
+                    .min_w(0)
                     .gap(6)
                     .text_size(12)
                     .child(div().flex_none().font_semibold().text_color(t.foreground).child(number(r)))
                     .child(div().min_w(0).truncate().text_color(t.muted).child(title(r))),
                 )
-                .child(mini(t, r))
-                .child(stateCell(s, 200, 11.5, t))
+                .child(stateCell(s, 240, 11.5, t))
                 .child(div().w(34).flex_none().text_size(11).text_color(t.dim).child(age(r, now)));
             }),
           ),
