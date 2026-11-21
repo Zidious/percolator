@@ -1,0 +1,163 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+import { loadState } from '../engine/state.ts';
+import type { RunState } from '../engine/state.ts';
+import { runGit } from '../grounds/git.ts';
+import { sweepTerminals } from '../runtime/herdr-runtime.ts';
+import { runDir } from '../workspace/run-dir.ts';
+import { WORKTREES_DIR, removeWorktree, worktreeDirty } from '../workspace/worktree.ts';
+import { liveness } from './drive.ts';
+import { lockIsLive, readDriverLock } from './lock.ts';
+import type { DriverLock } from './lock.ts';
+import { readRunMeta } from './meta.ts';
+import type { RunListing, RunMeta } from './meta.ts';
+import type { DriverDeps } from './prepare.ts';
+import { driverLiveness, runStatusJson } from './status.ts';
+import type { RunStatusJson } from './status.ts';
+
+export type DeletePlan = {
+  id: string;
+  dir: string;
+  /** absent when `run.json` can't be read */
+  meta?: RunMeta;
+  /** `unreadable` when either `run.json` or the state can't be read */
+  status: RunStatusJson['status'];
+  ticket?: { ref: string; title?: string };
+  worktree?: { path: string; state: 'dirty' | 'clean' | 'gone' | 'unknown' };
+};
+
+/** Test seams: the worktree removal and the waits between its retries. */
+export type DeleteOptions = { removeWorktree?: typeof removeWorktree; retryDelaysMs?: number[] };
+
+const RETRY_DELAYS_MS = [200, 400, 800, 1600];
+// a file still held open (an agent process still exiting, mostly on Windows)
+const HELD = /Permission denied|resource busy|EBUSY|EPERM|being used by another process|Directory not empty|Invalid argument/i;
+
+const exists = (p: string) => fs.stat(p).then(() => true, () => false);
+
+export function isFinished(status: RunStatusJson['status']): boolean {
+  return status === 'completed' || status === 'failed';
+}
+
+async function worktreeState(dir: string): Promise<'dirty' | 'clean' | 'gone' | 'unknown'> {
+  try {
+    const dirty = await worktreeDirty(dir);
+    return dirty === undefined ? 'gone' : dirty ? 'dirty' : 'clean';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** What `deleteRun` will remove; throws when there is no such run dir. */
+export async function planDelete(runId: string, deps: DriverDeps): Promise<DeletePlan> {
+  const dir = runDir(deps.home, runId);
+  if (!(await exists(dir))) throw new Error(`no run ${runId}; perc status lists runs`);
+  let listing: RunListing = { dir };
+  let meta: RunMeta | undefined;
+  try {
+    meta = await readRunMeta(dir);
+    listing = { dir, meta };
+    if (await exists(path.join(dir, 'state.json'))) {
+      let state: RunState;
+      try {
+        state = await loadState(dir);
+        listing = { dir, meta, state };
+      } catch (err) {
+        listing = { dir, meta, error: (err as Error).message };
+      }
+    }
+  } catch (err) {
+    listing = { dir, error: (err as Error).message };
+  }
+  const run = await runStatusJson(listing, deps);
+  const ticket =
+    run.status !== 'unreadable'
+      ? { ref: run.ticket.ref, ...(run.ticket.title !== undefined ? { title: run.ticket.title } : {}) }
+      : meta !== undefined
+        ? { ref: meta.ticket }
+        : undefined;
+  return {
+    id: runId,
+    dir,
+    ...(meta !== undefined ? { meta } : {}),
+    status: run.status,
+    ...(ticket !== undefined ? { ticket } : {}),
+    ...(meta !== undefined ? { worktree: { path: meta.worktree, state: await worktreeState(meta.worktree) } } : {}),
+  };
+}
+
+function drivenBy(id: string, lock: DriverLock): string {
+  if (lock.host === os.hostname()) {
+    return `run ${id} is being driven by process ${lock.pid}; stop it (Ctrl-C) and run perc delete ${id} again`;
+  }
+  return `run ${id} is being driven by process ${lock.pid} on ${lock.host}; stop it there and run perc delete ${id} again`;
+}
+
+/** A live `driver.json` lock with no live driver terminal: a foreground drive or one on another host. */
+async function liveLockWithoutTerminal(plan: DeletePlan, deps: DriverDeps): Promise<DriverLock | undefined> {
+  if (plan.meta !== undefined) return (await driverLiveness(plan.dir, plan.meta, deps)).lock;
+  const lock = await readDriverLock(plan.dir);
+  return lock !== undefined && lockIsLive(lock, liveness(deps)) ? lock : undefined;
+}
+
+/** Kills and removes the live driver terminal, only when it is labelled for this run. */
+async function stopDriver(meta: RunMeta, deps: DriverDeps): Promise<boolean> {
+  const t = await deps.hc.get(meta.driver);
+  if (t?.state !== 'live' || t.labels['percolator.run'] !== meta.runId) return false;
+  await deps.hc.kill(meta.driver);
+  await deps.hc.rm(meta.driver);
+  return true;
+}
+
+async function removeHeld(meta: RunMeta, deps: DriverDeps, o: DeleteOptions): Promise<void> {
+  const remove = o.removeWorktree ?? removeWorktree;
+  const sleep = deps.sleep ?? ((ms: number) => delay(ms));
+  const delays = o.retryDelaysMs ?? RETRY_DELAYS_MS;
+  for (let i = 0; ; i++) {
+    try {
+      await remove({ repoRoot: meta.repoRoot, dir: meta.worktree, force: true });
+      return;
+    } catch (err) {
+      const message = (err as Error).message;
+      if (!HELD.test(message)) throw new Error(`run ${meta.runId}: ${message}`);
+      if (i >= delays.length) {
+        throw new Error(
+          `run ${meta.runId}: worktree ${meta.worktree} is still in use; close what holds it and run perc delete ${meta.runId} again`,
+        );
+      }
+      await sleep(delays[i]!);
+    }
+  }
+}
+
+/**
+ * Removes the run: driver terminal, other labelled terminals, worktree (forced), then the run dir last,
+ * so an interrupted delete is still listed and a re-run finishes it. Keeps the branch. Returns the one-line report.
+ */
+export async function deleteRun(plan: DeletePlan, deps: DriverDeps, o: DeleteOptions = {}): Promise<string> {
+  const { id, meta } = plan;
+  const lock = await liveLockWithoutTerminal(plan, deps);
+  if (lock !== undefined) throw new Error(drivenBy(id, lock));
+
+  const driver = meta !== undefined && (await stopDriver(meta, deps)) ? 1 : 0;
+  const n = driver + (await sweepTerminals(deps.hc, id)).length;
+
+  let line: string;
+  if (meta === undefined) {
+    line = `deleted run ${id}: ${n} terminal(s); its worktree is unknown, check <repo>/${WORKTREES_DIR}/${id}; kept branch percolator/${id}`;
+  } else if (!(await exists(meta.repoRoot))) {
+    line = `deleted run ${id}: ${n} terminal(s); repo ${meta.repoRoot} not found, worktree ${meta.worktree} left as is; kept branch ${meta.branch}`;
+  } else if (!(await exists(meta.worktree))) {
+    // removed by hand leaves a stale entry; after perc clean prune finds nothing
+    await runGit(['worktree', 'prune'], meta.repoRoot);
+    line = `deleted run ${id}: ${n} terminal(s), worktree already removed; kept branch ${meta.branch}`;
+  } else {
+    await removeHeld(meta, deps, o);
+    line = `deleted run ${id}: ${n} terminal(s), worktree ${meta.worktree}; kept branch ${meta.branch}`;
+  }
+
+  await fs.rm(plan.dir, { recursive: true, force: true, maxRetries: 5 });
+  return line;
+}
