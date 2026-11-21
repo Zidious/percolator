@@ -9,6 +9,8 @@ export type Terminal = {
   status: AgentStatus | null;
   exitCode: number | null;
   turn: number;
+  /** the program's working directory, when hc reports one */
+  cwd?: string;
   /** `{}` when hc omits it (`ls` does not return labels; `get` does) */
   labels: Record<string, string>;
 };
@@ -77,6 +79,7 @@ function toTerminal(j: Record<string, unknown>): Terminal {
     status: toStatus(j['status']),
     exitCode: (j['exit_code'] ?? null) as number | null,
     turn: Number(j['turn'] ?? 0),
+    ...(typeof j['cwd'] === 'string' ? { cwd: j['cwd'] } : {}),
     labels,
   };
 }

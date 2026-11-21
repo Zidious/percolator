@@ -80,7 +80,7 @@ export class FakeHc implements Hc {
     const want = Object.entries(o?.labels ?? {});
     return [...this.terminals.values()]
       .filter((t) => (o?.all || t.state === 'live') && want.every(([k, v]) => t.labels[k] === v))
-      .map((t) => ({ address: t.address, name: t.name, state: t.state, status: t.status, exitCode: t.exitCode, turn: t.turn, labels: { ...t.labels } }));
+      .map((t) => ({ address: t.address, name: t.name, state: t.state, status: t.status, exitCode: t.exitCode, turn: t.turn, labels: { ...t.labels }, ...(t.cwd ? { cwd: t.cwd } : {}) }));
   }
 
   async wait(name: string, o?: { timeoutS?: number }): Promise<WaitResult> {
@@ -102,13 +102,18 @@ export class FakeHc implements Hc {
 
   async kill(name: string): Promise<void> {
     this.calls.push(['kill', name]);
-    const t = this.terminals.get(name);
+    const t = this.#find(name);
     if (t) t.state = 'finished';
   }
 
   async rm(name: string): Promise<void> {
     this.calls.push(['rm', name]);
-    this.terminals.delete(name);
+    this.terminals.delete(this.#find(name)?.name ?? name);
+  }
+
+  /** By name, or by address like the real hc. */
+  #find(t: string): FakeTerminal | undefined {
+    return this.terminals.get(t) ?? [...this.terminals.values()].find((x) => x.address === t);
   }
 
   #must(sub: string, name: string): FakeTerminal {

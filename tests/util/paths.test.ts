@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { test } from 'node:test';
-import { expandHome, foldCase, samePath, toPosix } from '../../src/util/paths.ts';
+import { expandHome, foldCase, isInside, samePath, toPosix } from '../../src/util/paths.ts';
 
 test('expandHome handles both separators', () => {
   assert.equal(expandHome('~/dev/x', '/h'), path.resolve('/h', 'dev/x'));
@@ -29,4 +29,17 @@ test('foldCase lower-cases on win32 and darwin only', () => {
   assert.equal(foldCase('/A/B', 'win32'), '/a/b');
   assert.equal(foldCase('/A/B', 'darwin'), '/a/b');
   assert.equal(foldCase('/A/B', 'linux'), '/A/B');
+});
+
+test('isInside is true for the dir itself and anything under it, never a sibling sharing its prefix', () => {
+  const root = path.resolve('repo', '.worktrees', 'r1');
+  assert.equal(isInside(root, root), true);
+  assert.equal(isInside(path.join(root, 'src', 'a'), root), true);
+  assert.equal(isInside(`${root}-other`, root), false);
+  assert.equal(isInside(path.resolve('repo'), root), false);
+  assert.equal(isInside(`${root}${path.sep}`, root), true);
+});
+
+test('isInside ignores case and slash style on win32', { skip: process.platform !== 'win32' }, () => {
+  assert.equal(isInside('C:/Repo/.worktrees/R1/src', 'c:\\repo\\.worktrees\\r1'), true);
 });

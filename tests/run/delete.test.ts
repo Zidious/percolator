@@ -312,6 +312,41 @@ test('deleteRun never touches a terminal named like the driver without the run l
   }
 });
 
+// a run's Herdr space starts a shell in the worktree that carries no percolator label; on Windows it holds the folder
+test('deleteRun ends live terminals inside the worktree, and only those', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const shell = e.deps.hc.add({ name: 'space-shell', cwd: m.worktree, labels: { 'herdr.space': 's1' } });
+    const deeper = e.deps.hc.add({ name: 'editor', cwd: path.join(m.worktree, 'src') });
+    e.deps.hc.add({ name: 'repo-shell', cwd: e.root });
+    e.deps.hc.add({ name: 'sibling', cwd: `${m.worktree}-other` });
+    assert.equal(await del(e, m), line(m, 2));
+    for (const t of [shell, deeper]) {
+      assert.ok(e.deps.hc.calls.some((c) => c[0] === 'kill' && c[1] === t.address), `${t.name} was not ended`);
+    }
+    assert.deepEqual([...e.deps.hc.terminals.keys()], ['repo-shell', 'sibling']);
+    await assertDeleted(e, m);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('deleteRun refuses to run from a terminal inside the worktree', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    e.deps.selfTerminal = e.deps.hc.add({ name: 'space-shell', cwd: m.worktree }).address;
+    await assert.rejects(del(e, m), {
+      message: `run ${m.runId}: this terminal belongs to the run; run perc delete ${m.runId} from another terminal`,
+    });
+    assert.equal(e.deps.hc.calls.some((c) => c[0] === 'kill'), false);
+    assert.equal(await exists(e.dir(m)), true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('planDelete reports ticket, status and dirty worktree', async () => {
   const e = await setup();
   try {

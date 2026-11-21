@@ -107,7 +107,7 @@ test('cliHc.list passes label filters and --all and parses terminals', async () 
     stdout: JSON.stringify({
       terminals: [
         { address: 't1', name: 'a', state: 'live', status: 'working', turn: 2 },
-        { address: 't2', name: 'b', state: 'finished', exit_code: 0, labels: { 'percolator.run': 'r1' } },
+        { address: 't2', name: 'b', state: 'finished', exit_code: 0, labels: { 'percolator.run': 'r1' }, cwd: 'C:\\repo\\.worktrees\\r1' },
       ],
     }),
   });
@@ -118,6 +118,7 @@ test('cliHc.list passes label filters and --all and parses terminals', async () 
   assert.deepEqual(ts[0], { address: 't1', name: 'a', state: 'live', status: 'working', exitCode: null, turn: 2, labels: {} });
   assert.equal(ts[1]!.exitCode, 0);
   assert.deepEqual(ts[1]!.labels, { 'percolator.run': 'r1' });
+  assert.equal(ts[1]!.cwd, 'C:\\repo\\.worktrees\\r1');
   await hc.list();
   assert.deepEqual(rec.calls[1]!.args, ['ls', '--json']);
 });

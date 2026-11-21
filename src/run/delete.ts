@@ -7,6 +7,7 @@ import type { Terminal } from '../herdr/hc.ts';
 import type { RunState } from '../engine/state.ts';
 import { runGit } from '../grounds/git.ts';
 import { sweepTerminals } from '../runtime/herdr-runtime.ts';
+import { isInside } from '../util/paths.ts';
 import { runDir } from '../workspace/run-dir.ts';
 import { WORKTREES_DIR, removeWorktree, worktreeDirty } from '../workspace/worktree.ts';
 import { liveness } from './drive.ts';
@@ -157,8 +158,14 @@ export async function deleteRun(plan: DeletePlan, deps: DriverDeps, o: DeleteOpt
     if (lock !== undefined) throw new Error(drivenBy(id, lock));
   }
   const labelled = await herdr(deps.hc.list({ labels: { 'percolator.run': id }, all: true }));
+  // unlabelled terminals still in the worktree (the run space's own shell, ones opened there) hold it open
+  const owned = new Set([driver, ...labelled].flatMap((t) => (t !== undefined ? [t.address] : [])));
+  const inWorktree =
+    meta !== undefined
+      ? (await herdr(deps.hc.list())).filter((t) => !owned.has(t.address) && t.cwd !== undefined && isInside(t.cwd, meta.worktree))
+      : [];
   const self = deps.selfTerminal;
-  if (self !== undefined && [driver, ...labelled].some((t) => t !== undefined && (t.address === self || t.name === self))) {
+  if (self !== undefined && [driver, ...labelled, ...inWorktree].some((t) => t !== undefined && (t.address === self || t.name === self))) {
     throw new Error(`run ${id}: this terminal belongs to the run; run perc delete ${id} from another terminal`);
   }
 
@@ -169,6 +176,11 @@ export async function deleteRun(plan: DeletePlan, deps: DriverDeps, o: DeleteOpt
     n = 1;
   }
   n += (await herdr(sweepTerminals(deps.hc, id))).length;
+  for (const t of inWorktree) {
+    await herdr(deps.hc.kill(t.address));
+    await herdr(deps.hc.rm(t.address));
+    n++;
+  }
 
   let line: string;
   if (meta === undefined) {

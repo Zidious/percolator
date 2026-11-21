@@ -28,3 +28,14 @@ export function samePath(a: string, b: string): boolean {
 export function foldCase(s: string, platform: NodeJS.Platform = process.platform): string {
   return platform === 'win32' || platform === 'darwin' ? s.toLowerCase() : s;
 }
+
+/** Whether `p` is `dir` or anything under it (a sibling sharing its prefix is not), compared like `samePath`. */
+export function isInside(p: string, dir: string): boolean {
+  const norm = (s: string) => {
+    const x = toPosix(path.resolve(s)).replace(/\/$/, '');
+    return process.platform === 'win32' ? x.toLowerCase() : x;
+  };
+  const x = norm(p);
+  const d = norm(dir);
+  return x === d || x.startsWith(`${d}/`);
+}
