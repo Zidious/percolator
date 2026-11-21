@@ -261,6 +261,137 @@ test('a completed or paused run has no live attempt', async () => {
   }
 });
 
+const gateEntries = (tl: TimelineJson[]) => tl.filter((x) => x.kind === 'attempt' && x.step === 'approve-groom');
+
+test('a gate attempt carries its decision and who made it, from decision.json', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.history.push(
+        rec('intake', 1, 'pass'),
+        rec('groom', 1, 'pass'),
+        rec('approve-groom', 1, 'fail', { findings: rel('approve-groom', 1, 'findings') }),
+        rec('groom', 2, 'pass'),
+        rec('approve-groom', 2, 'pass', { approval: rel('approve-groom', 2, 'approval') }),
+      );
+    });
+    await writeJson(path.join(e.dir(m), 'steps', 'approve-groom', '1', 'decision.json'), { decision: 'reject', by: 'zidious', via: 'local', feedback: 'x' });
+    await writeJson(path.join(e.dir(m), 'steps', 'approve-groom', '2', 'decision.json'), { decision: 'approve', by: 'zidious', via: 'local' });
+    assert.deepEqual(
+      gateEntries(await timelineOf(e, m)).map((x) => x.kind === 'attempt' && x.decision),
+      [{ decision: 'reject', by: 'zidious' }, { decision: 'approve', by: 'zidious' }],
+    );
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a gate decided by a GitHub comment takes who from its approval or findings output', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.history.push(
+        rec('approve-groom', 1, 'fail', { findings: rel('approve-groom', 1, 'findings') }),
+        rec('approve-groom', 2, 'pass', { approval: rel('approve-groom', 2, 'approval') }),
+      );
+    });
+    const out = async (attempt: number, key: string, text: string) => {
+      const f = path.join(e.dir(m), rel('approve-groom', attempt, key));
+      await fs.mkdir(path.dirname(f), { recursive: true });
+      await fs.writeFile(f, text);
+    };
+    await out(2, 'approval', 'Approved by @octo via comment https://github.com/o/r/issues/5#issuecomment-9\n');
+    await out(1, 'findings', 'Rejected by @octo-cat: tighten scope\n');
+    assert.deepEqual(
+      gateEntries(await timelineOf(e, m)).map((x) => x.kind === 'attempt' && x.decision),
+      [{ decision: 'reject', by: 'octo-cat' }, { decision: 'approve', by: 'octo' }],
+    );
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a gate decision without a readable decision.json or output has no by', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.history.push(rec('approve-groom', 1, 'pass', { approval: rel('approve-groom', 1, 'approval') }));
+    });
+    const f = path.join(e.dir(m), 'steps', 'approve-groom', '1', 'decision.json');
+    await fs.mkdir(path.dirname(f), { recursive: true });
+    await fs.writeFile(f, 'not json');
+    const entry = gateEntries(await timelineOf(e, m))[0] as { decision?: unknown };
+    assert.deepEqual(entry.decision, { decision: 'approve' });
+    assert.notEqual((await e.full(m)).status, 'unreadable');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('agent attempts and escalated gate attempts carry no decision', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'approve-groom';
+      s.history.push(rec('groom', 1, 'pass'), rec('approve-groom', 1, 'escalate'));
+    });
+    const [groomEntry, gateEntry] = await timelineOf(e, m);
+    assert.equal('decision' in groomEntry!, false);
+    assert.equal('decision' in gateEntry!, false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+async function reviewLoop(e: Env, m: RunMeta, round: number): Promise<TimelineJson[]> {
+  await e.edit(m, (s) => {
+    s.currentStep = 'deliver';
+    s.rounds = { review: round };
+    s.history.push(
+      rec('implement', 1, 'pass'),
+      rec('review', 1, 'fail'),
+      rec('implement', 2, 'pass'),
+      rec('review', 2, 'fail'),
+      rec('implement', 3, 'pass'),
+      rec('review', 3, 'fail'),
+    );
+  });
+  return timelineOf(e, m);
+}
+
+test('a loop at its cap adds a cap entry right after the attempt that hit it', async () => {
+  const e = await setup();
+  try {
+    const tl = await reviewLoop(e, await e.prepare(), 3);
+    const i = tl.findIndex((x) => x.kind === 'cap');
+    assert.deepEqual(tl[i], { kind: 'cap', loop: 'review', from: 'review', to: 'implement', max: 3, at: T2 });
+    assert.deepEqual(tl[i - 1], { ...tl[i - 1], step: 'review', attempt: 3 });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a loop under its cap adds no cap entry', async () => {
+  const e = await setup();
+  try {
+    const tl = await reviewLoop(e, await e.prepare(), 2);
+    assert.equal(tl.some((x) => x.kind === 'cap'), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('gate with live driver', async () => {
   const e = await setup();
   try {
