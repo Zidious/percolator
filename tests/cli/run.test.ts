@@ -577,6 +577,7 @@ test('approve writes the decision', async () => {
     assert.equal(r.out, `approved approve-groom of run ${meta.runId}\n`);
     const d = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
     assert.equal(d.decision, 'approve');
+    assert.equal(d.by, 'perc-bot');
     assert.equal(d.via, 'local');
 
     const rej = await e.perc(['reject', meta.runId, 'tighten', 'the scope']);
@@ -585,6 +586,23 @@ test('approve writes the decision', async () => {
     const d2 = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
     assert.equal(d2.decision, 'reject');
     assert.equal(d2.feedback, 'tighten the scope');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('approve records the OS user when gh cannot say who is logged in', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const stepDir = path.join(e.dir(meta.runId), 'steps', 'approve-groom', '1');
+    await fs.mkdir(stepDir, { recursive: true });
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir, since: NOW.toISOString(), commentUrl: 'u' });
+    (e.deps.gh as FakeGh).fail('user', 'not logged in');
+    const r = await e.perc(['approve', meta.runId]);
+    assert.equal(r.code, 0, r.err);
+    const d = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
+    assert.equal(d.by, os.userInfo().username.replace(/\s+/g, '-'));
   } finally {
     await e.cleanup();
   }

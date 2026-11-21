@@ -17,7 +17,7 @@ import { launchDriver, prepareRun } from './run/prepare.ts';
 import type { DriverDeps } from './run/prepare.ts';
 import { attentionNext, driverLiveness, readAttention, runStatusJson, statusJson } from './run/status.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
-import { readWaiting, writeDecision } from './tracker/gate.ts';
+import { deciderLogin, readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
 import { isDirectRun } from './util/entry.ts';
 import { validate } from './validate.ts';
@@ -274,7 +274,11 @@ async function runDecide(decision: 'approve' | 'reject', args: string[], deps: D
   }
   const dir = runDir(deps.home, runId);
   await readRunMeta(dir);
-  const w = await writeDecision(dir, { decision, ...(feedback !== undefined ? { feedback } : {}) });
+  const w = await writeDecision(dir, {
+    decision,
+    ...(feedback !== undefined ? { feedback } : {}),
+    by: await deciderLogin(deps.gh),
+  });
   deps.out(`${decision === 'approve' ? 'approved' : 'rejected'} ${w.stepId} of run ${runId}`);
   return 0;
 }

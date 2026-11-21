@@ -6,7 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { RunContext } from '../../src/engine/runtime.ts';
 import type { Step } from '../../src/graph/build.ts';
-import { githubGate, readWaiting, writeDecision } from '../../src/tracker/gate.ts';
+import { deciderLogin, githubGate, readWaiting, writeDecision } from '../../src/tracker/gate.ts';
 import { decisionNote } from '../../src/tracker/prior-groom.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 
@@ -216,7 +216,7 @@ test('a local decision wins without the tracker', async () => {
   try {
     e.onSleep.fn = async (n) => {
       if (n === 1) {
-        const w = await writeDecision(e.runDir, { decision: 'approve' });
+        const w = await writeDecision(e.runDir, { decision: 'approve', by: 'alice' });
         assert.equal(w.stepId, 'approve-groom');
       }
     };
@@ -224,16 +224,16 @@ test('a local decision wins without the tracker', async () => {
     const out = await gate(e.step, e.ctx, e.io);
     assert.equal(out.status, 'pass');
     const d = JSON.parse(await fsp.readFile(path.join(e.io.stepDir, 'decision.json'), 'utf8'));
-    assert.deepEqual(d, { decision: 'approve', by: os.userInfo().username, via: 'local' });
+    assert.deepEqual(d, { decision: 'approve', by: 'alice', via: 'local' });
     assert.equal(
       await fsp.readFile(path.join(e.io.outputsDir, 'approval.md'), 'utf8'),
-      `Approved by @${os.userInfo().username} via perc approve.\n`,
+      'Approved by @alice via perc approve.\n',
     );
     // the issue records the local decision, so a later run can tell this groomed ticket was approved
     assert.equal(e.gh.bodies.length, 2);
     assert.equal(
       e.gh.bodies[1],
-      decisionNote({ runId: 'r1', stepId: 'approve-groom', round: 1, decision: 'approve', by: os.userInfo().username }),
+      decisionNote({ runId: 'r1', stepId: 'approve-groom', round: 1, decision: 'approve', by: 'alice' }),
     );
   } finally {
     await rm(e.runDir);
@@ -243,11 +243,11 @@ test('a local decision wins without the tracker', async () => {
 test('a local decision already noted on the issue is not noted again', async () => {
   const e = await setup();
   try {
-    const by = os.userInfo().username;
+    const by = OWNER;
     const note = decisionNote({ runId: 'r1', stepId: 'approve-groom', round: 1, decision: 'reject', by, feedback: 'split it' });
     e.onSleep.fn = async (n) => {
       if (n === 1) {
-        await writeDecision(e.runDir, { decision: 'reject', feedback: 'split it' });
+        await writeDecision(e.runDir, { decision: 'reject', feedback: 'split it', by: OWNER });
         e.gh.addComment(REPO, 7, OWNER, note);
       }
     };
@@ -264,7 +264,7 @@ test('a failure to note a local decision does not stop the gate', async () => {
   try {
     e.onSleep.fn = async (n) => {
       if (n === 1) {
-        await writeDecision(e.runDir, { decision: 'approve' });
+        await writeDecision(e.runDir, { decision: 'approve', by: OWNER });
         e.gh.fail('comment', 'HTTP 502');
       }
     };
@@ -291,7 +291,7 @@ test('an invalid decision.json escalates', async () => {
 test('writeDecision when nothing waits', async () => {
   const e = await setup();
   try {
-    await assert.rejects(writeDecision(e.runDir, { decision: 'approve' }), {
+    await assert.rejects(writeDecision(e.runDir, { decision: 'approve', by: OWNER }), {
       message: 'run is not waiting at a gate',
     });
   } finally {
@@ -483,4 +483,15 @@ test('the marker search matches the gh user case-insensitively', async () => {
   } finally {
     await rm(e.runDir);
   }
+});
+
+test('deciderLogin is the gh login', async () => {
+  assert.equal(await deciderLogin(new FakeGh({ user: 'alice' }), () => 'os-user'), 'alice');
+});
+
+test('deciderLogin falls back to the OS user when gh fails or has no login, as one handle', async () => {
+  const gh = new FakeGh();
+  gh.fail('user', 'not logged in');
+  assert.equal(await deciderLogin(gh, () => 'Gabe  Smith'), 'Gabe-Smith');
+  assert.equal(await deciderLogin(new FakeGh({ user: '' }), () => 'gabe'), 'gabe');
 });

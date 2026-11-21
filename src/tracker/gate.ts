@@ -72,13 +72,24 @@ export async function readWaiting(runDir: string): Promise<Waiting | undefined> 
   return r.data;
 }
 
+/** The gh login of whoever decides locally; the OS user (as one handle) when gh cannot say. */
+export async function deciderLogin(gh: Gh, username: () => string = () => os.userInfo().username): Promise<string> {
+  try {
+    const login = await gh.user();
+    if (login !== '') return login;
+  } catch {
+    // gh not logged in or unreachable: fall back to the OS user
+  }
+  return username().replace(/\s+/g, '-');
+}
+
 export async function writeDecision(
   runDir: string,
-  d: { decision: 'approve' | 'reject'; feedback?: string },
+  d: { decision: 'approve' | 'reject'; feedback?: string; by: string },
 ): Promise<Waiting> {
   const waiting = await readWaiting(runDir);
   if (!waiting) throw new Error('run is not waiting at a gate');
-  const full: Decision = { ...d, by: os.userInfo().username, via: 'local' };
+  const full: Decision = { ...d, via: 'local' };
   await writeFileAtomic(path.join(waiting.stepDir, 'decision.json'), `${JSON.stringify(full, null, 2)}\n`);
   return waiting;
 }
