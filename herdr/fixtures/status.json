@@ -1,0 +1,934 @@
+{
+  "schema": 1,
+  "runs": [
+    {
+      "id": "t8-20261121-091502-a41c",
+      "ticket": {
+        "ref": "github.com/zidious/percolator#8",
+        "number": 8,
+        "title": "add a security scan after implement",
+        "url": "https://github.com/Zidious/percolator/issues/8"
+      },
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t8-20261121-091502-a41c",
+      "worktree": "/home/me/src/percolator/.worktrees/t8-20261121-091502-a41c",
+      "createdAt": "2026-11-21T00:15:02.000Z",
+      "status": "running",
+      "currentStep": "review",
+      "driver": {
+        "alive": true,
+        "terminal": "t8z"
+      },
+      "steps": [
+        {
+          "id": "setup",
+          "stage": "before-all",
+          "role": "node",
+          "kind": "script",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T00:15:03.000Z",
+          "endedAt": "2026-11-21T00:15:05.000Z"
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T00:15:05.000Z",
+          "endedAt": "2026-11-21T00:16:40.000Z"
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T00:20:00.000Z",
+          "endedAt": "2026-11-21T00:24:10.000Z"
+        },
+        {
+          "id": "lint-plan",
+          "stage": "implement",
+          "role": "node",
+          "kind": "script",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 2,
+          "outputs": {},
+          "startedAt": "2026-11-21T00:36:00.000Z",
+          "endedAt": "2026-11-21T00:40:30.000Z"
+        },
+        {
+          "id": "security-scan",
+          "stage": "implement",
+          "role": "node",
+          "kind": "script",
+          "status": "pass",
+          "attempts": 2,
+          "outputs": {},
+          "startedAt": "2026-11-21T00:40:31.000Z",
+          "endedAt": "2026-11-21T00:41:05.000Z"
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "running",
+          "attempts": 2,
+          "outputs": {},
+          "startedAt": "2026-11-21T00:41:10.000Z"
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "notify",
+          "stage": "after-all",
+          "role": "node",
+          "kind": "script",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 2
+        }
+      ],
+      "terminals": {
+        "driver": "t8z",
+        "review": "t8r"
+      },
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t3-20261120-142211-e012",
+      "ticket": {
+        "ref": "github.com/zidious/percolator#3",
+        "number": 3,
+        "title": "perc init and the percolator-config skill",
+        "url": "https://github.com/Zidious/percolator/issues/3"
+      },
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t3-20261120-142211-e012",
+      "worktree": "/home/me/src/percolator/.worktrees/t3-20261120-142211-e012",
+      "createdAt": "2026-11-20T14:22:11.000Z",
+      "status": "completed",
+      "driver": {
+        "alive": false,
+        "terminal": "t3z"
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        }
+      ],
+      "terminals": {},
+      "pr": {
+        "url": "https://github.com/Zidious/percolator/pull/7"
+      },
+      "graph": "full"
+    },
+    {
+      "id": "t2-20261121-005347-f0ab",
+      "ticket": {
+        "ref": "github.com/zidious/percolator#2",
+        "number": 2,
+        "title": "refactor(cli): replace node:util parseArgs with meow",
+        "url": "https://github.com/Zidious/percolator/issues/2"
+      },
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t2-20261121-005347-f0ab",
+      "worktree": "/home/me/src/percolator/.worktrees/t2-20261121-005347-f0ab",
+      "createdAt": "2026-11-21T00:53:47.927Z",
+      "status": "waiting",
+      "currentStep": "approve-groom",
+      "driver": {
+        "alive": true,
+        "terminal": "t2z"
+      },
+      "attention": {
+        "kind": "gate",
+        "since": "2026-11-21T00:54:45.575Z",
+        "message": "approve-groom is waiting for approval",
+        "commentUrl": "https://github.com/Zidious/percolator/issues/2#issuecomment-7054595390",
+        "review": [
+          {
+            "step": "groom",
+            "key": "groomed_ticket",
+            "path": "samples/groomed_ticket.md"
+          }
+        ],
+        "actions": [
+          "approve",
+          "reject"
+        ]
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {
+            "groomed_ticket": "samples/groomed_ticket.md"
+          },
+          "startedAt": "2026-11-21T00:53:50.802Z",
+          "endedAt": "2026-11-21T00:54:42.184Z"
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "waiting",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T00:54:45.575Z"
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        }
+      ],
+      "terminals": {
+        "driver": "t2z"
+      },
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t4-20261121-061230-77ab",
+      "ticket": {
+        "ref": "github.com/zidious/percolator#4",
+        "number": 4,
+        "title": "retry flaky gh calls with backoff",
+        "url": "https://github.com/Zidious/percolator/issues/4"
+      },
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t4-20261121-061230-77ab",
+      "worktree": "/home/me/src/percolator/.worktrees/t4-20261121-061230-77ab",
+      "createdAt": "2026-11-20T21:12:30.000Z",
+      "status": "paused",
+      "currentStep": "review",
+      "driver": {
+        "alive": false,
+        "terminal": "t4z"
+      },
+      "attention": {
+        "kind": "cap",
+        "since": "2026-11-20T23:58:02.000Z",
+        "message": "review hit its cap (review: 3 of 3 rounds)",
+        "detail": "Grant one more round and the run goes back with the open findings.",
+        "review": [
+          {
+            "step": "review",
+            "key": "findings",
+            "path": "samples/findings.md"
+          }
+        ],
+        "actions": [
+          "grant"
+        ]
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 3,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "escalate",
+          "attempts": 3,
+          "outputs": {
+            "findings": "samples/findings.md"
+          }
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 3
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t12-20261121-020000-9b1d",
+      "ticket": {
+        "ref": "github.com/zidious/percolator#12",
+        "number": 12,
+        "title": "split the run state into smaller files",
+        "url": "https://github.com/Zidious/percolator/issues/12"
+      },
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t12-20261121-020000-9b1d",
+      "worktree": "/home/me/src/percolator/.worktrees/t12-20261121-020000-9b1d",
+      "createdAt": "2026-11-21T02:00:00.000Z",
+      "status": "paused",
+      "currentStep": "plan",
+      "driver": {
+        "alive": false,
+        "terminal": "t12z"
+      },
+      "attention": {
+        "kind": "paused",
+        "since": "2026-11-21T02:10:00.000Z",
+        "message": "plan paused: contract: plan finished without outputs/plan.md",
+        "review": [],
+        "actions": [
+          "resume"
+        ]
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "escalate",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t9-20261120-215502-c3d9",
+      "ticket": {
+        "ref": "github.com/zidious/percolator#9",
+        "number": 9,
+        "title": "stream hc output into the driver pane",
+        "url": "https://github.com/Zidious/percolator/issues/9"
+      },
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t9-20261120-215502-c3d9",
+      "worktree": "/home/me/src/percolator/.worktrees/t9-20261120-215502-c3d9",
+      "createdAt": "2026-11-20T21:55:02.000Z",
+      "status": "failed",
+      "currentStep": "implement",
+      "driver": {
+        "alive": false,
+        "terminal": "t9z"
+      },
+      "attention": {
+        "kind": "failed",
+        "since": "2026-11-20T22:31:00.000Z",
+        "message": "implement failed",
+        "detail": "A failed run can't be resumed. Start a new run for the ticket, or clean this one up.",
+        "review": [
+          {
+            "step": "implement",
+            "key": "log",
+            "path": "samples/implement-log.md"
+          }
+        ],
+        "actions": [
+          "clean"
+        ],
+        "commands": [
+          "perc run github.com/zidious/percolator#9 --repo /home/me/src/percolator"
+        ]
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "contract_error",
+          "attempts": 1,
+          "outputs": {
+            "log": "samples/implement-log.md"
+          },
+          "startedAt": "2026-11-20T22:10:00.000Z",
+          "endedAt": "2026-11-20T22:31:00.000Z"
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t11-20261121-001500-5e7f",
+      "ticket": {
+        "ref": "github.com/zidious/percolator#11",
+        "number": 11,
+        "title": "document the config layers",
+        "url": "https://github.com/Zidious/percolator/issues/11"
+      },
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t11-20261121-001500-5e7f",
+      "worktree": "/home/me/src/percolator/.worktrees/t11-20261121-001500-5e7f",
+      "createdAt": "2026-11-21T00:15:00.000Z",
+      "status": "running",
+      "currentStep": "implement",
+      "driver": {
+        "alive": false,
+        "terminal": "t11z"
+      },
+      "attention": {
+        "kind": "stalled",
+        "since": "2026-11-21T00:52:00.000Z",
+        "message": "the driver stopped while implement was running",
+        "detail": "Nothing is driving this run. Resume picks up at implement.",
+        "actions": [
+          "resume"
+        ]
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "running",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t13-20261121-030000-0c2e",
+      "ticket": {
+        "ref": "github.com/zidious/percolator#13",
+        "number": 13,
+        "title": "trust prompt on a fresh machine",
+        "url": "https://github.com/Zidious/percolator/issues/13"
+      },
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t13-20261121-030000-0c2e",
+      "worktree": "/home/me/src/percolator/.worktrees/t13-20261121-030000-0c2e",
+      "createdAt": "2026-11-21T03:00:00.000Z",
+      "status": "running",
+      "currentStep": "groom",
+      "driver": {
+        "alive": true,
+        "terminal": "t13z"
+      },
+      "attention": {
+        "kind": "agent",
+        "since": "2026-11-21T03:00:20.000Z",
+        "message": "groom's agent is blocked in terminal t13g",
+        "detail": "Attend the agent's terminal.",
+        "terminal": "t13g",
+        "agentState": "blocked",
+        "actions": [
+          "open-pane"
+        ]
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "running",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        }
+      ],
+      "terminals": {
+        "driver": "t13z",
+        "groom": "t13g"
+      },
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t5-20261119-120000-dead",
+      "status": "unreadable",
+      "error": "state.json: Unexpected end of JSON input"
+    }
+  ]
+}

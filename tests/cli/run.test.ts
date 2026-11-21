@@ -536,6 +536,24 @@ test('approve writes the decision', async () => {
   }
 });
 
+// the Herdr panel sends ["reject", id, "--", feedback] (herdr/mods/percolator/model.js actionArgv)
+test('reject takes the feedback after -- as one value, even when it starts with -', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const stepDir = path.join(e.dir(meta.runId), 'steps', 'approve-groom', '1');
+    await fs.mkdir(stepDir, { recursive: true });
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir, since: NOW.toISOString(), commentUrl: 'u' });
+    const r = await e.perc(['reject', meta.runId, '--', '-x "quoted"\nline2']);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, `rejected approve-groom of run ${meta.runId}\n`);
+    const d = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
+    assert.equal(d.feedback, '-x "quoted"\nline2');
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('approve when not waiting', async () => {
   const e = await setup();
   try {

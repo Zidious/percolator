@@ -72,7 +72,9 @@ Detailed behaviour lives in the code; read the module before changing it.
 | `src/validate.ts` | full config → graph validation pipeline |
 | `templates/` | recommended config written by `perc init` |
 | `skills/` | agent-agnostic skills shipped in the package |
+| `herdr/` | the Herdr side, in herdr.dev's layout listing: `mods/percolator/` (the panel mod; plain JS, no build; `model.js` is its pure logic, typed by `model.d.ts`), `fixtures/` (a sample `perc status --json` with review files; paths relative to the fixture) |
 | `tests/helpers/` | fakes and fixtures builders (see Testing conventions) |
+| `tests/herdr/` | covers `src/herdr/` and the panel model `herdr/mods/percolator/model.js` (pure, no `herdr` imports) |
 | `tests/smoke/` | manual smoke tests against the real `hc`/`gh`; never run by `pnpm test` |
 
 ## Conventions
