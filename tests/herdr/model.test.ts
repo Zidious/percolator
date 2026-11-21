@@ -39,6 +39,7 @@ import {
   timelineOf,
   resolvePath,
   rowState,
+  loopLabelAlign,
   runningCount,
   shownLoops,
   showsHere,
@@ -155,18 +156,18 @@ test('visibleRuns "all" keeps everything in order', () => {
 });
 
 test('rowState gives the tone and the board text for each kind of run', () => {
-  const cases: [string, string, string][] = [
+  const cases: [string, string, string, string?][] = [
     ['t2', 'blocked', 'your turn · approve-groom'],
     ['t4', 'blocked', 'paused · review at cap'],
     ['t12', 'blocked', 'paused · plan'],
     ['t9', 'blocked', 'failed · implement'],
     ['t11', 'blocked', 'stalled · driver stopped'],
     ['t13', 'blocked', 'agent blocked · groom'],
-    ['t8', 'working', 'review · round 2/3'],
+    ['t8', 'working', 'review', 'round 2/3'],
     ['t3', 'dim', 'delivered · PR #7'],
     ['t5', 'muted', 'unreadable · state.json: Unexpected end of JSON input'],
   ];
-  for (const [id, tone, text] of cases) assert.deepEqual(rowState(byId(id)), { tone, text }, id);
+  for (const [id, tone, text, round] of cases) assert.deepEqual(rowState(byId(id)), { tone, text, ...(round ? { round } : {}) }, id);
 });
 
 test('rowState for a running step outside a loop shows only the step', () => {
@@ -654,4 +655,16 @@ test('timelineRows shows a cap as its own row', () => {
 
 test('timelineRows without a timeline lists the steps that ran, newest first', () => {
   assert.deepEqual(timelineRows(readable('t9'), 0).map((r) => r.key), ['implement#1', 'plan#1', 'approve-groom#1', 'groom#1', 'intake#1']);
+});
+
+test('rowState keeps the round apart from a long step name, so it is never cut', () => {
+  const r = readable('t8');
+  const long = { ...r, currentStep: 'security-scan-extended', loops: [{ ...r.loops[0]!, from: 'security-scan-extended' }] };
+  assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'round 2/3' });
+});
+
+test('loopLabelAlign anchors the label to the arc end nearer the middle', () => {
+  assert.equal(loopLabelAlign(60, 90), 'end');
+  assert.equal(loopLabelAlign(10, 30), 'start');
+  assert.equal(loopLabelAlign(40, 60), 'start');
 });

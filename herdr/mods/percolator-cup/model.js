@@ -57,7 +57,7 @@ export function rowState(run) {
   }
   if (run.status === 'running') {
     const loop = (run.loops ?? []).find((l) => l.from === step && l.round > 0);
-    return { tone: 'working', text: loop ? `${step} · round ${loop.round}/${loop.max}` : `${step}` };
+    return loop ? { tone: 'working', text: `${step}`, round: `round ${loop.round}/${loop.max}` } : { tone: 'working', text: `${step}` };
   }
   if (run.status === 'completed') {
     const pr = run.pr?.url.split('/').pop();
@@ -217,6 +217,12 @@ export function loopAtCap(loop) {
 export function loopLabel(loop, narrow) {
   const where = narrow ? '' : `${loop.from} → ${loop.to} · `;
   return `↺ ${where}round ${loop.round} of ${loop.max}${loopAtCap(loop) ? ' · cap' : ''}`;
+}
+
+/** Which end of a loop arc (spanning a% to b% of the track) its label hangs from, so a label wider than the arc grows
+ *  toward the middle of the track rather than past its edge. */
+export function loopLabelAlign(a, b) {
+  return (a + b) / 2 > 50 ? 'end' : 'start';
 }
 
 /** Whether a stop can be selected: one that has not started has nothing to show. */

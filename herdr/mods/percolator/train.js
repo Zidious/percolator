@@ -2,7 +2,7 @@
 
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { STAGES, ago, canPick, loopAtCap, loopLabel, roundView, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
+import { STAGES, ago, canPick, loopAtCap, loopLabel, loopLabelAlign, roundView, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
 import { stepColor, link, own } from './ui.js';
 
 const TOP = 40; // room above the rail for loop arcs
@@ -177,14 +177,13 @@ export function train(p, t, r, narrow) {
         .border_r(2)
         .rounded_t(12)
         .border_color(c),
-      // the label sits above the arc, centred on it, and may be wider than it
-      h_flex()
+      // the label sits above the arc, hung from the end nearer the track's middle, and may be wider than it
+      (loopLabelAlign(a, b) === 'end' ? h_flex().justify_end() : h_flex().justify_start())
         .absolute()
         .top(2)
         .left(`${a}%`)
         .w(`${b - a}%`)
         .h(14)
-        .justify_center()
         .child(div().flex_none().whitespace_nowrap().text_size(10).text_color(c).child(loopLabel(l, narrow))),
     );
   }
