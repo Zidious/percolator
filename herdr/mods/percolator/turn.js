@@ -2,7 +2,6 @@
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex, TextView, Textarea } from 'gpui-base';
-import { terminals } from 'herdr';
 import { ago, attentionTag, terminalCommands, took } from './model.js';
 import { stepColor, link, button, own, scrollY } from './ui.js';
 
@@ -15,7 +14,6 @@ const LABELS = {
   'open-pane': ['Go to agent pane', ''],
 };
 const MARKS = { running: '●', pass: '✓', waiting: '■', pending: '·' };
-const live = (term) => Boolean(term) && terminals().some((x) => x.address === term);
 
 const tag = (label, c) =>
   div().flex_none().px(6).py(1).rounded(4).text_size(10).font_semibold().border(1).border_color(c).text_color(c).child(label);
@@ -203,7 +201,7 @@ function banner(p, t, r, narrow) {
       .items_center()
       .child(tag('RUNNING', t.working))
       .child(div().text_size(13).child(`${r.currentStep} is running${spent ? ` for ${spent}` : ''}. Nothing for you yet.`))
-      .when(live(term), (el) => el.child(link(t, 'watch', 'watch agent ↗', () => p.focusTerminal(term))));
+      .when(Boolean(p.addressOf(term)), (el) => el.child(link(t, 'watch', 'watch agent ↗', () => p.focusTerminal(term))));
   }
   if (r.status === 'completed') {
     const pr = r.pr?.url;
@@ -223,7 +221,7 @@ export function turn(p, t, r, narrow) {
   const a = r.attention;
   const acts = a?.actions ?? [];
   const term = r.status === 'running' ? r.terminals?.[r.currentStep] : null;
-  const tailText = live(term) ? p.tail[term] : null;
+  const tailText = p.addressOf(term) ? p.tail[term] : null;
   const body = p.file
     ? reader(p, t)
     : a

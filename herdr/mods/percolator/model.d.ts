@@ -57,3 +57,6 @@ export declare function readRatio(stored: unknown): number;
 export declare function fillHeight(view: number, content: number, box: number, min: number): number;
 export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short' };
 export declare function nextBoxH(prev: number, target: number): number;
+export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
+export declare function terminalAddress(live: { address: string; name?: string | null }[], term: string | null | undefined): string | null;
+export declare function ticketTitle(run: Readable): string;

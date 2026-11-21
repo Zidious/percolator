@@ -2,15 +2,13 @@
 
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { run as command, terminals } from 'herdr';
-import { STAGES, ago, loopAtCap, loopLabel, shownLoops, took, trainLayout, xOf } from './model.js';
+import { STAGES, ago, loopAtCap, loopLabel, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
 import { stepColor, link, own } from './ui.js';
 
 const TOP = 40; // room above the rail for loop arcs
 const RAIL = 14; // the rail's y inside a stop row
 const MARK = 28; // the train marker
 const short = (id) => id.split('-').pop();
-const live = (term) => Boolean(term) && terminals().some((x) => x.address === term);
 
 export function header(p, t, r, narrow) {
   if (r.status === 'unreadable') {
@@ -32,17 +30,15 @@ export function header(p, t, r, narrow) {
         .gap(8)
         .items_center()
         .child(div().flex_none().text_size(15).font_semibold().child(`#${r.ticket.number}`))
-        .child(div().min_w(0).text_size(15).truncate().child(r.ticket.title)),
+        .child(div().min_w(0).text_size(15).truncate().child(ticketTitle(r))),
     )
     .child(
       h_flex()
         .gap(6)
         .items_center()
-        .child(link(t, 'issue', 'issue ↗', (_e, cx) => cx.open_url(r.ticket.url)))
+        .when(Boolean(r.ticket.url), (el) => el.child(link(t, 'issue', 'issue ↗', (_e, cx) => cx.open_url(r.ticket.url))))
         .when(Boolean(r.pr?.url), (el) => el.child(link(t, 'pr', 'PR ↗', (_e, cx) => cx.open_url(r.pr.url))))
-        .when(live(driver), (el) =>
-          el.child(link(t, 'driver', 'driver pane ↗', () => command('pane.focus', { terminal: driver }))),
-        )
+        .when(Boolean(p.addressOf(driver)), (el) => el.child(link(t, 'driver', 'driver pane ↗', () => p.focusTerminal(driver))))
         .child(
           div()
             .min_w(0)

@@ -9,6 +9,7 @@ import {
   closeOverlay,
   exec,
   hc,
+  layout,
   nextCommand,
   openOverlay,
   props,
@@ -17,7 +18,6 @@ import {
   setShared,
   settings,
   shared,
-  terminals,
   theme,
 } from 'herdr';
 import {
@@ -26,6 +26,7 @@ import {
   boardHeight,
   dragBoard,
   fillHeight,
+  findNode,
   nextBoxH,
   titleLayout,
   moveRow,
@@ -36,6 +37,7 @@ import {
   readerPath,
   resolvePath,
   runningCount,
+  showsHere,
   sortRuns,
   visibleRuns,
 } from './model.js';
@@ -43,7 +45,7 @@ import { mark } from './mark.js';
 import { board } from './board.js';
 import { header, train, stopStrip } from './train.js';
 import { turn } from './turn.js';
-import { own } from './ui.js';
+import { addressOf, own } from './ui.js';
 import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
 
 const NARROW = 720;
@@ -120,9 +122,10 @@ export default class Percolator extends View {
       setShared('percolator.place', 'window');
       command('layout.hide', { id: BLOCK });
     }
-    watchRuns(cx, (cx) => this.refresh(cx));
+    // Only the shown copy where the panel lives polls perc (the cup does its own polling, for notices).
+    watchRuns(cx, (cx) => this.shown() && this.refresh(cx));
     cx.timer.every(30000, (cx) => cx.notify()); // the "4m ago" clocks
-    cx.timer.every(5000, (cx) => this.readTail(cx));
+    cx.timer.every(5000, (cx) => this.shown() && this.readTail(cx));
     cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
@@ -142,8 +145,24 @@ export default class Percolator extends View {
       this.perc = src.perc ?? null;
       this.fixture = src.fixture ?? null;
       cx.notify();
-      this.refresh(cx);
+      if (this.shown()) this.refresh(cx);
     });
+  }
+
+  /** This copy is where the panel lives and is shown (a window while open; docked while its block isn't hidden). */
+  shown() {
+    const node = findNode(layout(), BLOCK);
+    return showsHere(shared('percolator.place'), this.inWindow(), Boolean(node && !node.hidden));
+  }
+
+  /** Called each frame: refreshes at once when this copy becomes the shown one again (its data went stale). */
+  catchUp(cx) {
+    const now = this.shown();
+    if (now && !this.wasShown) {
+      this.refresh(cx);
+      this.readTail(cx);
+    }
+    this.wasShown = now;
   }
 
   refresh(cx) {
@@ -237,9 +256,10 @@ export default class Percolator extends View {
   readTail(cx) {
     const r = this.current();
     const term = r?.status === 'running' ? r.terminals?.[r.currentStep] : null;
-    if (!term || checking() || !terminals().some((x) => x.address === term)) return;
+    const address = checking() ? null : addressOf(term);
+    if (!address) return;
     cx.spawn(async (cx) => {
-      const out = await hc(['read', term, '--lines', '8']).catch(() => null);
+      const out = await hc(['read', address, '--lines', '8']).catch(() => null);
       if (out?.code === 0 && out.stdout.trim()) {
         this.tail[term] = out.stdout.trimEnd();
         cx.notify();
@@ -247,8 +267,15 @@ export default class Percolator extends View {
     });
   }
 
-  focusTerminal(terminal) {
-    command('pane.focus', { terminal });
+  /** A live terminal by its perc name (or address); null when none is live. */
+  addressOf(term) {
+    return addressOf(term);
+  }
+
+  /** Focuses a terminal perc names: pane.focus takes Herdr's address. */
+  focusTerminal(term) {
+    const terminal = addressOf(term);
+    if (terminal) command('pane.focus', { terminal });
   }
 
   // ── acting ──────────────────────────────────────────────────────────
@@ -648,6 +675,7 @@ export default class Percolator extends View {
 
   render(cx) {
     const t = theme();
+    this.catchUp(cx);
     this.followFocus(cx);
     const narrow = this.width < NARROW;
     return v_flex()

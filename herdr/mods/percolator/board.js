@@ -2,11 +2,11 @@
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { STAGES, ago, rowState } from './model.js';
+import { STAGES, ago, rowState, ticketTitle } from './model.js';
 import { mark } from './mark.js';
 import { SPIN, stepColor, own, scrollY } from './ui.js';
 
-const title = (r) => (r.status === 'unreadable' ? r.id : r.ticket.title);
+const title = (r) => (r.status === 'unreadable' ? r.id : ticketTitle(r));
 const number = (r) => (r.status === 'unreadable' ? '?' : `#${r.ticket.number}`);
 const age = (r, now) => (r.status === 'unreadable' ? '' : ago(r.attention?.since ?? r.createdAt, now));
 

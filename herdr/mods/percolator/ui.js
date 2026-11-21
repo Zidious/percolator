@@ -2,7 +2,11 @@
 
 import { div } from 'gpui-kit';
 import { Scrollbar } from 'gpui-base';
-import { stepTone } from './model.js';
+import { terminals } from 'herdr';
+import { stepTone, terminalAddress } from './model.js';
+
+/** The Herdr address of a live terminal perc names (or addresses), else null: hc read and pane.focus take addresses. */
+export const addressOf = (term) => terminalAddress(terminals(), term);
 
 export const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 

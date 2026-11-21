@@ -35,6 +35,9 @@ import {
   rowState,
   runningCount,
   shownLoops,
+  showsHere,
+  terminalAddress,
+  ticketTitle,
   sortRuns,
   stepTone,
   took,
@@ -43,6 +46,8 @@ import {
   xOf,
 } from '../../herdr/mods/percolator/model.js';
 import type { RunStatusJson, StatusJson } from '../../src/run/status.ts';
+import { driverName } from '../../src/run/meta.ts';
+import { terminalName } from '../../src/runtime/herdr-runtime.ts';
 
 const FIXTURE = path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'status.json');
 const RAW = fs.readFileSync(FIXTURE, 'utf8');
@@ -60,6 +65,51 @@ test('the fixture covers every attention kind, a running run, a completed run an
   assert.ok(runs().some((r) => r.status === 'running' && !('attention' in r && r.attention)));
   assert.ok(runs().some((r) => r.status === 'completed'));
   assert.ok(runs().some((r) => r.status === 'unreadable'));
+});
+
+test('the fixture has a run before intake wrote its title and url, one read from history, and a cleaned failed run', () => {
+  const rs = runs().filter((r): r is Readable => r.status !== 'unreadable');
+  assert.ok(rs.some((r) => r.ticket.title === undefined && r.ticket.url === undefined));
+  assert.ok(rs.some((r) => r.graph === 'history'));
+  assert.ok(rs.some((r) => r.status === 'failed' && r.attention === undefined));
+});
+
+test("the fixture's terminals are named as perc names them (names, not Herdr addresses)", () => {
+  for (const r of runs()) {
+    if (r.status === 'unreadable') continue;
+    assert.equal(r.driver.terminal, driverName(r.id, r.ticket.ref), r.id);
+    for (const [step, name] of Object.entries(r.terminals)) {
+      const attempts: number = r.steps.find((s) => s.id === step)?.attempts ?? 0;
+      assert.equal(name, step === 'driver' ? driverName(r.id, r.ticket.ref) : terminalName(r.id, r.ticket.ref, step, attempts), `${r.id} ${step}`);
+    }
+    if (r.attention?.terminal !== undefined) assert.equal(r.attention.terminal, r.terminals[r.currentStep!], r.id);
+  }
+});
+
+test('terminalAddress finds a terminal by its hc name or its address; null when it is not live', () => {
+  const live = [
+    { address: 'w1:p3', name: 't8_review_a1_9f2a' },
+    { address: 'w1:p4', name: null },
+  ];
+  assert.equal(terminalAddress(live, 't8_review_a1_9f2a'), 'w1:p3');
+  assert.equal(terminalAddress(live, 'w1:p4'), 'w1:p4');
+  assert.equal(terminalAddress(live, 't8_driver_a0_0000'), null);
+  assert.equal(terminalAddress(live, undefined), null);
+  assert.equal(terminalAddress(live, ''), null);
+});
+
+test("ticketTitle is the issue's title, else its ref (before intake reads the issue)", () => {
+  assert.equal(ticketTitle(readable('t8')), 'add a security scan after implement');
+  assert.equal(ticketTitle(readable('t14')), 'github.com/zidious/percolator#14');
+});
+
+test('showsHere: the copy where the panel lives, and only while it is shown', () => {
+  assert.equal(showsHere('panel', false, true), true);
+  assert.equal(showsHere(null, false, true), true, 'docked by default');
+  assert.equal(showsHere('panel', false, false), false, 'a hidden docked block');
+  assert.equal(showsHere('window', false, true), false, 'the docked copy while the window is the place');
+  assert.equal(showsHere('window', true, false), true, 'the window, whatever the block');
+  assert.equal(showsHere('panel', true, true), false, 'a window left over after docking back');
 });
 
 test('STAGES lists the six core stages in order', () => {
@@ -83,7 +133,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t13', 't12', 't2', 't11', 't9', 't4', 't8', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t13', 't12', 't2', 't11', 't9', 't4', 't14', 't8', 't15', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -91,7 +141,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -253,7 +303,7 @@ test('actionArgv refuses a reject without feedback', () => {
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
   assert.equal(needsCount(runs()), 6);
-  assert.equal(runningCount(runs()), 1);
+  assert.equal(runningCount(runs()), 2);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
 });

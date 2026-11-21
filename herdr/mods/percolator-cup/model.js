@@ -337,3 +337,21 @@ export function cupMoves(place, open, why) {
 export function ownsCommands(place, inWindow) {
   return place === 'window' ? inWindow : !inWindow;
 }
+
+/** The copy that should poll and draw fresh data: the one where the panel lives (ownsCommands), while it is shown
+ *  (a window is shown while open; a docked copy while its layout block is not hidden). */
+export function showsHere(place, inWindow, blockShown) {
+  return ownsCommands(place, inWindow) && (inWindow || blockShown);
+}
+
+/** perc names terminals (`hc` names); Herdr's terminals() lists `{ address, name }`. The live terminal's address for a
+ *  name or an address, or null when none is live. */
+export function terminalAddress(live, term) {
+  if (!term) return null;
+  return live.find((x) => x.address === term || x.name === term)?.address ?? null;
+}
+
+/** The run's title: the issue's, else its ref (no issue.json yet: before intake, or a run that failed in it). */
+export function ticketTitle(run) {
+  return run.ticket?.title ?? run.ticket?.ref ?? run.id;
+}

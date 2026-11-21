@@ -17,7 +17,7 @@
       "currentStep": "review",
       "driver": {
         "alive": true,
-        "terminal": "t8z"
+        "terminal": "t8_driver_a0_b65d"
       },
       "steps": [
         {
@@ -142,8 +142,8 @@
         }
       ],
       "terminals": {
-        "driver": "t8z",
-        "review": "t8r"
+        "driver": "t8_driver_a0_b65d",
+        "review": "t8_review_a2_49a6"
       },
       "pr": null,
       "graph": "full"
@@ -163,7 +163,7 @@
       "status": "completed",
       "driver": {
         "alive": false,
-        "terminal": "t3z"
+        "terminal": "t3_driver_a0_53dd"
       },
       "steps": [
         {
@@ -262,7 +262,7 @@
       "currentStep": "approve-groom",
       "driver": {
         "alive": true,
-        "terminal": "t2z"
+        "terminal": "t2_driver_a0_b90e"
       },
       "attention": {
         "kind": "gate",
@@ -362,7 +362,7 @@
         }
       ],
       "terminals": {
-        "driver": "t2z"
+        "driver": "t2_driver_a0_b90e"
       },
       "pr": null,
       "graph": "full"
@@ -383,7 +383,7 @@
       "currentStep": "review",
       "driver": {
         "alive": false,
-        "terminal": "t4z"
+        "terminal": "t4_driver_a0_4baa"
       },
       "attention": {
         "kind": "cap",
@@ -498,7 +498,7 @@
       "currentStep": "plan",
       "driver": {
         "alive": false,
-        "terminal": "t12z"
+        "terminal": "t12_driver_a0_eb1e"
       },
       "attention": {
         "kind": "paused",
@@ -604,7 +604,7 @@
       "currentStep": "implement",
       "driver": {
         "alive": false,
-        "terminal": "t9z"
+        "terminal": "t9_driver_a0_b29c"
       },
       "attention": {
         "kind": "failed",
@@ -724,7 +724,7 @@
       "currentStep": "implement",
       "driver": {
         "alive": false,
-        "terminal": "t11z"
+        "terminal": "t11_driver_a0_879a"
       },
       "attention": {
         "kind": "stalled",
@@ -830,14 +830,14 @@
       "currentStep": "groom",
       "driver": {
         "alive": true,
-        "terminal": "t13z"
+        "terminal": "t13_driver_a0_0761"
       },
       "attention": {
         "kind": "agent",
         "since": "2026-11-21T03:00:20.000Z",
-        "message": "groom's agent is blocked in terminal t13g",
+        "message": "groom's agent is blocked in terminal t13_groom_a1_cc4e",
         "detail": "Attend the agent's terminal.",
-        "terminal": "t13g",
+        "terminal": "t13_groom_a1_cc4e",
         "agentState": "blocked",
         "actions": [
           "open-pane"
@@ -919,9 +919,148 @@
         }
       ],
       "terminals": {
-        "driver": "t13z",
-        "groom": "t13g"
+        "driver": "t13_driver_a0_0761",
+        "groom": "t13_groom_a1_cc4e"
       },
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t14-20261121-032000-6a1f",
+      "ticket": {
+        "ref": "github.com/zidious/percolator#14",
+        "number": 14
+      },
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t14-20261121-032000-6a1f",
+      "worktree": "/home/me/src/percolator/.worktrees/t14-20261121-032000-6a1f",
+      "createdAt": "2026-11-21T03:20:00.000Z",
+      "status": "running",
+      "currentStep": "intake",
+      "driver": {
+        "alive": true,
+        "terminal": "t14_driver_a0_915f"
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "agent",
+          "status": "running",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [],
+      "terminals": {
+        "driver": "t14_driver_a0_915f"
+      },
+      "pr": null,
+      "graph": "history"
+    },
+    {
+      "id": "t15-20261121-013000-d2c4",
+      "ticket": {
+        "ref": "github.com/zidious/percolator#15",
+        "number": 15
+      },
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t15-20261121-013000-d2c4",
+      "worktree": "/home/me/src/percolator/.worktrees/t15-20261121-013000-d2c4",
+      "createdAt": "2026-11-21T01:30:00.000Z",
+      "status": "failed",
+      "currentStep": "intake",
+      "driver": {
+        "alive": false,
+        "terminal": "t15_driver_a0_d238"
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "fail",
+          "attempts": 1,
+          "startedAt": "2026-11-21T01:30:01.000Z",
+          "endedAt": "2026-11-21T01:30:03.000Z",
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "approve-groom",
+          "from": "approve-groom",
+          "to": "groom",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        },
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "continue",
+          "round": 0
+        }
+      ],
+      "terminals": {},
       "pr": null,
       "graph": "full"
     },
