@@ -4,11 +4,13 @@ Herdr's own layout (a copy of its shipped `main`, 0.1.16) plus a Percolator pane
 
 ![Percolator](preview.png)
 
+The screenshot shows the panel popped out into its window, with sample data from `fixtures/status.json`.
+
 ## What you see
 
 The layout is Herdr's `main` (sidebar with spaces and agents, tabs, work area, status bar) with two additions.
 
-**The cup.** A 150px block at the right end of the 28px status row, next to the status text. It shows a 14px mark in the text colour (a cup under five drops, the middle drop a ring) and a 11.8px label: "N need(s) you", else "N running", else "Percolator". The ring is the "blocked" colour and pulses while something needs you, the "working" colour while something runs, muted otherwise. The label is "blocked" coloured when something needs you. While the panel or its window is open the button has the "raised" background. Tooltip: "Show Percolator" or "Hide Percolator"; the connection error when there is one; "Run perc herdr link once to connect" before linking.
+**The cup.** A 150px block at the right end of the 28px status row, next to the status text. It shows a 14px mark in the text colour (a cup under five drops, the middle drop a ring) and an 11.8px label: "N need(s) you", else "N running", else "Percolator". The ring is the "blocked" colour and pulses while something needs you, the "working" colour while something runs, muted otherwise. The label is "blocked" coloured when something needs you. While the panel or its window is open the button has the "raised" background. Tooltip: "Show Percolator" or "Hide Percolator"; the connection error when there is one; "Run perc herdr link once to connect" before linking.
 
 **The panel.** A 380px block at the right of the work area (min 280, max 900), hidden until shown. Top to bottom:
 
@@ -25,7 +27,7 @@ The layout is Herdr's `main` (sidebar with spaces and agents, tabs, work area, s
 
 **The window.** The panel can pop out into a floating 860x680 window (key `percolator`, remembers its place), the same view at the wider width: the full layout from 720px up.
 
-Only theme colours are used (`theme()`), so it follows light and dark.
+Every colour comes from `theme()`; nothing is hard-coded, so it follows light and dark.
 
 ## How it behaves
 
@@ -43,18 +45,28 @@ Only theme colours are used (`theme()`), so it follows light and dark.
 
 **Where it is.** The place (docked or window) is remembered in shared state `percolator.place`. Only the copy that matches it acts on `percolator.*` commands and keys, so a docked panel and a window never both answer.
 
-**Light and dark.** Colours come from `theme()` only; nothing is hard-coded.
-
 ## Built from
 
-Files (all in this folder, copied as they are):
+**Where the files come from.** The `herdr/` folder of the Percolator repository (this repository), next to this recipe. Copy these files as they are; build from the recipe only if they do not load on your Herdr version:
 
 - `layouts/percolator.json`: Herdr's shipped `main` 0.1.16 (`cloned_from` records it) with two additions.
   - In `work-body` (the row after `main` and the Files/Changes `panel` column), a block `percolator-panel`: `hidden: true`, `size: {px: 380}`, `min: 280`, `max: 900`, `content: {mod: "percolator"}`. It is its own block, not a child of `panel-body`: Herdr's tabs mod hides stack children that are not in the space's `workspace.panels`, which would close the Percolator panel on every space switch.
   - In `status-row` (a row, 28px), after `status` (weight 1), a block `percolator-cup`: `size: {px: 150}`, `content: {mod: "percolator-cup"}`.
-- `mods/percolator/`: the panel. Plain JS, no build. `mod.json` is `{"place": "none", "title": "Percolator", "overlay": {"kind": "window", "width": 860, "height": 680, "key": "percolator"}}`. `main.js` (view), `board.js`, `train.js`, `turn.js`, `ui.js`, `model.js` (pure logic, typed by `model.d.ts`), `source.js` (runs `perc status --json`, watches `~/.percolator/runs`), `mark.js`, and the art `glyph-base.svg`, `glyph-live.svg`, `train.svg`.
-- `mods/percolator-cup/`: the cup. `mod.json` is `{"place": "none", "title": "Percolator cup"}`. `main.js` plus copies of the panel's `model.js`, `mark.js` and `source.js`.
-- `fixtures/status.json` and `fixtures/samples/`: a sample `perc status --json` for trying the panel without Percolator. If `mods/percolator/perc.json` is `{"fixtures": "<path to status.json>"}` the panel and the cup read that file and the buttons only say what they would run.
+- `mods/percolator/` (the panel; plain JS, no build): `mod.json`, `main.js` (the view), `board.js`, `train.js`, `turn.js`, `ui.js`, `model.js` (pure logic, the only reader of the JSON contract), `model.d.ts` (its types), `source.js` (runs `perc status --json`, watches `~/.percolator/runs`), `mark.js`, and the art `glyph-base.svg`, `glyph-live.svg`, `train.svg`. `mod.json` is `{"place": "none", "title": "Percolator", "overlay": {"kind": "window", "width": 860, "height": 680, "key": "percolator"}}`.
+- `mods/percolator-cup/` (the cup): `mod.json` (`{"place": "none", "title": "Percolator cup"}`), `main.js`, and copies of the panel's `model.js`, `mark.js` and `source.js`.
+- `fixtures/status.json` and `fixtures/samples/` (`findings.md`, `groomed_ticket.md`, `implement-log.md`, the review files that `status.json` points to by relative path): a sample `perc status --json`, for trying the panel without Percolator (see Install, step 5).
+- `preview.png` and this recipe are for the listing; do not copy them into Herdr.
+
+`"place": "none"` means Herdr does not dock the mod anywhere by itself; it shows only where a layout block (`percolator-panel`, `percolator-cup`) or an overlay (the window) puts it.
+
+**Install.**
+
+1. Herdr's app home is `~/.config/herdr-app` on every OS (on Windows, `C:\Users\<you>\.config\herdr-app`), or the folder in `HERDR_APP_HOME` if set (`perc herdr link` respects it too). Layouts live in `<home>/layouts/<name>.json`, mods in `<home>/mods/<name>/`.
+2. Copy `layouts/percolator.json` to `<home>/layouts/` and the two mod folders to `<home>/mods/`. Never overwrite: if a name is taken, rename the new file or folder and the `mod` names in the layout. Herdr's own procedure for shared layouts is the same: ask Herdr's agent to add the listing, or copy by hand. Herdr loads new files live.
+3. Check each mod: `herdr-app check <home>/mods/percolator` and `herdr-app check <home>/mods/percolator-cup`. Each prints `check passed: <folder>` and exits 0; on failure it prints the error and exits nonzero.
+4. Switch to the layout: `herdr-app do layout.switch --name percolator`, or press `ctrl-shift-l` until it shows (the same key cycles back to your own layout).
+5. Connect to perc. Either (a) fixtures, by hand: write `<home>/mods/percolator/perc.json` as `{"fixtures": "<absolute path to herdr/fixtures/status.json>"}`; or (b) real runs: you need Node 24 or later and a Percolator checkout (`git clone` this repository, then `pnpm install --frozen-lockfile`), then, after step 2, run `perc herdr link` (from the checkout: `node src/cli.ts herdr link`). It writes `perc.json` as `{"node": "<absolute path of node>", "cli": "<absolute path of perc's cli>"}`. It fails with `perc herdr link: no Herdr config at <home>; install Herdr first` if the home does not exist, and with `perc herdr link: <home>/mods/percolator not found; add the Percolator layout to Herdr first (see herdr/RECIPE.md)` if the panel mod is not copied yet. Link replaces fixtures mode.
+6. Reload the mods, because `perc.json` is read when they start: re-save any file in `<home>/mods/percolator/` and in `<home>/mods/percolator-cup/` (Herdr reloads a mod when a file in its folder is saved: open `main.js` and save it), or restart Herdr.
 
 Shipped mods used: `workspace-chrome`, `spaces`, `agents`, `tabs`, `files`, `changes`, `pane`, `workspace-status` (all from `main`).
 
@@ -68,12 +80,10 @@ The data contract is the output of `perc status --json` (schema field `schema`);
 
 - **This is a copy of Herdr's `main` 0.1.16.** It does not follow later changes to `main`. To pick those up, re-add the listing afresh, or copy the two additions (the `percolator-panel` and `percolator-cup` blocks) into your own layout.
 - **The mod runs programs and reads your files.** It runs `node` with perc's CLI and reads `~/.percolator/runs`, the review files and outputs perc points to, and `mods/percolator/perc.json`. It makes no network calls. Tell the person before adding it.
-- **`perc herdr link` is required.** Install Percolator, add the layout and mods, then run `perc herdr link` (from a Percolator checkout: `node src/cli.ts herdr link`). It writes `perc.json` into the installed `mods/percolator/` folder, so it fails if the mod is not installed yet. Without it the panel and cup show "Run perc herdr link once to connect".
-- **`perc.json` is read when the mods start.** After linking, reload both mods: save any file in `mods/percolator/` and in `mods/percolator-cup/` (Herdr reloads a mod when a file in its folder is saved; `touch main.js` does it), or restart Herdr.
-- **Herdr refuses imports across mod folders.** That is why `mods/percolator-cup/` has its own copies of the panel's `model.js`, `mark.js` and `source.js`. They must stay byte-identical: edit the panel's file, then copy it over the cup's.
-- **Mods-only install** (no layout copy, so no cup and no docked panel): copy `mods/percolator/` only. Its `mod.json` has a window overlay; open it with the command palette or a key you bind in `keys.json` (`"percolator.place"` pops the panel out). Without the cup there are no notices.
+- **`perc herdr link` is required for real runs** (Install, step 5). Until `perc.json` exists the panel and cup show "Run perc herdr link once to connect" (the panel shows nothing else); an unreadable `perc.json` counts as missing.
+- **Herdr refuses imports across mod folders.** That is why `mods/percolator-cup/` has its own copies of the panel's `model.js`, `mark.js` and `source.js`. They must stay byte-identical: edit the panel's file, then copy it over the cup's. Check with `node --test tests/herdr/cup.test.ts` (or `pnpm test`).
+- **Mods-only install** (no layout copy, so no cup, no docked panel and no notices): copy `mods/percolator/` only, then link as above. Open the window with the command `mod.open` and the name `percolator`. To bind a key, add this to `<home>/keys.json` (merge into the person's file; ask before replacing a key they use): `{"global": {"ctrl-alt-p": "mod.open:percolator"}}`. With the cup installed, `"ctrl-alt-p": "percolator-cup.toggle"` toggles the panel instead.
 - **The window uses key `percolator` with `keep: true`**, so it remembers its place; the docked block is `percolator-panel`.
-- **Take every colour from `theme()`;** hard-coded colours break light or dark.
 - **One copy acts.** The docked panel and the window can both exist; only the one matching `percolator.place` handles `percolator.*` commands and keys.
 - **Two toasts.** For a blocked agent Herdr may also post its own "agent needs you" notification next to the cup's.
 
@@ -87,4 +97,4 @@ The data contract is the output of `perc status --json` (schema field `schema`);
 - ⧉ closes the docked panel and opens the 860x680 window with the same content; ⧉ in the window closes it and docks the panel again.
 - Cup click, ✕ and Esc each hide a shown panel; a click on a "needs you" toast shows the panel on that run.
 - After `perc herdr link` and a mod reload, the panel and cup show your real runs (`perc status --json` output), and "Run perc herdr link once to connect" is gone.
-- A light and a dark appearance both read well, with no colour outside `theme()`.
+- A light and a dark appearance both read well.

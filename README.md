@@ -15,10 +15,6 @@ Run `perc init` to write the recommended config, `perc validate` to check it, an
 
 The `herdr/` folder is a [Herdr](https://herdr.dev) layout: Herdr's own layout plus a Percolator panel (every run on a board, the stage train for the one you pick, and Approve / Reject / Resume buttons) and a status-bar cup that says how many runs need you and posts a notice when one does. See `herdr/RECIPE.md` and `herdr/preview.png`.
 
-To install it:
-
-1. Ask Herdr's agent to add the layout from this folder, or follow Herdr's procedure for shared layouts: copy `herdr/layouts/percolator.json` to Herdr's `layouts/` and `herdr/mods/percolator` and `herdr/mods/percolator-cup` to `mods/`, without overwriting anything, then run `layout.switch {name: "percolator"}`. The mod runs `node` with perc's CLI and reads `~/.percolator`.
-2. Run `perc herdr link` (from a checkout: `node src/cli.ts herdr link`). It tells the panel how to run perc.
-3. Reload the mods (save a file in each mod folder, or restart Herdr).
+To install it, follow "Install" in `herdr/RECIPE.md`: copy `herdr/layouts/percolator.json` and the two folders under `herdr/mods/` into Herdr's home (`~/.config/herdr-app`) without overwriting, run `herdr-app check` on each mod, switch with `herdr-app do layout.switch --name percolator`, then run `perc herdr link` (from a checkout: `node src/cli.ts herdr link`) and reload the mods. The mod runs `node` with perc's CLI and reads `~/.percolator`.
 
 `herdr/` and `assets/` live in the repo only; they are not in the npm package.
