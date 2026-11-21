@@ -1,5 +1,5 @@
 // The Percolator mark, theme-tinted: drops and cup in `base`, the live ring in `live` (pulsing when `pulse`).
-// The cup imports it from ../percolator/mark.js.
+// The cup carries a copy (Herdr refuses imports from another mod folder; tests/herdr/cup.test.ts keeps them equal).
 
 import { div, svg } from 'gpui-kit';
 

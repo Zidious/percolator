@@ -5,12 +5,10 @@
 import { View, div } from 'gpui-kit';
 import { v_flex, h_flex, TextareaState } from 'gpui-base';
 import {
-  appHome,
   checking,
   closeOverlay,
   exec,
   hc,
-  home,
   nextCommand,
   openOverlay,
   props,
@@ -20,14 +18,13 @@ import {
   shared,
   terminals,
   theme,
-  watchFolder,
 } from 'herdr';
 import {
   actionArgv,
   moveRow,
   moveStop,
   needsCount,
-  readStatus,
+  ownsCommands,
   readerPath,
   resolvePath,
   runningCount,
@@ -39,15 +36,15 @@ import { board } from './board.js';
 import { header, train, stopStrip } from './train.js';
 import { turn } from './turn.js';
 import { own } from './ui.js';
+import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
 
 const NARROW = 720;
 const BLOCK = 'percolator-panel';
-const firstLine = (text) => String(text ?? '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? '';
+const WINDOW = 'percolator.window'; // shared: the open window's overlay id, else null
 const folderOf = (file) => file.replace(/[\\/][^\\/]*$/, '');
 
 export default class Percolator extends View {
   init(_props, cx) {
-    this.modDir = `${appHome()}/mods/percolator`;
     this.conn = null; // null (loading) | 'missing' | 'perc' | 'fixtures'
     this.perc = null;
     this.fixture = null;
@@ -94,23 +91,19 @@ export default class Percolator extends View {
 
     this.connect(cx);
     if (checking()) return;
-    cx.timer.every(10000, (cx) => this.refresh(cx));
+    if (this.inWindow()) {
+      // However the window opened (⧉, the cup, the palette), it is now the place: one copy shown, one acting.
+      setShared(WINDOW, props().overlay); // the cup reads it: the window is open
+      setShared('percolator.place', 'window');
+      command('layout.hide', { id: BLOCK });
+    }
+    watchRuns(cx, (cx) => this.refresh(cx));
     cx.timer.every(30000, (cx) => cx.notify()); // the "4m ago" clocks
     cx.timer.every(5000, (cx) => this.readTail(cx));
     cx.spawn(async (cx) => {
       for (;;) {
-        try {
-          await watchFolder(`${home()}/.percolator/runs`);
-        } catch {
-          await cx.sleep(10000); // no runs folder yet: the 10s timer covers it
-          continue;
-        }
-        this.schedule(cx);
-      }
-    });
-    cx.spawn(async (cx) => {
-      for (;;) {
         const c = await nextCommand();
+        if (c !== 'focus' && !ownsCommands(shared('percolator.place'), this.inWindow())) continue;
         this.onCommand(c, cx);
         cx.notify();
       }
@@ -121,31 +114,13 @@ export default class Percolator extends View {
 
   connect(cx) {
     cx.spawn(async (cx) => {
-      const text = await readTextFile(`${this.modDir}/perc.json`).catch(() => null);
-      let cfg = null;
-      try {
-        cfg = text ? JSON.parse(text) : null;
-      } catch {
-        cfg = null;
-      }
-      if (cfg && typeof cfg.fixtures === 'string') {
-        this.conn = 'fixtures';
-        this.fixture = resolvePath(this.modDir, cfg.fixtures);
-      } else if (cfg && typeof cfg.node === 'string' && typeof cfg.cli === 'string') {
-        this.conn = 'perc';
-        this.perc = cfg;
-      } else {
-        this.conn = 'missing';
-      }
+      const src = await connectSource();
+      this.conn = src.conn;
+      this.perc = src.perc ?? null;
+      this.fixture = src.fixture ?? null;
       cx.notify();
       this.refresh(cx);
     });
-  }
-
-  /** Collects a burst of file changes into one refresh. */
-  schedule(cx) {
-    this.debounce?.cancel();
-    this.debounce = cx.timer.after(300, (cx) => this.refresh(cx));
   }
 
   refresh(cx) {
@@ -157,7 +132,7 @@ export default class Percolator extends View {
     }
     this.loading = true;
     cx.spawn(async (cx) => {
-      const got = await this.fetch();
+      const got = await fetchStatus(this);
       if (got.ok) {
         this.runs = sortRuns(got.data.runs);
         this.error = null;
@@ -174,24 +149,6 @@ export default class Percolator extends View {
         this.refresh(cx);
       }
     });
-  }
-
-  async fetch() {
-    if (this.conn === 'fixtures') {
-      const text = await readTextFile(this.fixture).catch(() => null);
-      if (text === null) return { ok: false, error: `${this.fixture} not found; fix "fixtures" in perc.json` };
-      return readStatus(text);
-    }
-    const res = await exec(this.perc.node, [this.perc.cli, 'status', '--json'], { timeout: 30000 }).catch((e) => ({
-      code: -1,
-      stdout: '',
-      stderr: String(e?.message ?? e),
-    }));
-    if (res.code !== 0) {
-      const why = firstLine(res.stderr) || `exit ${res.code}`;
-      return { ok: false, error: `perc status --json failed: ${why}; check perc is installed and run perc herdr link` };
-    }
-    return readStatus(res.stdout);
   }
 
   /** Review and output paths: absolute from perc; relative to the fixture file's folder in fixtures mode. */
@@ -387,6 +344,10 @@ export default class Percolator extends View {
     else if (c === 'focus') this.handle.focus();
     else if (c === 'place' && this.inWindow()) this.dockBack();
     else if (c === 'place') this.popOut();
+  }
+
+  async close() {
+    if (this.inWindow() && shared(WINDOW) === props().overlay) setShared(WINDOW, null);
   }
 
   inWindow() {

@@ -8,13 +8,18 @@ import {
   ago,
   attentionTag,
   cliLines,
+  cupLabel,
+  cupMoves,
   duration,
+  findNode,
+  ownsCommands,
   loopAtCap,
   loopLabel,
   moveRow,
   moveStop,
   needsCount,
   newlyNeeding,
+  notice,
   parseStatus,
   readStatus,
   readerPath,
@@ -353,4 +358,55 @@ test('readerPath shows the selected stop first output, else the first review fil
   delete passed.attention;
   assert.equal(readerPath(passed, null), null, 'once the gate passes there is nothing to read');
   assert.equal(readerPath(byId('t5'), null), null);
+});
+
+test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
+  assert.deepEqual(cupLabel(runs()), { text: '6 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
+  assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
+  assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
+  assert.deepEqual(cupLabel([]), { text: 'Percolator', tone: 'muted' });
+});
+
+test('notice asks for the run by number, with its message, and opens it through the cup', () => {
+  assert.deepEqual(notice(readable('t2')), {
+    title: '#2 needs you',
+    body: 'approve-groom is waiting for approval',
+    level: 'warning',
+    action: { name: 'percolator-cup.open/t2-20261121-005347-f0ab' },
+  });
+});
+
+test('findNode finds a layout node by id anywhere in the tree, else null', () => {
+  const tree = { id: 'root', children: [{ id: 'a', children: [{ id: 'b', hidden: true }] }, { id: 'c' }] };
+  assert.deepEqual(findNode(tree, 'b'), { id: 'b', hidden: true });
+  assert.equal(findNode(tree, 'root'), tree);
+  assert.equal(findNode(tree, 'gone'), null);
+  assert.equal(findNode(null, 'b'), null);
+});
+
+test('cupMoves: a click hides what is open, else shows the panel where it was last', () => {
+  const none = { panel: false, window: false };
+  assert.deepEqual(cupMoves('panel', none, 'click'), ['show-panel']);
+  assert.deepEqual(cupMoves(null, none, 'click'), ['show-panel'], 'docked is the default place');
+  assert.deepEqual(cupMoves('window', none, 'click'), ['open-window']);
+  assert.deepEqual(cupMoves('window', { panel: true, window: false }, 'click'), ['hide-panel']);
+  assert.deepEqual(cupMoves('panel', { panel: false, window: true }, 'click'), ['close-window']);
+  assert.deepEqual(cupMoves('panel', { panel: true, window: true }, 'click'), ['hide-panel', 'close-window']);
+});
+
+test('cupMoves: open shows the panel where it was last, and leaves an open one as it is', () => {
+  assert.deepEqual(cupMoves('panel', { panel: false, window: false }, 'open'), ['show-panel']);
+  assert.deepEqual(cupMoves('window', { panel: false, window: false }, 'open'), ['open-window']);
+  assert.deepEqual(cupMoves('window', { panel: true, window: false }, 'open'), []);
+  assert.deepEqual(cupMoves('panel', { panel: false, window: true }, 'open'), []);
+});
+
+test('ownsCommands: only the copy where the panel lives (shared percolator.place) acts on percolator commands', () => {
+  assert.equal(ownsCommands('window', true), true);
+  assert.equal(ownsCommands('window', false), false, 'the docked copy stays out while the window is the place');
+  assert.equal(ownsCommands('panel', false), true);
+  assert.equal(ownsCommands('panel', true), false, 'a window opened beside the docked panel stays out');
+  assert.equal(ownsCommands(undefined, false), true, 'docked is the default place');
+  assert.equal(ownsCommands(undefined, true), false);
 });

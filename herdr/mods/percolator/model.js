@@ -238,3 +238,51 @@ export function readerPath(run, stopSel) {
   const out = step ? Object.values(step.outputs ?? {})[0] : undefined;
   return out ?? run.attention?.review?.[0]?.path ?? null;
 }
+
+// ── the cup (mods/percolator-cup carries a copy of this file) ──
+
+/** The cup's label and its theme tone: who needs you, else what runs, else the name. */
+export function cupLabel(runs) {
+  const n = needsCount(runs);
+  if (n > 0) return { text: `${n} need${n === 1 ? 's' : ''} you`, tone: 'blocked' };
+  const running = runningCount(runs);
+  if (running > 0) return { text: `${running} running`, tone: 'working' };
+  return { text: 'Percolator', tone: 'muted' };
+}
+
+/** The notification for a run that newly needs you; clicking it opens the run through the cup. */
+export function notice(run) {
+  return {
+    title: `#${run.ticket?.number ?? '?'} needs you`,
+    body: run.attention?.message ?? '',
+    level: 'warning',
+    action: { name: `percolator-cup.open/${run.id}` },
+  };
+}
+
+/** A layout node by id (depth first), or null. */
+export function findNode(node, id) {
+  if (!node || typeof node !== 'object') return null;
+  if (node.id === id) return node;
+  for (const child of node.children ?? []) {
+    const found = findNode(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** What the cup does to the panel. `open`: which places show it now; `why`: 'click' toggles, 'open' (a notice)
+ *  only shows. Nothing open → show it where it was last (`place`, shared `percolator.place`; docked by default). */
+export function cupMoves(place, open, why) {
+  if (open.panel || open.window) {
+    if (why !== 'click') return [];
+    return [...(open.panel ? ['hide-panel'] : []), ...(open.window ? ['close-window'] : [])];
+  }
+  return [place === 'window' ? 'open-window' : 'show-panel'];
+}
+
+/** Whether this panel copy acts on `percolator.*` commands: only the one where the panel lives (shared
+ *  `percolator.place`; docked by default), so a docked copy and a window both shown never run perc twice. */
+export function ownsCommands(place, inWindow) {
+  return place === 'window' ? inWindow : !inWindow;
+}

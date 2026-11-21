@@ -34,3 +34,18 @@ export declare function loopLabel(loop: Loop, narrow: boolean): string;
 export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number): string | null;
 export declare function moveRow(rows: RunStatusJson[], selId: string | null, dir: number): string | null;
 export declare function readerPath(run: RunStatusJson, stopSel: string | null): string | null;
+export declare function cupLabel(runs: RunStatusJson[]): { text: string; tone: 'blocked' | 'working' | 'muted' };
+export declare function notice(run: RunStatusJson): {
+  title: string;
+  body: string;
+  level: 'warning';
+  action: { name: string };
+};
+export declare function findNode(node: unknown, id: string): any;
+export type CupMove = 'show-panel' | 'hide-panel' | 'open-window' | 'close-window';
+export declare function cupMoves(
+  place: unknown,
+  open: { panel: boolean; window: boolean },
+  why: 'click' | 'open',
+): CupMove[];
+export declare function ownsCommands(place: unknown, inWindow: boolean): boolean;
