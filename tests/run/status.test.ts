@@ -486,11 +486,25 @@ test('status json keeps going past a broken run', async () => {
     const broken = path.join(e.home, '.percolator', 'runs', 't9-broken');
     await fs.mkdir(broken, { recursive: true });
     const graphFile = path.join(e.dir(badGraph), 'graph.json');
+    e.clock.t += 1000;
+    const noState = await e.prepare();
+    const noStateFile = path.join(e.dir(noState), 'state.json');
+    await fs.rm(noStateFile);
+    e.clock.t += 1000;
+    const badState = await e.prepare();
+    const badStateFile = path.join(e.dir(badState), 'state.json');
+    await fs.writeFile(badStateFile, '{not json');
     assert.deepEqual(await statusJson(e.deps), {
       schema: 1,
       runs: [
+        {
+          id: noState.runId,
+          status: 'unreadable',
+          error: `Cannot read run state ${noStateFile}: ENOENT: no such file or directory, open '${noStateFile}'`,
+        },
         { id: badGraph.runId, status: 'unreadable', error: `Run graph ${graphFile} is invalid: version: Invalid input: expected 1; start a new run` },
         expected(good, { attention: { kind: 'stalled', since: good.createdAt, actions: ['resume'] } }),
+        { id: badState.runId, status: 'unreadable', error: `Run state ${badStateFile} is not valid JSON` },
         { id: 't9-broken', status: 'unreadable', error: `Run metadata ${path.join(broken, 'run.json')} is missing or invalid: file not found` },
       ],
     });
@@ -561,3 +575,31 @@ test('terminals when hc ls returns no labels', async () => {
     await e.cleanup();
   }
 });
+
+test('a corrupt waiting.json makes the run unreadable with a located error', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const file = path.join(e.dir(m), 'waiting.json');
+    await fs.writeFile(file, '{"stepId": 1}');
+    assert.deepEqual(await e.status(m), {
+      id: m.runId,
+      status: 'unreadable',
+      error: `Waiting file ${file} is invalid: stepId: Invalid input: expected string, received number; delete it and resume the run`,
+    });
+    await fs.writeFile(file, '{oops');
+    const r = (await e.status(m)) as { error?: string };
+    assert.equal(r.error, `Waiting file ${file} is invalid: ${jsonError('{oops')}; delete it and resume the run`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+function jsonError(text: string): string {
+  try {
+    JSON.parse(text);
+  } catch (err) {
+    return (err as Error).message;
+  }
+  return '';
+}

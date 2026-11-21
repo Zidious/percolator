@@ -53,8 +53,22 @@ async function readJson(file: string): Promise<unknown | undefined> {
 }
 
 export async function readWaiting(runDir: string): Promise<Waiting | undefined> {
-  const raw = await readJson(waitingFile(runDir));
-  return raw === undefined ? undefined : WaitingSchema.parse(raw);
+  const file = waitingFile(runDir);
+  const invalid = (why: string) => new Error(`Waiting file ${file} is invalid: ${why}; delete it and resume the run`);
+  let raw: unknown;
+  try {
+    raw = await readJson(file);
+  } catch (err) {
+    if (err instanceof SyntaxError) throw invalid(err.message);
+    throw err;
+  }
+  if (raw === undefined) return undefined;
+  const r = WaitingSchema.safeParse(raw);
+  if (!r.success) {
+    const i = r.error.issues[0]!;
+    throw invalid(`${i.path.join('.') || 'value'}: ${i.message}`);
+  }
+  return r.data;
 }
 
 export async function writeDecision(
