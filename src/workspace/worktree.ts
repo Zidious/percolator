@@ -3,8 +3,28 @@ import * as path from 'node:path';
 import { runGit } from '../grounds/git.ts';
 import { samePath } from '../util/paths.ts';
 
-export function defaultWorktreeDir(home: string, repoName: string, runId: string): string {
-  return path.join(home, '.percolator', 'worktrees', repoName, runId);
+/** In-repo folder for run worktrees: covered by the repo's agent trust (Claude Code trusts everything below it). */
+export const WORKTREES_DIR = '.worktrees';
+
+export function defaultWorktreeDir(repoRoot: string, runId: string): string {
+  return path.join(repoRoot, WORKTREES_DIR, runId);
+}
+
+/** Lists `/.worktrees/` in the repo's `info/exclude` (once), so worktrees inside it never show as untracked. */
+export async function excludeWorktreesDir(repoRoot: string): Promise<void> {
+  const common = await runGit(['rev-parse', '--path-format=absolute', '--git-common-dir'], repoRoot);
+  const file = path.join(common.trim(), 'info', 'exclude');
+  const line = `/${WORKTREES_DIR}/`;
+  let text = '';
+  try {
+    text = await fs.readFile(file, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  if (text.split(/\r?\n/).includes(line)) return;
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const sep = text === '' || text.endsWith('\n') ? '' : '\n';
+  await fs.writeFile(file, `${text}${sep}${line}\n`);
 }
 
 interface Listed {

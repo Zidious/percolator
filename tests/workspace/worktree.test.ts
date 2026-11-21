@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { defaultWorktreeDir, ensureWorktree, removeWorktree } from '../../src/workspace/worktree.ts';
+import { defaultWorktreeDir, excludeWorktreesDir, ensureWorktree, removeWorktree } from '../../src/workspace/worktree.ts';
 
 const run = promisify(execFile);
 const G = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'advice.detachedHead=false'];
@@ -25,11 +25,8 @@ async function setup(): Promise<{ root: string; repo: string; cleanup: () => Pro
   return { root, repo, cleanup: () => fs.rm(root, { recursive: true, force: true, maxRetries: 5 }) };
 }
 
-test('defaultWorktreeDir nests under ~/.percolator/worktrees', () => {
-  assert.equal(
-    defaultWorktreeDir('/h', 'repo', 'r1'),
-    path.join('/h', '.percolator', 'worktrees', 'repo', 'r1'),
-  );
+test('defaultWorktreeDir nests under <repo>/.worktrees', () => {
+  assert.equal(defaultWorktreeDir(path.join('/h', 'repo'), 'r1'), path.join('/h', 'repo', '.worktrees', 'r1'));
 });
 
 test('creates a worktree on a new branch from base', async () => {
@@ -188,6 +185,20 @@ test('removeWorktree returns false for a dir that is not a worktree', async () =
   const { root, repo, cleanup } = await setup();
   try {
     assert.equal(await removeWorktree({ repoRoot: repo, dir: path.join(root, 'nope'), force: false }), false);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('excludeWorktreesDir adds /.worktrees/ to info/exclude once, keeping what is there', async () => {
+  const { repo, cleanup } = await setup();
+  try {
+    const file = path.join(repo, '.git', 'info', 'exclude');
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, '*.log');
+    await excludeWorktreesDir(repo);
+    await excludeWorktreesDir(repo);
+    assert.equal(await fs.readFile(file, 'utf8'), '*.log\n/.worktrees/\n');
   } finally {
     await cleanup();
   }

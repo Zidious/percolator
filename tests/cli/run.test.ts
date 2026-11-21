@@ -109,12 +109,12 @@ test('run without --foreground launches the driver and prints the start block', 
     assert.equal(r.code, 0);
     const id = await onlyRun(e);
     const driver = terminalName(id, `${REPO}#5`, '@driver', 0);
-    const worktree = path.join(e.home, '.percolator', 'worktrees', 'r', id);
+    const worktree = path.join(e.root, '.worktrees', id);
     assert.equal(
       r.out,
       [
         `run ${id} started`,
-        `  terminal ${driver} (space "r #5")`,
+        `  terminal ${driver} (space "r #5 · ${id.slice(-4)}")`,
         `  worktree ${worktree}`,
         `  follow with: perc status ${id}`,
         '',

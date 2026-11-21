@@ -93,4 +93,5 @@ Detailed behaviour lives in the code; read the module before changing it.
 - **Back-edges** (`on_fail: { back_to, max_rounds }`): at the cap the run escalates (pauses for the owner).
 - **Locks:** `required: true` locks always win over merge order. A locked target may only be restated deep-equal; otherwise `LockViolation` (`"<target> is locked by <src>; <attempt> cannot change it"`), naming the locking source.
 - **Completion** = `done.json` + `outputs/<key>.md` files; hc status is only for attention.
+- **Worktrees in the repo:** run worktrees default to `<repo>/.worktrees/<run-id>`, listed in `.git/info/exclude` (no tracked file changes), so the repo's agent trust covers them. Run dirs stay in `~/.percolator/runs`, which agents reach via `--add-dir`: trust `~/.percolator` once in Claude Code (`cd ~/.percolator; claude`, accept) or groom stops at Claude's trust dialog.
 - **Terminal ownership:** a terminal not labelled `percolator.run` = this run is never re-attached, adopted, killed or removed.

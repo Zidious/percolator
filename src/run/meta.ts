@@ -26,6 +26,10 @@ export type RunMeta = {
   createdAt: string;
 };
 
+/** The Herdr space name: repo, issue, and the run id's suffix, so two runs of one issue stay apart. */
+export const spaceName = (m: Pick<RunMeta, 'repo' | 'issue' | 'runId'>): string =>
+  `${m.repo.split('/').at(-1)} #${m.issue} · ${m.runId.slice(-4)}`;
+
 const META_FILE = 'run.json';
 const STRINGS = [
   'runId',

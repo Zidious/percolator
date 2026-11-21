@@ -13,9 +13,9 @@ import { formatTicket, parseTicket } from '../tracker/ticket.ts';
 import { expandHome } from '../util/paths.ts';
 import { validate } from '../validate.ts';
 import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
-import { ensureWorktree, removeWorktree } from '../workspace/worktree.ts';
+import { defaultWorktreeDir, ensureWorktree, excludeWorktreesDir, removeWorktree } from '../workspace/worktree.ts';
 import { writeRunGraph } from './graph-file.ts';
-import { detectBase, driverName, newRunId, writeRunMeta } from './meta.ts';
+import { detectBase, driverName, newRunId, spaceName, writeRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 
 export type DriverDeps = {
@@ -90,10 +90,8 @@ export async function prepareRun(
   // `expandHome` alone would resolve a relative root against the process cwd
   const rootDir =
     root === undefined ? undefined : root.startsWith('~') ? expandHome(root, deps.home) : path.resolve(path.dirname(configFile), root);
-  const worktree =
-    rootDir !== undefined
-      ? worktreeIn(rootDir, repoName, runId)
-      : worktreeIn(path.join(deps.home, '.percolator', 'worktrees'), repoName, runId);
+  const worktree = rootDir !== undefined ? worktreeIn(rootDir, repoName, runId) : defaultWorktreeDir(repoRoot, runId);
+  if (rootDir === undefined) await excludeWorktreesDir(repoRoot);
 
   if (base.startsWith('origin/')) await runGit(['fetch', '--quiet', 'origin'], repoRoot);
   const branchExisted = await runGit(['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], repoRoot).then(
@@ -105,7 +103,7 @@ export async function prepareRun(
   let space: string | undefined;
   if (v.runtime?.space !== false) {
     try {
-      space = await deps.app.newSpace(`${repoName} #${ref.number}`, worktree);
+      space = await deps.app.newSpace(spaceName({ repo: ref.repo, issue: ref.number, runId }), worktree);
     } catch (err) {
       // no run.json yet, so nothing else would ever find this worktree; best-effort, never masks err
       if (created) {

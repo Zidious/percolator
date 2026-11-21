@@ -11,7 +11,7 @@ import { cliHerdrApp } from './herdr/app.ts';
 import { cliHc } from './herdr/hc.ts';
 import { herdrAppHome, linkHerdr } from './herdr/link.ts';
 import { checkResumable, drive, prUrl } from './run/drive.ts';
-import { listRuns, readRunMeta } from './run/meta.ts';
+import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
 import type { RunMeta } from './run/meta.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
 import type { DriverDeps } from './run/prepare.ts';
@@ -160,7 +160,7 @@ async function runRun(args: string[], deps: DriverDeps): Promise<number> {
     return exitOf(await drive(meta.runId, deps));
   }
   const driver = await launchDriver(meta, deps);
-  const space = meta.space !== undefined ? ` (space "${meta.repo.split('/').at(-1)} #${meta.issue}")` : '';
+  const space = meta.space !== undefined ? ` (space "${spaceName(meta)}")` : '';
   deps.out(`run ${meta.runId} started`);
   deps.out(`  terminal ${driver}${space}`);
   deps.out(`  worktree ${meta.worktree}`);

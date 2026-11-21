@@ -23,7 +23,7 @@ const exists = (p: string) => fs.lstat(p).then(() => true, () => false);
 
 async function assertNothingCreated(e: Env): Promise<void> {
   assert.equal(await exists(path.join(e.home, '.percolator', 'runs')), false);
-  assert.equal(await exists(path.join(e.home, '.percolator', 'worktrees')), false);
+  assert.equal(await exists(path.join(e.root, '.worktrees')), false);
   assert.deepEqual(e.deps.app.calls, []);
 }
 
@@ -32,7 +32,7 @@ test('prepareRun creates worktree, space, run.json and state', async () => {
   try {
     const meta = await prepareRun({ ticket: '#5', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
     assert.match(meta.runId, /^t5-20260304-050607-[0-9a-f]{4}$/);
-    const worktree = path.join(e.home, '.percolator', 'worktrees', 'r', meta.runId);
+    const worktree = path.join(e.root, '.worktrees', meta.runId);
     const dir = path.join(e.home, '.percolator', 'runs', meta.runId);
     const expected: RunMeta = {
       version: 1,
@@ -54,7 +54,9 @@ test('prepareRun creates worktree, space, run.json and state', async () => {
     assert.deepEqual(meta, expected);
     assert.deepEqual(await readRunMeta(dir), expected);
     assert.equal(await git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD'), `percolator/${meta.runId}`);
-    assert.deepEqual(e.deps.app.calls, [['r #5', worktree]]);
+    // the in-repo worktree folder is kept out of git without changing any tracked file
+    assert.doesNotMatch(await git(e.root, 'status', '--porcelain', '--untracked-files=all'), /\.worktrees/);
+    assert.deepEqual(e.deps.app.calls, [[`r #5 · ${meta.runId.slice(-4)}`, worktree]]);
     assert.equal(await fs.readFile(path.join(dir, 'grounds', 'team', 'policies', 'sdlc.md'), 'utf8'), 'be careful\n');
     const state = await loadState(dir);
     assert.match(state.graphFingerprint!, /^[0-9a-f]{64}$/);
