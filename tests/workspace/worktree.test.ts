@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { defaultWorktreeDir, excludeWorktreesDir, ensureWorktree, removeWorktree } from '../../src/workspace/worktree.ts';
+import { defaultWorktreeDir, excludeWorktreesDir, ensureWorktree, removeWorktree, worktreeDirty } from '../../src/workspace/worktree.ts';
 
 const run = promisify(execFile);
 const G = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'advice.detachedHead=false'];
@@ -199,6 +199,21 @@ test('excludeWorktreesDir adds /.worktrees/ to info/exclude once, keeping what i
     await excludeWorktreesDir(repo);
     await excludeWorktreesDir(repo);
     assert.equal(await fs.readFile(file, 'utf8'), '*.log\n/.worktrees/\n');
+  } finally {
+    await cleanup();
+  }
+});
+
+test('worktreeDirty is false for a clean worktree, true after an untracked file, undefined when the dir is gone', async () => {
+  const { root, repo, cleanup } = await setup();
+  try {
+    const dir = path.join(root, 'wt', 'r1');
+    await ensureWorktree({ repoRoot: repo, dir, branch: 'perc/t1', base: 'main' });
+    assert.equal(await worktreeDirty(dir), false);
+    await fs.writeFile(path.join(dir, 'x.txt'), 'x');
+    assert.equal(await worktreeDirty(dir), true);
+    await removeWorktree({ repoRoot: repo, dir, force: true });
+    assert.equal(await worktreeDirty(dir), undefined);
   } finally {
     await cleanup();
   }
