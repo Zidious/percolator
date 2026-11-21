@@ -385,7 +385,7 @@ const ACTIVE = new Set(['running', 'waiting', 'paused']);
 /** The confirm dialog for deleting one run. */
 export function deleteConfirm(run) {
   if (run.status === 'unreadable') {
-    return { title: `Delete ${run.id}?`, detail: `Deletes run ${run.id}: its terminals and record. The branch percolator/${run.id} is kept.` };
+    return { title: `Delete ${run.id}?`, detail: `Deletes run ${run.id}: its terminals, its worktree if its record still names one (uncommitted changes there are lost), and its record. The branch percolator/${run.id} is kept.` };
   }
   const stopped = ACTIVE.has(run.status) ? ' The run is stopped first.' : '';
   return {
@@ -403,6 +403,21 @@ export function deleteFinishedConfirm(runs) {
     detail: `Deletes ${done.map((r) => `${r.id} (#${r.ticket.number})`).join(', ')}: their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
     ids: done.map((r) => r.id),
   };
+}
+
+/**
+ * The notice beside Delete finished runs…: "No finished runs" when it was just pressed (`asked`) with none;
+ * on a refresh, kept until a finished run is listed.
+ */
+export function finishedNotice(notice, runs, asked) {
+  const none = !runs.some(isFinished);
+  if (asked) return none ? 'No finished runs' : null;
+  return notice === 'No finished runs' && !none ? null : notice;
+}
+
+/** The action error when a confirmed delete arrives while `busy` (another action) runs; null when free. */
+export function deleteBusyError(busy) {
+  return busy ? 'Another action is running; try Delete again' : null;
 }
 
 /** The selection after `deletedIds` are gone: `selId` if it stays, else the next row left, else the previous, else null. */

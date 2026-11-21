@@ -20,7 +20,9 @@ import {
   cupMoves,
   deleteArgv,
   deleteConfirm,
+  deleteBusyError,
   deleteFinishedConfirm,
+  finishedNotice,
   duration,
   isFinished,
   selectAfterDelete,
@@ -592,7 +594,7 @@ test('deleteConfirm names the run, says what is lost and kept, and that an activ
   const bad = byId('t5');
   assert.deepEqual(deleteConfirm(bad), {
     title: `Delete ${bad.id}?`,
-    detail: `Deletes run ${bad.id}: its terminals and record. The branch percolator/${bad.id} is kept.`,
+    detail: `Deletes run ${bad.id}: its terminals, its worktree if its record still names one (uncommitted changes there are lost), and its record. The branch percolator/${bad.id} is kept.`,
   });
 });
 
@@ -604,6 +606,20 @@ test('deleteFinishedConfirm lists the finished runs, or is null when there are n
     ids: [a, b, c],
   });
   assert.equal(deleteFinishedConfirm(runs().filter((r) => !isFinished(r))), null);
+});
+
+test('finishedNotice says No finished runs until a finished run is listed; another notice stays', () => {
+  const unfinished = runs().filter((r) => !isFinished(r));
+  assert.equal(finishedNotice(null, unfinished, true), 'No finished runs');
+  assert.equal(finishedNotice(null, runs(), true), null);
+  assert.equal(finishedNotice('No finished runs', unfinished, false), 'No finished runs');
+  assert.equal(finishedNotice('No finished runs', runs(), false), null);
+  assert.equal(finishedNotice(null, unfinished, false), null);
+});
+
+test('deleteBusyError tells the owner a confirmed delete did not run', () => {
+  assert.equal(deleteBusyError('approve'), 'Another action is running; try Delete again');
+  assert.equal(deleteBusyError(null), null);
 });
 
 test('selectAfterDelete moves to the next row, else the previous, else none; an unrelated selection stays', () => {

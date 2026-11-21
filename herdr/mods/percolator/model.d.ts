@@ -66,6 +66,8 @@ export declare function deleteCommandIds(command: string): string[] | null;
 export declare function isFinished(run: RunStatusJson): boolean;
 export declare function deleteConfirm(run: RunStatusJson): { title: string; detail: string };
 export declare function deleteFinishedConfirm(runs: RunStatusJson[]): { title: string; detail: string; ids: string[] } | null;
+export declare function finishedNotice(notice: string | null, runs: RunStatusJson[], asked: boolean): string | null;
+export declare function deleteBusyError(busy: string | null): string | null;
 export declare function selectAfterDelete(rows: { id: string }[], deletedIds: string[], selId: string | null): string | null;
 export declare function selectAfterRefresh(
   runs: { id: string }[],

@@ -28,7 +28,9 @@ import {
   deleteCommand,
   deleteCommandIds,
   deleteConfirm,
+  deleteBusyError,
   deleteFinishedConfirm,
+  finishedNotice,
   dragBoard,
   fillHeight,
   findNode,
@@ -188,6 +190,7 @@ export default class Percolator extends View {
       const got = await fetchStatus(this);
       if (got.ok) {
         this.runs = sortRuns(got.data.runs);
+        this.notice = finishedNotice(this.notice, this.runs, false);
         this.error = null;
         this.loaded = true;
         const pick = selectAfterRefresh(this.runs, this.rows(), this.sel, this.deleting);
@@ -337,12 +340,11 @@ export default class Percolator extends View {
     if (this.busy) return;
     this.actError = null;
     const confirm = deleteFinishedConfirm(this.runs);
+    this.notice = finishedNotice(this.notice, this.runs, true);
     if (confirm === null) {
-      this.notice = 'No finished runs';
       cx.notify();
       return;
     }
-    this.notice = null;
     openOverlay({
       mod: 'confirm',
       kind: 'dialog',
@@ -355,7 +357,12 @@ export default class Percolator extends View {
 
   /** Deletes exactly `ids`; the row to select after is worked out now, from the rows the owner saw. */
   deleteRuns(ids, cx) {
-    if (this.busy) return;
+    if (this.busy) {
+      // the dialog has closed: say the delete didn't run rather than drop it
+      this.actError = deleteBusyError(this.busy);
+      cx.notify();
+      return;
+    }
     if (this.conn !== 'fixtures') this.deleting = { ids, next: selectAfterDelete(this.rows(), ids, this.sel) };
     this.perform('delete', deleteArgv(ids), cx);
   }
