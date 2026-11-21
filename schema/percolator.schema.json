@@ -118,7 +118,7 @@
                       }
                     },
                     "prompt": {
-                      "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; default the stage contract.",
+                      "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {run_id}, {worktree} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
                       "anyOf": [
                         {
                           "type": "string"
@@ -148,7 +148,7 @@
                       "type": "string"
                     },
                     "command": {
-                      "description": "Argv array for a script node, never a shell string; {run_dir}, {outputs_dir} and {worktree} are filled in.",
+                      "description": "Argv array, never a shell string: the script for a script node ({run_dir}, {outputs_dir}, {worktree} filled in), or the program for agent: command.",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -214,7 +214,7 @@
                       "additionalProperties": false
                     },
                     "max_rounds": {
-                      "description": "Round cap for the review loop; default 3.",
+                      "description": "Round cap for the review loop, read from the last node bound to review; default 3.",
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 9007199254740991
@@ -229,7 +229,7 @@
                       "type": "boolean"
                     },
                     "required": {
-                      "description": "Locks the node: later layers may only restate it unchanged; default false.",
+                      "description": "Locks the node (in bindings, the whole stage binding): later layers may only restate it unchanged; default false.",
                       "type": "boolean"
                     }
                   },
@@ -281,7 +281,7 @@
                         }
                       },
                       "prompt": {
-                        "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; default the stage contract.",
+                        "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {run_id}, {worktree} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
                         "anyOf": [
                           {
                             "type": "string"
@@ -311,7 +311,7 @@
                         "type": "string"
                       },
                       "command": {
-                        "description": "Argv array for a script node, never a shell string; {run_dir}, {outputs_dir} and {worktree} are filled in.",
+                        "description": "Argv array, never a shell string: the script for a script node ({run_dir}, {outputs_dir}, {worktree} filled in), or the program for agent: command.",
                         "type": "array",
                         "items": {
                           "type": "string"
@@ -377,7 +377,7 @@
                         "additionalProperties": false
                       },
                       "max_rounds": {
-                        "description": "Round cap for the review loop; default 3.",
+                        "description": "Round cap for the review loop, read from the last node bound to review; default 3.",
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 9007199254740991
@@ -392,7 +392,7 @@
                         "type": "boolean"
                       },
                       "required": {
-                        "description": "Locks the node: later layers may only restate it unchanged; default false.",
+                        "description": "Locks the node (in bindings, the whole stage binding): later layers may only restate it unchanged; default false.",
                         "type": "boolean"
                       }
                     },
@@ -453,7 +453,7 @@
                   }
                 },
                 "prompt": {
-                  "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; default the stage contract.",
+                  "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {run_id}, {worktree} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
                   "anyOf": [
                     {
                       "type": "string"
@@ -483,7 +483,7 @@
                   "type": "string"
                 },
                 "command": {
-                  "description": "Argv array for a script node, never a shell string; {run_dir}, {outputs_dir} and {worktree} are filled in.",
+                  "description": "Argv array, never a shell string: the script for a script node ({run_dir}, {outputs_dir}, {worktree} filled in), or the program for agent: command.",
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -549,7 +549,7 @@
                   "additionalProperties": false
                 },
                 "max_rounds": {
-                  "description": "Round cap for the review loop; default 3.",
+                  "description": "Round cap for the review loop, read from the last node bound to review; default 3.",
                   "type": "integer",
                   "minimum": 1,
                   "maximum": 9007199254740991
@@ -564,7 +564,7 @@
                   "type": "boolean"
                 },
                 "required": {
-                  "description": "Locks the node: later layers may only restate it unchanged; default false.",
+                  "description": "Locks the node (in bindings, the whole stage binding): later layers may only restate it unchanged; default false.",
                   "type": "boolean"
                 }
               },
@@ -600,7 +600,7 @@
                           "const": "*"
                         }
                       ],
-                      "description": "Stage whose agent nodes must load the skills, or * for every stage."
+                      "description": "Stage whose agent nodes must load the skills, or * for every stage; a named stage must be bound to an agent node."
                     },
                     "skills": {
                       "type": "array",
@@ -625,7 +625,7 @@
                 }
               },
               "allowed_models": {
-                "description": "Models agent nodes may use; default any model.",
+                "description": "Models agent nodes may use; when set, every agent node must name one of them; default any model.",
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -718,7 +718,7 @@
                     "prompt",
                     "graph"
                   ],
-                  "description": "What the mapping is: policy (binding rules), context (reference), skills, plugins, prompt, or graph (a config fragment layer)."
+                  "description": "What the mapping is: policy (binding rules), context (reference), skills, plugins, prompt (accepted but not used yet; has no effect), or graph (a config fragment layer)."
                 },
                 "applies_to": {
                   "default": [
@@ -805,7 +805,7 @@
             "type": "object",
             "properties": {
               "worktree_root": {
-                "description": "Put worktrees here; default <repo>/.worktrees.",
+                "description": "Put worktrees under <root>/<repo>/; relative to the config file, ~ expanded; default <repo>/.worktrees.",
                 "type": "string"
               },
               "base": {

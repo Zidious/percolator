@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BUILTIN_NAMES } from '../tracker/index.ts';
 
 export const STAGES = ['intake', 'groom', 'plan', 'implement', 'review', 'deliver'] as const;
 export const StageSchema = z.enum(STAGES);
@@ -43,7 +44,7 @@ export const MappingSchema = z
     file: z.string().optional().describe('File inside the ground to map; exactly one of file or dir.'),
     dir: z.string().optional().describe('Directory inside the ground to map; exactly one of file or dir.'),
     as: MappingKindSchema.describe(
-      'What the mapping is: policy (binding rules), context (reference), skills, plugins, prompt, or graph (a config fragment layer).',
+      'What the mapping is: policy (binding rules), context (reference), skills, plugins, prompt (accepted but not used yet; has no effect), or graph (a config fragment layer).',
     ),
     applies_to: z
       .array(z.string())
@@ -86,12 +87,16 @@ export const NodeDefSchema = z
         }),
       ])
       .optional()
-      .describe('Task prompt for an agent node: inline text, or { from: <ground>, file: … }; default the stage contract.'),
-    builtin: z.string().optional().describe('Builtin to run: github.intake or github.open_pr (builtin nodes).'),
+      .describe(
+        "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {run_id}, {worktree} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
+      ),
+    builtin: z.string().optional().describe(`Builtin to run: ${BUILTIN_NAMES.join(' or ')} (builtin nodes).`),
     command: z
       .array(z.string())
       .optional()
-      .describe('Argv array for a script node, never a shell string; {run_dir}, {outputs_dir} and {worktree} are filled in.'),
+      .describe(
+        'Argv array, never a shell string: the script for a script node ({run_dir}, {outputs_dir}, {worktree} filled in), or the program for agent: command.',
+      ),
     before: StageOrAllSchema.optional().describe(
       'Hook point: run this node before a stage, or before all; at most one of before/after.',
     ),
@@ -109,7 +114,9 @@ export const NodeDefSchema = z
       })
       .optional()
       .describe('Bounded back-edge: on fail, loop back to an earlier stage, up to max_rounds times.'),
-    max_rounds: z.number().int().min(1).optional().describe('Round cap for the review loop; default 3.'),
+    max_rounds: z.number().int().min(1).optional().describe(
+      'Round cap for the review loop, read from the last node bound to review; default 3.',
+    ),
     timeout_s: z
       .number()
       .positive()
@@ -119,7 +126,7 @@ export const NodeDefSchema = z
     required: z
       .boolean()
       .optional()
-      .describe('Locks the node: later layers may only restate it unchanged; default false.'),
+      .describe('Locks the node (in bindings, the whole stage binding): later layers may only restate it unchanged; default false.'),
   })
   .superRefine((n, ctx) => {
     if (n.before !== undefined && n.after !== undefined) {
@@ -183,14 +190,16 @@ export const RulesSchema = z.strictObject({
       z.strictObject({
         stage: z
           .union([StageSchema, z.literal('*')])
-          .describe('Stage whose agent nodes must load the skills, or * for every stage.'),
+          .describe('Stage whose agent nodes must load the skills, or * for every stage; a named stage must be bound to an agent node.'),
         skills: z.array(z.string()).describe('Skills each agent node in that stage must load.'),
       }),
     )
     .optional()
     .describe('Skills that agent nodes in a stage must load.'),
   allowed_agents: z.array(z.string()).optional().describe('Agents nodes may use; default any agent.'),
-  allowed_models: z.array(z.string()).optional().describe('Models agent nodes may use; default any model.'),
+  allowed_models: z.array(z.string()).optional().describe(
+    'Models agent nodes may use; when set, every agent node must name one of them; default any model.',
+  ),
   max_rounds_ceiling: z
     .number()
     .int()
@@ -210,16 +219,16 @@ const NODE_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
 export const NodesSchema = z
   .record(z.string(), NodeDefSchema.describe('One named node: a hook (with before/after), a gate or a node rules require.'))
   .superRefine((nodes, ctx) => {
-  for (const name of Object.keys(nodes)) {
-    if (!NODE_NAME.test(name)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: [name],
-        message: 'node names must start with a letter and contain only letters, digits, "_" and "-"',
-      });
+    for (const name of Object.keys(nodes)) {
+      if (!NODE_NAME.test(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message: 'node names must start with a letter and contain only letters, digits, "_" and "-"',
+        });
+      }
     }
-  }
-});
+  });
 
 const graphFragmentShape = {
   bindings: z
@@ -260,7 +269,9 @@ export const ProfileSchema = z.strictObject({
     .describe('Issue tracker used for tickets, gates and pull requests.'),
   runtime: z
     .strictObject({
-      worktree_root: z.string().optional().describe('Put worktrees here; default <repo>/.worktrees.'),
+      worktree_root: z.string().optional().describe(
+        'Put worktrees under <root>/<repo>/; relative to the config file, ~ expanded; default <repo>/.worktrees.',
+      ),
       base: z
         .string()
         .optional()

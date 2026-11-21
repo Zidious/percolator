@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { UserConfigSchema } from '../../src/config/schema.ts';
+import { BUILTIN_NAMES } from '../../src/tracker/index.ts';
 
 type Node = Record<string, unknown>;
 
@@ -98,7 +99,17 @@ test('descriptions state the defaults the code uses', () => {
     ['$.profiles.*.nodes.*.once', /default false/],
     ['$.profiles.*.use[].applies_to', /default all stages/],
     ['$.profiles.*.nodes.*.escalation', /not used.*no effect/],
+    ['$.profiles.*.use[].as', /prompt \(accepted but not used yet; has no effect\)/],
+    ['$.profiles.*.nodes.*.prompt', /stage contract \(bindings\) or the node's purpose \(hooks\)/],
+    ['$.profiles.*.nodes.*.prompt', /\{run_id\}, \{worktree\}/],
+    ['$.profiles.*.nodes.*.command', /program for agent: command/],
+    ['$.profiles.*.nodes.*.max_rounds', /read from the last node bound to review/],
+    ['$.profiles.*.rules.allowed_models', /when set, every agent node must name one of them/],
+    ['$.profiles.*.nodes.*.required', /in bindings, the whole stage binding/],
+    ['$.profiles.*.runtime.worktree_root', /<root>\/<repo>\/; relative to the config file, ~ expanded/],
+    ['$.profiles.*.rules.require_skills[].stage', /a named stage must be bound to an agent node/],
   ];
   for (const [p, re] of expected) assert.match(desc(p), re, p);
+  assert.ok(desc('$.profiles.*.nodes.*.builtin').includes(BUILTIN_NAMES.join(' or ')), 'builtin names come from BUILTIN_NAMES');
   assert.deepEqual(at(s, '$.profiles.*.use[].applies_to')?.['default'], ['*']);
 });
