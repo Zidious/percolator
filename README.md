@@ -48,14 +48,14 @@ Every run follows the same six stages in the same order. You choose what runs at
   <img alt="The run train: intake, groom, the approve-groom gate, plan, implement, an optional hook, review looping back to implement up to three times, then deliver opens a pull request." src="assets/diagram-run-light.svg" width="100%">
 </picture>
 
-The diagram shows the example config mid-run: intake and groom are done, and the run waits at the `approve-groom` gate. Rejecting with feedback re-runs groom. Review can send work back to implement for up to 3 rounds; after the third, it delivers anyway and lists the unresolved findings in the PR. Hooks, like the one after implement, are optional nodes you add `before` or `after` any stage, or `all`.
+The diagram shows the example config mid-run: intake and groom are done, and the run waits at the `approve-groom` gate. Rejecting with feedback re-runs groom. Review can send work back to implement for up to 3 rounds; after the third, it delivers anyway. Hooks, like the one after implement, are optional nodes you add `before` or `after` any stage, or `all`.
 
 | Stop | What can run there | Done when |
 |---|---|---|
 | **intake** | builtin `github.intake` | The issue is read and the run has a ticket. |
 | **groom … review** | an `agent`, `script` or `builtin` node, or a list of them | The step wrote `done.json` and its `outputs/<key>.md`. |
 | **approve-groom** | `gate`, built in and locked, always after groom | You approve, locally or with a `/percolator approve` comment on the issue. A rejection re-runs groom, 3 times at most. |
-| **deliver** | builtin `github.open_pr` | The branch is pushed and the PR is open. |
+| **deliver** | builtin `github.open_pr` | The branch is pushed and the PR is open. Its body is `Closes #N`, followed by the `pr_body` output if a step wrote one. |
 
 ## The engine
 
