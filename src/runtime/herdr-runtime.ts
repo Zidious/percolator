@@ -281,7 +281,7 @@ export class HerdrRuntime implements Runtime {
         break;
       }
       if (!t || t.state === 'finished') {
-        if (isAgent) return escalate(`${step.id}: agent exited without a valid done.json`);
+        if (isAgent) return escalate(await this.#exitedReason(step, io, n, t?.exitCode ?? null));
         result = t?.exitCode === 0 ? { status: 'pass' } : { status: 'fail', reason: `exit code ${t?.exitCode ?? null}` };
         break;
       }
@@ -329,6 +329,21 @@ export class HerdrRuntime implements Runtime {
     const outcome: NodeOutcome = { status: result.status, outputs: collected.outputs };
     if (result.status !== 'pass' && result.reason !== undefined) outcome.reason = result.reason;
     return outcome;
+  }
+
+  /** One line saying why an agent stopped without completing: exit code, its last screen lines, the saved screen. */
+  async #exitedReason(step: Step, io: StepIo, n: string, exitCode: number | null): Promise<string> {
+    const transcript = await this.#saveTranscript(n, io);
+    const text = await fs.readFile(transcript, 'utf8').catch(() => '');
+    const last = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l !== '')
+      .slice(-3)
+      .join(' | ');
+    const code = exitCode === null ? '' : ` with code ${exitCode}`;
+    const lines = last === '' ? '' : `; last lines: "${last}"`;
+    return `${step.id}: agent exited${code} without a valid done.json${lines}; full screen in ${transcript}`;
   }
 
   /** Best-effort: a terminal that has vanished leaves no transcript. */

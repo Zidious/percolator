@@ -279,15 +279,23 @@ test('a finished terminal with a done.json is collected without relaunching', as
   assert.ok(!subs(e.hc).includes('run'));
 });
 
-test('agent exiting without done.json escalates with a reason naming the step', async () => {
+test('agent exiting without done.json escalates with its exit code, last screen lines and saved transcript', async () => {
+  const screen = 'Claude Code\n\n Adding a new directory: /runs/x\n ❯ No, exit\n   Yes, add it\n\nTo go on without it, start again without --add-dir\n\n';
   const e = await env((t, n) => {
     if (n === 1) {
       t.state = 'finished';
-      t.exitCode = 0;
+      t.exitCode = 1;
+      t.screen = screen;
     }
   });
   const out = await runtime(e).executeStep(step(), ctx());
-  assert.deepEqual(out, { status: 'escalate', outputs: {}, reason: 'plan: agent exited without a valid done.json' });
+  const transcript = path.join(e.runDir, 'steps', 'plan', '1', 'transcript.txt');
+  assert.deepEqual(out, {
+    status: 'escalate',
+    outputs: {},
+    reason: `plan: agent exited with code 1 without a valid done.json; last lines: "❯ No, exit | Yes, add it | To go on without it, start again without --add-dir"; full screen in ${transcript}`,
+  });
+  assert.equal(await fs.readFile(transcript, 'utf8'), screen);
 });
 
 test('invalid done.json after the turn ends escalates naming the file', async () => {
