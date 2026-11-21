@@ -257,7 +257,8 @@ export function timelineOf(run) {
     .map((s) => ({
       kind: 'attempt',
       step: s.id,
-      attempt: s.attempts,
+      // an older perc's `attempts` counts finished records, so a live step is on the next one
+      attempt: s.status === 'running' || s.status === 'waiting' ? (s.attempts ?? 0) + 1 : s.attempts,
       status: s.status,
       ...(s.startedAt ? { startedAt: s.startedAt } : {}),
       ...(s.endedAt ? { endedAt: s.endedAt } : {}),

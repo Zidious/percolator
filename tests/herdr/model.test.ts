@@ -89,7 +89,10 @@ test("the fixture's terminals are named as perc names them (names, not Herdr add
     if (r.status === 'unreadable') continue;
     assert.equal(r.driver.terminal, driverName(r.id, r.ticket.ref), r.id);
     for (const [step, name] of Object.entries(r.terminals)) {
-      const attempts: number = r.steps.find((s) => s.id === step)?.attempts ?? 0;
+      const st = r.steps.find((s) => s.id === step);
+      // without a timeline, `attempts` counts finished records, so a live step runs attempt `attempts + 1`
+      const live = !Array.isArray(r.timeline) && (st?.status === 'running' || st?.status === 'waiting');
+      const attempts: number = (st?.attempts ?? 0) + (live ? 1 : 0);
       assert.equal(name, step === 'driver' ? driverName(r.id, r.ticket.ref) : terminalName(r.id, r.ticket.ref, step, attempts), `${r.id} ${step}`);
     }
     if (r.attention?.terminal !== undefined) assert.equal(r.attention.terminal, r.terminals[r.currentStep!], r.id);
@@ -658,6 +661,13 @@ test('timelineRows shows a cap as its own row', () => {
 
 test('timelineRows without a timeline lists the steps that ran, newest first', () => {
   assert.deepEqual(timelineRows(readable('t9'), 0).map((r) => r.key), ['implement#1', 'plan#1', 'approve-groom#1', 'groom#1', 'intake#1']);
+});
+
+test('timelineRows without a timeline counts a live step as the attempt in progress', () => {
+  const first = timelineRows(readable('t14'), 0).find((r) => r.key === 'intake#1');
+  assert.equal(first?.round, 'round 1');
+  assert.equal(stepAttempts(readable('t11'), 'implement').at(-1)!.attempt, 1);
+  assert.equal(stepAttempts(readable('t11'), 'plan').at(-1)!.attempt, 1, 'a finished step keeps its attempts');
 });
 
 test('rowState keeps the round apart from a long step name, so it is never cut', () => {

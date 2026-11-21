@@ -19,7 +19,7 @@ function stateCell(s, width, size, t) {
     .text_size(size)
     .text_color(t[s.tone])
     .child(div().min_w(0).truncate().child(s.text))
-    .when(s.round, (el) => el.child(div().flex_none().child(`· ${s.round}`)));
+    .when(Boolean(s.round), (el) => el.child(div().flex_none().child(`· ${s.round}`)));
 }
 
 function icon(t, r) {

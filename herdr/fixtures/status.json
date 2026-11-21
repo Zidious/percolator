@@ -1131,7 +1131,7 @@
           "role": "core",
           "kind": "agent",
           "status": "running",
-          "attempts": 1,
+          "attempts": 0,
           "outputs": {}
         },
         {
@@ -1212,7 +1212,7 @@
           "role": "core",
           "kind": "agent",
           "status": "running",
-          "attempts": 1,
+          "attempts": 0,
           "outputs": {}
         },
         {
