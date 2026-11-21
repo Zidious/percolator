@@ -218,3 +218,15 @@ test('worktreeDirty is false for a clean worktree, true after an untracked file,
     await cleanup();
   }
 });
+
+test('worktreeDirty refuses to answer for a worktree whose .git is gone, instead of reporting the enclosing repo', async () => {
+  const { repo, cleanup } = await setup();
+  try {
+    const dir = path.join(repo, '.worktrees', 'r1');
+    await ensureWorktree({ repoRoot: repo, dir, branch: 'perc/t1', base: 'main' });
+    await fs.rm(path.join(dir, '.git'));
+    await assert.rejects(worktreeDirty(dir), { message: `${dir} is not a git worktree; check it by hand` });
+  } finally {
+    await cleanup();
+  }
+});
