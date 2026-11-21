@@ -62,6 +62,7 @@ Read the module before changing it.
 - **Errors:** one line, name the file or run, say what to do next; tests assert the exact text.
 - **Panel contract:** `perc status --json` and `herdr/mods/percolator/model.js` (its only reader) change together. Herdr refuses cross-mod imports, so the cup carries copies of the panel's `model.js`, `mark.js`, `source.js`; re-copy them, and `tests/herdr/cup.test.ts` keeps them equal.
 - **Resume-safe:** run ids, terminal names and posted comments are deterministic or marked so a resume finds them instead of duplicating them.
+- **README stays true:** `README.md` is the user-facing doc. A change that makes anything in it wrong (requirements, stages, the example config, config keys, statuses and how to answer them, integrations, setup) updates it in the same commit, including the diagrams in `assets/diagram-*-{light,dark}.svg` (both themes). A new integration gets a row in the Integrations table and its own `###` section. Check it before calling the work done.
 
 ## Design decisions to keep
 
