@@ -150,6 +150,7 @@ export async function prepareRun(
 /**
  * Start `perc drive <runId>` in an hc terminal that outlives this process. Only a terminal labelled
  * with this run is ever removed: a live one means the run is already driven; a finished one is replaced.
+ * The driver carries no `herdr.space` label, so it stays out of the run's space until the panel shows it.
  */
 export async function launchDriver(meta: RunMeta, deps: DriverDeps): Promise<string> {
   const name = meta.driver;
@@ -167,7 +168,6 @@ export async function launchDriver(meta: RunMeta, deps: DriverDeps): Promise<str
     labels: {
       'percolator.run': meta.runId,
       'percolator.role': 'driver',
-      ...(meta.space !== undefined ? { 'herdr.space': meta.space } : {}),
     },
     outliveParent: true,
   });
