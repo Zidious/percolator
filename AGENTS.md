@@ -23,6 +23,7 @@ perc resume <run-id> [--foreground]   # continue a paused/interrupted run; check
 perc status [<run-id>] [--json]       # list runs, or show one (detail, your turn, last 10 history records); --json: the stable JSON contract
 perc approve <run-id> | perc reject <run-id> <feedback>   # answer the gate a run waits at
 perc clean <run-id> [--force]         # remove a finished run's terminals and worktree (keeps branch and run record)
+perc herdr link                       # tell the Percolator Herdr panel how to run perc (writes <herdr app home>/mods/percolator/perc.json)
 perc drive <run-id>                   # internal: what the driver terminal runs
 node tests/smoke/hc.smoke.ts [--space <id>] [--boot] [--codex]   # manual: talks to the real hc (needs hc on PATH; --space also uses herdr-app; --boot launches claude + an idle program; --codex runs codex on Windows); not in pnpm test
 node tests/smoke/gh.smoke.ts --issue <owner/repo#n>   # manual, read-only: real gh issue view, prints parsed JSON; not in pnpm test

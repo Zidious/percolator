@@ -9,6 +9,7 @@ import { loadState } from './engine/state.ts';
 import type { RunState } from './engine/state.ts';
 import { cliHerdrApp } from './herdr/app.ts';
 import { cliHc } from './herdr/hc.ts';
+import { herdrAppHome, linkHerdr } from './herdr/link.ts';
 import { checkResumable, drive, prUrl } from './run/drive.ts';
 import { listRuns, readRunMeta } from './run/meta.ts';
 import type { RunMeta } from './run/meta.ts';
@@ -46,6 +47,8 @@ commands:
       answer the approval gate a run is waiting at
   clean <run-id> [--force]
       remove a finished run's terminals and worktree (keeps the branch and the run record)
+  herdr link
+      tell the Percolator Herdr panel how to run perc (writes perc.json)
   drive <run-id>
       internal: what a run's driver terminal executes
 
@@ -294,6 +297,20 @@ async function runClean(args: string[], deps: DriverDeps): Promise<number> {
   return 0;
 }
 
+async function runHerdr(args: string[], io: Io, home: string): Promise<number> {
+  const [sub, ...rest] = args;
+  if (sub !== 'link') throw new UsageError('herdr needs a subcommand: link');
+  parse(rest, {});
+  const file = await linkHerdr({
+    appHome: herdrAppHome(process.env, home),
+    node: process.execPath,
+    cli: fileURLToPath(import.meta.url),
+  });
+  io.stdout(`wrote ${file}
+`);
+  return 0;
+}
+
 async function runDrive(args: string[], deps: DriverDeps): Promise<number> {
   const { positionals } = parseWith(args, {});
   return exitOf(await drive(onlyRunId('drive', positionals), deps));
@@ -332,6 +349,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     if (command === 'init') return await runInit(rest, io);
     if (command === 'validate') return await runValidate(rest, io);
     if (command === 'schema') return await runSchema(rest, io);
+    if (command === 'herdr') return await runHerdr(rest, io, deps.home ?? os.homedir());
     const d = () => driverDeps(io, deps);
     if (command === 'run') return await runRun(rest, d());
     if (command === 'resume') return await runResume(rest, d());
