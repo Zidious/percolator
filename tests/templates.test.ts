@@ -56,3 +56,33 @@ test('template binds agent stages to claude on opus, each with a skill', async (
     assert.match(agent('groom').prompt as string, /then stop: no plan and no code/);
   });
 });
+
+test('template adds a pr-description agent hook before deliver', async () => {
+  await withTemplate(async (tmp, configFile) => {
+    const config = await loadUserConfig(configFile);
+    const node = (config.profiles['default']!.nodes as Record<string, { agent: string; model: string; before: string; prompt: string }> | undefined)?.['pr-description'];
+    assert.ok(node, 'profiles.default.nodes has pr-description');
+    assert.equal(node.agent, 'claude');
+    assert.equal(node.model, 'opus');
+    assert.equal(node.before, 'deliver');
+    assert.match(node.prompt, /pr_body\.md/);
+    const r = await validate({ configFile, cwd: tmp, profile: 'default', home: tmp });
+    const steps = r.graph.steps;
+    const deliver = steps.findIndex((s) => s.role === 'slot' && s.stage === 'deliver');
+    assert.ok(deliver > 0);
+    assert.equal(steps[deliver - 1]!.id, 'pr-description');
+    assert.equal(steps[deliver - 1]!.role, 'hook');
+  });
+});
+
+test('the pr-description prompt uses only known template variables', async () => {
+  await withTemplate(async (_tmp, configFile) => {
+    const config = await loadUserConfig(configFile);
+    const node = (config.profiles['default']!.nodes as Record<string, { prompt: string }> | undefined)?.['pr-description'];
+    assert.ok(node, 'profiles.default.nodes has pr-description');
+    const known = new Set(['run_id', 'ticket', 'step', 'stage', 'round', 'max_rounds', 'worktree', 'branch', 'base', 'run_dir', 'outputs_dir']);
+    const names = [...node.prompt.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]!);
+    assert.ok(names.length > 0);
+    for (const n of names) assert.ok(known.has(n), `unknown template variable {{${n}}}`);
+  });
+});
