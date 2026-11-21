@@ -121,6 +121,36 @@ test('drive runs a ticket to a PR', async () => {
   }
 });
 
+test('the driver prints each step as it starts and ends, and where a gate waits', async () => {
+  const e = await setup(TRACKER);
+  try {
+    const meta = await e.prepare();
+    e.decisions.push('/percolator approve');
+    await drive(meta.runId, e.deps);
+    const gateUrl = gateComments(e)[0]!.url;
+    const at = (line: string) => {
+      const i = e.out.indexOf(line);
+      assert.ok(i >= 0, `missing "${line}" in ${JSON.stringify(e.out)}`);
+      return i;
+    };
+    const lines = [
+      'intake: started',
+      'intake: pass',
+      'groom: started',
+      'groom: pass',
+      'approve-groom: started',
+      `approve-groom: waiting for approval: ${gateUrl}`,
+      'approve-groom: pass',
+      'plan: started',
+      'deliver: pass',
+    ];
+    const idx = lines.map(at);
+    assert.deepEqual(idx, [...idx].sort((a, b) => a - b));
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('keepTerminals comes from run.json, not the config at resume', async () => {
   const e = await setup(`${TRACKER}\n    runtime: { keep_terminals: true }`);
   try {
@@ -393,6 +423,58 @@ test('attention is printed, recorded in attention.json and cleared after the ste
     assert.deepEqual(seen, { stepId: 'groom', terminal: groom, kind: 'blocked', at: (seen as { at: string }).at });
     assert.match((seen as { at: string }).at, /^2026-03-04T05:\d\d:\d\d\.000Z$/);
     assert.equal(await exists(file), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+const priorGate = (run: string, text: string) =>
+  [
+    `${GATE_MARKER} run=${run} step=approve-groom round=1 -->`,
+    `**Percolator** needs approval to continue run \`${run}\` (step \`approve-groom\`).`,
+    '',
+    '### groomed_ticket',
+    '',
+    text,
+    '',
+    'Reply `/percolator approve` to continue, or `/percolator reject <what to change>` to send it back.',
+    '',
+  ].join('\n');
+
+test('an approved groomed ticket from an earlier run is reused: no groom agent, no new gate comment', async () => {
+  const e = await setup();
+  try {
+    e.deps.gh.addComment(REPO, 5, 'perc-bot', priorGate('old-run', '# Reused\n\nthe approved ticket'));
+    const ok = e.deps.gh.addComment(REPO, 5, 'alice', '/percolator approve');
+    const meta = await e.prepare();
+    // only used if the gate (wrongly) posts a new comment: the run then ends and the asserts say why
+    e.decisions.push('/percolator approve');
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed');
+    assert.equal(runs(e, 'groom').length, 0);
+    assert.equal(gateComments(e).length, 1);
+    const groomed = state.history.find((h) => h.stepId === 'groom')!.outputs['groomed_ticket']!;
+    assert.equal(await fs.readFile(path.join(e.runDir(meta), groomed), 'utf8'), '# Reused\n\nthe approved ticket\n');
+    const approval = state.history.find((h) => h.stepId === 'approve-groom')!.outputs['approval']!;
+    assert.match(await fs.readFile(path.join(e.runDir(meta), approval), 'utf8'), new RegExp(`^Approved earlier by @alice: ${ok.url} `));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('an unapproved groomed ticket from an earlier run is given to groom to refine', async () => {
+  const e = await setup();
+  try {
+    e.deps.gh.addComment(REPO, 5, 'perc-bot', priorGate('old-run', 'the draft'));
+    e.deps.gh.addComment(REPO, 5, 'alice', 'not quite');
+    const meta = await e.prepare();
+    e.decisions.push('/percolator approve');
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed');
+    assert.equal(runs(e, 'groom').length, 1);
+    const task = await fs.readFile(path.join(e.runDir(meta), 'steps', 'groom', '1', 'task.md'), 'utf8');
+    const prev = path.join(e.runDir(meta), 'steps', 'intake', '1', 'outputs', 'previous_groom.md');
+    assert.ok(task.includes(`previous_groom (from intake): ${prev}`), task);
   } finally {
     await e.cleanup();
   }

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { graphFingerprint, runGraph } from '../engine/engine.ts';
 import { grantRound, loadState, saveState } from '../engine/state.ts';
 import type { RunState } from '../engine/state.ts';
+import type { Runtime } from '../engine/runtime.ts';
 import { mappingKeys, mappingsFingerprint } from '../grounds/mappings.ts';
 import { HerdrRuntime, sweepTerminals } from '../runtime/herdr-runtime.ts';
 import type { Attention } from '../runtime/herdr-runtime.ts';
@@ -20,6 +21,7 @@ import type { Liveness } from './lock.ts';
 import { readRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
+import { reusePriorGroom } from './reuse-groom.ts';
 
 /** The PR url the deliver step recorded, if any. */
 export async function prUrl(dir: string, state: RunState): Promise<string | undefined> {
@@ -151,7 +153,12 @@ async function driveHeld(
     keepTerminals: meta.keepTerminals,
     outliveParent: true,
     builtins: {
-      'github.intake': githubIntake({ gh: deps.gh, runDir: dir, ticket }),
+      'github.intake': githubIntake({
+        gh: deps.gh,
+        runDir: dir,
+        ticket,
+        ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
+      }),
       'github.open_pr': githubOpenPr({ gh: deps.gh, runDir: dir, worktree: meta.worktree, branch: meta.branch, base: meta.base }),
     },
     gate: githubGate({
@@ -161,6 +168,7 @@ async function driveHeld(
       ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
       ...(sleep !== undefined ? { sleep } : {}),
       now: nowMs,
+      onWaiting: (stepId, url) => deps.out(`${stepId}: waiting for approval: ${url}`),
     }),
     onAttention,
     ...(sleep !== undefined ? { sleep } : {}),
@@ -176,7 +184,17 @@ async function driveHeld(
     await fs.rm(attentionFile, { force: true });
   };
   await save(state);
-  const end = await runGraph(v.graph, state, { runtime, save, now: () => now().toISOString() });
+  // one line per step start and end, so the driver's terminal shows where the run is
+  const reusing = reusePriorGroom(runtime, dir);
+  const logged: Runtime = {
+    executeStep: async (step, ctx) => {
+      deps.out(`${step.id}: started`);
+      const outcome = await reusing.executeStep(step, ctx);
+      deps.out(`${step.id}: ${outcome.status}${outcome.reason !== undefined ? `: ${outcome.reason}` : ''}`);
+      return outcome;
+    },
+  };
+  const end = await runGraph(v.graph, state, { runtime: logged, save, now: () => now().toISOString() });
 
   if (end.status === 'paused') {
     deps.out(`run ${runId} paused at ${end.currentStep}: ${end.pausedReason}`);

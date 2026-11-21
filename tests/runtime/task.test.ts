@@ -130,3 +130,11 @@ test('the groom brief tells the agent to address approval-gate findings', () => 
   const t = buildTask(input({ step: step({ id: 'groom', name: 'groom', stage: 'groom' }) }));
   assert.match(t, /If the inputs include findings from an approval gate, revise the groomed ticket to address them\./);
 });
+
+test('the groom brief tells the agent to refine a previous groomed ticket, not start over', () => {
+  const t = buildTask(input({ step: step({ id: 'groom', name: 'groom', stage: 'groom' }) }));
+  assert.match(
+    t,
+    /If the inputs include a previous groomed ticket \(previous_groom\), start from it: keep what still holds, change what the ticket, its comments or the feedback changed; don't start over\./,
+  );
+});

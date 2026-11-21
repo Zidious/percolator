@@ -122,3 +122,99 @@ test('readIssueMeta names the run dir when issue.json is absent', async () => {
     await rm(runDir);
   }
 });
+
+const groomGate = (run: string, text: string) =>
+  [
+    `<!-- percolator:gate run=${run} step=approve-groom round=1 -->`,
+    `**Percolator** needs approval to continue run \`${run}\` (step \`approve-groom\`).`,
+    '',
+    '### groomed_ticket',
+    '',
+    text,
+    '',
+    'Reply `/percolator approve` to continue, or `/percolator reject <what to change>` to send it back.',
+    '',
+  ].join('\n');
+
+test('github.intake: an unapproved earlier groomed ticket becomes the previous_groom output', async () => {
+  const { runDir, io } = await setup();
+  try {
+    const gh = new FakeGh();
+    gh.addIssue(REPO, 2, { title: 'T', author: 'a' });
+    const g = gh.addComment(REPO, 2, 'perc-bot', groomGate('r1', '# Groomed\n\nold'));
+    const out = await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 2 } })(step, ctx, io);
+    assert.equal(out.status, 'pass');
+    const rel = (f: string) => path.relative(runDir, path.join(io.outputsDir, f)).split(path.sep).join('/');
+    assert.deepEqual(out.outputs, { previous_groom: rel('previous_groom.md'), ticket: rel('ticket.md') });
+    assert.equal(
+      await fs.readFile(path.join(io.outputsDir, 'previous_groom.md'), 'utf8'),
+      `An earlier run groomed this ticket (${g.url}); it was not approved. Refine it, don't start over.\n\n# Groomed\n\nold\n`,
+    );
+    assert.equal(await fs.stat(path.join(runDir, 'prior-groom.json')).catch(() => undefined), undefined);
+  } finally {
+    await rm(runDir);
+  }
+});
+
+test('github.intake: a rejected earlier groomed ticket carries the rejection feedback', async () => {
+  const { runDir, io } = await setup();
+  try {
+    const gh = new FakeGh();
+    gh.addIssue(REPO, 2, { title: 'T', author: 'a' });
+    const g = gh.addComment(REPO, 2, 'perc-bot', groomGate('r1', 'old'));
+    const no = gh.addComment(REPO, 2, 'alice', '/percolator reject split it in two');
+    await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 2 }, approvers: ['alice'] })(step, ctx, io);
+    assert.equal(
+      await fs.readFile(path.join(io.outputsDir, 'previous_groom.md'), 'utf8'),
+      `An earlier run groomed this ticket (${g.url}); @alice rejected it (${no.url}): split it in two\n\nRefine it, don't start over.\n\nold\n`,
+    );
+  } finally {
+    await rm(runDir);
+  }
+});
+
+test('github.intake: an approved earlier groomed ticket is saved to prior-groom.json, not given to groom', async () => {
+  const { runDir, io } = await setup();
+  try {
+    const gh = new FakeGh();
+    gh.addIssue(REPO, 2, { title: 'T', author: 'a' });
+    const g = gh.addComment(REPO, 2, 'perc-bot', groomGate('r1', 'the ticket'));
+    const ok = gh.addComment(REPO, 2, 'alice', '/percolator approve');
+    const out = await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 2 }, approvers: ['alice'] })(step, ctx, io);
+    assert.deepEqual(Object.keys(out.outputs), ['ticket']);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(runDir, 'prior-groom.json'), 'utf8')), {
+      text: 'the ticket',
+      gateUrl: g.url,
+      decision: { decision: 'approve', by: 'alice', url: ok.url },
+    });
+  } finally {
+    await rm(runDir);
+  }
+});
+
+test('github.intake: approvers default to the gh user', async () => {
+  const { runDir, io } = await setup();
+  try {
+    const gh = new FakeGh();
+    gh.addIssue(REPO, 2, { title: 'T', author: 'a' });
+    gh.addComment(REPO, 2, 'perc-bot', groomGate('r1', 'the ticket'));
+    gh.addComment(REPO, 2, 'perc-bot', '/percolator approve');
+    await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 2 } })(step, ctx, io);
+    assert.equal(JSON.parse(await fs.readFile(path.join(runDir, 'prior-groom.json'), 'utf8')).text, 'the ticket');
+  } finally {
+    await rm(runDir);
+  }
+});
+
+test('github.intake leaves decision notes out of ticket.md', async () => {
+  const { runDir, io } = await setup();
+  try {
+    const gh = new FakeGh();
+    gh.addIssue(REPO, 2, { title: 'T', author: 'a' });
+    gh.addComment(REPO, 2, 'perc-bot', '<!-- percolator:decision run=r1 step=approve-groom round=1 decision=approve -->\nApproved locally by @x via `perc approve`.\n');
+    await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 2 } })(step, ctx, io);
+    assert.ok((await fs.readFile(path.join(io.outputsDir, 'ticket.md'), 'utf8')).endsWith('_No comments._\n'));
+  } finally {
+    await rm(runDir);
+  }
+});

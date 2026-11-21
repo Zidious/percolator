@@ -27,7 +27,7 @@ export function renderTemplate(text: string, vars: Record<string, string>): stri
 export const STAGE_BRIEFS: Readonly<Record<Exclude<Stage, 'deliver'>, string>> = Object.freeze({
   intake: 'Read ticket {{ticket}} and write its title, body and existing comments to ticket.md.',
   groom:
-    'Groom the ticket in the inputs into a ready-to-plan ticket and write it to groomed_ticket.md. Percolator posts it on the issue for approval. If the inputs include findings from an approval gate, revise the groomed ticket to address them.',
+    'Groom the ticket in the inputs into a ready-to-plan ticket and write it to groomed_ticket.md. Percolator posts it on the issue for approval. If the inputs include findings from an approval gate, revise the groomed ticket to address them. If the inputs include a previous groomed ticket (previous_groom), start from it: keep what still holds, change what the ticket, its comments or the feedback changed; don\'t start over.',
   plan: 'Write an implementation plan for the approved groomed ticket to plan.md.',
   implement:
     'Implement the plan in the worktree and commit on the current branch. If the inputs include review findings, address them. Write a short summary of your changes to summary.md.',
