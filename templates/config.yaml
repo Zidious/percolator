@@ -8,27 +8,23 @@ profiles:
       intake: { builtin: github.intake }
       groom:
         agent: claude
-        model: sonnet
+        model: opus
+        skill: superpowers:brainstorming
         prompt: |
-          Make the ticket unambiguous: state the goal, the acceptance criteria and anything out of scope.
-          Look at the repository first; list open questions in the groomed ticket instead of guessing.
+          Let's brainstorm this ticket to make sure it matches expectations before we move on to planning or implementing it.
+          Write the agreed ticket (goal, acceptance criteria, out of scope, open questions) as the groomed ticket, then stop: no plan and no code.
       plan:
         agent: claude
         model: opus
-        prompt: |
-          Read the relevant code first and follow the repository's existing conventions.
-          Break the work into small, ordered steps, each with the tests that prove it.
+        skill: superpowers:writing-plans
       implement:
         agent: claude
         model: opus
-        prompt: |
-          Work test-first: write a failing test, make it pass, then refactor.
-          Commit in small steps with conventional commit messages and keep the diff focused on the plan.
+        skills: [superpowers:executing-plans, superpowers:test-driven-development]
       review:
         agent: claude
         model: opus
+        effort: medium
+        skill: deep-dive-review
         max_rounds: 3
-        prompt: |
-          Review like a skeptical maintainer: correctness, missing tests, scope creep and unclear naming.
-          Report each finding with the file it concerns and what to change.
       deliver: { builtin: github.open_pr }

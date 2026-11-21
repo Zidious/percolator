@@ -39,18 +39,20 @@ test("template's default profile matches GitHub remotes", async () => {
   });
 });
 
-test('template binds agent stages to claude with the recommended models', async () => {
+test('template binds agent stages to claude on opus, each with a skill', async () => {
   await withTemplate(async (_tmp, configFile) => {
     const config = await loadUserConfig(configFile);
     const b = config.profiles['default']!.bindings!;
-    const agent = (s: string) => (b as Record<string, unknown>)[s] as { agent: string; model: string; prompt: unknown; max_rounds?: number };
-    assert.equal(agent('groom').model, 'sonnet');
-    for (const s of ['plan', 'implement', 'review']) assert.equal(agent(s).model, 'opus');
-    assert.equal(agent('review').max_rounds, 3);
+    type Agent = { agent: string; model: string; effort?: string; skill?: string; skills?: string[]; prompt?: unknown; max_rounds?: number };
+    const agent = (s: string) => (b as Record<string, unknown>)[s] as Agent;
     for (const s of ['groom', 'plan', 'implement', 'review']) {
       assert.equal(agent(s).agent, 'claude');
-      assert.equal(typeof agent(s).prompt, 'string');
-      assert.ok((agent(s).prompt as string).trim().length > 0);
+      assert.equal(agent(s).model, 'opus');
+      assert.ok(agent(s).skill !== undefined || (agent(s).skills ?? []).length > 0, `${s} names a skill`);
     }
+    assert.equal(agent('review').effort, 'medium');
+    assert.equal(agent('review').max_rounds, 3);
+    // groom keeps a prompt: it stops brainstorming before it moves on to planning
+    assert.match(agent('groom').prompt as string, /then stop: no plan and no code/);
   });
 });
