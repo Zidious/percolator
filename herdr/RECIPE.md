@@ -22,7 +22,7 @@ The layout is Herdr's `main` (sidebar with spaces and agents, tabs, work area, s
    - Needs you: a tag (GATE, PAUSED, FAILED or STALLED), the message, the age, an optional detail line; the first review file rendered as markdown; the action buttons; a "Terminal commands" row (click to open, closed by default, the choice kept while the panel lives) listing the equivalent `perc` commands, each with a Copy button.
    - Running: "RUNNING · <step> is running for 3m. Nothing for you yet." with a "watch agent ↗" link and the agent's last 8 lines.
    - Delivered: "DELIVERED · Opened <pr>" and the history.
-   - History (newest first): status mark, step id, kind, status, attempts, time taken.
+   - Run history (newest first, one row per attempt): mark, step, round ("round 2"), status, start time (HH:MM), time taken, and a note ("approved by @login" for a gate decision). A loop that hit its cap adds a red ↺ row ("review → implement hit its cap of 3 rounds"). It is the body of the lower half when nothing else is (delivered, or a run with no agent tail); when the reader fills the body it is a "Run history" row after the buttons (click to open, closed by default, the choice kept while the panel lives) that opens a 150px scrolling box. Against a perc that sends no timeline, one row per step that ran.
    Items 3 to 5 scroll together as one region. The review file (or the history, or the agent's last lines) fills what that region has left, at least 120px, and scrolls on its own past its height; with less room the region scrolls instead.
 6. Key hint row (wide only): "↑↓ runs, ←→ stops, a approve, r reject, g grant / resume, esc close".
 

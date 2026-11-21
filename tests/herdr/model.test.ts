@@ -15,6 +15,8 @@ import {
   titleLayout,
   readRatio,
   cliLines,
+  clock,
+  timelineRows,
   terminalCommands,
   cupLabel,
   cupMoves,
@@ -599,4 +601,40 @@ test('fillHeight converges: from what the rest takes (content minus the box draw
     seen.push(box);
   }
   assert.deepEqual(seen, [220, 220, 220, 220]);
+});
+
+const hhmm = (iso: string) => {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+test('clock is the local HH:MM of a date, empty without one', () => {
+  assert.equal(clock('2026-11-21T00:15:03.000Z'), hhmm('2026-11-21T00:15:03.000Z'));
+  assert.equal(clock(undefined), '');
+});
+
+test('timelineRows lists every attempt newest first, with round, start, duration and decision', () => {
+  const rows = timelineRows(readable('t8'), Date.parse('2026-11-21T00:41:10.000Z') + 120000);
+  assert.deepEqual(rows[0], {
+    key: 'review#3',
+    mark: '●',
+    tone: 'working',
+    step: 'review',
+    round: 'round 3',
+    status: 'running',
+    started: hhmm('2026-11-21T00:41:10.000Z'),
+    took: '2m',
+    note: '',
+  });
+  assert.equal(rows.find((r) => r.key === 'approve-groom#1')!.note, 'approved by @zidious');
+  assert.equal(rows.at(-1)!.step, 'setup');
+});
+
+test('timelineRows shows a cap as its own row', () => {
+  const cap = timelineRows(readable('t4'), 0).find((r) => r.status === 'cap')!;
+  assert.deepEqual([cap.mark, cap.tone, cap.step, cap.note], ['↺', 'blocked', 'review', 'review → implement hit its cap of 3 rounds']);
+});
+
+test('timelineRows without a timeline lists the steps that ran, newest first', () => {
+  assert.deepEqual(timelineRows(readable('t9'), 0).map((r) => r.key), ['implement#1', 'plan#1', 'approve-groom#1', 'groom#1', 'intake#1']);
 });

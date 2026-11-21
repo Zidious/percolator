@@ -278,6 +278,53 @@ export function roundView(run, stepId, roundSel) {
   };
 }
 
+const ROW_MARKS = { running: '●', pass: '✓', waiting: '■' };
+
+/** The local HH:MM of an ISO date, zero-padded; "" without one. */
+export function clock(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+const decisionNote = (d) => {
+  if (!d) return '';
+  const word = d.decision === 'approve' ? 'approved' : 'rejected';
+  return d.by ? `${word} by @${d.by}` : word;
+};
+
+/** The run history, newest first: one row per attempt (with its round, start, duration and gate decision) and one per
+ *  loop cap that was hit. */
+export function timelineRows(run, now) {
+  return timelineOf(run)
+    .map((e) =>
+      e.kind === 'cap'
+        ? {
+            key: `cap:${e.loop}`,
+            mark: '↺',
+            tone: 'blocked',
+            step: e.from,
+            round: '',
+            status: 'cap',
+            started: clock(e.at),
+            took: '',
+            note: `${e.from} → ${e.to} hit its cap of ${e.max} rounds`,
+          }
+        : {
+            key: `${e.step}#${e.attempt}`,
+            mark: ROW_MARKS[e.status] ?? '✕',
+            tone: stepTone(e.status),
+            step: e.step,
+            round: `round ${e.attempt}`,
+            status: e.status,
+            started: clock(e.startedAt),
+            took: took(e, now),
+            note: decisionNote(e.decision),
+          },
+    )
+    .reverse();
+}
+
 /** What the reader shows: the selected stop's (picked, else latest) round's first output, else the first file to
  *  review, else null (as perc gave it). */
 export function readerPath(run, stopSel, roundSel = null) {

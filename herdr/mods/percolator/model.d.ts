@@ -47,6 +47,19 @@ export type RoundView = {
 export declare function timelineOf(run: RunStatusJson): TimelineEntry[];
 export declare function stepAttempts(run: RunStatusJson, stepId: string): Attempt[];
 export declare function roundView(run: RunStatusJson, stepId: string, roundSel: number | null): RoundView | null;
+export type TimelineRow = {
+  key: string;
+  mark: string;
+  tone: 'done' | 'working' | 'blocked' | null;
+  step: string;
+  round: string;
+  status: string;
+  started: string;
+  took: string;
+  note: string;
+};
+export declare function clock(iso?: string): string;
+export declare function timelineRows(run: RunStatusJson, now: number): TimelineRow[];
 export declare function readerPath(run: RunStatusJson, stopSel: string | null, roundSel?: number | null): string | null;
 export declare function cupLabel(runs: RunStatusJson[]): { text: string; tone: 'blocked' | 'working' | 'muted' };
 export declare function notice(run: RunStatusJson): {
