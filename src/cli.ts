@@ -10,6 +10,8 @@ import type { RunState } from './engine/state.ts';
 import { cliHerdrApp } from './herdr/app.ts';
 import { cliHc } from './herdr/hc.ts';
 import { herdrAppHome, linkHerdr } from './herdr/link.ts';
+import { deleteRun, planDelete } from './run/delete.ts';
+import type { DeletePlan } from './run/delete.ts';
 import { checkResumable, drive, prUrl } from './run/drive.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
 import type { RunMeta } from './run/meta.ts';
@@ -19,6 +21,7 @@ import { attentionNext, driverLiveness, readAttention, runStatusJson, statusJson
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
 import { readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
+import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
 import { validate } from './validate.ts';
 import type { ValidateResult } from './validate.ts';
@@ -46,7 +49,9 @@ commands:
   approve <run-id> | reject <run-id> <feedback>
       answer the approval gate a run is waiting at
   clean <run-id> [--force]
-      remove a finished run's terminals and worktree (keeps the branch and the run record)
+      remove a finished run's terminals and worktree (keeps the branch and the run record; perc delete removes it all)
+  delete <run-id> [--yes] | delete --finished [--yes]
+      remove a run entirely: stop it, its terminals, worktree and record (keeps the branch)
   herdr link
       tell the Percolator Herdr panel how to run perc (writes perc.json)
   drive <run-id>
@@ -285,17 +290,56 @@ async function runClean(args: string[], deps: DriverDeps): Promise<number> {
   const dir = runDir(deps.home, runId);
   const meta = await readRunMeta(dir);
   const driver = await deps.hc.get(meta.driver);
-  if (driver?.state === 'live') throw new Error(`run ${runId} is being driven by terminal ${meta.driver}; stop it first`);
+  if (driver?.state === 'live') throw new Error(`run ${runId} is being driven by terminal ${meta.driver}; stop it first (or perc delete ${runId})`);
   if (values.force !== true) {
     // a paused or running run still has live node terminals the owner may want
     const { status } = await loadState(dir);
     if (status !== 'completed' && status !== 'failed') {
-      throw new Error(`run ${runId} is ${status}; finish it or use perc clean ${runId} --force`);
+      throw new Error(`run ${runId} is ${status}; finish it or use perc clean ${runId} --force, or perc delete ${runId} to remove it entirely`);
     }
   }
   const removed = await sweepTerminals(deps.hc, runId);
   await removeWorktree({ repoRoot: meta.repoRoot, dir: meta.worktree, force: values.force === true });
   deps.out(`removed ${removed.length} terminal(s) and worktree ${meta.worktree}`);
+  return 0;
+}
+
+const WORKTREE_STATE = {
+  dirty: 'uncommitted changes will be lost',
+  clean: 'clean',
+  gone: 'already removed',
+  unknown: 'unknown',
+} as const;
+
+/** Only `y` or `yes` (any case, surrounding blanks ignored) proceeds. */
+async function confirmed(deps: DriverDeps, question: string): Promise<void> {
+  const answer = await deps.ask!(question);
+  if (!/^y(es)?$/i.test(answer.trim())) throw new Error('aborted; nothing deleted');
+}
+
+function deleteSummary(p: DeletePlan, deps: DriverDeps): void {
+  deps.out(`perc delete will remove run ${p.id}`);
+  if (p.ticket !== undefined) deps.out(`  ticket ${p.ticket.ref}${p.ticket.title !== undefined ? ` ${p.ticket.title}` : ''}`);
+  deps.out(`  status ${p.status}`);
+  const wt = p.worktree ?? { path: `<repo>/.worktrees/${p.id}`, state: 'unknown' as const };
+  deps.out(`  worktree ${wt.path} (${WORKTREE_STATE[wt.state]})`);
+  deps.out(`  keeps branch ${p.meta?.branch ?? `percolator/${p.id}`}`);
+}
+
+async function runDelete(args: string[], deps: DriverDeps): Promise<number> {
+  const { values, positionals } = parseWith(args, { yes: { type: 'boolean' }, finished: { type: 'boolean' } });
+  if (values.finished === true && positionals.length > 0) throw new UsageError('delete takes <run-id> or --finished, not both');
+  if (positionals.length === 0) throw new UsageError('delete needs <run-id> or --finished');
+  if (positionals.length > 1) throw new UsageError('delete takes one <run-id>');
+  const runId = runIdArg(positionals[0]!);
+  const yes = values.yes === true;
+  if (!yes && (deps.ask ?? null) === null) throw new UsageError('delete needs --yes when stdin is not a terminal');
+  const plan = await planDelete(runId, deps);
+  if (!yes) {
+    deleteSummary(plan, deps);
+    await confirmed(deps, `delete run ${runId}? [y/N] `);
+  }
+  deps.out(await deleteRun(plan, deps));
   return 0;
 }
 
@@ -318,6 +362,8 @@ async function runDrive(args: string[], deps: DriverDeps): Promise<number> {
   return exitOf(await drive(onlyRunId('drive', positionals), deps));
 }
 
+const ttyAsk = (question: string) => askLine(question, { input: process.stdin, output: process.stdout });
+
 /** Fills in the real clients for missing deps; `out` always writes lines to `io.stdout`. */
 function driverDeps(io: Io, d: Partial<DriverDeps>): DriverDeps {
   const self = d.selfTerminal ?? process.env['HC_TERMINAL_ID'];
@@ -333,6 +379,7 @@ function driverDeps(io: Io, d: Partial<DriverDeps>): DriverDeps {
     entry: d.entry ?? fileURLToPath(import.meta.url),
     ...(d.pid !== undefined ? { pid: d.pid } : {}),
     ...(d.pidAlive !== undefined ? { pidAlive: d.pidAlive } : {}),
+    ask: d.ask !== undefined ? d.ask : process.stdin.isTTY ? ttyAsk : null,
   };
 }
 
@@ -358,6 +405,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     if (command === 'status') return await runStatus(rest, d());
     if (command === 'approve' || command === 'reject') return await runDecide(command, rest, d());
     if (command === 'clean') return await runClean(rest, d());
+    if (command === 'delete') return await runDelete(rest, d());
     if (command === 'drive') return await runDrive(rest, d());
     io.stderr(`unknown command: ${command}\n\n${USAGE}`);
     return 2;

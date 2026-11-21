@@ -33,6 +33,8 @@ export type DriverDeps = {
   pid?: number;
   /** liveness of a `driver.json` pid on this host (default `process.kill(pid, 0)`) */
   pidAlive?: (pid: number) => boolean;
+  /** asks the owner one question and returns the answer; `null` when stdin is not a terminal */
+  ask?: ((question: string) => Promise<string>) | null;
 };
 
 const SPACE_FAILED = 'herdr-app space.new failed: ';
