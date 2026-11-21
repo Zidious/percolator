@@ -5,6 +5,8 @@ import { test } from 'node:test';
 import { loadState } from '../../src/engine/state.ts';
 import { readRunMeta } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
+import { readRunGraph, toRunGraph } from '../../src/run/graph-file.ts';
+import { validate } from '../../src/validate.ts';
 import { launchDriver, prepareRun, worktreeIn } from '../../src/run/prepare.ts';
 import type { DriverDeps } from '../../src/run/prepare.ts';
 import { FakeHerdrApp } from '../helpers/fake-app.ts';
@@ -310,5 +312,17 @@ test('launchDriver refuses a terminal of another run, or unlabelled, and never r
       });
       assert.deepEqual(hc.calls, [['get', m.driver]]);
     }
+  }
+});
+
+test('prepare writes graph.json matching the run\'s graph', async () => {
+  const e = await setup();
+  try {
+    const meta = await prepareRun({ ticket: '#5', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+    const dir = path.join(e.home, '.percolator', 'runs', meta.runId);
+    const v = await validate({ configFile: e.configFile, cwd: e.root, home: e.home, profile: 'work' });
+    assert.deepEqual(await readRunGraph(dir), toRunGraph(v.graph));
+  } finally {
+    await e.cleanup();
   }
 });
