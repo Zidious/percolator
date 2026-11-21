@@ -42,6 +42,7 @@ const WaitingSchema = z.object({
 });
 
 const OUTPUT_CAP = 60000;
+const BODY_CAP = 65000;
 
 const waitingFile = (runDir: string) => path.join(runDir, 'waiting.json');
 
@@ -99,9 +100,9 @@ export async function writeDecision(
 
 export { parseCommand } from './prior-groom.ts';
 
-async function renderOutputs(runDir: string, runId: string, outputs: Record<string, string>): Promise<string> {
+async function renderOutputs(runDir: string, runId: string, outputs: Record<string, string>, cap: number): Promise<string> {
   const parts: string[] = [];
-  let budget = OUTPUT_CAP;
+  let budget = cap;
   for (const key of Object.keys(outputs).sort()) {
     const rel = outputs[key]!;
     if (!rel.toLowerCase().endsWith('.md')) continue;
@@ -134,7 +135,13 @@ type SavedGate = { commentUrl: string; commentId: number; round?: number; posted
 const gateJson = (g: SavedGate) => `${JSON.stringify(g, null, 2)}\n`;
 
 async function readGate(file: string): Promise<SavedGate | undefined> {
-  const raw = (await readJson(file)) as Partial<SavedGate> | undefined;
+  let raw: Partial<SavedGate> | undefined;
+  try {
+    raw = (await readJson(file)) as Partial<SavedGate> | undefined;
+  } catch (err) {
+    if (err instanceof SyntaxError) throw new Error(`Gate file ${file} is invalid: ${err.message}; delete it and resume the run`);
+    throw err;
+  }
   if (!raw) return undefined;
   // a gate.json from before the upgrade has only commentUrl and postedAt
   return { ...raw, commentId: raw.commentId ?? commentIdOf(raw.commentUrl ?? '') } as SavedGate;
@@ -219,8 +226,11 @@ export function githubGate(o: {
               break;
             }
           }
-          const outputs = await renderOutputs(o.runDir, o.runId, previousStepOutputs(step, ctx));
-          const body = renderGateComment({ runId: o.runId, stepId: step.id, round, outputs, rejected: found?.g.rejected ?? [] });
+          const frame = { runId: o.runId, stepId: step.id, round, rejected: found?.g.rejected ?? [] };
+          // GitHub refuses a body over 65536 chars: the header and every round's feedback come first
+          const cap = Math.min(OUTPUT_CAP, BODY_CAP - renderGateComment({ ...frame, outputs: '' }).length);
+          const outputs = await renderOutputs(o.runDir, o.runId, previousStepOutputs(step, ctx), cap);
+          const body = renderGateComment({ ...frame, outputs });
           const bodyFile = path.join(io.stepDir, 'gate-comment.md');
           await writeFileAtomic(bodyFile, body);
           if (found) {
@@ -293,7 +303,9 @@ export function githubGate(o: {
 
       // best-effort: the comment shows the outcome, and a later run reuses the round only by reading it
       try {
-        const current = (await o.gh.issue(meta.repo, meta.number)).comments.find((c) => c.id === commentId);
+        // a legacy url without `#issuecomment-` has no id: id 0 could be any other comment
+        const current =
+          commentId > 0 ? (await o.gh.issue(meta.repo, meta.number)).comments.find((c) => c.id === commentId) : undefined;
         const parsed = current && parseGateComment(current.body);
         if (current && parsed) {
           const next: GateComment =

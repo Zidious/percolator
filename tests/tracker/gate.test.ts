@@ -605,3 +605,85 @@ test('deciderLogin falls back to the OS user when gh fails or has no login, as o
   assert.equal(await deciderLogin(gh, () => 'Gabe  Smith'), 'Gabe-Smith');
   assert.equal(await deciderLogin(new FakeGh({ user: '' }), () => 'gabe'), 'gabe');
 });
+
+test('a corrupt gate.json escalates naming the file and what to do', async () => {
+  const e = await setup();
+  try {
+    const file = path.join(e.io.stepDir, 'gate.json');
+    await fsp.writeFile(file, '{');
+    let why = '';
+    try {
+      JSON.parse('{');
+    } catch (err) {
+      why = (err as Error).message;
+    }
+    const out = await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, e.io);
+    assert.equal(out.status, 'escalate');
+    assert.equal(out.reason, `gate approve-groom: Gate file ${file} is invalid: ${why}; delete it and resume the run`);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test("a corrupt gate.json in an earlier attempt escalates naming that file", async () => {
+  const e = await setup();
+  try {
+    const file = path.join(e.io.stepDir, 'gate.json');
+    await fsp.writeFile(file, 'not json');
+    let why = '';
+    try {
+      JSON.parse('not json');
+    } catch (err) {
+      why = (err as Error).message;
+    }
+    const io2 = await attemptIo(e, 2);
+    const out = await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, io2);
+    assert.equal(out.status, 'escalate');
+    assert.equal(out.reason, `gate approve-groom: Gate file ${file} is invalid: ${why}; delete it and resume the run`);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test('a long rejection history shrinks the outputs so the whole comment fits GitHub', async () => {
+  const e = await setup();
+  try {
+    const dir = path.join(e.runDir, 'steps', 'groom', '1', 'outputs');
+    await fsp.writeFile(path.join(dir, 'a.md'), 'x'.repeat(60000));
+    e.ctx.previousOutputs.groom = { a: 'steps/groom/1/outputs/a.md' };
+    const rejected = [1, 2].map((round) => ({ round, by: OWNER, feedback: 'f'.repeat(5000) }));
+    e.gh.addComment(REPO, 7, OWNER, renderGateComment({ runId: 'r1', stepId: 'approve-groom', round: 2, outputs: 'old', rejected }));
+    e.ctx.state.history.push(record('fail', 1), record('fail', 2));
+    e.onSleep.fn = () => {
+      e.gh.addComment(REPO, 7, OWNER, '/percolator approve');
+    };
+    const io3 = await attemptIo(e, 3);
+    await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, io3);
+    const body = e.gh.bodies[0]!;
+    assert.ok(body.includes('\n… (truncated; full text in steps/groom/1/outputs/a.md of run r1)\n'), 'outputs are truncated');
+    assert.ok(body.length <= 65536, `body is ${body.length} chars`);
+    assert.equal(parseGateComment(body)?.rejected.length, 2);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test('a legacy comment url without an id records no decision in any comment', async () => {
+  const e = await setup();
+  try {
+    // another run's gate comment that happens to have id 0
+    const other = e.gh.addComment(REPO, 7, OWNER, renderGateComment({ runId: 'r0', stepId: 'approve-groom', round: 1, outputs: 'o', rejected: [] }));
+    other.id = 0;
+    await fsp.writeFile(
+      path.join(e.io.stepDir, 'gate.json'),
+      JSON.stringify({ commentUrl: `https://${REPO}/issues/7`, postedAt: other.createdAt }),
+    );
+    await fsp.writeFile(path.join(e.io.stepDir, 'decision.json'), JSON.stringify({ decision: 'approve', by: OWNER, via: 'local' }));
+    const out = await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, e.io);
+    assert.equal(out.status, 'pass');
+    assert.equal(count(e, 'editComment'), 0);
+    assert.equal(parseGateComment((await e.gh.issue(REPO, 7)).comments[0]!.body)?.approvedBy, undefined);
+  } finally {
+    await rm(e.runDir);
+  }
+});
