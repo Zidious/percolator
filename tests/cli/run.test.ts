@@ -55,12 +55,17 @@ async function setup(): Promise<Env> {
   gh.addIssue(REPO, 5, { title: 'Fix the thing', body: 'It is broken.' });
   const base = await setupRunEnv({ hc, gh, bindings: BINDINGS, extra: TRACKER });
   const clock = { t: NOW.getTime() };
-  const lastIsGate = () => gh.issues.get(`${REPO}#5`)!.comments.at(-1)?.body.includes(GATE_MARKER) === true;
+  // a gate posts once and edits its comment each round: answer each write, not the newest comment
+  const gateWrites = () => gh.bodies.filter((b) => b.startsWith(GATE_MARKER)).length;
+  let replied = 0;
   Object.assign(base.deps, {
     now: () => new Date(clock.t),
     sleep: async () => {
       clock.t += 30000;
-      if (lastIsGate()) gh.addComment(REPO, 5, 'alice', '/percolator approve');
+      if (gateWrites() > replied) {
+        replied++;
+        gh.addComment(REPO, 5, 'alice', '/percolator approve');
+      }
     },
   });
   const dir = (id: string) => path.join(base.home, '.percolator', 'runs', id);

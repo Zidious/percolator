@@ -30,7 +30,7 @@ const SCRIPT_OUTPUT: Record<string, string> = { plan: 'plan', implement: 'summar
 
 type Env = RunEnv & {
   out: string[];
-  /** comments alice posts, one each time the newest comment is a gate comment */
+  /** comments alice posts, one after each time a gate posts or edits its comment */
   decisions: string[];
   /** set by a test to change one wait's behaviour; return true when it handled the wait */
   onWait: { fn: (t: FakeTerminal, n: number) => boolean | Promise<boolean> };
@@ -68,14 +68,19 @@ async function setup(extra = TRACKER): Promise<Env> {
   const decisions: string[] = [];
   const clock = { t: NOW.getTime() };
   const onSleep = { fn: (): void | Promise<void> => {} };
-  const lastIsGate = () => gh.issues.get(`${REPO}#5`)!.comments.at(-1)?.body.includes(GATE_MARKER) === true;
+  // a gate posts once and edits its comment each round: count its writes, not the comments
+  const gateWrites = () => gh.bodies.filter((b) => b.startsWith(GATE_MARKER)).length;
+  let replied = 0;
   Object.assign(base.deps, {
     out: (s: string) => out.push(s),
     now: () => new Date(clock.t),
     sleep: async () => {
       clock.t += 30000;
       await onSleep.fn();
-      if (decisions.length > 0 && lastIsGate()) gh.addComment(REPO, 5, 'alice', decisions.shift()!);
+      if (decisions.length > 0 && gateWrites() > replied) {
+        replied++;
+        gh.addComment(REPO, 5, 'alice', decisions.shift()!);
+      }
     },
   });
   return {
@@ -175,8 +180,9 @@ test('a rejected groom goes back to groom with the feedback as input', async () 
     const state = await drive(meta.runId, e.deps);
     assert.equal(state.status, 'completed');
     assert.equal(runs(e, 'groom').length, 2);
-    // one gate comment per round: the rejected round and the approved one
-    assert.equal(gateComments(e).length, 2);
+    // one gate comment per run and step: the approved round edited the rejected one's
+    assert.equal(gateComments(e).length, 1);
+    assert.equal(calls(e, 'editComment').length, 1);
     const task = await fs.readFile(path.join(e.runDir(meta), 'steps', 'groom', '2', 'task.md'), 'utf8');
     const findings = path.join(e.runDir(meta), 'steps', 'approve-groom', '1', 'outputs', 'findings.md');
     assert.ok(task.includes(`findings (from approve-groom): ${findings}`), task);
@@ -303,7 +309,8 @@ test('resume at a cap grants one round', async () => {
       `run ${meta.runId} paused at approve-groom: cap: approve-groom reached 3 rounds`,
       `resume with: perc resume ${meta.runId}`,
     ]);
-    assert.equal(gateComments(e).length, 3);
+    // three rounds, one comment: rounds 2 and 3 edited it
+    assert.equal(gateComments(e).length, 1);
 
     e.out.length = 0;
     e.decisions.push('/percolator approve');
@@ -311,7 +318,8 @@ test('resume at a cap grants one round', async () => {
     assert.equal(e.out[0], 'granted one more round on approve-groom');
     assert.equal(state.status, 'completed');
     assert.equal(runs(e, 'groom').length, 4);
-    assert.equal(gateComments(e).length, 4);
+    assert.equal(gateComments(e).length, 1);
+    assert.equal(calls(e, 'editComment').length, 3);
   } finally {
     await e.cleanup();
   }
