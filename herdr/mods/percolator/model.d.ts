@@ -48,6 +48,9 @@ export type RoundView = {
 };
 export declare function timelineOf(run: RunStatusJson): TimelineEntry[];
 export declare function stepAttempts(run: RunStatusJson, stepId: string): Attempt[];
+export declare const COFFEE_LINES: readonly string[];
+export declare function coffeeLine(runId: string, stepId: string): string;
+export declare function runningText(run: RunStatusJson, now: number): string;
 export declare function roundView(run: RunStatusJson, stepId: string, roundSel: number | null): RoundView | null;
 export type TimelineRow = {
   key: string;

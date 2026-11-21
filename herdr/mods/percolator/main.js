@@ -8,7 +8,6 @@ import {
   checking,
   closeOverlay,
   exec,
-  hc,
   layout,
   nextCommand,
   openOverlay,
@@ -72,7 +71,6 @@ export default class Percolator extends View {
     this.roundSel = null; // the attempt number picked in the stop strip; null = the latest
     this.file = null;
     this.files = {};
-    this.tail = {};
     this.width = 900;
     this.busy = null;
     this.actError = null;
@@ -88,7 +86,7 @@ export default class Percolator extends View {
     this.area = 600; // under the title bar
     this.boardPx = 0; // the board
     this.detailH = 400; // the detail's viewport
-    this.rest = 0; // what the detail's content takes besides the reader (or history, or agent tail)
+    this.rest = 0; // what the detail's content takes besides the reader
     this.boxH = MIN_BOX; // the reader's height, as drawn in the last frame
     this.drag = null; // { y, px } while the divider is held
     this.boardScroll = ScrollHandle.new();
@@ -127,7 +125,6 @@ export default class Percolator extends View {
     // Only the shown copy where the panel lives polls perc (the cup does its own polling, for notices).
     watchRuns(cx, (cx) => this.shown() && this.refresh(cx));
     cx.timer.every(30000, (cx) => cx.notify()); // the "4m ago" clocks
-    cx.timer.every(5000, (cx) => this.shown() && this.readTail(cx));
     cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
@@ -162,7 +159,6 @@ export default class Percolator extends View {
     const now = this.shown();
     if (now && !this.wasShown) {
       this.refresh(cx);
-      this.readTail(cx);
     }
     this.wasShown = now;
   }
@@ -223,7 +219,6 @@ export default class Percolator extends View {
     this.roundSel = null;
     this.outPick = null;
     this.syncReader(cx);
-    this.readTail(cx);
   }
 
   /** Selects a stop (null closes the strip and goes back to the run's review file). */
@@ -260,21 +255,6 @@ export default class Percolator extends View {
       const text = await readTextFile(path).catch(() => null);
       this.files[path] = text ?? `_${path} could not be read._`;
       cx.notify();
-    });
-  }
-
-  /** The running step's agent terminal, its last 8 lines through hc. */
-  readTail(cx) {
-    const r = this.current();
-    const term = r?.status === 'running' ? r.terminals?.[r.currentStep] : null;
-    const address = checking() ? null : addressOf(term);
-    if (!address) return;
-    cx.spawn(async (cx) => {
-      const out = await hc(['read', address, '--lines', '8']).catch(() => null);
-      if (out?.code === 0 && out.stdout.trim()) {
-        this.tail[term] = out.stdout.trimEnd();
-        cx.notify();
-      }
     });
   }
 
@@ -446,7 +426,7 @@ export default class Percolator extends View {
     this.revealRow();
   }
 
-  /** The reader's (or history's, or the agent tail's) height: what the detail has left over, at least MIN_BOX. Worked out
+  /** The reader's (or history's) height: what the detail has left over, at least MIN_BOX. Worked out
    *  from the viewport and `rest` only (neither depends on it), and kept unless it moves 2px, so it cannot oscillate. */
   boxHeight() {
     return this.rest ? nextBoxH(this.boxH, fillHeight(this.detailH, this.rest, 0, MIN_BOX)) : this.boxH;

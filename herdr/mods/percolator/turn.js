@@ -2,7 +2,7 @@
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex, TextView, Textarea } from 'gpui-base';
-import { ago, attentionTag, terminalCommands, timelineRows, took } from './model.js';
+import { ago, attentionTag, runningText, terminalCommands, timelineRows } from './model.js';
 import { link, button, own, scrollY } from './ui.js';
 
 const LABELS = {
@@ -17,7 +17,7 @@ const LABELS = {
 const tag = (label, c) =>
   div().flex_none().px(6).py(1).rounded(4).text_size(10).font_semibold().border(1).border_color(c).text_color(c).child(label);
 
-// The reader, history and the agent tail fill what the detail has left over (p.boxH, at least a few lines; below that
+// The reader and the history fill what the detail has left over (p.boxH, at least a few lines; below that
 // the detail scrolls), and scroll on their own past that.
 const frame = (p, t, id) =>
   v_flex().id(id).flex_none().h(p.boxH).rounded(6).bg(t.background).border(1).border_color(t.border);
@@ -113,28 +113,6 @@ function historySection(p, t, r) {
             .border(1)
             .border_color(t.border)
             .child(scrollY('history-small', historyList(t, r))),
-        ),
-      ),
-    );
-}
-
-function tail(p, t, r, text) {
-  return v_flex()
-    .flex_none()
-    .gap(4)
-    .child(div().text_size(11).text_color(t.muted).child(`${r.currentStep} agent · last lines`))
-    .child(
-      own(
-        box(
-          p,
-          t,
-          'tail',
-          v_flex()
-            .p(10)
-            .text_size(11)
-            .font_family('monospace')
-            .text_color(t.muted)
-            .children(text.split('\n').map((line) => div().whitespace_nowrap().child(line || ' '))),
         ),
       ),
     );
@@ -238,15 +216,13 @@ function banner(p, t, r, narrow) {
       .child(div().flex_none().text_size(11).text_color(t.dim).child(`${ago(a.since, now)} ago`));
   }
   if (r.status === 'running') {
-    const st = (r.steps ?? []).find((s) => s.id === r.currentStep);
     const term = r.terminals?.[r.currentStep];
-    const spent = st ? took(st, now) : '';
     return h_flex()
       .flex_wrap()
       .gap(8)
       .items_center()
       .child(tag('RUNNING', t.working))
-      .child(div().text_size(13).child(`${r.currentStep} is running${spent ? ` for ${spent}` : ''}. Nothing for you yet.`))
+      .child(div().text_size(13).child(runningText(r, now)))
       .when(Boolean(p.addressOf(term)), (el) => el.child(link(t, 'watch', 'watch agent ↗', () => p.focusTerminal(term))));
   }
   if (r.status === 'completed') {
@@ -266,15 +242,7 @@ function banner(p, t, r, narrow) {
 export function turn(p, t, r, narrow) {
   const a = r.attention;
   const acts = a?.actions ?? [];
-  const term = r.status === 'running' ? r.terminals?.[r.currentStep] : null;
-  const tailText = p.addressOf(term) ? p.tail[term] : null;
-  const body = p.file
-    ? reader(p, t)
-    : a
-      ? history(p, t, r)
-      : tailText
-        ? tail(p, t, r, tailText)
-        : history(p, t, r);
+  const body = p.file ? reader(p, t) : history(p, t, r);
   const cmds = terminalCommands(r);
   const say = p.said ? div().text_size(11).text_color(t.accent).child(p.said) : null;
   const buttons = h_flex()

@@ -4,6 +4,9 @@ import path from 'node:path';
 import { test } from 'node:test';
 import {
   STAGES,
+  COFFEE_LINES,
+  coffeeLine,
+  runningText,
   actionArgv,
   ago,
   attentionTag,
@@ -667,4 +670,28 @@ test('loopLabelAlign anchors the label to the arc end nearer the middle', () => 
   assert.equal(loopLabelAlign(60, 90), 'end');
   assert.equal(loopLabelAlign(10, 30), 'start');
   assert.equal(loopLabelAlign(40, 60), 'start');
+});
+
+test('COFFEE_LINES has 8 to 12 lines, including the espresso and another ticket', () => {
+  assert.ok(COFFEE_LINES.length >= 8 && COFFEE_LINES.length <= 12);
+  assert.ok(COFFEE_LINES.includes('Go make an espresso.') && COFFEE_LINES.includes('Start another ticket!'));
+});
+
+test('coffeeLine is picked from the run id and the step, the same on every refresh', () => {
+  const id = 't7-20261121-062224-638f';
+  assert.equal(coffeeLine(id, 'groom'), COFFEE_LINES[2]);
+  assert.equal(coffeeLine(id, 'plan'), COFFEE_LINES[1]);
+  assert.equal(coffeeLine(id, 'review'), COFFEE_LINES[4]);
+  assert.equal(coffeeLine(id, 'review'), coffeeLine(id, 'review'));
+});
+
+test('runningText says how long the live attempt has run, then a coffee line', () => {
+  const r = readable('t8'); // review#3 live in the timeline
+  const at = Date.parse(stepAttempts(r, 'review').at(-1)!.startedAt!);
+  assert.equal(runningText(r, at + 180000), `review is running for 3m. ${coffeeLine(r.id, 'review')}`);
+});
+
+test('runningText without a start time leaves the duration out', () => {
+  const r = readable('t11'); // implement running, no startedAt, no timeline
+  assert.equal(runningText(r, 0), `implement is running. ${coffeeLine(r.id, 'implement')}`);
 });

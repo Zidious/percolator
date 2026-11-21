@@ -270,6 +270,41 @@ export function stepAttempts(run, stepId) {
   return timelineOf(run).filter((e) => e.kind === 'attempt' && e.step === stepId);
 }
 
+/** What the banner says while a step runs, one line picked per run and step. */
+export const COFFEE_LINES = [
+  'Go make an espresso.',
+  'Start another ticket!',
+  'Instant coffee? Not on this watch.',
+  'Time for a pour-over. No rush.',
+  'Grind some beans; this has it.',
+  'Perfect moment for a flat white.',
+  "Stretch your legs. It'll keep.",
+  'Brewing. Unlike instant, worth the wait.',
+  'Go pull a shot.',
+  "The kettle's on. So is the agent.",
+];
+
+/** 32-bit FNV-1a over UTF-16 code units. */
+function fnv1a32(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+
+/** The coffee line for a run's step: fixed, so it does not change from one refresh to the next. */
+export function coffeeLine(runId, stepId) {
+  return COFFEE_LINES[fnv1a32(`${runId}/${stepId}`) % COFFEE_LINES.length];
+}
+
+/** "<step> is running[ for <spent>]. <coffee line>" for the running step. */
+export function runningText(run, now) {
+  const step = run.currentStep;
+  const live = stepAttempts(run, step).at(-1);
+  const st = live?.status === 'running' ? live : (run.steps ?? []).find((s) => s.id === step);
+  const spent = st ? took(st, now) : '';
+  return `${step} is running${spent ? ` for ${spent}` : ''}. ${coffeeLine(run.id, step)}`;
+}
+
 /** The round of a step the strip shows: `roundSel` (an attempt number), else the last attempt, with its place among
  *  the rounds and its neighbours' numbers. `mark` is set on the last round only. Null when the step has not run. */
 export function roundView(run, stepId, roundSel) {
