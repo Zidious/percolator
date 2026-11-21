@@ -14,7 +14,7 @@ import { listRuns, readRunMeta } from './run/meta.ts';
 import type { RunMeta } from './run/meta.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
 import type { DriverDeps } from './run/prepare.ts';
-import { driverLiveness, readAttention } from './run/status.ts';
+import { attentionNext, driverLiveness, readAttention, runStatusJson, statusJson } from './run/status.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
 import { readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
@@ -40,8 +40,8 @@ commands:
       start a run: groom, approval, plan, implement, review, PR (default: in its own hc terminal)
   resume <run-id> [--foreground]
       continue a paused or interrupted run (grants one more round at a cap)
-  status [<run-id>]
-      list runs, or show one
+  status [<run-id>] [--json]
+      list runs, or show one (--json: the stable JSON contract)
   approve <run-id> | reject <run-id> <feedback>
       answer the approval gate a run is waiting at
   clean <run-id> [--force]
@@ -201,13 +201,19 @@ async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: Driv
 }
 
 async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
-  const { positionals } = parseWith(args, {});
+  const { values, positionals } = parseWith(args, { json: { type: 'boolean' } });
   if (positionals.length > 1) throw new UsageError('status takes at most one <run-id>');
+  const printJson = (x: unknown) => deps.out(JSON.stringify(x, null, 2));
   if (positionals.length === 1) {
     const runId = runIdArg(positionals[0]!);
     const dir = runDir(deps.home, runId);
     const meta = await readRunMeta(dir);
     const state = await loadState(dir);
+    const run = await runStatusJson({ dir, meta, state }, deps);
+    if (values.json) {
+      printJson(run);
+      return 0;
+    }
     deps.out(`run ${runId}`);
     deps.out(`  ticket ${meta.ticket}`);
     deps.out(`  profile ${meta.profile}`);
@@ -216,8 +222,19 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
     deps.out(`  status ${state.status}`);
     deps.out(`  step ${state.currentStep ?? '-'}`);
     deps.out(`  detail ${await runDetail(dir, meta, state, deps)}`);
+    if ('attention' in run && run.attention !== undefined) {
+      const a = run.attention;
+      deps.out(`your turn: ${a.message}`);
+      if (a.detail !== undefined) deps.out(`  ${a.detail}`);
+      for (const r of a.review ?? []) deps.out(`  read: ${r.path}`);
+      for (const n of attentionNext(a, run)) deps.out(`  next: ${n}`);
+    }
     deps.out('history:');
     for (const h of state.history.slice(-10)) deps.out(`  ${h.stepId} a${h.attempt} ${h.status}`);
+    return 0;
+  }
+  if (values.json) {
+    printJson(await statusJson(deps));
     return 0;
   }
   for (const l of await listRuns(deps.home)) {

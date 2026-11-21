@@ -226,6 +226,11 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
   }
 }
 
+/** The commands `yourTurn` gives for an attention record (they depend on its kind and the run, not on its reason). */
+export function attentionNext(a: AttentionJson, run: { id: string; ticket: { ref: string }; repo: string }): string[] {
+  return yourTurn({ kind: a.kind, runId: run.id, step: '', ticket: run.ticket.ref, repoRoot: run.repo }).next;
+}
+
 async function attentionOf(o: {
   dir: string;
   meta: RunMeta;

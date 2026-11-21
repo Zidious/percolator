@@ -20,7 +20,7 @@ perc schema [--out <file>]            # write the config JSON schema (default sc
 node src/cli.ts <command> …           # run perc from a checkout without building
 perc run <ticket> [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]   # start a run (driver in its own hc terminal unless --foreground)
 perc resume <run-id> [--foreground]   # continue a paused/interrupted run; checks run here before the driver launches
-perc status [<run-id>]                # list runs, or show one (detail, last 10 history records)
+perc status [<run-id>] [--json]       # list runs, or show one (detail, your turn, last 10 history records); --json: the stable JSON contract
 perc approve <run-id> | perc reject <run-id> <feedback>   # answer the gate a run waits at
 perc clean <run-id> [--force]         # remove a finished run's terminals and worktree (keeps branch and run record)
 perc drive <run-id>                   # internal: what the driver terminal runs
