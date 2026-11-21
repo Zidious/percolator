@@ -221,8 +221,8 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
     case 'failed':
       return {
         message: `${a.step} failed`,
-        detail: "A failed run can't be resumed. Start a new run for the ticket, or clean this one up.",
-        next: [`perc run ${a.ticket} --repo ${a.repoRoot}`, `perc clean ${a.runId}`],
+        detail: "A failed run can't be resumed. Start a new run for the ticket, then delete this one (or clean it up to keep its record).",
+        next: [`perc run ${a.ticket} --repo ${a.repoRoot}`, `perc delete ${a.runId}`, `perc clean ${a.runId}`],
       };
     case 'stalled':
       if (a.decision !== undefined) return { message: `${a.decision === 'approve' ? 'approved' : 'rejected'}; resume to continue`, next: resume };
