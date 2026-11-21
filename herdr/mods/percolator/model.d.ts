@@ -90,4 +90,8 @@ export declare function titleLayout(width: number, needs: number): { tabs: 'inli
 export declare function nextBoxH(prev: number, target: number): number;
 export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
 export declare function terminalAddress(live: { address: string; name?: string | null }[], term: string | null | undefined): string | null;
+export declare function driverToggle(
+  run: RunStatusJson | null | undefined,
+): { show: boolean; terminal: string; label: 'driver pane ↗' | 'hide driver pane'; argv: string[] } | null;
+export declare function ownedDriver(stdout: string, runId: string): boolean;
 export declare function ticketTitle(run: Readable): string;

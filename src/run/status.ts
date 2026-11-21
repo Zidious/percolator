@@ -64,7 +64,7 @@ export type RunStatusJson =
       createdAt: string;
       status: 'running' | 'waiting' | 'paused' | 'failed' | 'completed';
       currentStep?: string;
-      driver: { alive: boolean | null; terminal: string };
+      driver: { alive: boolean | null; terminal: string; space?: string; shown: boolean };
       attention?: AttentionJson;
       steps: StepJson[];
       loops: LoopJson[];
@@ -192,21 +192,24 @@ function gateReview(dir: string, gateId: string, steps: RunGraphStep[], state: R
   return [];
 }
 
-async function liveTerminals(meta: RunMeta, deps: DriverDeps): Promise<Record<string, string>> {
+async function liveTerminals(meta: RunMeta, deps: DriverDeps): Promise<{ names: Record<string, string>; driverSpace?: string }> {
   try {
     const out: Record<string, string> = {};
+    let driverSpace: string | undefined;
     for (const t of await deps.hc.list({ labels: { 'percolator.run': meta.runId } })) {
       const n = t.name ?? t.address;
       // hc ls returns no labels: get them, and re-check ownership rather than trusting the server-side filter
       const labels = Object.keys(t.labels).length > 0 ? t.labels : (await deps.hc.get(n))?.labels;
       if (labels?.['percolator.run'] !== meta.runId) continue;
       const step = labels['percolator.step'];
-      if (labels['percolator.role'] === 'driver') out['driver'] = n;
-      else if (step !== undefined) out[step] = n;
+      if (labels['percolator.role'] === 'driver') {
+        out['driver'] = n;
+        driverSpace = labels['herdr.space'];
+      } else if (step !== undefined) out[step] = n;
     }
-    return out;
+    return { names: out, driverSpace };
   } catch {
-    return {};
+    return { names: {} };
   }
 }
 
@@ -400,6 +403,7 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps): Pro
   // a finished run has no driver or terminals worth asking hc about
   const finished = state.status === 'completed' || state.status === 'failed';
   const alive = finished ? false : await driverAlive(dir, meta, deps);
+  const liveT = finished ? { names: {} as Record<string, string> } : await liveTerminals(meta, deps);
   const steps: StepJson[] = stepDefs.map((s) => {
     const h = latest(state, s.id);
     const status: StepJson['status'] =
@@ -427,12 +431,17 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps): Pro
     createdAt: meta.createdAt,
     status: waiting !== undefined ? 'waiting' : state.status,
     ...(state.currentStep !== undefined && state.status !== 'completed' ? { currentStep: state.currentStep } : {}),
-    driver: { alive, terminal: meta.driver },
+    driver: {
+      alive,
+      terminal: meta.driver,
+      ...(meta.space !== undefined ? { space: meta.space } : {}),
+      shown: meta.space !== undefined && liveT.driverSpace === meta.space,
+    },
     ...(attention !== undefined ? { attention } : {}),
     steps,
     loops: loopDefs.map((lp) => ({ ...lp, round: state.rounds[lp.id] ?? 0 })),
     timeline: await timelineOf({ dir, meta, state, waiting, steps: stepDefs, loops: loopDefs }),
-    terminals: finished ? {} : await liveTerminals(meta, deps),
+    terminals: liveT.names,
     pr: url === undefined ? null : { url },
     graph: graph === undefined ? 'history' : 'full',
   };

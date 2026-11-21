@@ -160,9 +160,11 @@ async function runRun(args: string[], deps: DriverDeps): Promise<number> {
     return exitOf(await drive(meta.runId, deps));
   }
   const driver = await launchDriver(meta, deps);
-  const space = meta.space !== undefined ? ` (space "${spaceName(meta)}")` : '';
   deps.out(`run ${meta.runId} started`);
-  deps.out(`  terminal ${driver}${space}`);
+  deps.out(`  terminal ${driver}`);
+  if (meta.space !== undefined) {
+    deps.out(`  space "${spaceName(meta)}" (the driver stays hidden; "driver pane ↗" in the Percolator panel shows it)`);
+  }
   deps.out(`  worktree ${meta.worktree}`);
   deps.out(`  follow with: perc status ${meta.runId}`);
   return 0;

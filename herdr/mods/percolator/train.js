@@ -2,7 +2,7 @@
 
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { STAGES, ago, canPick, loopAtCap, loopLabel, loopLabelAlign, roundView, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
+import { STAGES, ago, canPick, driverToggle, loopAtCap, loopLabel, loopLabelAlign, roundView, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
 import { stepColor, link, own } from './ui.js';
 
 const TOP = 40; // room above the rail for loop arcs
@@ -19,7 +19,7 @@ export function header(p, t, r, narrow) {
       .child(div().text_size(15).font_semibold().child(r.id))
       .child(div().text_size(11).text_color(t.dim).child('This run could not be read.'));
   }
-  const driver = r.driver?.terminal ?? r.terminals?.driver;
+  const drv = driverToggle(r);
   const now = Date.now();
   return v_flex()
     .px(16)
@@ -38,7 +38,7 @@ export function header(p, t, r, narrow) {
         .items_center()
         .when(Boolean(r.ticket.url), (el) => el.child(link(t, 'issue', 'issue ↗', (_e, cx) => cx.open_url(r.ticket.url))))
         .when(Boolean(r.pr?.url), (el) => el.child(link(t, 'pr', 'PR ↗', (_e, cx) => cx.open_url(r.pr.url))))
-        .when(Boolean(p.addressOf(driver)), (el) => el.child(link(t, 'driver', 'driver pane ↗', () => p.focusTerminal(driver))))
+        .when(Boolean(drv), (el) => el.child(link(t, 'driver', drv.label, (_e, cx) => p.toggleDriver(cx))))
         .child(
           div()
             .min_w(0)

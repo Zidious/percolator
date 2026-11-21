@@ -23,8 +23,10 @@ import {
   terminalCommands,
   cupLabel,
   cupMoves,
+  driverToggle,
   duration,
   findNode,
+  ownedDriver,
   ownsCommands,
   loopAtCap,
   loopLabel,
@@ -704,4 +706,63 @@ test('runningText says how long the live attempt has run, then a coffee line', (
 test('runningText without a start time leaves the duration out', () => {
   const r = readable('t11'); // implement running, no startedAt, no timeline
   assert.equal(runningText(r, 0), `implement is running. ${coffeeLine(r.id, 'implement')}`);
+});
+
+const T8_DRIVER = 't8_driver_a0_b65d';
+const withDriver = (driver: Partial<Readable['driver']>, terminals?: Record<string, string>): Readable => {
+  const r = readable('t8');
+  return { ...r, driver: { alive: true, terminal: T8_DRIVER, shown: false, ...driver }, ...(terminals !== undefined ? { terminals } : {}) };
+};
+
+test('driverToggle shows a hidden driver in the run\'s space', () => {
+  const r = withDriver({ space: 'w1:s3', shown: false });
+  assert.deepEqual(driverToggle(r), {
+    show: true,
+    terminal: T8_DRIVER,
+    label: 'driver pane ↗',
+    argv: ['label', '--', T8_DRIVER, 'herdr.space=w1:s3'],
+  });
+});
+
+test('driverToggle hides a shown driver by removing herdr.space', () => {
+  const r = withDriver({ space: 'w1:s3', shown: true });
+  assert.deepEqual(driverToggle(r), {
+    show: false,
+    terminal: T8_DRIVER,
+    label: 'hide driver pane',
+    argv: ['label', '--', T8_DRIVER, 'herdr.space='],
+  });
+});
+
+test('driverToggle is null without driver.space', () => {
+  assert.equal(driverToggle(withDriver({})), null);
+  assert.equal(driverToggle(withDriver({ space: '' })), null);
+});
+
+test('driverToggle is null when terminals has no driver or a different one', () => {
+  assert.equal(driverToggle(withDriver({ space: 'w1:s3' }, {})), null);
+  assert.equal(driverToggle(withDriver({ space: 'w1:s3' }, { driver: 'someone_else' })), null);
+});
+
+test('driverToggle is null for a finished run and an unreadable entry', () => {
+  assert.equal(driverToggle({ ...readable('t3'), driver: { alive: false, terminal: 't3_driver_a0_53dd', space: 'w1:s3', shown: false } }), null);
+  assert.equal(driverToggle(byId('t5')), null);
+});
+
+test('driverToggle is null for a terminal name that starts with "-"', () => {
+  assert.equal(driverToggle(withDriver({ space: 'w1:s3', terminal: '-x' }, { driver: '-x' })), null);
+});
+
+test('ownedDriver accepts only this run\'s live driver', () => {
+  const j = (labels: object, state = 'live') => JSON.stringify({ address: 't1', name: 'd', state, labels });
+  assert.equal(ownedDriver(j({ 'percolator.run': 'r1', 'percolator.role': 'driver' }), 'r1'), true);
+  assert.equal(ownedDriver(j({ 'percolator.run': 'r2', 'percolator.role': 'driver' }), 'r1'), false);
+  assert.equal(ownedDriver(j({ 'percolator.run': 'r1', 'percolator.step': 'plan' }), 'r1'), false);
+  assert.equal(ownedDriver(j({ 'percolator.run': 'r1', 'percolator.role': 'driver' }, 'finished'), 'r1'), false);
+  assert.equal(ownedDriver('not json', 'r1'), false);
+});
+
+test('driverToggle is null when no run is selected', () => {
+  assert.equal(driverToggle(null), null);
+  assert.equal(driverToggle(undefined), null);
 });

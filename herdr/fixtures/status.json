@@ -17,7 +17,9 @@
       "currentStep": "review",
       "driver": {
         "alive": true,
-        "terminal": "t8_driver_a0_b65d"
+        "terminal": "t8_driver_a0_b65d",
+        "space": "w1:s8",
+        "shown": false
       },
       "steps": [
         {
@@ -307,7 +309,9 @@
       "status": "completed",
       "driver": {
         "alive": false,
-        "terminal": "t3_driver_a0_53dd"
+        "terminal": "t3_driver_a0_53dd",
+        "space": "w1:s3",
+        "shown": false
       },
       "steps": [
         {
@@ -475,7 +479,9 @@
       "currentStep": "approve-groom",
       "driver": {
         "alive": true,
-        "terminal": "t2_driver_a0_b90e"
+        "terminal": "t2_driver_a0_b90e",
+        "space": "w1:s2",
+        "shown": false
       },
       "attention": {
         "kind": "gate",
@@ -626,7 +632,9 @@
       "currentStep": "review",
       "driver": {
         "alive": false,
-        "terminal": "t4_driver_a0_4baa"
+        "terminal": "t4_driver_a0_4baa",
+        "space": "w1:s4",
+        "shown": false
       },
       "attention": {
         "kind": "cap",
@@ -851,7 +859,9 @@
       "currentStep": "plan",
       "driver": {
         "alive": false,
-        "terminal": "t12_driver_a0_eb1e"
+        "terminal": "t12_driver_a0_eb1e",
+        "space": "w1:s12",
+        "shown": false
       },
       "attention": {
         "kind": "paused",
@@ -957,7 +967,9 @@
       "currentStep": "implement",
       "driver": {
         "alive": false,
-        "terminal": "t9_driver_a0_b29c"
+        "terminal": "t9_driver_a0_b29c",
+        "space": "w1:s9",
+        "shown": false
       },
       "attention": {
         "kind": "failed",
@@ -1077,7 +1089,9 @@
       "currentStep": "implement",
       "driver": {
         "alive": false,
-        "terminal": "t11_driver_a0_879a"
+        "terminal": "t11_driver_a0_879a",
+        "space": "w1:s11",
+        "shown": false
       },
       "attention": {
         "kind": "stalled",
@@ -1183,7 +1197,9 @@
       "currentStep": "groom",
       "driver": {
         "alive": true,
-        "terminal": "t13_driver_a0_0761"
+        "terminal": "t13_driver_a0_0761",
+        "space": "w1:s13",
+        "shown": true
       },
       "attention": {
         "kind": "agent",
@@ -1292,7 +1308,9 @@
       "currentStep": "intake",
       "driver": {
         "alive": true,
-        "terminal": "t14_driver_a0_915f"
+        "terminal": "t14_driver_a0_915f",
+        "space": "w1:s14",
+        "shown": false
       },
       "steps": [
         {
@@ -1326,7 +1344,9 @@
       "currentStep": "intake",
       "driver": {
         "alive": false,
-        "terminal": "t15_driver_a0_d238"
+        "terminal": "t15_driver_a0_d238",
+        "space": "w1:s15",
+        "shown": false
       },
       "steps": [
         {

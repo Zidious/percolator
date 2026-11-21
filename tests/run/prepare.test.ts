@@ -249,7 +249,7 @@ const launchDeps = (hc: FakeHc): DriverDeps => ({
   entry: ENTRY,
 });
 
-test('launchDriver argv and labels', async () => {
+test("launchDriver argv and labels: the driver stays out of the run's Herdr space", async () => {
   const hc = new FakeHc();
   const m = meta();
   assert.equal(await launchDriver(m, launchDeps(hc)), m.driver);
@@ -261,21 +261,11 @@ test('launchDriver argv and labels', async () => {
         name: m.driver,
         cwd: m.worktree,
         argv: [process.execPath, ENTRY, 'drive', m.runId],
-        labels: { 'percolator.run': m.runId, 'percolator.role': 'driver', 'herdr.space': 'space-1' },
+        labels: { 'percolator.run': m.runId, 'percolator.role': 'driver' },
         outliveParent: true,
       },
     ],
   ]);
-});
-
-test('launchDriver leaves out herdr.space when the run has no space', async () => {
-  const hc = new FakeHc();
-  const { space: _, ...m } = meta();
-  await launchDriver(m, launchDeps(hc));
-  assert.deepEqual((hc.calls[1]![1] as { labels: unknown }).labels, {
-    'percolator.run': m.runId,
-    'percolator.role': 'driver',
-  });
 });
 
 test('launchDriver refuses a live driver', async () => {
