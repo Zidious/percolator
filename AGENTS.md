@@ -67,7 +67,7 @@ Read the module before changing it.
 ## Design decisions to keep
 
 - **Six core stages, in order:** `intake`, `groom`, `plan`, `implement`, `review`, `deliver`. All must be bound or the engine refuses to start. No built-in bindings for `groom`…`review`; `perc init` writes the recommended config.
-- **Bounded loops:** review caps at 3 rounds, then delivers with an unresolved-findings summary; a back-edge (`on_fail: { back_to, max_rounds }`) at its cap escalates to the owner.
+- **Bounded loops:** review caps at 3 rounds, then delivers anyway (the PR body does not carry the findings); a back-edge (`on_fail: { back_to, max_rounds }`) at its cap escalates to the owner.
 - **Locks:** `required: true` wins over merge order. A locked target may only be restated deep-equal; otherwise `LockViolation` (`"<target> is locked by <src>; <attempt> cannot change it"`).
 - **Completion** = `done.json` + `outputs/<key>.md`; hc status is only for attention.
 - **Worktrees in the repo:** `<repo>/.worktrees/<run-id>`, listed in `.git/info/exclude`, so the repo's agent trust covers them. Run dirs stay in `~/.percolator/runs`, reached via `--add-dir` (`~/.percolator` must be trusted in Claude Code once).

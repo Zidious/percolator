@@ -86,3 +86,13 @@ test('the pr-description prompt uses only known template variables', async () =>
     for (const n of names) assert.ok(known.has(n), `unknown template variable {{${n}}}`);
   });
 });
+
+test('the pr-description prompt does not point at review rounds and always finishes with pass', async () => {
+  await withTemplate(async (_tmp, configFile) => {
+    const config = await loadUserConfig(configFile);
+    const node = (config.profiles['default']!.nodes as Record<string, { prompt: string }> | undefined)?.['pr-description'];
+    assert.ok(node, 'profiles.default.nodes has pr-description');
+    assert.doesNotMatch(node.prompt, /\brounds\b/);
+    assert.match(node.prompt, /Finish with status pass/);
+  });
+});

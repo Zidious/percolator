@@ -150,9 +150,10 @@ profiles:
         prompt: |
           Write the pull request description for this run to {{outputs_dir}}/pr_body.md, in Markdown.
           Cover what changed and why, from the implement summary in the inputs and the diff (git diff {{base}}...HEAD in {{worktree}}).
-          Say in one line how self-review ended (the latest review findings are in the inputs; review rounds are in {{run_dir}}/state.json), but do not copy the findings.
+          Say in one line how self-review ended (the latest review findings are in the inputs), but do not copy the findings.
           List the grounds the run was built under, from groundVersions in {{run_dir}}/state.json.
           Do not write "Closes #…": Percolator adds it. Do not push, open the PR or comment on the issue; Percolator opens the PR with this text.
+          Finish with status pass, even if you could not write a description; Percolator then opens the PR with only "Closes #…".
 ```
 
 ### Profiles
@@ -218,7 +219,7 @@ profiles:
 - `audit` runs after implement. If it fails, the run goes back to implement at most twice, then pauses and escalates to you.
 - `sign-off` adds a second human gate after plan, which you answer the same way as `approve-groom`.
 - `back_to` must point to an earlier stage. A `before: all` hook cannot loop.
-- Any step that writes a `pr_body` output sets the PR description; the last one before deliver wins.
+- Any step that writes a `pr_body` output sets the PR description; the last one in run order wins.
 
 ### Grounds: shared policy from git
 

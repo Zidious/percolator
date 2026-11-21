@@ -36,6 +36,7 @@ profiles:
         prompt: |
           Write the pull request description for this run to {{outputs_dir}}/pr_body.md, in Markdown.
           Cover what changed and why, from the implement summary in the inputs and the diff (git diff {{base}}...HEAD in {{worktree}}).
-          Say in one line how self-review ended (the latest review findings are in the inputs; review rounds are in {{run_dir}}/state.json), but do not copy the findings.
+          Say in one line how self-review ended (the latest review findings are in the inputs), but do not copy the findings.
           List the grounds the run was built under, from groundVersions in {{run_dir}}/state.json.
           Do not write "Closes #…": Percolator adds it. Do not push, open the PR or comment on the issue; Percolator opens the PR with this text.
+          Finish with status pass, even if you could not write a description; Percolator then opens the PR with only "Closes #…".
