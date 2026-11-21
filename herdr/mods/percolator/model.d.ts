@@ -34,6 +34,7 @@ export declare function attentionTag(kind: string): string;
 export declare function shownLoops(run: RunStatusJson): Loop[];
 export declare function loopAtCap(loop: Loop): boolean;
 export declare function loopLabel(loop: Loop, narrow: boolean): string;
+export declare function canPick(step: { status: string }): boolean;
 export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number): string | null;
 export declare function moveRow(rows: RunStatusJson[], selId: string | null, dir: number): string | null;
 export type RoundView = {

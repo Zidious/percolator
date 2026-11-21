@@ -219,9 +219,14 @@ export function loopLabel(loop, narrow) {
   return `↺ ${where}round ${loop.round} of ${loop.max}${loopAtCap(loop) ? ' · cap' : ''}`;
 }
 
-/** The step one stop left (-1) or right (1) of the selected stop, else of the current (or last) step; null if none. */
+/** Whether a stop can be selected: one that has not started has nothing to show. */
+export function canPick(step) {
+  return step.status !== 'pending';
+}
+
+/** The started step one stop left (-1) or right (1) of the selected stop, else of the current (or last) step; null if none. */
 export function moveStop(run, selected, dir) {
-  const order = trainLayout(run, false).flatMap((z) => z.shown.map((s) => s.id));
+  const order = trainLayout(run, false).flatMap((z) => z.shown.filter(canPick).map((s) => s.id));
   if (order.length === 0) return null;
   let at = order.indexOf(selected);
   if (at < 0) at = order.indexOf(run.currentStep);

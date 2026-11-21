@@ -26,6 +26,7 @@ import {
   loopAtCap,
   loopLabel,
   moveRow,
+  canPick,
   moveStop,
   needsCount,
   newlyNeeding,
@@ -403,13 +404,29 @@ test('shownLoops keeps loops that have gone round; loopLabel says where and how 
 
 test('moveStop walks the train in execution order from the selected stop, else the current step', () => {
   const r = byId('t8');
-  assert.equal(moveStop(r, null, 1), 'deliver');
+  assert.equal(moveStop(r, null, 1), 'review');
   assert.equal(moveStop(r, null, -1), 'security-scan');
   assert.equal(moveStop(r, 'setup', -1), 'setup');
-  assert.equal(moveStop(r, 'notify', 1), 'notify');
   assert.equal(moveStop(r, 'approve-groom', 1), 'plan');
   assert.equal(moveStop(readable('t3'), null, 1), 'deliver');
   assert.equal(moveStop(byId('t5'), null, 1), null);
+});
+
+test('canPick refuses a stop that has not started', () => {
+  assert.equal(canPick({ status: 'pending' }), false);
+  for (const s of ['running', 'waiting', 'pass', 'fail', 'escalate', 'contract_error']) assert.equal(canPick({ status: s }), true);
+});
+
+test('moveStop never lands on a stop that has not started', () => {
+  const r = readable('t2'); // waiting at approve-groom; plan onwards pending
+  assert.equal(moveStop(r, 'approve-groom', 1), 'approve-groom');
+  assert.equal(moveStop(r, null, 1), 'approve-groom');
+  assert.equal(moveStop(r, 'groom', 1), 'approve-groom');
+});
+
+test('moveStop is null when nothing has started', () => {
+  const r = readable('t14');
+  assert.equal(moveStop({ ...r, steps: r.steps.map((s) => ({ ...s, status: 'pending' })) }, null, 1), null);
 });
 
 test('moveRow moves the selection within the shown rows and stays at the ends', () => {

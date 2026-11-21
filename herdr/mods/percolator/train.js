@@ -2,7 +2,7 @@
 
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { STAGES, ago, loopAtCap, loopLabel, roundView, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
+import { STAGES, ago, canPick, loopAtCap, loopLabel, roundView, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
 import { stepColor, link, own } from './ui.js';
 
 const TOP = 40; // room above the rail for loop arcs
@@ -87,15 +87,16 @@ function stop(p, t, r, st, left, right, folded) {
       .flex_1()
       .min_w(0)
       .items_center()
-      .cursor_pointer()
       .relative()
       .when(left !== null, (el) => el.child(rail('l', left)))
       .when(right !== null, (el) => el.child(rail('r', right)))
       .tooltip(tip)
-      .on_click((_e, cx) => {
-        p.pickStop(picked ? null : st.id, cx);
-        cx.notify();
-      })
+      .when(canPick(st), (el) =>
+        el.cursor_pointer().on_click((_e, cx) => {
+          p.pickStop(picked ? null : st.id, cx);
+          cx.notify();
+        }),
+      )
       .child(
         div()
           .h(RAIL * 2)
