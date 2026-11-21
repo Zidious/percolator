@@ -88,7 +88,7 @@ export const NodeDefSchema = z
       ])
       .optional()
       .describe(
-        "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {run_id}, {worktree} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
+        "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {{run_id}}, {{worktree}} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
       ),
     builtin: z.string().optional().describe(`Builtin to run: ${BUILTIN_NAMES.join(' or ')} (builtin nodes).`),
     command: z
@@ -114,10 +114,10 @@ export const NodeDefSchema = z
           .number()
           .int()
           .min(1)
-          .describe('Most rounds the loop may run before escalating to you; required.'),
+          .describe('Failed rounds allowed before escalating to you, the first run counts; 1 escalates on the first fail; required.'),
       })
       .optional()
-      .describe('Bounded back-edge: on fail, loop back to an earlier stage, up to max_rounds times.'),
+      .describe('Bounded back-edge: on fail, loop back to an earlier stage until max_rounds rounds have failed (the first run counts).'),
     max_rounds: z
       .number()
       .int()
@@ -128,7 +128,7 @@ export const NodeDefSchema = z
       .number()
       .positive()
       .optional()
-      .describe('Escalate to you if the step is not done after this many seconds; default no timeout.'),
+      .describe('Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.'),
     escalation: z.boolean().optional().describe('Accepted but not used yet; has no effect.'),
     required: z
       .boolean()

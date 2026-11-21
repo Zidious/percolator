@@ -118,7 +118,7 @@
                       }
                     },
                     "prompt": {
-                      "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {run_id}, {worktree} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
+                      "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {{run_id}}, {{worktree}} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
                       "anyOf": [
                         {
                           "type": "string"
@@ -185,7 +185,7 @@
                       "type": "boolean"
                     },
                     "on_fail": {
-                      "description": "Bounded back-edge: on fail, loop back to an earlier stage, up to max_rounds times.",
+                      "description": "Bounded back-edge: on fail, loop back to an earlier stage until max_rounds rounds have failed (the first run counts).",
                       "type": "object",
                       "properties": {
                         "back_to": {
@@ -204,7 +204,7 @@
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 9007199254740991,
-                          "description": "Most rounds the loop may run before escalating to you; required."
+                          "description": "Failed rounds allowed before escalating to you, the first run counts; 1 escalates on the first fail; required."
                         }
                       },
                       "required": [
@@ -220,7 +220,7 @@
                       "maximum": 9007199254740991
                     },
                     "timeout_s": {
-                      "description": "Escalate to you if the step is not done after this many seconds; default no timeout.",
+                      "description": "Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.",
                       "type": "number",
                       "exclusiveMinimum": 0
                     },
@@ -281,7 +281,7 @@
                         }
                       },
                       "prompt": {
-                        "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {run_id}, {worktree} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
+                        "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {{run_id}}, {{worktree}} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
                         "anyOf": [
                           {
                             "type": "string"
@@ -348,7 +348,7 @@
                         "type": "boolean"
                       },
                       "on_fail": {
-                        "description": "Bounded back-edge: on fail, loop back to an earlier stage, up to max_rounds times.",
+                        "description": "Bounded back-edge: on fail, loop back to an earlier stage until max_rounds rounds have failed (the first run counts).",
                         "type": "object",
                         "properties": {
                           "back_to": {
@@ -367,7 +367,7 @@
                             "type": "integer",
                             "minimum": 1,
                             "maximum": 9007199254740991,
-                            "description": "Most rounds the loop may run before escalating to you; required."
+                            "description": "Failed rounds allowed before escalating to you, the first run counts; 1 escalates on the first fail; required."
                           }
                         },
                         "required": [
@@ -383,7 +383,7 @@
                         "maximum": 9007199254740991
                       },
                       "timeout_s": {
-                        "description": "Escalate to you if the step is not done after this many seconds; default no timeout.",
+                        "description": "Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.",
                         "type": "number",
                         "exclusiveMinimum": 0
                       },
@@ -453,7 +453,7 @@
                   }
                 },
                 "prompt": {
-                  "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {run_id}, {worktree} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
+                  "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {{run_id}}, {{worktree}} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
                   "anyOf": [
                     {
                       "type": "string"
@@ -520,7 +520,7 @@
                   "type": "boolean"
                 },
                 "on_fail": {
-                  "description": "Bounded back-edge: on fail, loop back to an earlier stage, up to max_rounds times.",
+                  "description": "Bounded back-edge: on fail, loop back to an earlier stage until max_rounds rounds have failed (the first run counts).",
                   "type": "object",
                   "properties": {
                     "back_to": {
@@ -539,7 +539,7 @@
                       "type": "integer",
                       "minimum": 1,
                       "maximum": 9007199254740991,
-                      "description": "Most rounds the loop may run before escalating to you; required."
+                      "description": "Failed rounds allowed before escalating to you, the first run counts; 1 escalates on the first fail; required."
                     }
                   },
                   "required": [
@@ -555,7 +555,7 @@
                   "maximum": 9007199254740991
                 },
                 "timeout_s": {
-                  "description": "Escalate to you if the step is not done after this many seconds; default no timeout.",
+                  "description": "Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.",
                   "type": "number",
                   "exclusiveMinimum": 0
                 },
