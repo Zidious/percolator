@@ -57,7 +57,7 @@ export function rowState(run) {
   }
   if (run.status === 'running') {
     const loop = (run.loops ?? []).find((l) => l.from === step && l.round > 0);
-    return { tone: 'working', text: loop ? `${step} · round ${loop.round}/${loop.max}` : `${step}` };
+    return loop ? { tone: 'working', text: `${step}`, round: `round ${loop.round}/${loop.max}` } : { tone: 'working', text: `${step}` };
   }
   if (run.status === 'completed') {
     const pr = run.pr?.url.split('/').pop();
@@ -219,9 +219,20 @@ export function loopLabel(loop, narrow) {
   return `↺ ${where}round ${loop.round} of ${loop.max}${loopAtCap(loop) ? ' · cap' : ''}`;
 }
 
-/** The step one stop left (-1) or right (1) of the selected stop, else of the current (or last) step; null if none. */
+/** Which end of a loop arc (spanning a% to b% of the track) its label hangs from, so a label wider than the arc grows
+ *  toward the middle of the track rather than past its edge. */
+export function loopLabelAlign(a, b) {
+  return (a + b) / 2 > 50 ? 'end' : 'start';
+}
+
+/** Whether a stop can be selected: one that has not started has nothing to show. */
+export function canPick(step) {
+  return step.status !== 'pending';
+}
+
+/** The started step one stop left (-1) or right (1) of the selected stop, else of the current (or last) step; null if none. */
 export function moveStop(run, selected, dir) {
-  const order = trainLayout(run, false).flatMap((z) => z.shown.map((s) => s.id));
+  const order = trainLayout(run, false).flatMap((z) => z.shown.filter(canPick).map((s) => s.id));
   if (order.length === 0) return null;
   let at = order.indexOf(selected);
   if (at < 0) at = order.indexOf(run.currentStep);
@@ -237,10 +248,135 @@ export function moveRow(rows, selId, dir) {
   return rows[Math.max(0, Math.min(rows.length - 1, at + dir))].id;
 }
 
-/** What the reader shows: the selected stop's first output, else the first file to review, else null (as perc gave it). */
-export function readerPath(run, stopSel) {
-  const step = stopSel ? (run.steps ?? []).find((s) => s.id === stopSel) : undefined;
-  const out = step ? Object.values(step.outputs ?? {})[0] : undefined;
+/** The run's attempts in order (with gate decisions and loop caps): its `timeline`; an older perc sends none, so one
+ *  attempt per step that ran, from the step's own data. [] for an unreadable run. */
+export function timelineOf(run) {
+  if (Array.isArray(run.timeline)) return run.timeline;
+  return (run.steps ?? [])
+    .filter((s) => s.status !== 'pending')
+    .map((s) => ({
+      kind: 'attempt',
+      step: s.id,
+      // an older perc's `attempts` counts finished records, so a live step is on the next one
+      attempt: s.status === 'running' || s.status === 'waiting' ? (s.attempts ?? 0) + 1 : s.attempts,
+      status: s.status,
+      ...(s.startedAt ? { startedAt: s.startedAt } : {}),
+      ...(s.endedAt ? { endedAt: s.endedAt } : {}),
+      outputs: s.outputs ?? {},
+    }));
+}
+
+/** One step's attempts, in order. */
+export function stepAttempts(run, stepId) {
+  return timelineOf(run).filter((e) => e.kind === 'attempt' && e.step === stepId);
+}
+
+/** What the banner says while a step runs, one line picked per run and step. */
+export const COFFEE_LINES = [
+  'Go make an espresso.',
+  'Start another ticket!',
+  'Instant coffee? Not on this watch.',
+  'Time for a pour-over. No rush.',
+  'Grind some beans; this has it.',
+  'Perfect moment for a flat white.',
+  "Stretch your legs. It'll keep.",
+  'Brewing. Unlike instant, worth the wait.',
+  'Go pull a shot.',
+  "The kettle's on. So is the agent.",
+];
+
+/** 32-bit FNV-1a over UTF-16 code units. */
+function fnv1a32(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return h >>> 0;
+}
+
+/** The coffee line for a run's step: fixed, so it does not change from one refresh to the next. */
+export function coffeeLine(runId, stepId) {
+  return COFFEE_LINES[fnv1a32(`${runId}/${stepId}`) % COFFEE_LINES.length];
+}
+
+/** "<step> is running[ for <spent>]. <coffee line>" for the running step. */
+export function runningText(run, now) {
+  const step = run.currentStep;
+  const live = stepAttempts(run, step).at(-1);
+  const st = live?.status === 'running' ? live : (run.steps ?? []).find((s) => s.id === step);
+  const spent = st ? took(st, now) : '';
+  return `${step} is running${spent ? ` for ${spent}` : ''}. ${coffeeLine(run.id, step)}`;
+}
+
+/** The round of a step the strip shows: `roundSel` (an attempt number), else the last attempt, with its place among
+ *  the rounds and its neighbours' numbers. `mark` is set on the last round only. Null when the step has not run. */
+export function roundView(run, stepId, roundSel) {
+  const all = stepAttempts(run, stepId);
+  if (all.length === 0) return null;
+  const found = all.findIndex((a) => a.attempt === roundSel);
+  const i = found < 0 ? all.length - 1 : found;
+  const attempt = all[i];
+  const last = i === all.length - 1;
+  return {
+    attempt,
+    n: i + 1,
+    of: all.length,
+    mark: last ? (attempt.status === 'running' || attempt.status === 'waiting' ? attempt.status : 'latest') : null,
+    prev: i > 0 ? all[i - 1].attempt : null,
+    next: last ? null : all[i + 1].attempt,
+  };
+}
+
+const ROW_MARKS = { running: '●', pass: '✓', waiting: '■' };
+
+/** The local HH:MM of an ISO date, zero-padded; "" without one. */
+export function clock(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+const decisionNote = (d) => {
+  if (!d) return '';
+  const word = d.decision === 'approve' ? 'approved' : 'rejected';
+  return d.by ? `${word} by @${d.by}` : word;
+};
+
+/** The run history, newest first: one row per attempt (with its round, start, duration and gate decision) and one per
+ *  loop cap that was hit. */
+export function timelineRows(run, now) {
+  return timelineOf(run)
+    .map((e) =>
+      e.kind === 'cap'
+        ? {
+            key: `cap:${e.loop}`,
+            mark: '↺',
+            tone: 'blocked',
+            step: e.from,
+            round: '',
+            status: 'cap',
+            started: clock(e.at),
+            took: '',
+            note: `${e.from} → ${e.to} hit its cap of ${e.max} rounds`,
+          }
+        : {
+            key: `${e.step}#${e.attempt}`,
+            mark: ROW_MARKS[e.status] ?? '✕',
+            tone: stepTone(e.status),
+            step: e.step,
+            round: `round ${e.attempt}`,
+            status: e.status,
+            started: clock(e.startedAt),
+            took: took(e, now),
+            note: decisionNote(e.decision),
+          },
+    )
+    .reverse();
+}
+
+/** What the reader shows: the selected stop's (picked, else latest) round's first output, else the first file to
+ *  review, else null (as perc gave it). */
+export function readerPath(run, stopSel, roundSel = null) {
+  const view = stopSel ? roundView(run, stopSel, roundSel) : null;
+  const out = view ? Object.values(view.attempt.outputs ?? {})[0] : undefined;
   return out ?? run.attention?.review?.[0]?.path ?? null;
 }
 

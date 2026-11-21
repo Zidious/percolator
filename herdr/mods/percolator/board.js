@@ -10,6 +10,18 @@ const title = (r) => (r.status === 'unreadable' ? r.id : ticketTitle(r));
 const number = (r) => (r.status === 'unreadable' ? '?' : `#${r.ticket.number}`);
 const age = (r, now) => (r.status === 'unreadable' ? '' : ago(r.attention?.since ?? r.createdAt, now));
 
+// the state text truncates alone; the round (when there is one) is a separate child, so it is never cut
+function stateCell(s, width, size, t) {
+  return h_flex()
+    .w(width)
+    .flex_none()
+    .gap(4)
+    .text_size(size)
+    .text_color(t[s.tone])
+    .child(div().min_w(0).truncate().child(s.text))
+    .when(Boolean(s.round), (el) => el.child(div().flex_none().child(`· ${s.round}`)));
+}
+
 function icon(t, r) {
   const box = div().w(14).flex_none().flex().items_center().justify_center().text_size(12);
   if (r.attention?.kind === 'failed') return box.text_color(t.blocked).child('✕');
@@ -114,7 +126,7 @@ export function board(p, t, narrow, rows) {
                 .gap(8)
                 .items_center()
                 .child(mini(t, r))
-                .child(div().w(130).flex_none().truncate().text_size(10.5).text_color(t[s.tone]).child(s.text)),
+                .child(stateCell(s, 130, 10.5, t)),
             );
         }),
       );
@@ -166,7 +178,7 @@ export function board(p, t, narrow, rows) {
                     .child(div().min_w(0).truncate().text_color(t.muted).child(title(r))),
                 )
                 .child(mini(t, r))
-                .child(div().w(200).flex_none().truncate().text_size(11.5).text_color(t[s.tone]).child(s.text))
+                .child(stateCell(s, 200, 11.5, t))
                 .child(div().w(34).flex_none().text_size(11).text_color(t.dim).child(age(r, now)));
             }),
           ),

@@ -2,8 +2,8 @@
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex, TextView, Textarea } from 'gpui-base';
-import { ago, attentionTag, terminalCommands, took } from './model.js';
-import { stepColor, link, button, own, scrollY } from './ui.js';
+import { ago, attentionTag, runningText, terminalCommands, timelineRows } from './model.js';
+import { link, button, own, scrollY } from './ui.js';
 
 const LABELS = {
   approve: ['Approve', 'ok'],
@@ -13,12 +13,11 @@ const LABELS = {
   clean: ['Clean up', ''],
   'open-pane': ['Go to agent pane', ''],
 };
-const MARKS = { running: '●', pass: '✓', waiting: '■', pending: '·' };
 
 const tag = (label, c) =>
   div().flex_none().px(6).py(1).rounded(4).text_size(10).font_semibold().border(1).border_color(c).text_color(c).child(label);
 
-// The reader, history and the agent tail fill what the detail has left over (p.boxH, at least a few lines; below that
+// The reader and the history fill what the detail has left over (p.boxH, at least a few lines; below that
 // the detail scrolls), and scroll on their own past that.
 const frame = (p, t, id) =>
   v_flex().id(id).flex_none().h(p.boxH).rounded(6).bg(t.background).border(1).border_color(t.border);
@@ -42,53 +41,78 @@ function reader(p, t) {
     );
 }
 
-/** Steps that ran, newest first. */
-function history(p, t, r) {
-  const ran = (r.steps ?? []).filter((s) => s.status !== 'pending').reverse();
-  const now = Date.now();
-  const list = v_flex()
+const toneColor = (t, tone) => (tone ? t[tone] : t.dim);
+
+/** The run history's rows, newest first. */
+function historyList(t, r) {
+  const rows = timelineRows(r, Date.now());
+  return v_flex()
     .py(4)
     .children(
-      ran.length === 0
+      rows.length === 0
         ? [div().px(12).py(3).text_size(11.5).text_color(t.dim).child('Nothing has run yet.')]
-        : ran.map((s) =>
+        : rows.map((x) =>
             h_flex()
               .px(12)
               .py(3)
               .gap(10)
               .text_size(11.5)
-              .child(div().w(10).flex_none().text_color(stepColor(t, s.status)).child(MARKS[s.status] ?? '✕'))
-              .child(div().w(130).flex_none().truncate().text_color(t.foreground).child(s.id))
-              .child(div().w(70).flex_none().text_color(t.dim).child(s.kind))
-              .child(div().w(90).flex_none().text_color(stepColor(t, s.status)).child(s.status))
-              .child(div().w(80).flex_none().text_color(t.dim).child(s.attempts > 1 ? `${s.attempts} attempts` : ''))
-              .child(div().flex_1().text_color(t.dim).child(took(s, now))),
+              .child(div().w(10).flex_none().text_color(toneColor(t, x.tone)).child(x.mark))
+              .child(div().w(130).flex_none().truncate().text_color(t.foreground).child(x.step))
+              .child(div().w(60).flex_none().text_color(t.dim).child(x.round))
+              .child(div().w(90).flex_none().text_color(toneColor(t, x.tone)).child(x.status))
+              .child(div().w(50).flex_none().text_color(t.dim).child(x.started))
+              .child(div().w(50).flex_none().text_color(t.dim).child(x.took))
+              .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(x.note)),
           ),
     );
-  return v_flex()
-    .flex_none()
-    .gap(4)
-    .child(div().text_size(11).text_color(t.muted).child('History'))
-    .child(own(box(p, t, 'history', list)));
 }
 
-function tail(p, t, r, text) {
+/** "Run history" as the body: fills what the detail has left over, like the reader. */
+function history(p, t, r) {
   return v_flex()
     .flex_none()
     .gap(4)
-    .child(div().text_size(11).text_color(t.muted).child(`${r.currentStep} agent · last lines`))
+    .child(div().text_size(11).text_color(t.muted).child('Run history'))
+    .child(own(box(p, t, 'history', historyList(t, r))));
+}
+
+/** "Run history" under the reader: a disclosure row; open, a fixed 150px scrolling box (so the reader keeps the height). */
+function historySection(p, t, r) {
+  const open = p.historyOpen;
+  return v_flex()
+    .flex_none()
+    .gap(6)
     .child(
       own(
-        box(
-          p,
-          t,
-          'tail',
+        h_flex()
+          .id('history-toggle')
+          .gap(6)
+          .items_center()
+          .cursor_pointer()
+          .text_size(11)
+          .text_color(t.muted)
+          .hover((s) => s.text_color(t.foreground))
+          .on_click((_e, cx) => {
+            p.historyOpen = !p.historyOpen;
+            cx.notify();
+          })
+          .child(div().w(12).flex_none().text_size(12).child(open ? '▾' : '▸'))
+          .child('Run history'),
+      ),
+    )
+    .when(open, (el) =>
+      el.child(
+        own(
           v_flex()
-            .p(10)
-            .text_size(11)
-            .font_family('monospace')
-            .text_color(t.muted)
-            .children(text.split('\n').map((line) => div().whitespace_nowrap().child(line || ' '))),
+            .id('history-small-frame')
+            .flex_none()
+            .h(150)
+            .rounded(6)
+            .bg(t.background)
+            .border(1)
+            .border_color(t.border)
+            .child(scrollY('history-small', historyList(t, r))),
         ),
       ),
     );
@@ -192,15 +216,13 @@ function banner(p, t, r, narrow) {
       .child(div().flex_none().text_size(11).text_color(t.dim).child(`${ago(a.since, now)} ago`));
   }
   if (r.status === 'running') {
-    const st = (r.steps ?? []).find((s) => s.id === r.currentStep);
     const term = r.terminals?.[r.currentStep];
-    const spent = st ? took(st, now) : '';
     return h_flex()
       .flex_wrap()
       .gap(8)
       .items_center()
       .child(tag('RUNNING', t.working))
-      .child(div().text_size(13).child(`${r.currentStep} is running${spent ? ` for ${spent}` : ''}. Nothing for you yet.`))
+      .child(div().text_size(13).child(runningText(r, now)))
       .when(Boolean(p.addressOf(term)), (el) => el.child(link(t, 'watch', 'watch agent ↗', () => p.focusTerminal(term))));
   }
   if (r.status === 'completed') {
@@ -220,15 +242,7 @@ function banner(p, t, r, narrow) {
 export function turn(p, t, r, narrow) {
   const a = r.attention;
   const acts = a?.actions ?? [];
-  const term = r.status === 'running' ? r.terminals?.[r.currentStep] : null;
-  const tailText = p.addressOf(term) ? p.tail[term] : null;
-  const body = p.file
-    ? reader(p, t)
-    : a
-      ? history(p, t, r)
-      : tailText
-        ? tail(p, t, r, tailText)
-        : history(p, t, r);
+  const body = p.file ? reader(p, t) : history(p, t, r);
   const cmds = terminalCommands(r);
   const say = p.said ? div().text_size(11).text_color(t.accent).child(p.said) : null;
   const buttons = h_flex()
@@ -257,5 +271,6 @@ export function turn(p, t, r, narrow) {
     .when(acts.length > 0, (el) => el.child(buttons))
     .when(Boolean(p.actError), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(p.actError)))
     .when(Boolean(say), (el) => el.child(say))
+    .when(Boolean(p.file), (el) => el.child(historySection(p, t, r)))
     .when(cmds.length > 0, (el) => el.child(commandsSection(p, t, cmds, narrow)));
 }

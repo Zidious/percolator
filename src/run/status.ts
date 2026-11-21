@@ -37,6 +37,22 @@ export type StepJson = RunGraphStep & {
   endedAt?: string;
   outputs: Record<string, string>;
 };
+export type DecisionJson = { decision: 'approve' | 'reject'; by?: string };
+export type AttemptJson = {
+  kind: 'attempt';
+  step: string;
+  attempt: number;
+  /** `running` or `waiting` only on the live entry, which is always last */
+  status: Exclude<StepJson['status'], 'pending'>;
+  startedAt?: string;
+  /** absent on the live entry */
+  endedAt?: string;
+  outputs: Record<string, string>;
+  /** gate attempts only: pass is approve, fail is reject */
+  decision?: DecisionJson;
+};
+export type CapJson = { kind: 'cap'; loop: string; from: string; to: string; max: number; at: string };
+export type TimelineJson = AttemptJson | CapJson;
 export type LoopJson = RunGraphLoop & { round: number };
 export type RunStatusJson =
   | {
@@ -52,6 +68,8 @@ export type RunStatusJson =
       attention?: AttentionJson;
       steps: StepJson[];
       loops: LoopJson[];
+      /** every attempt in execution order, oldest first; the live attempt (if any) is last */
+      timeline: TimelineJson[];
       terminals: Record<string, string>;
       pr: { url: string } | null;
       graph: 'full' | 'history';
@@ -306,6 +324,71 @@ async function attentionOf(o: {
   };
 }
 
+/** Who decided a gate attempt: `decision.json`, else the `@login` in its approval or findings output. Any failure only means no one. */
+async function deciderOf(dir: string, h: StepRecord, decision: 'approve' | 'reject'): Promise<string | undefined> {
+  try {
+    const d = JSON.parse(await fs.readFile(path.join(dir, 'steps', h.stepId, String(h.attempt), 'decision.json'), 'utf8')) as { by?: unknown };
+    if (typeof d.by === 'string' && d.by !== '') return d.by;
+  } catch {
+    // fall through to the output
+  }
+  const rel = h.outputs[decision === 'approve' ? 'approval' : 'findings'];
+  if (rel === undefined) return undefined;
+  try {
+    return /\bby @([A-Za-z0-9-]+)/.exec(await fs.readFile(path.join(dir, rel), 'utf8'))?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/** One entry per history record (plus a cap entry after the attempt that hit a loop's cap), then the live attempt: the waiting gate, else the running current step. */
+async function timelineOf(o: {
+  dir: string;
+  meta: RunMeta;
+  state: RunState;
+  waiting: Waiting | undefined;
+  steps: RunGraphStep[];
+  loops: RunGraphLoop[];
+}): Promise<TimelineJson[]> {
+  const { dir, meta, state, waiting } = o;
+  const gates = new Set(o.steps.filter((s) => s.kind === 'gate').map((s) => s.id));
+  const out: TimelineJson[] = [];
+  for (const h of state.history) {
+    const entry: AttemptJson = {
+      kind: 'attempt',
+      step: h.stepId,
+      attempt: h.attempt,
+      status: h.status,
+      startedAt: h.startedAt,
+      endedAt: h.endedAt,
+      outputs: absOutputs(dir, h.outputs),
+    };
+    if (gates.has(h.stepId) && (h.status === 'pass' || h.status === 'fail')) {
+      const decision = h.status === 'pass' ? 'approve' : 'reject';
+      const by = await deciderOf(dir, h, decision);
+      entry.decision = { decision, ...(by !== undefined ? { by } : {}) };
+    }
+    out.push(entry);
+  }
+  for (const lp of o.loops) {
+    if ((state.rounds[lp.id] ?? 0) < lp.max) continue;
+    const at = out.findLastIndex((x) => x.kind === 'attempt' && x.step === lp.from);
+    const last = out[at];
+    if (last?.kind !== 'attempt' || last.endedAt === undefined) continue;
+    out.splice(at + 1, 0, { kind: 'cap', loop: lp.id, from: lp.from, to: lp.to, max: lp.max, at: last.endedAt });
+  }
+  const live = waiting !== undefined ? { step: waiting.stepId, status: 'waiting' as const, startedAt: waiting.since } : undefined;
+  // a fresh run has no current step yet: it is running the first stage
+  const step = state.currentStep ?? (state.history.length === 0 ? STAGES[0] : undefined);
+  const running =
+    live === undefined && state.status === 'running' && step !== undefined
+      ? { step, status: 'running' as const, startedAt: state.history.at(-1)?.endedAt || meta.createdAt }
+      : undefined;
+  const cur = live ?? running;
+  if (cur !== undefined) out.push({ kind: 'attempt', ...cur, attempt: (state.executed[cur.step] ?? 0) + 1, outputs: {} });
+  return out;
+}
+
 async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps): Promise<RunStatusJson> {
   const { dir, meta } = l;
   const state = l.state ?? (await loadState(dir));
@@ -348,6 +431,7 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps): Pro
     ...(attention !== undefined ? { attention } : {}),
     steps,
     loops: loopDefs.map((lp) => ({ ...lp, round: state.rounds[lp.id] ?? 0 })),
+    timeline: await timelineOf({ dir, meta, state, waiting, steps: stepDefs, loops: loopDefs }),
     terminals: finished ? {} : await liveTerminals(meta, deps),
     pr: url === undefined ? null : { url },
     graph: graph === undefined ? 'history' : 'full',

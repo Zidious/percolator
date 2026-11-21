@@ -2,7 +2,7 @@
 
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { STAGES, ago, loopAtCap, loopLabel, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
+import { STAGES, ago, canPick, loopAtCap, loopLabel, loopLabelAlign, roundView, shownLoops, ticketTitle, took, trainLayout, xOf } from './model.js';
 import { stepColor, link, own } from './ui.js';
 
 const TOP = 40; // room above the rail for loop arcs
@@ -87,15 +87,16 @@ function stop(p, t, r, st, left, right, folded) {
       .flex_1()
       .min_w(0)
       .items_center()
-      .cursor_pointer()
       .relative()
       .when(left !== null, (el) => el.child(rail('l', left)))
       .when(right !== null, (el) => el.child(rail('r', right)))
       .tooltip(tip)
-      .on_click((_e, cx) => {
-        p.pickStop(picked ? null : st.id, cx);
-        cx.notify();
-      })
+      .when(canPick(st), (el) =>
+        el.cursor_pointer().on_click((_e, cx) => {
+          p.pickStop(picked ? null : st.id, cx);
+          cx.notify();
+        }),
+      )
       .child(
         div()
           .h(RAIL * 2)
@@ -176,14 +177,13 @@ export function train(p, t, r, narrow) {
         .border_r(2)
         .rounded_t(12)
         .border_color(c),
-      // the label sits above the arc, centred on it, and may be wider than it
-      h_flex()
+      // the label sits above the arc, hung from the end nearer the track's middle, and may be wider than it
+      (loopLabelAlign(a, b) === 'end' ? h_flex().justify_end() : h_flex().justify_start())
         .absolute()
         .top(2)
         .left(`${a}%`)
         .w(`${b - a}%`)
         .h(14)
-        .justify_center()
         .child(div().flex_none().whitespace_nowrap().text_size(10).text_color(c).child(loopLabel(l, narrow))),
     );
   }
@@ -229,7 +229,16 @@ export function stopStrip(p, t, r) {
   const st = (r.steps ?? []).find((s) => s.id === p.stopSel);
   if (!st) return div();
   const kv = (k, v) => h_flex().gap(4).child(div().text_color(t.dim).child(k)).child(div().text_color(t.foreground).child(v));
-  const spent = took(st, Date.now());
+  const rv = roundView(r, st.id, p.roundSel); // null for a step that has not run: its own values show
+  const shown = rv?.attempt ?? st;
+  const spent = took(shown, Date.now());
+  const step = (glyph, to, id) =>
+    to === null
+      ? div().flex_none().px(4).text_color(t.dim).child(glyph)
+      : link(t, id, glyph, (_e, cx) => {
+          p.pickRound(to, cx);
+          cx.notify();
+        });
   return h_flex()
     .flex_wrap()
     .mx(16)
@@ -242,14 +251,20 @@ export function stopStrip(p, t, r) {
     .bg(t.raised)
     .text_size(11.5)
     .child(div().font_semibold().child(st.id))
+    .when(rv !== null && rv.of > 1, (el) =>
+      el
+        .child(step('‹', rv.prev, 'round-prev'))
+        .child(div().text_color(t.dim).child(`round ${rv.n} of ${rv.of}${rv.mark ? ` · ${rv.mark}` : ''}`))
+        .child(step('›', rv.next, 'round-next')),
+    )
     .child(kv('kind', st.kind))
     .child(kv('stage', st.stage))
-    .child(kv('status', st.status))
+    .child(kv('status', shown.status))
     .child(kv('attempts', String(st.attempts ?? 0)))
     .when(Boolean(spent), (el) => el.child(kv('took', spent)))
     .child(div().flex_1())
     .children(
-      Object.entries(st.outputs ?? {}).map(([k, path]) =>
+      Object.entries(shown.outputs ?? {}).map(([k, path]) =>
         link(t, `out-${k}`, `${k}.md`, (_e, cx) => {
           p.pickOutput(path, cx);
           cx.notify();

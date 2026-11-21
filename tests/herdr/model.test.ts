@@ -4,6 +4,9 @@ import path from 'node:path';
 import { test } from 'node:test';
 import {
   STAGES,
+  COFFEE_LINES,
+  coffeeLine,
+  runningText,
   actionArgv,
   ago,
   attentionTag,
@@ -15,6 +18,8 @@ import {
   titleLayout,
   readRatio,
   cliLines,
+  clock,
+  timelineRows,
   terminalCommands,
   cupLabel,
   cupMoves,
@@ -24,6 +29,7 @@ import {
   loopAtCap,
   loopLabel,
   moveRow,
+  canPick,
   moveStop,
   needsCount,
   newlyNeeding,
@@ -31,8 +37,12 @@ import {
   parseStatus,
   readStatus,
   readerPath,
+  roundView,
+  stepAttempts,
+  timelineOf,
   resolvePath,
   rowState,
+  loopLabelAlign,
   runningCount,
   shownLoops,
   showsHere,
@@ -79,7 +89,10 @@ test("the fixture's terminals are named as perc names them (names, not Herdr add
     if (r.status === 'unreadable') continue;
     assert.equal(r.driver.terminal, driverName(r.id, r.ticket.ref), r.id);
     for (const [step, name] of Object.entries(r.terminals)) {
-      const attempts: number = r.steps.find((s) => s.id === step)?.attempts ?? 0;
+      const st = r.steps.find((s) => s.id === step);
+      // without a timeline, `attempts` counts finished records, so a live step runs attempt `attempts + 1`
+      const live = !Array.isArray(r.timeline) && (st?.status === 'running' || st?.status === 'waiting');
+      const attempts: number = (st?.attempts ?? 0) + (live ? 1 : 0);
       assert.equal(name, step === 'driver' ? driverName(r.id, r.ticket.ref) : terminalName(r.id, r.ticket.ref, step, attempts), `${r.id} ${step}`);
     }
     if (r.attention?.terminal !== undefined) assert.equal(r.attention.terminal, r.terminals[r.currentStep!], r.id);
@@ -149,18 +162,18 @@ test('visibleRuns "all" keeps everything in order', () => {
 });
 
 test('rowState gives the tone and the board text for each kind of run', () => {
-  const cases: [string, string, string][] = [
+  const cases: [string, string, string, string?][] = [
     ['t2', 'blocked', 'your turn · approve-groom'],
     ['t4', 'blocked', 'paused · review at cap'],
     ['t12', 'blocked', 'paused · plan'],
     ['t9', 'blocked', 'failed · implement'],
     ['t11', 'blocked', 'stalled · driver stopped'],
     ['t13', 'blocked', 'agent blocked · groom'],
-    ['t8', 'working', 'review · round 2/3'],
+    ['t8', 'working', 'review', 'round 2/3'],
     ['t3', 'dim', 'delivered · PR #7'],
     ['t5', 'muted', 'unreadable · state.json: Unexpected end of JSON input'],
   ];
-  for (const [id, tone, text] of cases) assert.deepEqual(rowState(byId(id)), { tone, text }, id);
+  for (const [id, tone, text, round] of cases) assert.deepEqual(rowState(byId(id)), { tone, text, ...(round ? { round } : {}) }, id);
 });
 
 test('rowState for a running step outside a loop shows only the step', () => {
@@ -398,13 +411,29 @@ test('shownLoops keeps loops that have gone round; loopLabel says where and how 
 
 test('moveStop walks the train in execution order from the selected stop, else the current step', () => {
   const r = byId('t8');
-  assert.equal(moveStop(r, null, 1), 'deliver');
+  assert.equal(moveStop(r, null, 1), 'review');
   assert.equal(moveStop(r, null, -1), 'security-scan');
   assert.equal(moveStop(r, 'setup', -1), 'setup');
-  assert.equal(moveStop(r, 'notify', 1), 'notify');
   assert.equal(moveStop(r, 'approve-groom', 1), 'plan');
   assert.equal(moveStop(readable('t3'), null, 1), 'deliver');
   assert.equal(moveStop(byId('t5'), null, 1), null);
+});
+
+test('canPick refuses a stop that has not started', () => {
+  assert.equal(canPick({ status: 'pending' }), false);
+  for (const s of ['running', 'waiting', 'pass', 'fail', 'escalate', 'contract_error']) assert.equal(canPick({ status: s }), true);
+});
+
+test('moveStop never lands on a stop that has not started', () => {
+  const r = readable('t2'); // waiting at approve-groom; plan onwards pending
+  assert.equal(moveStop(r, 'approve-groom', 1), 'approve-groom');
+  assert.equal(moveStop(r, null, 1), 'approve-groom');
+  assert.equal(moveStop(r, 'groom', 1), 'approve-groom');
+});
+
+test('moveStop is null when nothing has started', () => {
+  const r = readable('t14');
+  assert.equal(moveStop({ ...r, steps: r.steps.map((s) => ({ ...s, status: 'pending' })) }, null, 1), null);
 });
 
 test('moveRow moves the selection within the shown rows and stays at the ends', () => {
@@ -419,7 +448,8 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
 test('readerPath shows the selected stop first output, else the first review file, else nothing', () => {
   const gate = readable('t2');
   assert.equal(readerPath(gate, null), 'samples/groomed_ticket.md');
-  const out = { ...gate, steps: gate.steps.map((s) => (s.id === 'groom' ? { ...s, outputs: { groomed_ticket: '/abs/g.md' } } : s)) };
+  const { timeline: _t, ...older } = gate; // an older perc: the steps' own outputs are read
+  const out = { ...older, steps: gate.steps.map((s) => (s.id === 'groom' ? { ...s, outputs: { groomed_ticket: '/abs/g.md' } } : s)) } as unknown as Readable;
   assert.equal(readerPath(out, 'groom'), '/abs/g.md');
   assert.equal(readerPath(out, 'intake'), 'samples/groomed_ticket.md', 'a stop without outputs falls back to the review');
   assert.equal(readerPath(out, 'gone'), 'samples/groomed_ticket.md');
@@ -427,6 +457,57 @@ test('readerPath shows the selected stop first output, else the first review fil
   delete passed.attention;
   assert.equal(readerPath(passed, null), null, 'once the gate passes there is nothing to read');
   assert.equal(readerPath(byId('t5'), null), null);
+});
+
+test('the fixture has timelines for t8, t3, t2 and t4, and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4']);
+});
+
+test('roundView defaults to the latest round and marks it running', () => {
+  const v = roundView(readable('t8'), 'review', null)!;
+  assert.deepEqual([v.attempt.attempt, v.n, v.of, v.mark, v.prev, v.next], [3, 3, 3, 'running', 2, null]);
+});
+
+test('roundView shows a picked earlier round, unmarked, with both neighbours', () => {
+  const v = roundView(readable('t8'), 'review', 2)!;
+  assert.deepEqual([v.attempt.status, v.n, v.mark, v.prev, v.next], ['fail', 2, null, 1, 3]);
+});
+
+test('roundView marks a finished last round latest, and a waiting one waiting', () => {
+  assert.equal(roundView(readable('t3'), 'review', null)!.mark, 'latest');
+  assert.equal(roundView(readable('t2'), 'approve-groom', null)!.mark, 'waiting');
+});
+
+test('roundView falls back to the latest round when the picked one is not there', () => {
+  assert.equal(roundView(readable('t8'), 'review', 9)!.n, 3);
+});
+
+test('roundView is null for a step that has not run', () => {
+  assert.equal(roundView(readable('t2'), 'plan', null), null);
+});
+
+test('without a timeline (older perc) a step that ran is one round from its own data', () => {
+  const v = roundView(readable('t9'), 'implement', null)!; // t9 has no timeline
+  assert.deepEqual([v.attempt.status, v.of, v.mark], ['contract_error', 1, 'latest']);
+});
+
+test('timelineOf is the run timeline, else one attempt per step that ran, in order; empty when unreadable', () => {
+  assert.deepEqual(timelineOf(readable('t8')), readable('t8').timeline);
+  assert.deepEqual(
+    timelineOf(readable('t9')).map((e) => e.kind === 'attempt' && [e.step, e.attempt, e.status]),
+    [['intake', 1, 'pass'], ['groom', 1, 'pass'], ['approve-groom', 1, 'pass'], ['plan', 1, 'pass'], ['implement', 1, 'contract_error']],
+  );
+  assert.deepEqual(timelineOf(byId('t5')), []);
+});
+
+test('stepAttempts is one step attempts in order', () => {
+  assert.deepEqual(stepAttempts(readable('t8'), 'review').map((a) => a.attempt), [1, 2, 3]);
+  assert.deepEqual(stepAttempts(readable('t8'), 'deliver'), []);
+});
+
+test('readerPath shows the picked round first output', () => {
+  assert.equal(readerPath(readable('t8'), 'review', 2), 'samples/findings.md');
+  assert.equal(readerPath(readable('t8'), 'review', null), null, 'the running round has no outputs yet');
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
@@ -544,4 +625,83 @@ test('fillHeight converges: from what the rest takes (content minus the box draw
     seen.push(box);
   }
   assert.deepEqual(seen, [220, 220, 220, 220]);
+});
+
+const hhmm = (iso: string) => {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+test('clock is the local HH:MM of a date, empty without one', () => {
+  assert.equal(clock('2026-11-21T00:15:03.000Z'), hhmm('2026-11-21T00:15:03.000Z'));
+  assert.equal(clock(undefined), '');
+});
+
+test('timelineRows lists every attempt newest first, with round, start, duration and decision', () => {
+  const rows = timelineRows(readable('t8'), Date.parse('2026-11-21T00:41:10.000Z') + 120000);
+  assert.deepEqual(rows[0], {
+    key: 'review#3',
+    mark: '●',
+    tone: 'working',
+    step: 'review',
+    round: 'round 3',
+    status: 'running',
+    started: hhmm('2026-11-21T00:41:10.000Z'),
+    took: '2m',
+    note: '',
+  });
+  assert.equal(rows.find((r) => r.key === 'approve-groom#1')!.note, 'approved by @zidious');
+  assert.equal(rows.at(-1)!.step, 'setup');
+});
+
+test('timelineRows shows a cap as its own row', () => {
+  const cap = timelineRows(readable('t4'), 0).find((r) => r.status === 'cap')!;
+  assert.deepEqual([cap.mark, cap.tone, cap.step, cap.note], ['↺', 'blocked', 'review', 'review → implement hit its cap of 3 rounds']);
+});
+
+test('timelineRows without a timeline lists the steps that ran, newest first', () => {
+  assert.deepEqual(timelineRows(readable('t9'), 0).map((r) => r.key), ['implement#1', 'plan#1', 'approve-groom#1', 'groom#1', 'intake#1']);
+});
+
+test('timelineRows without a timeline counts a live step as the attempt in progress', () => {
+  const first = timelineRows(readable('t14'), 0).find((r) => r.key === 'intake#1');
+  assert.equal(first?.round, 'round 1');
+  assert.equal(stepAttempts(readable('t11'), 'implement').at(-1)!.attempt, 1);
+  assert.equal(stepAttempts(readable('t11'), 'plan').at(-1)!.attempt, 1, 'a finished step keeps its attempts');
+});
+
+test('rowState keeps the round apart from a long step name, so it is never cut', () => {
+  const r = readable('t8');
+  const long = { ...r, currentStep: 'security-scan-extended', loops: [{ ...r.loops[0]!, from: 'security-scan-extended' }] };
+  assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'round 2/3' });
+});
+
+test('loopLabelAlign anchors the label to the arc end nearer the middle', () => {
+  assert.equal(loopLabelAlign(60, 90), 'end');
+  assert.equal(loopLabelAlign(10, 30), 'start');
+  assert.equal(loopLabelAlign(40, 60), 'start');
+});
+
+test('COFFEE_LINES has 8 to 12 lines, including the espresso and another ticket', () => {
+  assert.ok(COFFEE_LINES.length >= 8 && COFFEE_LINES.length <= 12);
+  assert.ok(COFFEE_LINES.includes('Go make an espresso.') && COFFEE_LINES.includes('Start another ticket!'));
+});
+
+test('coffeeLine is picked from the run id and the step, the same on every refresh', () => {
+  const id = 't7-20261121-062224-638f';
+  assert.equal(coffeeLine(id, 'groom'), COFFEE_LINES[2]);
+  assert.equal(coffeeLine(id, 'plan'), COFFEE_LINES[1]);
+  assert.equal(coffeeLine(id, 'review'), COFFEE_LINES[4]);
+  assert.equal(coffeeLine(id, 'review'), coffeeLine(id, 'review'));
+});
+
+test('runningText says how long the live attempt has run, then a coffee line', () => {
+  const r = readable('t8'); // review#3 live in the timeline
+  const at = Date.parse(stepAttempts(r, 'review').at(-1)!.startedAt!);
+  assert.equal(runningText(r, at + 180000), `review is running for 3m. ${coffeeLine(r.id, 'review')}`);
+});
+
+test('runningText without a start time leaves the duration out', () => {
+  const r = readable('t11'); // implement running, no startedAt, no timeline
+  assert.equal(runningText(r, 0), `implement is running. ${coffeeLine(r.id, 'implement')}`);
 });

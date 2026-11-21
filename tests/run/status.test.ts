@@ -10,7 +10,7 @@ import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
 import { driverAlive, runStatusJson, statusJson, yourTurn } from '../../src/run/status.ts';
-import type { RunStatusJson } from '../../src/run/status.ts';
+import type { RunStatusJson, TimelineJson } from '../../src/run/status.ts';
 import { NOW, setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
 
@@ -36,6 +36,9 @@ type Env = RunEnv & {
   liveDriver(m: RunMeta): void;
   /** `waiting.json` at approve-groom attempt 1, after a groom that produced `groomed_ticket` */
   waitAtGate(m: RunMeta): Promise<void>;
+  /** the whole status JSON, `timeline` included */
+  full(m: RunMeta): Promise<RunStatusJson>;
+  /** `full` without `timeline` (the timeline has its own tests) */
   status(m: RunMeta): Promise<RunStatusJson>;
 };
 
@@ -70,9 +73,14 @@ async function setup(): Promise<Env> {
         commentUrl: URL,
       });
     },
-    status: async (m) => {
+    full: async (m) => {
       const l = (await listRuns(base.home)).find((x) => x.meta?.runId === m.runId)!;
       return runStatusJson(l, base.deps);
+    },
+    status: async (m) => {
+      const l = (await listRuns(base.home)).find((x) => x.meta?.runId === m.runId)!;
+      const { timeline: _t, ...rest } = (await runStatusJson(l, base.deps)) as Record<string, unknown>;
+      return rest as RunStatusJson;
     },
   };
 }
@@ -87,6 +95,12 @@ const rel = (step: string, attempt: number, key: string) => path.join('steps', s
 function rec(stepId: string, attempt: number, status: StepRecord['status'], outputs: Record<string, string> = {}): StepRecord {
   return { stepId, attempt, startedAt: T1, endedAt: T2, status, outputs };
 }
+
+type Readable = Exclude<RunStatusJson, { status: 'unreadable' }>;
+const timelineOf = async (e: Env, m: RunMeta): Promise<TimelineJson[]> => ((await e.full(m)) as Readable).timeline;
+
+/** The timeline of a fresh prepared run: the live intake attempt. */
+const freshTimeline = (m: RunMeta) => [{ kind: 'attempt', step: 'intake', attempt: 1, status: 'running', startedAt: m.createdAt, outputs: {} }];
 
 const GRAPH: [string, string, 'core' | 'node', 'agent' | 'builtin' | 'script' | 'gate'][] = [
   ['intake', 'intake', 'core', 'builtin'],
@@ -146,6 +160,237 @@ function gateSteps(e: Env, m: RunMeta, gate: Step = { status: 'waiting' }): Step
 function groomReview(e: Env, m: RunMeta) {
   return [{ step: 'groom', key: 'groomed_ticket', path: path.join(e.dir(m), rel('groom', 1, 'groomed_ticket')) }];
 }
+
+test('timeline lists every attempt in history order with absolute outputs', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'approve-groom';
+      s.history.push(
+        rec('intake', 1, 'pass'),
+        rec('groom', 1, 'pass', { groomed_ticket: rel('groom', 1, 'groomed_ticket') }),
+        rec('approve-groom', 1, 'fail', { findings: rel('approve-groom', 1, 'findings') }),
+        rec('groom', 2, 'pass', { groomed_ticket: rel('groom', 2, 'groomed_ticket') }),
+      );
+    });
+    const tl = await timelineOf(e, m);
+    assert.deepEqual(
+      tl.map((x) => x.kind === 'attempt' && `${x.step}#${x.attempt}:${x.status}`),
+      ['intake#1:pass', 'groom#1:pass', 'approve-groom#1:fail', 'groom#2:pass'],
+    );
+    assert.deepEqual(tl[3], {
+      kind: 'attempt',
+      step: 'groom',
+      attempt: 2,
+      status: 'pass',
+      startedAt: T1,
+      endedAt: T2,
+      outputs: { groomed_ticket: path.join(e.dir(m), rel('groom', 2, 'groomed_ticket')) },
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('timeline ends with the live attempt of a running step, started when the last record ended', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.currentStep = 'plan';
+      s.executed = { intake: 1, groom: 1 };
+      s.history.push(rec('intake', 1, 'pass'), rec('groom', 1, 'pass'));
+    });
+    assert.deepEqual((await timelineOf(e, m)).at(-1), { kind: 'attempt', step: 'plan', attempt: 1, status: 'running', startedAt: T2, outputs: {} });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('timeline ends with a waiting gate attempt, started when it began waiting', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.waitAtGate(m);
+    await e.edit(m, (s) => {
+      s.executed = { intake: 1, groom: 1 };
+    });
+    assert.deepEqual((await timelineOf(e, m)).at(-1), {
+      kind: 'attempt',
+      step: 'approve-groom',
+      attempt: 1,
+      status: 'waiting',
+      startedAt: NOW.toISOString(),
+      outputs: {},
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a fresh run is running intake: its timeline is the live intake attempt, started at createdAt', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    assert.deepEqual(await timelineOf(e, m), freshTimeline(m));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a completed or paused run has no live attempt', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    for (const status of ['completed', 'paused'] as const) {
+      await e.edit(m, (s) => {
+        s.status = status;
+        s.currentStep = 'plan';
+        s.history = [rec('intake', 1, 'pass'), rec('groom', 1, 'pass')];
+      });
+      assert.deepEqual(
+        (await timelineOf(e, m)).map((x) => x.kind === 'attempt' && `${x.step}#${x.attempt}:${x.status}`),
+        ['intake#1:pass', 'groom#1:pass'],
+        status,
+      );
+    }
+  } finally {
+    await e.cleanup();
+  }
+});
+
+const gateEntries = (tl: TimelineJson[]) => tl.filter((x) => x.kind === 'attempt' && x.step === 'approve-groom');
+
+test('a gate attempt carries its decision and who made it, from decision.json', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.history.push(
+        rec('intake', 1, 'pass'),
+        rec('groom', 1, 'pass'),
+        rec('approve-groom', 1, 'fail', { findings: rel('approve-groom', 1, 'findings') }),
+        rec('groom', 2, 'pass'),
+        rec('approve-groom', 2, 'pass', { approval: rel('approve-groom', 2, 'approval') }),
+      );
+    });
+    await writeJson(path.join(e.dir(m), 'steps', 'approve-groom', '1', 'decision.json'), { decision: 'reject', by: 'zidious', via: 'local', feedback: 'x' });
+    await writeJson(path.join(e.dir(m), 'steps', 'approve-groom', '2', 'decision.json'), { decision: 'approve', by: 'zidious', via: 'local' });
+    assert.deepEqual(
+      gateEntries(await timelineOf(e, m)).map((x) => x.kind === 'attempt' && x.decision),
+      [{ decision: 'reject', by: 'zidious' }, { decision: 'approve', by: 'zidious' }],
+    );
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a gate decided by a GitHub comment takes who from its approval or findings output', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.history.push(
+        rec('approve-groom', 1, 'fail', { findings: rel('approve-groom', 1, 'findings') }),
+        rec('approve-groom', 2, 'pass', { approval: rel('approve-groom', 2, 'approval') }),
+      );
+    });
+    const out = async (attempt: number, key: string, text: string) => {
+      const f = path.join(e.dir(m), rel('approve-groom', attempt, key));
+      await fs.mkdir(path.dirname(f), { recursive: true });
+      await fs.writeFile(f, text);
+    };
+    await out(2, 'approval', 'Approved by @octo via comment https://github.com/o/r/issues/5#issuecomment-9\n');
+    await out(1, 'findings', 'Rejected by @octo-cat: tighten scope\n');
+    assert.deepEqual(
+      gateEntries(await timelineOf(e, m)).map((x) => x.kind === 'attempt' && x.decision),
+      [{ decision: 'reject', by: 'octo-cat' }, { decision: 'approve', by: 'octo' }],
+    );
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a gate decision without a readable decision.json or output has no by', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.history.push(rec('approve-groom', 1, 'pass', { approval: rel('approve-groom', 1, 'approval') }));
+    });
+    const f = path.join(e.dir(m), 'steps', 'approve-groom', '1', 'decision.json');
+    await fs.mkdir(path.dirname(f), { recursive: true });
+    await fs.writeFile(f, 'not json');
+    const entry = gateEntries(await timelineOf(e, m))[0] as { decision?: unknown };
+    assert.deepEqual(entry.decision, { decision: 'approve' });
+    assert.notEqual((await e.full(m)).status, 'unreadable');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('agent attempts and escalated gate attempts carry no decision', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'approve-groom';
+      s.history.push(rec('groom', 1, 'pass'), rec('approve-groom', 1, 'escalate'));
+    });
+    const [groomEntry, gateEntry] = await timelineOf(e, m);
+    assert.equal('decision' in groomEntry!, false);
+    assert.equal('decision' in gateEntry!, false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+async function reviewLoop(e: Env, m: RunMeta, round: number): Promise<TimelineJson[]> {
+  await e.edit(m, (s) => {
+    s.currentStep = 'deliver';
+    s.rounds = { review: round };
+    s.history.push(
+      rec('implement', 1, 'pass'),
+      rec('review', 1, 'fail'),
+      rec('implement', 2, 'pass'),
+      rec('review', 2, 'fail'),
+      rec('implement', 3, 'pass'),
+      rec('review', 3, 'fail'),
+    );
+  });
+  return timelineOf(e, m);
+}
+
+test('a loop at its cap adds a cap entry right after the attempt that hit it', async () => {
+  const e = await setup();
+  try {
+    const tl = await reviewLoop(e, await e.prepare(), 3);
+    const i = tl.findIndex((x) => x.kind === 'cap');
+    assert.deepEqual(tl[i], { kind: 'cap', loop: 'review', from: 'review', to: 'implement', max: 3, at: T2 });
+    assert.deepEqual(tl[i - 1], { ...tl[i - 1], step: 'review', attempt: 3 });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a loop under its cap adds no cap entry', async () => {
+  const e = await setup();
+  try {
+    const tl = await reviewLoop(e, await e.prepare(), 2);
+    assert.equal(tl.some((x) => x.kind === 'cap'), false);
+  } finally {
+    await e.cleanup();
+  }
+});
 
 test('gate with live driver', async () => {
   const e = await setup();
@@ -623,7 +868,7 @@ test('status json keeps going past a broken run', async () => {
           error: `Cannot read run state ${noStateFile}: ENOENT: no such file or directory, open '${noStateFile}'`,
         },
         { id: badGraph.runId, status: 'unreadable', error: `Run graph ${graphFile} is invalid: version: Invalid input: expected 1; start a new run` },
-        expected(good, { attention: { kind: 'stalled', since: good.createdAt, ...STALLED_FRESH, actions: ['resume'] } }),
+        expected(good, { attention: { kind: 'stalled', since: good.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(good) }),
         { id: badState.runId, status: 'unreadable', error: `Run state ${badStateFile} is not valid JSON` },
         { id: 't9-broken', status: 'unreadable', error: `Run metadata ${path.join(broken, 'run.json')} is missing or invalid: file not found` },
       ],
@@ -667,7 +912,7 @@ test('status json never loads config', async () => {
   try {
     const m = await e.prepare();
     await fs.rm(e.configFile);
-    assert.deepEqual(await statusJson(e.deps), { schema: 1, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] } })] });
+    assert.deepEqual(await statusJson(e.deps), { schema: 1, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(m) })] });
   } finally {
     await e.cleanup();
   }
