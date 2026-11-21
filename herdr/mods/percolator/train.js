@@ -255,7 +255,7 @@ export function stopStrip(p, t, r) {
     .children(
       Object.entries(st.outputs ?? {}).map(([k, path]) =>
         link(t, `out-${k}`, `${k}.md`, (_e, cx) => {
-          p.show(p.resolve(path), cx);
+          p.pickOutput(path, cx);
           cx.notify();
         }).when(p.file === p.resolve(path), (el) => el.text_color(t.accent)),
       ),

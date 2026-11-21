@@ -17,6 +17,7 @@ import {
   newlyNeeding,
   parseStatus,
   readStatus,
+  readerPath,
   resolvePath,
   rowState,
   runningCount,
@@ -339,4 +340,17 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
   assert.equal(moveRow(rows, rows.at(-1)!.id, 1), rows.at(-1)!.id);
   assert.equal(moveRow(rows, 'gone', 1), rows[0]!.id);
   assert.equal(moveRow([], 'gone', 1), null);
+});
+
+test('readerPath shows the selected stop first output, else the first review file, else nothing', () => {
+  const gate = readable('t2');
+  assert.equal(readerPath(gate, null), 'samples/groomed_ticket.md');
+  const out = { ...gate, steps: gate.steps.map((s) => (s.id === 'groom' ? { ...s, outputs: { groomed_ticket: '/abs/g.md' } } : s)) };
+  assert.equal(readerPath(out, 'groom'), '/abs/g.md');
+  assert.equal(readerPath(out, 'intake'), 'samples/groomed_ticket.md', 'a stop without outputs falls back to the review');
+  assert.equal(readerPath(out, 'gone'), 'samples/groomed_ticket.md');
+  const passed = { ...gate, status: 'running', currentStep: 'plan' } as Readable;
+  delete passed.attention;
+  assert.equal(readerPath(passed, null), null, 'once the gate passes there is nothing to read');
+  assert.equal(readerPath(byId('t5'), null), null);
 });

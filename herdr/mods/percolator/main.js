@@ -28,6 +28,7 @@ import {
   moveStop,
   needsCount,
   readStatus,
+  readerPath,
   resolvePath,
   runningCount,
   sortRuns,
@@ -162,6 +163,7 @@ export default class Percolator extends View {
         this.error = null;
         this.loaded = true;
         if (!this.current()) this.select(this.rows()[0]?.id ?? null, cx);
+        else this.syncReader(cx); // the run moved on: new review files, or none
       } else {
         this.error = got.error; // keep the last good runs
       }
@@ -217,24 +219,33 @@ export default class Percolator extends View {
     }
     this.sel = id;
     this.stopSel = null;
-    const r = this.current();
-    const review = r?.attention?.review?.[0]?.path;
-    this.show(review ? this.resolve(review) : null, cx);
+    this.outPick = null;
+    this.syncReader(cx);
     this.readTail(cx);
   }
 
+  /** Selects a stop (null closes the strip and goes back to the run's review file). */
   pickStop(id, cx) {
     this.stopSel = id;
-    const r = this.current();
-    const st = (r?.steps ?? []).find((s) => s.id === id);
-    const out = st && Object.values(st.outputs ?? {})[0];
-    if (out) this.show(this.resolve(out), cx);
+    this.outPick = null;
+    this.syncReader(cx);
   }
 
-  show(path, cx) {
+  /** One of the selected stop's outputs, from the strip. */
+  pickOutput(path, cx) {
+    this.outPick = path;
+    this.syncReader(cx);
+  }
+
+  /** Points the reader at what the run needs read now (readerPath, or an output picked in the strip) and reads it again:
+   *  the same path can hold new text (a re-groom rewrites groomed_ticket.md). */
+  syncReader(cx) {
+    const r = this.current();
+    const raw = (this.stopSel && this.outPick) || (r ? readerPath(r, this.stopSel) : null);
+    const path = raw ? this.resolve(raw) : null;
     this.file = path;
-    if (!path || this.files[path] !== undefined) return;
-    this.files[path] = null;
+    if (!path) return;
+    if (this.files[path] === undefined) this.files[path] = null;
     cx.spawn(async (cx) => {
       const text = await readTextFile(path).catch(() => null);
       this.files[path] = text ?? `_${path} could not be read._`;
@@ -362,7 +373,7 @@ export default class Percolator extends View {
     else if (key === 'g' && acts.includes('resume')) this.act('resume', cx);
     else if (key === 'escape') {
       if (this.rejecting) this.closeReject();
-      else if (this.stopSel) this.stopSel = null;
+      else if (this.stopSel) this.pickStop(null, cx);
       else this.hide();
     } else return false;
     return true;

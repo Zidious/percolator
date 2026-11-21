@@ -231,3 +231,10 @@ export function moveRow(rows, selId, dir) {
   if (at < 0) return rows[0].id;
   return rows[Math.max(0, Math.min(rows.length - 1, at + dir))].id;
 }
+
+/** What the reader shows: the selected stop's first output, else the first file to review, else null (as perc gave it). */
+export function readerPath(run, stopSel) {
+  const step = stopSel ? (run.steps ?? []).find((s) => s.id === stopSel) : undefined;
+  const out = step ? Object.values(step.outputs ?? {})[0] : undefined;
+  return out ?? run.attention?.review?.[0]?.path ?? null;
+}
