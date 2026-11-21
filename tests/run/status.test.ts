@@ -557,14 +557,19 @@ test('driverAlive is null for another host', async () => {
   }
 });
 
-test('driverAlive is false when hc fails and there is no lock', async () => {
+test('driverAlive is null when hc fails and there is no lock, and no stalled attention is raised', async () => {
   const e = await setup();
   try {
     const m = await e.prepare();
+    await e.edit(m, (s) => (s.currentStep = 'plan'));
     e.deps.hc.get = async () => {
       throw new Error('hc not found');
     };
-    assert.equal(await driverAlive(e.dir(m), m, e.deps), false);
+    assert.equal(await driverAlive(e.dir(m), m, e.deps), null);
+    assert.deepEqual(
+      await e.status(m),
+      expected(m, { currentStep: 'plan', driver: { alive: null, terminal: m.driver }, steps: steps({ plan: { status: 'running' } }) }),
+    );
   } finally {
     await e.cleanup();
   }

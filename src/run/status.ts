@@ -64,7 +64,7 @@ export type DriverLiveness = { alive: boolean | null; lock?: DriverLock; hcError
 
 /**
  * The driver's hc terminal is live, else its `driver.json` lock is live (a foreground drive has no terminal).
- * `alive: null` when the lock's host is another machine (its pid cannot be checked). Never throws.
+ * `alive: null` when the lock's host is another machine (its pid cannot be checked), or when hc failed and no lock exists. Never throws.
  */
 export async function driverLiveness(dir: string, meta: RunMeta, deps: DriverDeps): Promise<DriverLiveness> {
   let hcError: string | undefined;
@@ -74,6 +74,8 @@ export async function driverLiveness(dir: string, meta: RunMeta, deps: DriverDep
     hcError = (err as Error).message;
   }
   const lock = await readDriverLock(dir);
+  // hc failed and no lock can decide: liveness is unknown, not "dead"
+  if (hcError !== undefined && lock === undefined) return { alive: null, hcError };
   const out: DriverLiveness = { alive: false, ...(hcError !== undefined ? { hcError } : {}) };
   if (lock === undefined || !lockIsLive(lock, liveness(deps))) return out;
   return { ...out, alive: lock.host === os.hostname() ? true : null, lock };

@@ -189,8 +189,14 @@ async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: Driv
     const d = await driverLiveness(dir, meta, deps);
     // a foreground drive has no driver terminal; its driver.json says it is alive
     const live = d.lock === undefined ? `driver ${meta.driver}` : `driver pid ${d.lock.pid}${d.lock.host === os.hostname() ? '' : ` on ${d.lock.host}`}`;
-    const driver =
-      d.alive !== false ? undefined : d.hcError !== undefined ? `driver unknown (hc: ${d.hcError})` : `driver not running; perc resume ${meta.runId}`;
+    const unknown = d.hcError !== undefined && d.lock === undefined && d.alive !== true;
+    const driver = unknown
+      ? `driver unknown (hc: ${d.hcError})`
+      : d.alive !== false
+        ? undefined
+        : d.hcError !== undefined
+          ? `driver unknown (hc: ${d.hcError})`
+          : `driver not running; perc resume ${meta.runId}`;
     if (what === undefined) return driver ?? live;
     return driver === undefined ? what : `${what}; ${driver}`;
   }
