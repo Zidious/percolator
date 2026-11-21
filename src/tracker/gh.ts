@@ -1,7 +1,7 @@
 import { nodeExec } from '../util/exec.ts';
 import type { Exec } from '../util/exec.ts';
 
-export type IssueComment = { author: string; body: string; createdAt: string; url: string };
+export type IssueComment = { id: number; author: string; body: string; createdAt: string; url: string };
 export type Issue = {
   number: number;
   title: string;
@@ -16,6 +16,8 @@ export interface Gh {
   issue(repo: string, n: number): Promise<Issue>;
   /** Returns the new comment's URL. */
   comment(repo: string, n: number, bodyFile: string): Promise<string>;
+  /** PATCHes a comment's body from a file; returns the server's `updated_at`. */
+  editComment(repo: string, id: number, bodyFile: string): Promise<string>;
   user(): Promise<string>;
   findPr(repo: string, head: string): Promise<{ number: number; url: string } | undefined>;
   createPr(repo: string, o: { base: string; head: string; title: string; bodyFile: string }): Promise<string>;
@@ -33,6 +35,11 @@ const GH_ENV = { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: 
 
 function noDash(sub: string, what: string, v: string): void {
   if (v.startsWith('-')) throw new Error(`gh ${sub}: ${what} must not start with "-": ${v}`);
+}
+
+/** REST id from a comment url's `#issuecomment-<n>`, or 0 when it has none. */
+export function commentIdOf(url: string): number {
+  return Number(/#issuecomment-(\d+)$/.exec(url)?.[1] ?? 0);
 }
 
 export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
@@ -70,6 +77,7 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
         state: String(j['state'] ?? ''),
         author: login(j['author']),
         comments: comments.map((c) => ({
+          id: commentIdOf(String(c['url'] ?? '')),
           author: login(c['author']),
           body: String(c['body'] ?? ''),
           createdAt: String(c['createdAt'] ?? ''),
@@ -80,6 +88,18 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
     async comment(repo, n, bodyFile) {
       const out = await call('issue comment', ['issue', 'comment', '--repo', repo, '--body-file', bodyFile, '--', String(n)]);
       return out.trim();
+    },
+    async editComment(repo, id, bodyFile) {
+      noDash('api comment edit', 'repo', repo);
+      const parts = repo.split('/');
+      const host = parts.length === 3 ? ['--hostname', parts[0]!] : [];
+      const slug = parts.slice(-2).join('/');
+      const out = await call('api comment edit', [
+        'api', ...host, '-X', 'PATCH', `repos/${slug}/issues/comments/${id}`, '-F', `body=@${bodyFile}`, '--jq', '.updated_at',
+      ]);
+      const at = out.trim();
+      if (!at) throw new Error(`gh api comment edit returned no updated_at for comment ${id}`);
+      return at;
     },
     async user() {
       return (await call('api user', ['api', 'user', '--jq', '.login'])).trim();

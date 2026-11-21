@@ -55,12 +55,18 @@ async function setup(): Promise<Env> {
   gh.addIssue(REPO, 5, { title: 'Fix the thing', body: 'It is broken.' });
   const base = await setupRunEnv({ hc, gh, bindings: BINDINGS, extra: TRACKER });
   const clock = { t: NOW.getTime() };
-  const lastIsGate = () => gh.issues.get(`${REPO}#5`)!.comments.at(-1)?.body.includes(GATE_MARKER) === true;
+  // a gate posts once and edits its comment each round: answer each write, not the newest comment
+  // a decision edit rewrites the round it answers: only a new round header (or the post) is a new wait
+  const gateWrites = () => new Set(gh.bodies.filter((b) => b.startsWith(GATE_MARKER)).map((b) => b.split('\n')[1])).size;
+  let replied = 0;
   Object.assign(base.deps, {
     now: () => new Date(clock.t),
     sleep: async () => {
       clock.t += 30000;
-      if (lastIsGate()) gh.addComment(REPO, 5, 'alice', '/percolator approve');
+      if (gateWrites() > replied) {
+        replied++;
+        gh.addComment(REPO, 5, 'alice', '/percolator approve');
+      }
     },
   });
   const dir = (id: string) => path.join(base.home, '.percolator', 'runs', id);
@@ -577,6 +583,7 @@ test('approve writes the decision', async () => {
     assert.equal(r.out, `approved approve-groom of run ${meta.runId}\n`);
     const d = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
     assert.equal(d.decision, 'approve');
+    assert.equal(d.by, 'perc-bot');
     assert.equal(d.via, 'local');
 
     const rej = await e.perc(['reject', meta.runId, 'tighten', 'the scope']);
@@ -585,6 +592,23 @@ test('approve writes the decision', async () => {
     const d2 = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
     assert.equal(d2.decision, 'reject');
     assert.equal(d2.feedback, 'tighten the scope');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('approve records the OS user when gh cannot say who is logged in', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const stepDir = path.join(e.dir(meta.runId), 'steps', 'approve-groom', '1');
+    await fs.mkdir(stepDir, { recursive: true });
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir, since: NOW.toISOString(), commentUrl: 'u' });
+    (e.deps.gh as FakeGh).fail('user', 'not logged in');
+    const r = await e.perc(['approve', meta.runId]);
+    assert.equal(r.code, 0, r.err);
+    const d = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
+    assert.equal(d.by, os.userInfo().username.replace(/\s+/g, '-'));
   } finally {
     await e.cleanup();
   }

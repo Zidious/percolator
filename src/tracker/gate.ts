@@ -8,9 +8,12 @@ import type { StepHandler } from '../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../runtime/outcome.ts';
 import { exists, writeFileAtomic } from '../util/fs.ts';
 import { toPosix } from '../util/paths.ts';
+import { commentIdOf } from './gh.ts';
 import type { Gh, IssueComment } from './gh.ts';
-import { GATE_MARKER, readIssueMeta } from './intake.ts';
-import { decisionNote, parseCommand } from './prior-groom.ts';
+import { parseGateComment, renderGateComment, withRejection } from './gate-comment.ts';
+import type { GateComment } from './gate-comment.ts';
+import { readIssueMeta } from './intake.ts';
+import { parseCommand } from './prior-groom.ts';
 
 export type Decision = {
   decision: 'approve' | 'reject';
@@ -39,6 +42,7 @@ const WaitingSchema = z.object({
 });
 
 const OUTPUT_CAP = 60000;
+const BODY_CAP = 65000;
 
 const waitingFile = (runDir: string) => path.join(runDir, 'waiting.json');
 
@@ -72,22 +76,33 @@ export async function readWaiting(runDir: string): Promise<Waiting | undefined> 
   return r.data;
 }
 
+/** The gh login of whoever decides locally; the OS user (as one handle) when gh cannot say. */
+export async function deciderLogin(gh: Gh, username: () => string = () => os.userInfo().username): Promise<string> {
+  try {
+    const login = await gh.user();
+    if (login !== '') return login;
+  } catch {
+    // gh not logged in or unreachable: fall back to the OS user
+  }
+  return username().replace(/\s+/g, '-');
+}
+
 export async function writeDecision(
   runDir: string,
-  d: { decision: 'approve' | 'reject'; feedback?: string },
+  d: { decision: 'approve' | 'reject'; feedback?: string; by: string },
 ): Promise<Waiting> {
   const waiting = await readWaiting(runDir);
   if (!waiting) throw new Error('run is not waiting at a gate');
-  const full: Decision = { ...d, by: os.userInfo().username, via: 'local' };
+  const full: Decision = { ...d, via: 'local' };
   await writeFileAtomic(path.join(waiting.stepDir, 'decision.json'), `${JSON.stringify(full, null, 2)}\n`);
   return waiting;
 }
 
 export { parseCommand } from './prior-groom.ts';
 
-async function renderOutputs(runDir: string, runId: string, outputs: Record<string, string>): Promise<string> {
+async function renderOutputs(runDir: string, runId: string, outputs: Record<string, string>, cap: number): Promise<string> {
   const parts: string[] = [];
-  let budget = OUTPUT_CAP;
+  let budget = cap;
   for (const key of Object.keys(outputs).sort()) {
     const rel = outputs[key]!;
     if (!rel.toLowerCase().endsWith('.md')) continue;
@@ -112,6 +127,39 @@ function previousStepOutputs(step: Step, ctx: RunContext): Record<string, string
     if (out && Object.keys(out).length > 0) return out;
   }
   return {};
+}
+
+/** `<stepDir>/gate.json`: where this round's comment is and when its text went up. */
+type SavedGate = { commentUrl: string; commentId: number; round?: number; postedAt: string };
+
+const gateJson = (g: SavedGate) => `${JSON.stringify(g, null, 2)}\n`;
+
+async function readGate(file: string): Promise<SavedGate | undefined> {
+  let raw: Partial<SavedGate> | undefined;
+  try {
+    raw = (await readJson(file)) as Partial<SavedGate> | undefined;
+  } catch (err) {
+    if (err instanceof SyntaxError) throw new Error(`Gate file ${file} is invalid: ${err.message}; delete it and resume the run`);
+    throw err;
+  }
+  if (!raw) return undefined;
+  // a gate.json from before the upgrade has only commentUrl and postedAt
+  return { ...raw, commentId: raw.commentId ?? commentIdOf(raw.commentUrl ?? '') } as SavedGate;
+}
+
+/** This round's gate.json in an earlier attempt dir of the step, newest attempt first. */
+async function earlierGate(stepDir: string, round: number): Promise<SavedGate | undefined> {
+  const parent = path.dirname(stepDir);
+  const self = path.basename(stepDir);
+  const attempts = (await fs.readdir(parent, { withFileTypes: true }))
+    .filter((d) => d.isDirectory() && d.name !== self)
+    .map((d) => d.name)
+    .sort((a, b) => Number(b) - Number(a));
+  for (const a of attempts) {
+    const g = await readGate(path.join(parent, a, 'gate.json'));
+    if (g?.round === round) return g;
+  }
+  return undefined;
 }
 
 const escalate = (reason: string): NodeOutcome => ({ status: 'escalate', outputs: {}, reason });
@@ -152,36 +200,44 @@ export function githubGate(o: {
       // keyed on the round, not the attempt: an escalation after posting re-runs the gate in a new
       // attempt dir, and that attempt must find (not re-post) this round's comment
       const round = ctx.state.history.filter((h) => h.stepId === step.id && (h.status === 'pass' || h.status === 'fail')).length + 1;
-      const marker = `${GATE_MARKER} run=${o.runId} step=${step.id} round=${round} -->`;
       const gateFile = path.join(io.stepDir, 'gate.json');
 
       let commentUrl: string;
+      let commentId: number;
       let postedAt: string;
       try {
-        const saved = (await readJson(gateFile)) as { commentUrl: string; postedAt: string } | undefined;
+        let saved = await readGate(gateFile);
+        if (!saved) {
+          // an earlier attempt of this round (an escalation, then a resume) already put the text up:
+          // no gh write, and replies since then still count
+          saved = await earlierGate(io.stepDir, round);
+          if (saved) await writeFileAtomic(gateFile, gateJson(saved));
+        }
         if (saved) {
-          ({ commentUrl, postedAt } = saved);
+          ({ commentUrl, commentId, postedAt } = saved);
         } else {
           const self = (await o.gh.user()).toLowerCase();
-          const found = (await o.gh.issue(meta.repo, meta.number)).comments.find(
-            (c) => c.author.toLowerCase() === self && c.body.includes(marker),
-          );
-          let comment: { url: string; createdAt: string };
+          let found: { c: IssueComment; g: GateComment } | undefined;
+          for (const c of (await o.gh.issue(meta.repo, meta.number)).comments) {
+            if (c.author.toLowerCase() !== self) continue;
+            const g = parseGateComment(c.body);
+            if (g?.runId === o.runId && g.stepId === step.id) {
+              found = { c, g };
+              break;
+            }
+          }
+          const frame = { runId: o.runId, stepId: step.id, round, rejected: found?.g.rejected ?? [] };
+          // GitHub refuses a body over 65536 chars: the header and every round's feedback come first
+          const cap = Math.min(OUTPUT_CAP, BODY_CAP - renderGateComment({ ...frame, outputs: '' }).length);
+          const outputs = await renderOutputs(o.runDir, o.runId, previousStepOutputs(step, ctx), cap);
+          const body = renderGateComment({ ...frame, outputs });
+          const bodyFile = path.join(io.stepDir, 'gate-comment.md');
+          await writeFileAtomic(bodyFile, body);
           if (found) {
-            comment = found;
+            // replies to earlier rounds came before this edit, so the poll below never counts them
+            const editedAt = await o.gh.editComment(meta.repo, found.c.id, bodyFile);
+            saved = { commentUrl: found.c.url, commentId: found.c.id, round, postedAt: editedAt };
           } else {
-            const outputs = await renderOutputs(o.runDir, o.runId, previousStepOutputs(step, ctx));
-            const body = [
-              marker,
-              `**Percolator** needs approval to continue run \`${o.runId}\` (step \`${step.id}\`).`,
-              '',
-              ...(outputs === '' ? [] : [outputs, '']),
-              'Reply `/percolator approve` to continue, or `/percolator reject <what to change>` to send it back.',
-              `Locally: \`perc approve ${o.runId}\` or \`perc reject ${o.runId} "<what to change>"\`.`,
-              '',
-            ].join('\n');
-            const bodyFile = path.join(io.stepDir, 'gate-comment.md');
-            await writeFileAtomic(bodyFile, body);
             const before = new Date(now()).toISOString();
             const url = await o.gh.comment(meta.repo, meta.number, bodyFile);
             // the comment exists now: a failed lookup must not escalate, or the resume would search again
@@ -189,11 +245,10 @@ export function githubGate(o: {
               .issue(meta.repo, meta.number)
               .then((i) => i.comments.find((c) => c.url === url))
               .catch(() => undefined);
-            comment = { url, createdAt: posted?.createdAt ?? before };
+            saved = { commentUrl: url, commentId: commentIdOf(url), round, postedAt: posted?.createdAt ?? before };
           }
-          commentUrl = comment.url;
-          postedAt = comment.createdAt;
-          await writeFileAtomic(gateFile, `${JSON.stringify({ commentUrl, postedAt }, null, 2)}\n`);
+          await writeFileAtomic(gateFile, gateJson(saved));
+          ({ commentUrl, commentId, postedAt } = saved);
         }
       } catch (err) {
         return escalate(`gate ${step.id}: ${msg(err)}`);
@@ -246,27 +301,26 @@ export function githubGate(o: {
         });
       }
 
-      if (decision.via === 'local') {
-        // best-effort: the issue records the decision so a later run can reuse this round's groomed ticket
-        const note = decisionNote({
-          runId: o.runId,
-          stepId: step.id,
-          round,
-          decision: decision.decision,
-          by: decision.by,
-          ...(decision.feedback !== undefined ? { feedback: decision.feedback } : {}),
-        });
-        const marker = note.split('\n')[0]!;
-        try {
-          const noted = (await o.gh.issue(meta.repo, meta.number)).comments.some((c) => c.body.startsWith(marker));
-          if (!noted) {
-            const noteFile = path.join(io.stepDir, 'decision-note.md');
-            await writeFileAtomic(noteFile, note);
-            await o.gh.comment(meta.repo, meta.number, noteFile);
+      // best-effort: the comment shows the outcome, and a later run reuses the round only by reading it
+      try {
+        // a legacy url without `#issuecomment-` has no id: id 0 could be any other comment
+        const current =
+          commentId > 0 ? (await o.gh.issue(meta.repo, meta.number)).comments.find((c) => c.id === commentId) : undefined;
+        const parsed = current && parseGateComment(current.body);
+        if (current && parsed) {
+          const next: GateComment =
+            decision.decision === 'approve'
+              ? { ...parsed, approvedBy: decision.by }
+              : withRejection(parsed, { round, by: decision.by, ...(decision.feedback !== undefined ? { feedback: decision.feedback } : {}) });
+          const body = renderGateComment(next);
+          if (body !== current.body.replace(/\r\n/g, '\n')) {
+            const bodyFile = path.join(io.stepDir, 'gate-comment.md');
+            await writeFileAtomic(bodyFile, body);
+            await o.gh.editComment(meta.repo, commentId, bodyFile);
           }
-        } catch {
-          // the run goes on: only a later run's reuse of this groomed ticket depends on the note
         }
+      } catch {
+        // the run goes on: the decision itself is already made
       }
 
       await fs.rm(waitingPath, { force: true });

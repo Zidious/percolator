@@ -1,7 +1,7 @@
 import { GhError } from '../../src/tracker/gh.ts';
 import type { Gh, Issue, IssueComment } from '../../src/tracker/gh.ts';
 
-export type FakeGhMethod = 'issue' | 'comment' | 'user' | 'findPr' | 'createPr' | 'editPr';
+export type FakeGhMethod = 'issue' | 'comment' | 'editComment' | 'user' | 'findPr' | 'createPr' | 'editPr';
 export type FakePr = { number: number; url: string; repo: string; base: string; head: string; title: string; body: string };
 
 /** In-memory `Gh`: issues with comments, a PR list, recorded `calls`, and `fail(method, message)`. */
@@ -67,11 +67,13 @@ export class FakeGh implements Gh {
   private push(repo: string, n: number, author: string, body: string): IssueComment {
     const issue = this.issues.get(this.key(repo, n));
     if (!issue) throw new GhError('issue comment', `issue ${repo}#${n} not found`);
+    const id = this.nextComment++;
     const c: IssueComment = {
+      id,
       author,
       body,
       createdAt: this.now().toISOString(),
-      url: `${issue.url}#issuecomment-${this.nextComment++}`,
+      url: `${issue.url}#issuecomment-${id}`,
     };
     issue.comments.push(c);
     return c;
@@ -89,6 +91,18 @@ export class FakeGh implements Gh {
     const body = this.readFile(bodyFile);
     this.bodies.push(body);
     return this.push(repo, n, this.userLogin, body).url;
+  }
+
+  async editComment(repo: string, id: number, bodyFile: string): Promise<string> {
+    this.enter('editComment', [repo, id, bodyFile]);
+    const c = [...this.issues.entries()]
+      .filter(([k]) => k.startsWith(`${repo}#`))
+      .flatMap(([, i]) => i.comments)
+      .find((x) => x.id === id);
+    if (!c) throw new GhError('editComment', `comment ${id} not found`);
+    c.body = this.readFile(bodyFile);
+    this.bodies.push(c.body);
+    return this.now().toISOString();
   }
 
   async user(): Promise<string> {
