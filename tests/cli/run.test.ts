@@ -276,6 +276,60 @@ test('status <id> when hc is missing', async () => {
   }
 });
 
+/** `perc status <id>`'s detail line and its JSON's driver.alive, for a running run at plan. */
+async function driverDetail(e: Env, meta: RunMeta, deps: DriverDeps): Promise<[string | undefined, unknown]> {
+  const r = await e.perc(['status', meta.runId], deps);
+  assert.equal(r.code, 0, r.err);
+  const j = await e.perc(['status', meta.runId, '--json'], deps);
+  return [r.out.split('\n')[7], (JSON.parse(j.out) as { driver: { alive: unknown } }).driver.alive];
+}
+
+test('status <id> says the driver stopped when hc fails but a dead lock decides, like the JSON', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const s = await loadState(e.dir(meta.runId));
+    s.currentStep = 'plan';
+    await saveState(e.dir(meta.runId), s);
+    await writeJson(path.join(e.dir(meta.runId), 'driver.json'), { pid: 4242, host: os.hostname(), terminal: null, startedAt: NOW.toISOString() });
+    const hc = cliHc({ exec: async () => Promise.reject(new Error('hc not found on PATH')) });
+    assert.deepEqual(await driverDetail(e, meta, { ...e.deps, hc, pidAlive: () => false }), [
+      `  detail driver not running; perc resume ${meta.runId}`,
+      false,
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> says the driver is unknown when its lock is on another host, like the JSON', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const s = await loadState(e.dir(meta.runId));
+    s.currentStep = 'plan';
+    await saveState(e.dir(meta.runId), s);
+    await writeJson(path.join(e.dir(meta.runId), 'driver.json'), { pid: 4242, host: 'elsewhere', terminal: null, startedAt: NOW.toISOString() });
+    assert.deepEqual(await driverDetail(e, meta, e.deps), ['  detail driver unknown (pid 4242 on elsewhere)', null]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> of a run whose graph.json is corrupt prints the error', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const graph = path.join(e.dir(meta.runId), 'graph.json');
+    await fs.writeFile(graph, '{"version": 2}');
+    const r = await e.perc(['status', meta.runId]);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out.split('\n')[8], `error: Run graph ${graph} is invalid: version: Invalid input: expected 1; start a new run`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('status <id> of a run waiting at a gate whose driver died says so', async () => {
   const e = await setup();
   try {
@@ -326,6 +380,106 @@ test('status of a run waiting at a gate with a live driver lock keeps only the w
     const r = await e.perc(['status', meta.runId], { ...e.deps, pidAlive: (p) => p === 4242 });
     assert.equal(r.code, 0, r.err);
     assert.equal(r.out.split('\n')[7], '  detail waiting for approval: u');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+/** A run waiting at approve-groom with a live driver lock and a groom output to read. */
+async function gateRun(e: Env) {
+  const meta = await e.prepare();
+  const s = await loadState(e.dir(meta.runId));
+  s.currentStep = 'approve-groom';
+  s.history.push({
+    stepId: 'groom', attempt: 1, startedAt: '', endedAt: '', status: 'pass',
+    outputs: { groomed_ticket: 'steps/groom/1/outputs/groomed_ticket.md' },
+  });
+  await saveState(e.dir(meta.runId), s);
+  await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir: e.dir(meta.runId), since: NOW.toISOString(), commentUrl: 'u' });
+  await writeJson(path.join(e.dir(meta.runId), 'driver.json'), { pid: 4242, host: os.hostname(), terminal: null, startedAt: NOW.toISOString() });
+  return { meta, deps: { ...e.deps, pidAlive: (p: number) => p === 4242 } };
+}
+
+test('status --json lists runs', async () => {
+  const e = await setup();
+  try {
+    const { meta, deps } = await gateRun(e);
+    const r = await e.perc(['status', '--json'], deps);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.ok(r.out.endsWith('}\n'));
+    const j = JSON.parse(r.out) as { schema: number; runs: { id: string; status: string; attention?: { kind: string } }[] };
+    assert.equal(j.schema, 1);
+    assert.deepEqual(j.runs.map((x) => [x.id, x.status, x.attention?.kind]), [[meta.runId, 'waiting', 'gate']]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> --json prints that run', async () => {
+  const e = await setup();
+  try {
+    const { meta, deps } = await gateRun(e);
+    const r = await e.perc(['status', meta.runId, '--json'], deps);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, `${JSON.stringify(JSON.parse(r.out), null, 2)}\n`);
+    const j = JSON.parse(r.out) as { id: string; schema?: number };
+    assert.equal(j.id, meta.runId);
+    assert.equal(j.schema, undefined);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> --json of an unknown run fails like the text status', async () => {
+  const e = await setup();
+  try {
+    const r = await e.perc(['status', 't1-nope', '--json']);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, `Run metadata ${path.join(e.dir('t1-nope'), 'run.json')} is missing or invalid: file not found\n`);
+    assert.equal(r.out, '');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> shows your turn at a gate', async () => {
+  const e = await setup();
+  try {
+    const { meta, deps } = await gateRun(e);
+    const r = await e.perc(['status', meta.runId], deps);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(
+      r.out,
+      [
+        `run ${meta.runId}`,
+        `  ticket ${REPO}#5`,
+        '  profile work',
+        `  worktree ${meta.worktree}`,
+        `  branch ${meta.branch}`,
+        '  status running',
+        '  step approve-groom',
+        '  detail waiting for approval: u',
+        'your turn: approve-groom is waiting for approval',
+        `  read: ${path.join(e.dir(meta.runId), 'steps', 'groom', '1', 'outputs', 'groomed_ticket.md')}`,
+        `  next: perc approve ${meta.runId}`,
+        `  next: perc reject ${meta.runId} "<what to change>"`,
+        'history:',
+        '  groom a1 pass',
+        '',
+      ].join('\n'),
+    );
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status --json rejects extra positionals', async () => {
+  const e = await setup();
+  try {
+    const r = await e.perc(['status', 'a', 'b', '--json']);
+    assert.equal(r.code, 2);
+    assert.match(r.err, /^status takes at most one <run-id>\n/);
   } finally {
     await e.cleanup();
   }
@@ -404,7 +558,7 @@ test('status <id> shows only the last 10 history records', async () => {
     const r = await e.perc(['status', meta.runId]);
     const lines = r.out.split('\n');
     assert.equal(lines[7], '  detail review: stuck');
-    assert.deepEqual(lines.slice(9, -1), Array.from({ length: 10 }, (_, i) => `  review a${i + 3} fail`));
+    assert.deepEqual(lines.slice(lines.indexOf('history:') + 1, -1), Array.from({ length: 10 }, (_, i) => `  review a${i + 3} fail`));
   } finally {
     await e.cleanup();
   }
@@ -431,6 +585,24 @@ test('approve writes the decision', async () => {
     const d2 = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
     assert.equal(d2.decision, 'reject');
     assert.equal(d2.feedback, 'tighten the scope');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+// the Herdr panel sends ["reject", id, "--", feedback] (herdr/mods/percolator/model.js actionArgv)
+test('reject takes the feedback after -- as one value, even when it starts with -', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const stepDir = path.join(e.dir(meta.runId), 'steps', 'approve-groom', '1');
+    await fs.mkdir(stepDir, { recursive: true });
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir, since: NOW.toISOString(), commentUrl: 'u' });
+    const r = await e.perc(['reject', meta.runId, '--', '-x "quoted"\nline2']);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, `rejected approve-groom of run ${meta.runId}\n`);
+    const d = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
+    assert.equal(d.feedback, '-x "quoted"\nline2');
   } finally {
     await e.cleanup();
   }

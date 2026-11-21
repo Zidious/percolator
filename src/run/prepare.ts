@@ -14,6 +14,7 @@ import { expandHome } from '../util/paths.ts';
 import { validate } from '../validate.ts';
 import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
 import { ensureWorktree, removeWorktree } from '../workspace/worktree.ts';
+import { writeRunGraph } from './graph-file.ts';
 import { detectBase, driverName, newRunId, writeRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 
@@ -141,6 +142,7 @@ export async function prepareRun(
   await materializeGrounds(dir, v.mappings, v.grounds);
   const state = newState({ runId, ticket, profile: v.profile, groundVersions: v.groundVersions });
   state.graphFingerprint = graphFingerprint(v.graph);
+  await writeRunGraph(dir, v.graph);
   state.mappingKeys = mappingKeys(v.mappings);
   state.mappingsFingerprint = mappingsFingerprint(state.mappingKeys);
   await saveState(dir, state);

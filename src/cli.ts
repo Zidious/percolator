@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,12 +9,13 @@ import { loadState } from './engine/state.ts';
 import type { RunState } from './engine/state.ts';
 import { cliHerdrApp } from './herdr/app.ts';
 import { cliHc } from './herdr/hc.ts';
-import { checkResumable, drive, liveness, prUrl } from './run/drive.ts';
-import { lockIsLive, readDriverLock } from './run/lock.ts';
+import { herdrAppHome, linkHerdr } from './herdr/link.ts';
+import { checkResumable, drive, prUrl } from './run/drive.ts';
 import { listRuns, readRunMeta } from './run/meta.ts';
 import type { RunMeta } from './run/meta.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
 import type { DriverDeps } from './run/prepare.ts';
+import { attentionNext, driverLiveness, readAttention, runStatusJson, statusJson } from './run/status.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
 import { readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
@@ -41,12 +41,14 @@ commands:
       start a run: groom, approval, plan, implement, review, PR (default: in its own hc terminal)
   resume <run-id> [--foreground]
       continue a paused or interrupted run (grants one more round at a cap)
-  status [<run-id>]
-      list runs, or show one
+  status [<run-id>] [--json]
+      list runs, or show one (--json: the stable JSON contract)
   approve <run-id> | reject <run-id> <feedback>
       answer the approval gate a run is waiting at
   clean <run-id> [--force]
       remove a finished run's terminals and worktree (keeps the branch and the run record)
+  herdr link
+      tell the Percolator Herdr panel how to run perc (writes perc.json)
   drive <run-id>
       internal: what a run's driver terminal executes
 
@@ -179,16 +181,6 @@ async function runResume(args: string[], deps: DriverDeps): Promise<number> {
   return 0;
 }
 
-type AttentionRecord = { stepId?: unknown; terminal?: unknown; kind?: unknown };
-
-async function readAttention(dir: string): Promise<AttentionRecord | undefined> {
-  try {
-    return JSON.parse(await fs.readFile(path.join(dir, 'attention.json'), 'utf8')) as AttentionRecord;
-  } catch {
-    return undefined;
-  }
-}
-
 /** What a run is doing or waiting for, in one line; an hc failure is reported, never thrown. */
 async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: DriverDeps): Promise<string> {
   const waiting = await readWaiting(dir).catch(() => undefined);
@@ -197,22 +189,18 @@ async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: Driv
     // a killed driver leaves waiting.json and attention.json behind, so liveness is always reported
     const a = await readAttention(dir);
     const what = waitingText ?? (a !== undefined && a.stepId === state.currentStep ? `${a.kind}: attend terminal ${a.terminal}` : undefined);
-    let driver: string | undefined;
-    let live = `driver ${meta.driver}`;
-    try {
-      const t = await deps.hc.get(meta.driver);
-      driver = t?.state === 'live' ? undefined : `driver not running; perc resume ${meta.runId}`;
-    } catch (err) {
-      driver = `driver unknown (hc: ${(err as Error).message})`;
-    }
-    if (driver !== undefined) {
-      // a foreground drive has no driver terminal; its driver.json says it is alive
-      const lock = await readDriverLock(dir);
-      if (lock !== undefined && lockIsLive(lock, liveness(deps))) {
-        driver = undefined;
-        live = `driver pid ${lock.pid}${lock.host === os.hostname() ? '' : ` on ${lock.host}`}`;
-      }
-    }
+    // the same judgement as the JSON's driver.alive: true live, false stopped, null unknown
+    const d = await driverLiveness(dir, meta, deps);
+    // a foreground drive has no driver terminal; its driver.json says it is alive
+    const live = d.lock === undefined ? `driver ${meta.driver}` : `driver pid ${d.lock.pid}`;
+    const driver =
+      d.alive === true
+        ? undefined
+        : d.alive === false
+          ? `driver not running; perc resume ${meta.runId}`
+          : d.lock !== undefined
+            ? `driver unknown (pid ${d.lock.pid} on ${d.lock.host})`
+            : `driver unknown (hc: ${d.hcError})`;
     if (what === undefined) return driver ?? live;
     return driver === undefined ? what : `${what}; ${driver}`;
   }
@@ -223,13 +211,19 @@ async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: Driv
 }
 
 async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
-  const { positionals } = parseWith(args, {});
+  const { values, positionals } = parseWith(args, { json: { type: 'boolean' } });
   if (positionals.length > 1) throw new UsageError('status takes at most one <run-id>');
+  const printJson = (x: unknown) => deps.out(JSON.stringify(x, null, 2));
   if (positionals.length === 1) {
     const runId = runIdArg(positionals[0]!);
     const dir = runDir(deps.home, runId);
     const meta = await readRunMeta(dir);
     const state = await loadState(dir);
+    const run = await runStatusJson({ dir, meta, state }, deps);
+    if (values.json) {
+      printJson(run);
+      return 0;
+    }
     deps.out(`run ${runId}`);
     deps.out(`  ticket ${meta.ticket}`);
     deps.out(`  profile ${meta.profile}`);
@@ -238,8 +232,20 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
     deps.out(`  status ${state.status}`);
     deps.out(`  step ${state.currentStep ?? '-'}`);
     deps.out(`  detail ${await runDetail(dir, meta, state, deps)}`);
+    if (run.status === 'unreadable') deps.out(`error: ${run.error}`);
+    if ('attention' in run && run.attention !== undefined) {
+      const a = run.attention;
+      deps.out(`your turn: ${a.message}`);
+      if (a.detail !== undefined) deps.out(`  ${a.detail}`);
+      for (const r of a.review ?? []) deps.out(`  read: ${r.path}`);
+      for (const n of attentionNext(a, run)) deps.out(`  next: ${n}`);
+    }
     deps.out('history:');
     for (const h of state.history.slice(-10)) deps.out(`  ${h.stepId} a${h.attempt} ${h.status}`);
+    return 0;
+  }
+  if (values.json) {
+    printJson(await statusJson(deps));
     return 0;
   }
   for (const l of await listRuns(deps.home)) {
@@ -293,6 +299,20 @@ async function runClean(args: string[], deps: DriverDeps): Promise<number> {
   return 0;
 }
 
+async function runHerdr(args: string[], io: Io, home: string): Promise<number> {
+  const [sub, ...rest] = args;
+  if (sub !== 'link') throw new UsageError('herdr needs a subcommand: link');
+  parse(rest, {});
+  const file = await linkHerdr({
+    appHome: herdrAppHome(process.env, home),
+    node: process.execPath,
+    cli: fileURLToPath(import.meta.url),
+  });
+  io.stdout(`wrote ${file}
+`);
+  return 0;
+}
+
 async function runDrive(args: string[], deps: DriverDeps): Promise<number> {
   const { positionals } = parseWith(args, {});
   return exitOf(await drive(onlyRunId('drive', positionals), deps));
@@ -331,6 +351,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     if (command === 'init') return await runInit(rest, io);
     if (command === 'validate') return await runValidate(rest, io);
     if (command === 'schema') return await runSchema(rest, io);
+    if (command === 'herdr') return await runHerdr(rest, io, deps.home ?? os.homedir());
     const d = () => driverDeps(io, deps);
     if (command === 'run') return await runRun(rest, d());
     if (command === 'resume') return await runResume(rest, d());

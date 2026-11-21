@@ -103,12 +103,14 @@ test('--help lists the run commands', async () => {
         '      start a run: groom, approval, plan, implement, review, PR (default: in its own hc terminal)',
         '  resume <run-id> [--foreground]',
         '      continue a paused or interrupted run (grants one more round at a cap)',
-        '  status [<run-id>]',
-        '      list runs, or show one',
+        '  status [<run-id>] [--json]',
+        '      list runs, or show one (--json: the stable JSON contract)',
         '  approve <run-id> | reject <run-id> <feedback>',
         '      answer the approval gate a run is waiting at',
         '  clean <run-id> [--force]',
         "      remove a finished run's terminals and worktree (keeps the branch and the run record)",
+        '  herdr link',
+        '      tell the Percolator Herdr panel how to run perc (writes perc.json)',
         '  drive <run-id>',
         "      internal: what a run's driver terminal executes",
         '',
@@ -122,4 +124,33 @@ test('run with no ticket exits 2', async () => {
   const r = await run(['run']);
   assert.equal(r.code, 2);
   assert.match(r.err, /^run needs <ticket>\n\nusage: perc/);
+});
+
+test('herdr link writes perc.json for the running cli and prints the path', async () => {
+  const appHome = path.join(tmp, 'herdr-app');
+  await fs.mkdir(path.join(appHome, 'mods', 'percolator'), { recursive: true });
+  const saved = process.env['HERDR_APP_HOME'];
+  process.env['HERDR_APP_HOME'] = appHome;
+  try {
+    const r = await run(['herdr', 'link']);
+    const file = path.join(appHome, 'mods', 'percolator', 'perc.json');
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, `wrote ${file}
+`);
+    const json = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(json.node, process.execPath);
+    assert.equal(json.cli, path.resolve(import.meta.dirname, '..', '..', 'src', 'cli.ts'));
+  } finally {
+    if (saved === undefined) delete process.env['HERDR_APP_HOME'];
+    else process.env['HERDR_APP_HOME'] = saved;
+  }
+});
+
+test('herdr with no or an unknown subcommand is a usage error', async () => {
+  for (const argv of [['herdr'], ['herdr', 'nope']]) {
+    const r = await run(argv);
+    assert.equal(r.code, 2);
+    assert.match(r.err, /^herdr needs a subcommand: link/);
+    assert.match(r.err, /usage/i);
+  }
 });
