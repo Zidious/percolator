@@ -19,3 +19,17 @@ export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStat
 export declare function actionArgv(action: Action, run: { id: string }, feedback?: string): string[] | null;
 export declare function needsCount(runs: RunStatusJson[]): number;
 export declare function runningCount(runs: RunStatusJson[]): number;
+export type Loop = Readable['loops'][number];
+export declare function readStatus(stdout: string): { ok: true; data: StatusJson } | { ok: false; error: string };
+export declare function duration(seconds: number): string;
+export declare function ago(iso: string | undefined, now: number): string;
+export declare function took(step: Step, now: number): string;
+export declare function stepTone(status: string): 'done' | 'working' | 'blocked' | null;
+export declare function resolvePath(base: string, p: string): string;
+export declare function cliLines(run: RunStatusJson): string[];
+export declare function attentionTag(kind: string): string;
+export declare function shownLoops(run: RunStatusJson): Loop[];
+export declare function loopAtCap(loop: Loop): boolean;
+export declare function loopLabel(loop: Loop, narrow: boolean): string;
+export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number): string | null;
+export declare function moveRow(rows: RunStatusJson[], selId: string | null, dir: number): string | null;

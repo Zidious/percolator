@@ -132,3 +132,102 @@ export function needsCount(runs) {
 export function runningCount(runs) {
   return runs.filter((r) => r.status === 'running' && !needs(r)).length;
 }
+
+/** parseStatus, and refuses a schema this panel does not know. */
+export function readStatus(stdout) {
+  const parsed = parseStatus(stdout);
+  if (parsed.ok && parsed.data.schema !== 1) {
+    return { ok: false, error: `perc status --json returned schema ${parsed.data.schema}; update the Percolator panel` };
+  }
+  return parsed;
+}
+
+/** Seconds as "12s", "4m", "3h" or "2d". */
+export function duration(seconds) {
+  const s = Math.max(0, seconds);
+  if (s < 60) return `${Math.round(s)}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86400)}d`;
+}
+
+/** How long ago an ISO date was, from `now` (ms); "" without a date. */
+export function ago(iso, now) {
+  return iso ? duration((now - Date.parse(iso)) / 1000) : '';
+}
+
+/** A finished step's duration, or how long a running step has run; "" otherwise. */
+export function took(step, now) {
+  if (step.startedAt && step.endedAt) return duration((Date.parse(step.endedAt) - Date.parse(step.startedAt)) / 1000);
+  if (step.startedAt && step.status === 'running') return ago(step.startedAt, now);
+  return '';
+}
+
+const TONES = { pass: 'done', running: 'working', waiting: 'blocked', fail: 'blocked', escalate: 'blocked', contract_error: 'blocked' };
+
+/** The theme colour name for a step status, or null for one that has not run. */
+export function stepTone(status) {
+  return TONES[status] ?? null;
+}
+
+const ABSOLUTE = /^(?:[\\/]|[A-Za-z]:[\\/])/;
+
+/** `p` as is when absolute, else joined to the folder `base`. */
+export function resolvePath(base, p) {
+  return ABSOLUTE.test(p) ? p : `${base.replace(/[\\/]+$/, '')}/${p}`;
+}
+
+const CLI = {
+  approve: (id) => `perc approve ${id}`,
+  reject: (id) => `perc reject ${id} -- "<feedback>"`,
+  grant: (id) => `perc resume ${id}`,
+  resume: (id) => `perc resume ${id}`,
+  clean: (id) => `perc clean ${id}`,
+};
+
+/** The terminal commands that do what the run's action buttons do, once each. */
+export function cliLines(run) {
+  const lines = (run.attention?.actions ?? []).flatMap((a) => (CLI[a] ? [CLI[a](run.id)] : []));
+  return [...new Set(lines)];
+}
+
+const TAGS = { gate: 'GATE', cap: 'PAUSED', paused: 'PAUSED', failed: 'FAILED', stalled: 'STALLED', agent: 'AGENT' };
+
+/** The tag shown before an attention message. */
+export function attentionTag(kind) {
+  return TAGS[kind] ?? 'NEEDS YOU';
+}
+
+/** Loops that have gone round at least once (drawn as arcs). */
+export function shownLoops(run) {
+  return (run.loops ?? []).filter((l) => l.round > 0);
+}
+
+/** A loop has used all its rounds. */
+export function loopAtCap(loop) {
+  return loop.round >= loop.max;
+}
+
+/** "↺ review → implement · round 2 of 3", "· cap" at the cap; narrow leaves out where. */
+export function loopLabel(loop, narrow) {
+  const where = narrow ? '' : `${loop.from} → ${loop.to} · `;
+  return `↺ ${where}round ${loop.round} of ${loop.max}${loopAtCap(loop) ? ' · cap' : ''}`;
+}
+
+/** The step one stop left (-1) or right (1) of the selected stop, else of the current (or last) step; null if none. */
+export function moveStop(run, selected, dir) {
+  const order = trainLayout(run, false).flatMap((z) => z.shown.map((s) => s.id));
+  if (order.length === 0) return null;
+  let at = order.indexOf(selected);
+  if (at < 0) at = order.indexOf(run.currentStep);
+  if (at < 0) at = order.length - 1;
+  return order[Math.max(0, Math.min(order.length - 1, at + dir))];
+}
+
+/** The run id one row up (-1) or down (1) from `selId` in `rows`; the first row if `selId` is not there. */
+export function moveRow(rows, selId, dir) {
+  if (rows.length === 0) return null;
+  const at = rows.findIndex((r) => r.id === selId);
+  if (at < 0) return rows[0].id;
+  return rows[Math.max(0, Math.min(rows.length - 1, at + dir))].id;
+}

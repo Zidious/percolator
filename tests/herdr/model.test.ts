@@ -5,12 +5,25 @@ import { test } from 'node:test';
 import {
   STAGES,
   actionArgv,
+  ago,
+  attentionTag,
+  cliLines,
+  duration,
+  loopAtCap,
+  loopLabel,
+  moveRow,
+  moveStop,
   needsCount,
   newlyNeeding,
   parseStatus,
+  readStatus,
+  resolvePath,
   rowState,
   runningCount,
+  shownLoops,
   sortRuns,
+  stepTone,
+  took,
   trainLayout,
   visibleRuns,
   xOf,
@@ -229,4 +242,101 @@ test('needsCount counts runs with attention; runningCount counts running runs th
   assert.equal(runningCount(runs()), 1);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
+});
+
+test('readStatus accepts schema 1', () => {
+  assert.deepEqual(readStatus(RAW), { ok: true, data: load() });
+});
+
+test('readStatus refuses another schema and says to update the panel', () => {
+  assert.deepEqual(readStatus('{"schema":2,"runs":[]}'), {
+    ok: false,
+    error: 'perc status --json returned schema 2; update the Percolator panel',
+  });
+});
+
+test('readStatus passes on parseStatus errors', () => {
+  assert.deepEqual(readStatus('nope'), { ok: false, error: 'perc status --json returned invalid JSON' });
+});
+
+test('duration rounds to the largest unit', () => {
+  assert.deepEqual([0, 12.4, 59, 61, 3599, 3600, 7300, 86400, 200000].map(duration), [
+    '0s', '12s', '59s', '1m', '60m', '1h', '2h', '1d', '2d',
+  ]);
+});
+
+test('ago is the time since an ISO date, never negative; empty without one', () => {
+  const now = Date.parse('2026-11-21T01:00:00.000Z');
+  assert.equal(ago('2026-11-21T00:55:00.000Z', now), '5m');
+  assert.equal(ago('2026-11-21T02:00:00.000Z', now), '0s');
+  assert.equal(ago(undefined, now), '');
+});
+
+test('took is a finished step duration, or how long a running step has run; empty otherwise', () => {
+  const now = Date.parse('2026-11-21T00:44:10.000Z');
+  const step = (id: string) => readable('t8').steps.find((s) => s.id === id)!;
+  assert.equal(took(step('groom'), now), '2m');
+  assert.equal(took(step('review'), now), '3m');
+  assert.equal(took(step('deliver'), now), '');
+  assert.equal(took(step('setup'), now), '');
+});
+
+test('stepTone maps a step status to a theme colour name', () => {
+  const tones = ['pass', 'running', 'waiting', 'fail', 'escalate', 'contract_error', 'pending'].map(stepTone);
+  assert.deepEqual(tones, ['done', 'working', 'blocked', 'blocked', 'blocked', 'blocked', null]);
+});
+
+test('resolvePath keeps absolute paths and joins relative ones to the base folder', () => {
+  assert.equal(resolvePath('C:/x/fixtures', 'samples/a.md'), 'C:/x/fixtures/samples/a.md');
+  assert.equal(resolvePath('/x/fixtures/', 'samples/a.md'), '/x/fixtures/samples/a.md');
+  for (const abs of ['/home/me/a.md', 'C:\\Users\\a.md', 'c:/a.md', '\\\\server\\share\\a.md']) {
+    assert.equal(resolvePath('/x', abs), abs);
+  }
+});
+
+test('cliLines gives the perc commands for a run actions, once each', () => {
+  assert.deepEqual(cliLines(byId('t2')), [
+    'perc approve t2-20261121-005347-f0ab',
+    'perc reject t2-20261121-005347-f0ab -- "<feedback>"',
+  ]);
+  const both = { ...readable('t4'), attention: { ...readable('t4').attention!, actions: ['grant', 'resume', 'clean', 'open-pane'] } } as Readable;
+  assert.deepEqual(cliLines(both), ['perc resume t4-20261121-061230-77ab', 'perc clean t4-20261121-061230-77ab']);
+  assert.deepEqual(cliLines(byId('t8')), []);
+});
+
+test('attentionTag names each attention kind', () => {
+  assert.deepEqual(['gate', 'cap', 'paused', 'failed', 'stalled', 'agent'].map(attentionTag), [
+    'GATE', 'PAUSED', 'PAUSED', 'FAILED', 'STALLED', 'AGENT',
+  ]);
+});
+
+test('shownLoops keeps loops that have gone round; loopLabel says where and how far', () => {
+  const [loop] = shownLoops(byId('t8'));
+  assert.equal(loopLabel(loop!, false), '↺ review → implement · round 2 of 3');
+  assert.equal(loopLabel({ ...loop!, round: 3 }, false), '↺ review → implement · round 3 of 3 · cap');
+  assert.equal(loopLabel({ ...loop!, round: 3 }, true), '↺ round 3 of 3 · cap');
+  assert.equal(loopAtCap({ ...loop!, round: 3 }), true);
+  assert.equal(loopAtCap(loop!), false);
+  assert.deepEqual(shownLoops({ ...readable('t8'), loops: [{ ...loop!, round: 0 }] }), []);
+  assert.deepEqual(shownLoops(byId('t5')), []);
+});
+
+test('moveStop walks the train in execution order from the selected stop, else the current step', () => {
+  const r = byId('t8');
+  assert.equal(moveStop(r, null, 1), 'deliver');
+  assert.equal(moveStop(r, null, -1), 'security-scan');
+  assert.equal(moveStop(r, 'setup', -1), 'setup');
+  assert.equal(moveStop(r, 'notify', 1), 'notify');
+  assert.equal(moveStop(r, 'approve-groom', 1), 'plan');
+  assert.equal(moveStop(readable('t3'), null, 1), 'deliver');
+  assert.equal(moveStop(byId('t5'), null, 1), null);
+});
+
+test('moveRow moves the selection within the shown rows and stays at the ends', () => {
+  const rows = runs();
+  assert.equal(moveRow(rows, rows[0]!.id, -1), rows[0]!.id);
+  assert.equal(moveRow(rows, rows[0]!.id, 1), rows[1]!.id);
+  assert.equal(moveRow(rows, rows.at(-1)!.id, 1), rows.at(-1)!.id);
+  assert.equal(moveRow(rows, 'gone', 1), rows[0]!.id);
+  assert.equal(moveRow([], 'gone', 1), null);
 });
