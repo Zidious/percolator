@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 300" width="1080" height="300" role="img" aria-label="The run train: intake, groom, the approve-groom gate, plan, implement, an optional hook, review looping back to implement up to three times, then deliver opens a pull request.">
+<style>
+.ink{fill:#efe3cf}.mut{fill:#a8998b}.acc{fill:#f2b25c}.wait{fill:#f07a62}.pass{fill:#6f9cf0}.surf{fill:#1a1512}
+.s-line{stroke:#3d332b}.s-mut{stroke:#a8998b}.s-acc{stroke:#f2b25c}.s-wait{stroke:#f07a62}.s-ink{stroke:#efe3cf}.s-pass{stroke:#6f9cf0}
+.box{fill:#1a1512;stroke:#3d332b}.box-acc{fill:#3a2919;stroke:#f2b25c}
+.t12{font:600 12px -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;letter-spacing:.06em}.t13{font:500 13px -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif}.hd{font:700 15px -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif}.tm{font:11.5px ui-monospace, SFMono-Regular, 'Cascadia Code', Consolas, monospace}
+</style>
+<defs>
+<marker id="am" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="mut"/></marker>
+<marker id="aa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="acc"/></marker>
+<marker id="aw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="wait"/></marker>
+</defs>
+<line x1="70" y1="160" x2="1010" y2="160" class="s-line" stroke-width="6" stroke-linecap="round"/>
+<line x1="70" y1="160" x2="333" y2="160" stroke-width="6" stroke-linecap="round" class="s-pass"/>
+<path d="M840 144 C840 62 620 62 620 144" fill="none" class="s-acc" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#aa)"/>
+<text x="730" y="66" class="t13 acc" text-anchor="middle">↺ findings go back to implement · 3 rounds</text>
+<path d="M345 146 C345 92 220 92 220 144" fill="none" class="s-wait" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#aw)"/>
+<text x="282" y="94" class="t13 wait" text-anchor="middle">reject → re-groom</text>
+<circle cx="70" cy="160" r="15" class="pass"/>
+<text x="70" y="122" class="tm mut" text-anchor="middle">done</text>
+<text x="70" y="205" class="t12 ink" text-anchor="middle">INTAKE</text>
+<text x="70" y="226" class="tm mut" text-anchor="middle">github.intake</text>
+<text x="70" y="280" class="t13 ink" text-anchor="middle">reads the issue</text>
+<circle cx="220" cy="160" r="15" class="pass"/>
+<text x="220" y="122" class="tm mut" text-anchor="middle">done</text>
+<text x="220" y="205" class="t12 ink" text-anchor="middle">GROOM</text>
+<text x="220" y="226" class="tm mut" text-anchor="middle">claude · opus</text>
+<text x="220" y="243" class="tm mut" text-anchor="middle">brainstorming</text>
+<text x="220" y="280" class="t13 ink" text-anchor="middle">groomed ticket</text>
+<rect x="333" y="148" width="24" height="24" rx="4" class="surf s-wait" stroke-width="3"/>
+<text x="345" y="205" class="t12 wait" text-anchor="middle">GATE</text>
+<text x="345" y="226" class="tm mut" text-anchor="middle">approve-groom</text>
+<text x="345" y="280" class="t13 wait" text-anchor="middle">you decide</text>
+<circle cx="470" cy="160" r="15" class="surf s-mut" stroke-width="3"/>
+<text x="470" y="205" class="t12 ink" text-anchor="middle">PLAN</text>
+<text x="470" y="226" class="tm mut" text-anchor="middle">claude · opus</text>
+<text x="470" y="243" class="tm mut" text-anchor="middle">writing-plans</text>
+<text x="470" y="280" class="t13 ink" text-anchor="middle">plan</text>
+<circle cx="620" cy="160" r="15" class="surf s-mut" stroke-width="3"/>
+<text x="620" y="205" class="t12 ink" text-anchor="middle">IMPLEMENT</text>
+<text x="620" y="226" class="tm mut" text-anchor="middle">claude · opus</text>
+<text x="620" y="243" class="tm mut" text-anchor="middle">plans + TDD</text>
+<text x="620" y="280" class="t13 ink" text-anchor="middle">commits</text>
+<circle cx="730" cy="160" r="7" class="surf s-mut" stroke-width="2.5"/>
+<text x="730" y="205" class="t12 mut" text-anchor="middle">HOOK</text>
+<text x="730" y="226" class="tm mut" text-anchor="middle">yours</text>
+<circle cx="840" cy="160" r="15" class="surf s-mut" stroke-width="3"/>
+<text x="840" y="205" class="t12 ink" text-anchor="middle">REVIEW</text>
+<text x="840" y="226" class="tm mut" text-anchor="middle">claude · medium</text>
+<text x="840" y="243" class="tm mut" text-anchor="middle">deep-dive-review</text>
+<text x="840" y="280" class="t13 ink" text-anchor="middle">findings</text>
+<circle cx="1010" cy="160" r="15" class="surf s-mut" stroke-width="3"/>
+<text x="1010" y="205" class="t12 ink" text-anchor="middle">DELIVER</text>
+<text x="1010" y="226" class="tm mut" text-anchor="middle">github.open_pr</text>
+<text x="1010" y="280" class="t13 ink" text-anchor="middle">pull request</text>
+</svg>
