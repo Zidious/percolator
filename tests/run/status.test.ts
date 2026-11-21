@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { loadState, saveState } from '../../src/engine/state.ts';
 import type { RunState, StepRecord } from '../../src/engine/state.ts';
-import { listRuns } from '../../src/run/meta.ts';
+import { listRuns, writeRunMeta } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
@@ -124,7 +124,7 @@ function expected(m: RunMeta, over: Record<string, unknown>): Record<string, unk
     worktree: m.worktree,
     createdAt: m.createdAt,
     status: 'running',
-    driver: { alive: false, terminal: m.driver },
+    driver: { alive: false, terminal: m.driver, space: m.space, shown: false },
     steps: steps(),
     loops: loops(),
     terminals: {},
@@ -160,7 +160,7 @@ test('gate with live driver', async () => {
         ticket: { ref: TICKET, number: 5, title: 'Fix the thing', url: `https://${REPO}/issues/5` },
         status: 'waiting',
         currentStep: 'approve-groom',
-        driver: { alive: true, terminal: m.driver },
+        driver: { alive: true, terminal: m.driver, space: m.space, shown: false },
         attention: { kind: 'gate', since: NOW.toISOString(), message: 'approve-groom is waiting for approval', commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
         steps: gateSteps(e, m),
         terminals: { driver: m.driver },
@@ -362,7 +362,7 @@ test('agent blocked', async () => {
       await e.status(m),
       expected(m, {
         currentStep: 'groom',
-        driver: { alive: true, terminal: m.driver },
+        driver: { alive: true, terminal: m.driver, space: m.space, shown: false },
         attention: { kind: 'agent', since: T1, terminal: term, agentState: 'blocked', message: `groom's agent is blocked in terminal ${term}`, detail: "Attend the agent's terminal.", actions: ['open-pane'] },
         steps: steps({ groom: { status: 'running' } }),
         terminals: { driver: m.driver, groom: term },
@@ -385,7 +385,7 @@ test('running', async () => {
       await e.status(m),
       expected(m, {
         currentStep: 'implement',
-        driver: { alive: true, terminal: m.driver },
+        driver: { alive: true, terminal: m.driver, space: m.space, shown: false },
         steps: steps({ implement: { status: 'running' } }),
         terminals: { driver: m.driver },
       }),
@@ -445,7 +445,7 @@ test('steps from graph.json', async () => {
       r,
       expected(m, {
         currentStep: 'implement',
-        driver: { alive: true, terminal: m.driver },
+        driver: { alive: true, terminal: m.driver, space: m.space, shown: false },
         steps: steps({
           implement: { status: 'running', attempts: 2, startedAt: T1, endedAt: T2, outputs: {} },
           review: { status: 'fail', attempts: 2, startedAt: T2, endedAt: T2, outputs: { findings: path.join(e.dir(m), f2) } },
@@ -482,7 +482,7 @@ test('steps from history only', async () => {
       await e.status(m),
       expected(m, {
         currentStep: 'lint',
-        driver: { alive: true, terminal: m.driver },
+        driver: { alive: true, terminal: m.driver, space: m.space, shown: false },
         steps: [
           pass('intake', 'intake', 'core', 'agent'),
           pass('groom', 'groom', 'core', 'agent'),
@@ -542,7 +542,7 @@ test('history only: a running step with no history record yet is still a step', 
       await e.status(m),
       expected(m, {
         currentStep: 'groom',
-        driver: { alive: true, terminal: m.driver },
+        driver: { alive: true, terminal: m.driver, space: m.space, shown: false },
         steps: [
           { id: 'intake', stage: 'intake', role: 'core', kind: 'agent', ...done() },
           { id: 'groom', stage: 'groom', role: 'core', kind: 'agent', status: 'running', attempts: 0, outputs: {} },
@@ -568,7 +568,7 @@ test('history only: a custom first step gets stage before-all and role node', as
       await e.status(m),
       expected(m, {
         currentStep: 'setup',
-        driver: { alive: true, terminal: m.driver },
+        driver: { alive: true, terminal: m.driver, space: m.space, shown: false },
         steps: [{ id: 'setup', stage: 'before-all', role: 'node', kind: 'agent', status: 'running', attempts: 0, outputs: {} }],
         loops: [],
         terminals: { driver: m.driver },
@@ -673,6 +673,60 @@ test('status json never loads config', async () => {
   }
 });
 
+const driverOf = (r: RunStatusJson) => (r as Extract<RunStatusJson, { driver: unknown }>).driver;
+
+test('driver.shown is true when the owned driver carries the run\'s space', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.waitAtGate(m);
+    e.deps.hc.add({ name: m.driver, labels: { 'percolator.run': m.runId, 'percolator.role': 'driver', 'herdr.space': m.space! } });
+    assert.deepEqual(driverOf(await e.status(m)), { alive: true, terminal: m.driver, space: m.space, shown: true });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('driver.shown is false when the driver\'s herdr.space is another space', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.waitAtGate(m);
+    e.deps.hc.add({ name: m.driver, labels: { 'percolator.run': m.runId, 'percolator.role': 'driver', 'herdr.space': 'space-9' } });
+    assert.deepEqual(driverOf(await e.status(m)), { alive: true, terminal: m.driver, space: m.space, shown: false });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('driver.shown is false for a driver this run does not own', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.waitAtGate(m);
+    e.deps.hc.add({ name: m.driver, labels: { 'percolator.run': 'other-run', 'percolator.role': 'driver', 'herdr.space': m.space! } });
+    const r = await e.status(m);
+    assert.equal('terminals' in r && r.terminals['driver'], undefined);
+    assert.equal('driver' in r && r.driver.shown, false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('driver has no space when the run has none', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.waitAtGate(m);
+    const { space: _space, ...bare } = m;
+    await writeRunMeta(e.dir(m), bare);
+    e.liveDriver(m);
+    assert.deepEqual(driverOf(await e.status(m)), { alive: true, terminal: m.driver, shown: false });
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('driverAlive is null for another host', async () => {
   const e = await setup();
   try {
@@ -684,7 +738,7 @@ test('driverAlive is null for another host', async () => {
     // no stalled attention when liveness can't be known
     assert.deepEqual(
       await e.status(m),
-      expected(m, { currentStep: 'plan', driver: { alive: null, terminal: m.driver }, steps: steps({ plan: { status: 'running' } }) }),
+      expected(m, { currentStep: 'plan', driver: { alive: null, terminal: m.driver, space: m.space, shown: false }, steps: steps({ plan: { status: 'running' } }) }),
     );
     await lock(os.hostname());
     assert.equal(await driverAlive(e.dir(m), m, { ...e.deps, pidAlive: (p) => p === 4242 }), true);
@@ -705,7 +759,7 @@ test('driverAlive is null when hc fails and there is no lock, and no stalled att
     assert.equal(await driverAlive(e.dir(m), m, e.deps), null);
     assert.deepEqual(
       await e.status(m),
-      expected(m, { currentStep: 'plan', driver: { alive: null, terminal: m.driver }, steps: steps({ plan: { status: 'running' } }) }),
+      expected(m, { currentStep: 'plan', driver: { alive: null, terminal: m.driver, space: m.space, shown: false }, steps: steps({ plan: { status: 'running' } }) }),
     );
   } finally {
     await e.cleanup();
