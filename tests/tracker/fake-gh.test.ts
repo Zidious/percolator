@@ -44,3 +44,68 @@ test('FakeGh editComment of an unknown id throws GhError', async () => {
   await assert.rejects(gh.editComment('github.com/o/r', 99, 'b.md'),
     { name: 'GhError', message: 'gh editComment failed: comment 99 not found' });
 });
+
+test('FakeGh issues carry labels, empty unless seeded', async () => {
+  const gh = new FakeGh();
+  gh.addIssue('github.com/o/r', 1);
+  gh.addIssue('github.com/o/r', 2, { labels: ['pipeline:hotfix'] });
+  assert.deepEqual((await gh.issue('github.com/o/r', 1)).labels, []);
+  assert.deepEqual((await gh.issue('github.com/o/r', 2)).labels, ['pipeline:hotfix']);
+});
+
+test('FakeGh createIssue is found by findIssues through its body text', async () => {
+  const R = 'github.com/o/r';
+  const gh = new FakeGh({ user: 'bot', readFile: (f) => `draft\n\n<!-- percolator:issue run=r1 n=${f} -->\n` });
+  gh.addIssue(R, 3);
+  const url = await gh.createIssue(R, { title: 'New', bodyFile: '1' });
+  assert.equal(url, 'https://github.com/o/r/issues/4');
+  assert.deepEqual(await gh.findIssues(R, 'percolator:issue run=r1 n=1'), [
+    { number: 4, url, body: 'draft\n\n<!-- percolator:issue run=r1 n=1 -->\n' },
+  ]);
+  assert.deepEqual(await gh.findIssues(R, 'percolator:issue run=r1 n=2'), []);
+  assert.deepEqual(await gh.findIssues('github.com/o/other', 'percolator:issue run=r1 n=1'), []);
+  const i = await gh.issue(R, 4);
+  assert.equal(i.title, 'New');
+  assert.equal(i.author, 'bot');
+  assert.deepEqual(gh.calls.map((c) => c.method), ['createIssue', 'findIssues', 'findIssues', 'findIssues', 'issue']);
+});
+
+test('FakeGh findComment finds the marked comment', async () => {
+  const R = 'github.com/o/r';
+  const gh = new FakeGh();
+  gh.addIssue(R, 1);
+  gh.addComment(R, 1, 'alice', 'hello');
+  const c = gh.addComment(R, 1, 'bot', 'done <!-- m -->');
+  assert.deepEqual(await gh.findComment(R, 1, '<!-- m -->'), c);
+  assert.equal(await gh.findComment(R, 1, '<!-- other -->'), undefined);
+  assert.deepEqual(gh.calls.at(-1), { method: 'findComment', args: [R, 1, '<!-- other -->'] });
+});
+
+test('FakeGh createRelease is found by releaseUrl', async () => {
+  const R = 'github.com/o/r';
+  const gh = new FakeGh({ readFile: () => 'notes' });
+  assert.equal(await gh.releaseUrl(R, 'v1'), undefined);
+  const url = await gh.createRelease(R, { tag: 'v1', target: 'abc', notesFile: 'n.md' });
+  assert.equal(url, 'https://github.com/o/r/releases/tag/v1');
+  assert.equal(await gh.releaseUrl(R, 'v1'), url);
+  assert.deepEqual(gh.releases, [{ repo: R, tag: 'v1', target: 'abc', notes: 'notes', url }]);
+});
+
+test('FakeGh postReview is listed by prReviews', async () => {
+  const R = 'github.com/o/r';
+  const gh = new FakeGh({ readFile: () => 'looks fine <!-- percolator:review run=r1 -->' });
+  assert.deepEqual(await gh.prReviews(R, 4), []);
+  const url = await gh.postReview(R, 4, 'r.md');
+  assert.equal(url, 'https://github.com/o/r/pull/4#pullrequestreview-1');
+  assert.deepEqual(await gh.prReviews(R, 4), [{ body: 'looks fine <!-- percolator:review run=r1 -->', url }]);
+  assert.deepEqual(await gh.prReviews(R, 5), []);
+});
+
+test('FakeGh advisoryFork returns a fork and refuses a malformed id', async () => {
+  const gh = new FakeGh();
+  assert.deepEqual(await gh.advisoryFork('github.com/o/r', 'GHSA-2345-6789-cfgh'), {
+    fullName: 'o/r-ghsa-2345-6789-cfgh', cloneUrl: 'https://github.com/o/r-ghsa-2345-6789-cfgh.git',
+  });
+  assert.equal(gh.forks.length, 1);
+  await assert.rejects(gh.advisoryFork('github.com/o/r', 'x'), { message: 'advisory "x" is not a GHSA id (GHSA-xxxx-xxxx-xxxx)' });
+});

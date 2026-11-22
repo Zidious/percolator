@@ -1,14 +1,21 @@
-import { GhError } from '../../src/tracker/gh.ts';
-import type { Gh, Issue, IssueComment } from '../../src/tracker/gh.ts';
+import { checkGhsa, GhError } from '../../src/tracker/gh.ts';
+import type { AdvisoryFork, Gh, Issue, IssueComment, IssueHit, PrReview } from '../../src/tracker/gh.ts';
 
-export type FakeGhMethod = 'issue' | 'comment' | 'editComment' | 'user' | 'findPr' | 'createPr' | 'editPr';
+export type FakeGhMethod =
+  | 'issue' | 'comment' | 'editComment' | 'user' | 'findPr' | 'createPr' | 'editPr'
+  | 'createIssue' | 'findIssues' | 'findComment' | 'releaseUrl' | 'createRelease' | 'prReviews' | 'postReview' | 'advisoryFork';
 export type FakePr = { number: number; url: string; repo: string; base: string; head: string; title: string; body: string };
+export type FakeRelease = { repo: string; tag: string; target: string; notes: string; url: string };
+export type FakeReview = { repo: string; number: number; body: string; url: string };
 
 /** In-memory `Gh`: issues with comments, a PR list, recorded `calls`, and `fail(method, message)`. */
 export class FakeGh implements Gh {
   calls: { method: FakeGhMethod; args: unknown[] }[] = [];
   issues = new Map<string, Issue>();
   prs: FakePr[] = [];
+  releases: FakeRelease[] = [];
+  reviews: FakeReview[] = [];
+  forks: ({ repo: string; ghsa: string } & AdvisoryFork)[] = [];
   /** Login that authors comments made through `comment()` and answers `user()`. */
   userLogin: string;
   /** Contents of each body file at the time of the call, in order (set by `readFile`). */
@@ -17,6 +24,7 @@ export class FakeGh implements Gh {
   private tick = 0;
   private nextPr = 1;
   private nextComment = 1;
+  private nextReview = 1;
 
   constructor(
     o: { user?: string; now?: () => Date; readFile?: (file: string) => string } = {},
@@ -43,6 +51,7 @@ export class FakeGh implements Gh {
       state: 'OPEN',
       author: 'someone',
       comments: [],
+      labels: [],
       ...i,
     };
     this.issues.set(this.key(repo, n), issue);
@@ -132,5 +141,72 @@ export class FakeGh implements Gh {
     if (!p) throw new GhError('pr edit', `no pull request found for ${repo}#${n}`);
     p.body = this.readFile(bodyFile);
     this.bodies.push(p.body);
+  }
+
+  private inRepo(repo: string): Issue[] {
+    return [...this.issues.entries()].filter(([k]) => k.startsWith(`${repo}#`)).map(([, i]) => i);
+  }
+
+  async createIssue(repo: string, o: { title: string; bodyFile: string }): Promise<string> {
+    this.enter('createIssue', [repo, o]);
+    const taken = [...this.inRepo(repo).map((i) => i.number), ...this.prs.filter((p) => p.repo === repo).map((p) => p.number)];
+    const body = this.readFile(o.bodyFile);
+    this.bodies.push(body);
+    return this.addIssue(repo, Math.max(0, ...taken) + 1, { title: o.title, body, author: this.userLogin }).url;
+  }
+
+  async findIssues(repo: string, text: string): Promise<IssueHit[]> {
+    this.enter('findIssues', [repo, text]);
+    return this.inRepo(repo).filter((i) => i.body.includes(text)).map((i) => ({ number: i.number, url: i.url, body: i.body }));
+  }
+
+  async findComment(repo: string, n: number, marker: string): Promise<IssueComment | undefined> {
+    this.enter('findComment', [repo, n, marker]);
+    const i = this.issues.get(this.key(repo, n));
+    if (!i) throw new GhError('issue view', `Could not resolve to an issue with the number of ${n}.`);
+    const c = i.comments.find((x) => x.body.includes(marker));
+    return c ? structuredClone(c) : undefined;
+  }
+
+  async releaseUrl(repo: string, tag: string): Promise<string | undefined> {
+    this.enter('releaseUrl', [repo, tag]);
+    return this.releases.find((r) => r.repo === repo && r.tag === tag)?.url;
+  }
+
+  async createRelease(repo: string, o: { tag: string; target: string; notesFile: string }): Promise<string> {
+    this.enter('createRelease', [repo, o]);
+    if (this.releases.some((r) => r.repo === repo && r.tag === o.tag)) {
+      throw new GhError('release create', `a release with tag ${o.tag} already exists`);
+    }
+    const notes = this.readFile(o.notesFile);
+    this.bodies.push(notes);
+    const url = `https://${repo}/releases/tag/${o.tag}`;
+    this.releases.push({ repo, tag: o.tag, target: o.target, notes, url });
+    return url;
+  }
+
+  async prReviews(repo: string, n: number): Promise<PrReview[]> {
+    this.enter('prReviews', [repo, n]);
+    return this.reviews.filter((r) => r.repo === repo && r.number === n).map((r) => ({ body: r.body, url: r.url }));
+  }
+
+  async postReview(repo: string, n: number, bodyFile: string): Promise<string> {
+    this.enter('postReview', [repo, n, bodyFile]);
+    const body = this.readFile(bodyFile);
+    this.bodies.push(body);
+    const url = `https://${repo}/pull/${n}#pullrequestreview-${this.nextReview++}`;
+    this.reviews.push({ repo, number: n, body, url });
+    return url;
+  }
+
+  async advisoryFork(repo: string, ghsa: string): Promise<AdvisoryFork> {
+    this.enter('advisoryFork', [repo, ghsa]);
+    checkGhsa(ghsa);
+    const parts = repo.split('/');
+    const host = parts.length === 3 ? parts[0]! : 'github.com';
+    const fullName = `${parts.slice(-2).join('/')}-${ghsa.toLowerCase()}`;
+    const fork = { fullName, cloneUrl: `https://${host}/${fullName}.git` };
+    this.forks.push({ repo, ghsa, ...fork });
+    return fork;
   }
 }

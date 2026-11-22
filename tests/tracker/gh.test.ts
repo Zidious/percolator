@@ -14,10 +14,10 @@ test('issue runs gh issue view and parses the result', async () => {
     }),
   });
   const issue = await cliGh({ exec: rec.exec }).issue(R, 5);
-  assert.deepEqual(rec.calls[0]!.args, ['issue', 'view', '--repo', R, '--json', 'number,title,body,url,state,author,comments', '--', '5']);
+  assert.deepEqual(rec.calls[0]!.args, ['issue', 'view', '--repo', R, '--json', 'number,title,body,url,state,author,comments,labels', '--', '5']);
   assert.equal(rec.calls[0]!.file, 'gh');
   assert.deepEqual(issue, {
-    number: 5, title: 'T', body: 'B', url: 'u', state: 'OPEN', author: 'me',
+    number: 5, title: 'T', body: 'B', url: 'u', state: 'OPEN', author: 'me', labels: [],
     comments: [{ id: 0, author: 'bob', body: 'hi', createdAt: '2026-01-01T00:00:00Z', url: 'cu' }],
   });
 });
@@ -137,4 +137,124 @@ test('editComment with no updated_at in the reply fails', async () => {
   rec.respond(() => true, { stdout: '\n' });
   await assert.rejects(cliGh({ exec: rec.exec }).editComment('o/r', 42, 'f.md'),
     { message: 'gh api comment edit returned no updated_at for comment 42' });
+});
+
+test('issue view reads labels', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, {
+    stdout: JSON.stringify({
+      number: 5, title: 'T', body: 'B', url: 'u', state: 'OPEN', author: { login: 'me' }, comments: [],
+      labels: [{ name: 'pipeline:hotfix', color: 'fff' }, { name: 'bug' }],
+    }),
+  });
+  const issue = await cliGh({ exec: rec.exec }).issue(R, 5);
+  assert.deepEqual(rec.calls[0]!.args, ['issue', 'view', '--repo', R, '--json', 'number,title,body,url,state,author,comments,labels', '--', '5']);
+  assert.deepEqual(issue.labels, ['pipeline:hotfix', 'bug']);
+});
+
+test('createIssue passes the title as one token and returns the url', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: 'https://github.com/o/r/issues/8\n' });
+  assert.equal(await cliGh({ exec: rec.exec }).createIssue(R, { title: '-x Fix', bodyFile: 'b.md' }), 'https://github.com/o/r/issues/8');
+  assert.deepEqual(rec.calls[0]!.args, ['issue', 'create', '--repo', R, '--title=-x Fix', '--body-file', 'b.md']);
+});
+
+test('findIssues searches bodies across all states', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '[{"number":8,"url":"iu","body":"x percolator:issue run=r n=1"}]' });
+  const found = await cliGh({ exec: rec.exec }).findIssues(R, 'percolator:issue run=r n=1');
+  assert.deepEqual(rec.calls[0]!.args, [
+    'issue', 'list', '--repo', R, '--state', 'all', '--search', 'percolator:issue run=r n=1 in:body', '--json', 'number,url,body', '--limit', '100',
+  ]);
+  assert.deepEqual(found, [{ number: 8, url: 'iu', body: 'x percolator:issue run=r n=1' }]);
+  await assert.rejects(cliGh({ exec: rec.exec }).findIssues(R, '-x'), { message: 'gh issue list: text must not start with "-": -x' });
+});
+
+test('findComment returns the first comment holding the marker', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, {
+    stdout: JSON.stringify({
+      number: 5, title: 'T', body: 'B', url: 'u', state: 'OPEN', author: { login: 'me' }, labels: [],
+      comments: [
+        { author: { login: 'bob' }, body: 'plain', createdAt: 't', url: 'https://github.com/o/r/issues/5#issuecomment-1' },
+        { author: { login: 'bot' }, body: 'x <!-- m -->', createdAt: 't', url: 'https://github.com/o/r/issues/5#issuecomment-2' },
+      ],
+    }),
+  });
+  const gh = cliGh({ exec: rec.exec });
+  assert.equal((await gh.findComment(R, 5, '<!-- m -->'))?.id, 2);
+  assert.deepEqual(rec.calls[0]!.args, ['issue', 'view', '--repo', R, '--json', 'number,title,body,url,state,author,comments,labels', '--', '5']);
+  assert.equal(await gh.findComment(R, 5, '<!-- other -->'), undefined);
+});
+
+test('releaseUrl views the release and reads its url', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '{"url":"https://github.com/o/r/releases/tag/v1"}' });
+  assert.equal(await cliGh({ exec: rec.exec }).releaseUrl(R, 'v1'), 'https://github.com/o/r/releases/tag/v1');
+  assert.deepEqual(rec.calls[0]!.args, ['release', 'view', '--repo', R, '--json', 'url', '--', 'v1']);
+});
+
+test('releaseUrl returns undefined when the release is not found', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { code: 1, stderr: 'release not found\n' });
+  assert.equal(await cliGh({ exec: rec.exec }).releaseUrl(R, 'v1'), undefined);
+});
+
+test('releaseUrl keeps other failures and refuses a dash-leading tag', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { code: 1, stderr: 'HTTP 401: Bad credentials\n' });
+  await assert.rejects(cliGh({ exec: rec.exec }).releaseUrl(R, 'v1'), { message: 'gh release view failed: HTTP 401: Bad credentials' });
+  await assert.rejects(cliGh({ exec: rec.exec }).releaseUrl(R, '-x'), { message: 'gh release view: tag must not start with "-": -x' });
+});
+
+test('createRelease targets the commit with the notes file', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: 'https://github.com/o/r/releases/tag/v1\n' });
+  const gh = cliGh({ exec: rec.exec });
+  assert.equal(await gh.createRelease(R, { tag: 'v1', target: 'abc123', notesFile: 'n.md' }), 'https://github.com/o/r/releases/tag/v1');
+  assert.deepEqual(rec.calls[0]!.args, ['release', 'create', '--repo', R, '--target', 'abc123', '--title=v1', '--notes-file', 'n.md', '--', 'v1']);
+  const o = { tag: 'v1', target: 'abc123', notesFile: 'n.md' };
+  await assert.rejects(gh.createRelease(R, { ...o, tag: '-x' }), { message: 'gh release create: tag must not start with "-": -x' });
+  await assert.rejects(gh.createRelease(R, { ...o, target: '-x' }), { message: 'gh release create: target must not start with "-": -x' });
+});
+
+test('prReviews lists bodies and html urls through gh api', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '[{"body":"b <!-- m -->","url":"ru"}]\n' });
+  assert.deepEqual(await cliGh({ exec: rec.exec }).prReviews(R, 4), [{ body: 'b <!-- m -->', url: 'ru' }]);
+  assert.deepEqual(rec.calls[0]!.args, ['api', '--hostname', 'github.com', 'repos/o/r/pulls/4/reviews', '--jq', '[.[]|{body,url:.html_url}]']);
+});
+
+test('postReview posts a COMMENT review and returns its url', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: 'https://github.com/o/r/pull/4#pullrequestreview-1\n' });
+  assert.equal(await cliGh({ exec: rec.exec }).postReview('o/r', 4, 'r.md'), 'https://github.com/o/r/pull/4#pullrequestreview-1');
+  assert.deepEqual(rec.calls[0]!.args, [
+    'api', '-X', 'POST', 'repos/o/r/pulls/4/reviews', '-f', 'event=COMMENT', '-F', 'body=@r.md', '--jq', '.html_url',
+  ]);
+  await assert.rejects(cliGh({ exec: rec.exec }).postReview('-x/o/r', 4, 'r.md'),
+    { message: 'gh api pr review: repo must not start with "-": -x/o/r' });
+});
+
+test('advisoryFork creates the private fork and reads its name and clone url', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '{"full_name":"o/r-ghsa-abcd","clone_url":"https://github.com/o/r-ghsa-abcd.git","id":1}' });
+  const fork = await cliGh({ exec: rec.exec }).advisoryFork(R, 'GHSA-2345-6789-cfgh');
+  assert.deepEqual(rec.calls[0]!.args, ['api', '--hostname', 'github.com', '-X', 'POST', 'repos/o/r/security-advisories/GHSA-2345-6789-cfgh/forks']);
+  assert.deepEqual(fork, { fullName: 'o/r-ghsa-abcd', cloneUrl: 'https://github.com/o/r-ghsa-abcd.git' });
+});
+
+test('advisoryFork refuses a malformed GHSA id before calling gh', async () => {
+  const rec = new ExecRecorder();
+  for (const x of ['x', 'GHSA-1234-5678-abcd', '-GHSA-2345-6789-cfgh']) {
+    await assert.rejects(cliGh({ exec: rec.exec }).advisoryFork(R, x), { message: `advisory "${x}" is not a GHSA id (GHSA-xxxx-xxxx-xxxx)` });
+  }
+  assert.equal(rec.calls.length, 0);
+});
+
+test('advisoryFork without full_name or clone_url in the reply fails', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '{"id":1}' });
+  await assert.rejects(cliGh({ exec: rec.exec }).advisoryFork(R, 'GHSA-2345-6789-cfgh'),
+    { message: 'gh api advisory fork returned no full_name or clone_url for GHSA-2345-6789-cfgh' });
 });
