@@ -60,6 +60,7 @@ import {
   activeBox,
   agentCard,
   agentAddress,
+  openAgentAt,
   agentTone,
   boxActions,
   boxOutside,
@@ -988,6 +989,16 @@ test('agentTone colours the agent status Herdr reports', () => {
     'muted',
     'muted',
   ]);
+});
+
+test('openAgentAt focuses a live agent terminal, else says why it did not', () => {
+  const name = 't16_implement_a2_4a92';
+  const live = [{ address: 'w1:7', name }];
+  assert.deepEqual(openAgentAt(byId('t16'), live, false), { address: 'w1:7' });
+  assert.deepEqual(openAgentAt(byId('t16'), [], false), { error: `${name} is not a live terminal; refresh the panel` });
+  assert.deepEqual(openAgentAt(byId('t16'), live, true), { said: `fixtures: would open ${name}` });
+  assert.equal(openAgentAt(byId('t11'), live, false), null, 'the step has no terminal');
+  assert.equal(openAgentAt(byId('t5'), live, true), null, 'unreadable');
 });
 
 test('agentAddress is the live terminal of the current step, else null: Open terminal is off without one', () => {

@@ -555,6 +555,17 @@ export function agentAddress(run, live) {
   return terminalAddress(live, agentTerminal(run));
 }
 
+/** What opening the run's agent does: focus its live terminal (`address`); in fixtures mode only say so (`said`); an
+ *  `error` when the terminal is not live; null when the step has no agent terminal. */
+export function openAgentAt(run, live, fixtures) {
+  if (!run || run.status === 'unreadable') return null;
+  const name = agentTerminal(run);
+  if (!name) return null;
+  if (fixtures) return { said: `fixtures: would open ${name}` };
+  const address = terminalAddress(live, name);
+  return address ? { address } : { error: `${name} is not a live terminal; refresh the panel` };
+}
+
 /** The attention's buttons; open-pane is left to Open terminal ↗. */
 export function boxActions(run) {
   return (run.attention?.actions ?? []).filter((a) => a !== 'open-pane');

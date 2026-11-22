@@ -116,6 +116,11 @@ export declare function selectAfterRefresh(
 ): string | null;
 export declare function agentTone(status: string): 'blocked' | 'working' | 'muted';
 export declare function agentAddress(run: RunStatusJson, live: { address: string; name?: string | null }[]): string | null;
+export declare function openAgentAt(
+  run: RunStatusJson | null | undefined,
+  live: { address: string; name?: string | null }[],
+  fixtures: boolean,
+): { address: string } | { said: string } | { error: string } | null;
 export declare function boxActions(run: RunStatusJson): Action[];
 export declare function readerFiles(
   run: RunStatusJson,

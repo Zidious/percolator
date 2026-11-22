@@ -24,7 +24,7 @@ import {
   BOARD_RATIO,
   actionArgv,
   activeBox,
-  agentAddress,
+  openAgentAt,
   boardHeight,
   boxActions,
   detailParts,
@@ -297,16 +297,16 @@ export default class Percolator extends View {
     return activeSlot(this, t, r, narrow);
   }
 
-  /** Focuses a terminal perc names (or Herdr addresses) as an agent: agent.focus takes Herdr's address. */
-  focusTerminal(term) {
-    const terminal = addressOf(term);
-    if (terminal) command('agent.focus', { terminal });
-  }
-
-  /** Opens the selected run's active agent: its card, its stop and Enter call this. */
+  /** Opens the selected run's active agent (agent.focus takes Herdr's address): its card, its stop and Enter call
+   *  this. In fixtures mode, or with its terminal not live, it says so instead. */
   openAgent() {
-    const r = this.current();
-    if (r) this.focusTerminal(agentAddress(r, terminals()));
+    const at = openAgentAt(this.current(), terminals(), this.conn === 'fixtures');
+    if (!at) return;
+    this.actError = null;
+    this.said = null;
+    if ('said' in at) this.said = at.said;
+    else if ('error' in at) this.actError = at.error;
+    else command('agent.focus', { terminal: at.address });
   }
 
   /** Peeks at the run's driver terminal: closing a peek leaves the driver running (closing a pane would end it). */
