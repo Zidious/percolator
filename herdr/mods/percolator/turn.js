@@ -142,8 +142,8 @@ function said(p, t, el) {
 }
 
 /** The agent working the active stop: its program, Herdr's status for it, its terminal; a click opens the terminal.
- *  Dim and inert while the terminal is not live. */
-function agentBox(p, t, card) {
+ *  Dim and inert while the terminal is not live. Under the stop (`narrow`) the link says just Open ↗. */
+function agentBox(p, t, card, narrow) {
   const on = Boolean(card.address);
   return own(
     h_flex()
@@ -188,13 +188,14 @@ function agentBox(p, t, card) {
           .min_w(0)
           .child(
             h_flex()
+              .min_w(0)
               .gap(4)
               .child(div().flex_none().child(`${card.program} ·`))
-              .child(div().flex_none().text_color(t[agentTone(card.status)]).child(card.status)),
+              .child(div().min_w(0).truncate().text_color(t[agentTone(card.status)]).child(card.status)),
           )
           .child(div().min_w(0).truncate().text_size(10.5).text_color(t.muted).child(card.since ? `${card.name} · ${card.since}` : card.name)),
       )
-      .child(div().flex_none().font_semibold().text_color(on ? t.working : t.dim).child('Open terminal ↗')),
+      .child(div().flex_none().font_semibold().text_color(on ? t.working : t.dim).child(narrow ? 'Open ↗' : 'Open terminal ↗')),
   );
 }
 
@@ -236,14 +237,17 @@ function attentionBox(p, t, r, kind, narrow, fill) {
     .border(1)
     .border_color(t.blocked)
     .child(
+      // narrow: the tag and the age on a line of their own, so the message wraps at its words, not inside them
       h_flex()
         .flex_none()
         .gap(8)
         .items_center()
         .child(tag(attentionTag(kind), t.blocked))
-        .child(div().min_w(0).text_size(12.5).font_semibold().when(!narrow, (el) => el.truncate()).child(a.message))
+        .when(!narrow, (el) => el.child(div().flex_1().min_w(0).text_size(12.5).font_semibold().child(a.message)))
+        .when(narrow, (el) => el.child(div().flex_1()))
         .child(div().flex_none().text_size(11).text_color(t.dim).child(`${ago(a.since, Date.now())} ago`)),
     )
+    .when(narrow, (el) => el.child(div().text_size(12.5).font_semibold().child(a.message)))
     .when(Boolean(a.detail), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(a.detail)))
     .when(Boolean(card), (el) =>
       el.child(
@@ -270,7 +274,7 @@ export function activeSlot(p, t, r, narrow, fill = false) {
   if (kind === 'agent') {
     const card = agentCard(r, terminals(), agents(), Date.now());
     if (!card) return div().mt(2).mb(8).text_size(11).text_color(t.dim).child(agentNote(card));
-    return agentBox(p, t, card);
+    return agentBox(p, t, card, narrow);
   }
   return attentionBox(p, t, r, kind, narrow, fill);
 }
