@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { defaultPipeline, pickPipeline, pipelineSpecs } from '../../src/config/pipelines.ts';
+import { checkGlobalStages, defaultPipeline, pickPipeline, pipelineSpecs } from '../../src/config/pipelines.ts';
 import type { PipelineSpec } from '../../src/config/pipelines.ts';
 import { mergePipelines } from '../../src/graph/merge.ts';
 
@@ -93,4 +93,36 @@ test('pipelineSpecs lists feature when it is defined under pipelines', () => {
     { source: 'profile:work', locator: { file: 'c.yaml', lines: {} }, fragment: { pipelines: { feature: { description: 'the usual' }, alert: { stages: ['intake', 'deliver'] } } } },
   ]);
   assert.deepEqual(Object.keys(pipelineSpecs(merged, 'work', where)), ['feature', 'alert']);
+});
+
+test('a top-level require_skills stage must belong to some pipeline of the profile', () => {
+  const locator = { file: 'c.yaml', lines: { 'profiles.work.rules.require_skills.1.stage': 9 }, prefix: 'profiles.work' };
+  const merged = mergePipelines([
+    {
+      source: 'profile:work',
+      locator,
+      fragment: {
+        bindings: { intake: { builtin: 'github.intake' } },
+        rules: {
+          require_skills: [
+            { stage: 'triage', skills: ['a'] },
+            { stage: 'tirage', skills: ['a'] },
+            { stage: '*', skills: ['a'] },
+          ],
+        },
+        pipelines: {
+          alert: { stages: ['intake', 'triage', 'deliver'], rules: { require_skills: [{ stage: 'nowhere', skills: ['a'] }] } },
+        },
+      },
+    },
+  ]);
+  assert.deepEqual(checkGlobalStages(merged, pipelineSpecs(merged, 'work', where), 'work'), [
+    {
+      rule: 'require_skills',
+      source: 'profile:work',
+      target: 'rules.require_skills.1',
+      message: 'names stage "tirage", which no pipeline in profile "work" has; use one of their stages or *',
+      where: { file: 'c.yaml', line: 9, path: 'profiles.work.rules.require_skills.1.stage' },
+    },
+  ]);
 });

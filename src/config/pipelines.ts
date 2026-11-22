@@ -1,7 +1,9 @@
 import { FEATURE } from '../graph/core.ts';
 import type { PipelineHeader } from '../graph/core.ts';
 import type { MergedPipeline } from '../graph/merge.ts';
+import type { Violation } from '../graph/rules.ts';
 import { ConfigError } from './load.ts';
+import { locate } from './locate.ts';
 import type { Where } from './locate.ts';
 
 /** A pipeline's header with every default filled in: what a run request is checked against. */
@@ -35,6 +37,30 @@ export function pickPipeline(specs: Record<string, PipelineSpec>, name: string |
     );
   }
   return picked;
+}
+
+/**
+ * Top-level require_skills entries naming a stage that no pipeline of the profile has. checkRules skips
+ * those per pipeline (a global rule need not fit every pipeline), so this catches the typo across them.
+ */
+export function checkGlobalStages(merged: Record<string, MergedPipeline>, specs: Record<string, PipelineSpec>, profile: string): Violation[] {
+  const stages = new Set(Object.values(specs).flatMap((s) => s.stages ?? []));
+  const out: Violation[] = [];
+  // every pipeline carries the same copy of the top-level rule sets; feature always exists
+  for (const { value, source, locator, scope } of merged.feature?.rules ?? []) {
+    if (scope !== 'global') continue;
+    for (const [k, req] of (value.require_skills ?? []).entries()) {
+      if (req.stage === '*' || stages.has(req.stage)) continue;
+      out.push({
+        rule: 'require_skills',
+        source,
+        target: `rules.require_skills.${k}`,
+        message: `names stage "${req.stage}", which no pipeline in profile "${profile}" has; use one of their stages or *`,
+        where: locate(locator, source, `rules.require_skills.${k}.stage`),
+      });
+    }
+  }
+  return out;
 }
 
 /**

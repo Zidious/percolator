@@ -633,3 +633,38 @@ test("a pipeline's own use maps into that pipeline only", async () => {
     },
   );
 });
+
+test("a pipeline's rules are checked against that pipeline's stages", async () => {
+  await withConfig(
+    (abs) =>
+      pipelinesConfig(
+        abs,
+        [
+          '      alert:',
+          '        stages: [intake, triage, deliver]',
+          '        exit: pr',
+          '        bindings:',
+          '          triage: { agent: claude, skills: [ops] }',
+          '        rules:',
+          '          require_skills: [{ stage: triage, skills: [ops] }]',
+          '',
+        ].join('\n'),
+      ),
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'alert' });
+      assert.deepEqual(r.graph.stages, ['intake', 'triage', 'deliver']);
+    },
+  );
+});
+
+test('a top-level require_skills naming a stage no pipeline has is a violation', async () => {
+  await withConfig(
+    (abs) => pipelinesConfig(abs, '    rules:\n      require_skills: [{ stage: tirage, skills: [ops] }]\n'),
+    async (cfg) => {
+      await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'hotfix' }), {
+        name: 'RuleViolationError',
+        message: `${cfg}:23: profiles.default.rules.require_skills.0.stage: names stage "tirage", which no pipeline in profile "default" has; use one of their stages or *`,
+      });
+    },
+  );
+});

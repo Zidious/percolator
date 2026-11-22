@@ -5,7 +5,7 @@ import { ConfigError, loadLocated } from './config/load.ts';
 import type { Located } from './config/load.ts';
 import { locate } from './config/locate.ts';
 import type { Where } from './config/locate.ts';
-import { pickPipeline, pipelineSpecs } from './config/pipelines.ts';
+import { checkGlobalStages, pickPipeline, pipelineSpecs } from './config/pipelines.ts';
 import type { PipelineSpec } from './config/pipelines.ts';
 import { GraphFragmentSchema, UserConfigSchema } from './config/schema.ts';
 import type { GraphFragment, GroundSpec, Profile, UserConfig } from './config/schema.ts';
@@ -13,6 +13,7 @@ import type { LineIndex } from './config/locate.ts';
 import { selectProfile } from './config/profile.ts';
 import { buildGraph } from './graph/build.ts';
 import type { Graph } from './graph/build.ts';
+import { CORE_STAGES } from './graph/core.ts';
 import { mergePipelines } from './graph/merge.ts';
 import { checkRules, RuleViolationError } from './graph/rules.ts';
 import { cliGit } from './grounds/git.ts';
@@ -98,7 +99,8 @@ async function validatePipeline(l: Loaded, pipelineName: string): Promise<Valida
   const pipelines = pipelineSpecs(merged, l.name, l.pipelinesWhere);
   const pipeline = pickPipeline(pipelines, pipelineName, l.name, l.pipelinesWhere);
   const selected = merged[pipelineName]!;
-  const violations = checkRules(selected);
+  // the header's stages are the graph's; rules are checked first, as before pipelines
+  const violations = [...checkGlobalStages(merged, pipelines, l.name), ...checkRules(selected, pipeline.stages ?? CORE_STAGES)];
   if (violations.length > 0) throw new RuleViolationError(violations, l.configFile);
   const graph = buildGraph(selected, { profile: l.name, locator: l.profileLocator });
   await checkGraphReferences(graph, mappings, l.grounds, l.configFile);
