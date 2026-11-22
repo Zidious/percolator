@@ -35,14 +35,14 @@ export function header(p, t, r, narrow) {
       h_flex()
         .gap(8)
         .items_center()
-        .child(div().flex_none().text_size(15).font_semibold().child(`#${r.ticket.number}`))
+        .child(div().flex_none().text_size(15).font_semibold().child(r.ticket ? `#${r.ticket.number}` : ''))
         .child(div().min_w(0).text_size(15).truncate().child(ticketTitle(r))),
     )
     .child(
       h_flex()
         .gap(6)
         .items_center()
-        .when(Boolean(r.ticket.url), (el) => el.child(link(t, 'issue', 'Issue ↗', (_e, cx) => cx.open_url(r.ticket.url))))
+        .when(Boolean(r.ticket?.url), (el) => el.child(link(t, 'issue', 'Issue ↗', (_e, cx) => cx.open_url(r.ticket.url))))
         .when(Boolean(r.pr?.url), (el) => el.child(link(t, 'pr', 'PR ↗', (_e, cx) => cx.open_url(r.pr.url))))
         .when(Boolean(drv), (el) => el.child(link(t, 'driver', drv.label, () => p.peekDriver())))
         .child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx)))

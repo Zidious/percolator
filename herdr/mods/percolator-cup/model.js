@@ -1,4 +1,4 @@
-// The Percolator panel's pure logic: what `perc status --json` (schema 1) means for the board, the pipeline and the
+// The Percolator panel's pure logic: what `perc status --json` (schema 2) means for the board, the pipeline and the
 // actions. No `herdr` imports, so node:test covers it (tests/herdr/model.test.ts); model.d.ts declares it.
 
 export const STAGES = Object.freeze(['intake', 'groom', 'plan', 'implement', 'review', 'deliver']);
@@ -107,7 +107,7 @@ export function runningCount(runs) {
 /** parseStatus, and refuses a schema this panel does not know. */
 export function readStatus(stdout) {
   const parsed = parseStatus(stdout);
-  if (parsed.ok && parsed.data.schema !== 1) {
+  if (parsed.ok && parsed.data.schema !== 2) {
     return { ok: false, error: `perc status --json returned schema ${parsed.data.schema}; update the Percolator panel` };
   }
   return parsed;
@@ -465,7 +465,7 @@ export function cupLabel(runs) {
 /** The notification for a run that newly needs you; clicking it opens the run through the cup. */
 export function notice(run) {
   return {
-    title: `#${run.ticket?.number ?? '?'} needs you`,
+    title: `${runLabel(run)} needs you`,
     body: run.attention?.message ?? '',
     level: 'warning',
     action: { name: `percolator-cup.open/${run.id}` },
@@ -672,9 +672,30 @@ export function driverPeek(run) {
   return { terminal, label: 'Driver pane ↗' };
 }
 
-/** The run's title: the issue's, else its ref (no issue.json yet: before intake, or a run that failed in it). */
+const TITLE_INPUT_MAX = 40;
+
+/**
+ * The run's title: the issue's, else its ref (no issue.json yet: before intake, or a run that failed in it); a
+ * ticketless run's is `<pipeline> · <its first input value, cut to 40>`, or its pipeline when it has no inputs.
+ */
 export function ticketTitle(run) {
+  if (run.ticket === null && typeof run.pipeline === 'string') {
+    const first = Object.values(run.inputs ?? {})[0];
+    if (typeof first !== 'string' || first === '') return run.pipeline;
+    const cut = first.length > TITLE_INPUT_MAX ? `${first.slice(0, TITLE_INPUT_MAX - 1)}…` : first;
+    return `${run.pipeline} · ${cut}`;
+  }
   return run.ticket?.title ?? run.ticket?.ref ?? run.id;
+}
+
+/** How a run is named in a short line: `#<issue>`, else (ticketless) its pipeline. */
+export function runLabel(run) {
+  return run.ticket ? `#${run.ticket.number}` : (run.pipeline ?? '#?');
+}
+
+/** The pipeline chip a run shows: its pipeline, or null on `feature` (the default line, so boards look as before). */
+export function pipelineChip(run) {
+  return typeof run.pipeline === 'string' && run.pipeline !== 'feature' ? run.pipeline : null;
 }
 
 // ── delete ──
@@ -710,8 +731,8 @@ export function deleteConfirm(run) {
   }
   const stopped = ACTIVE.has(run.status) ? ' The run is stopped first.' : '';
   return {
-    title: `Delete #${run.ticket.number}?`,
-    detail: `Deletes run ${run.id} (${run.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${run.branch} is kept.${stopped}`,
+    title: `Delete ${runLabel(run)}?`,
+    detail: `Deletes run ${run.id}${run.ticket ? ` (${run.ticket.ref})` : ''}: its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${run.branch} is kept.${stopped}`,
   };
 }
 
@@ -721,7 +742,7 @@ export function deleteFinishedConfirm(runs) {
   if (done.length === 0) return null;
   return {
     title: `Delete ${done.length} finished run(s)?`,
-    detail: `Deletes ${done.map((r) => `${r.id} (#${r.ticket.number})`).join(', ')}: their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    detail: `Deletes ${done.map((r) => `${r.id} (${runLabel(r)})`).join(', ')}: their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
     ids: done.map((r) => r.id),
   };
 }

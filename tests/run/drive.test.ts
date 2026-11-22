@@ -769,3 +769,20 @@ test('issue exit with next starts only the missing runs after a crash', async ()
     await e.cleanup();
   }
 });
+
+test('a v1 run resumes against the same feature graph', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const state = await loadState(e.runDir(meta));
+    assert.ok(state.graphFingerprint !== undefined, 'prepare records the graph fingerprint');
+    // run.json as a v1 run wrote it: no pipeline, no inputs
+    const { pipeline: _p, inputs: _i, ...rest } = meta;
+    await fs.writeFile(path.join(e.runDir(meta), 'run.json'), JSON.stringify({ ...rest, version: 1 }, null, 2));
+    const r = await checkResumable(meta.runId, e.deps);
+    assert.equal(r.meta.pipeline, 'feature');
+    assert.equal(r.v.graph.pipeline, 'feature');
+  } finally {
+    await e.cleanup();
+  }
+});

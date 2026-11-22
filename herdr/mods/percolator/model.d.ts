@@ -99,6 +99,8 @@ export declare function agentCard(
 ): { address: string | null; name: string; status: string; program: string; since: string } | null;
 export declare function driverPeek(run: RunStatusJson | null | undefined): { terminal: string; label: 'Driver pane ↗' } | null;
 export declare function ticketTitle(run: Readable): string;
+export declare function runLabel(run: RunStatusJson): string;
+export declare function pipelineChip(run: { pipeline?: string }): string | null;
 export declare function deleteArgv(ids: string[]): string[];
 export declare function deleteCommand(ids: string[]): string;
 export declare function deleteCommandIds(command: string): string[] | null;

@@ -431,7 +431,7 @@ test('status --json lists runs', async () => {
     assert.equal(r.code, 0);
     assert.ok(r.out.endsWith('}\n'));
     const j = JSON.parse(r.out) as { schema: number; runs: { id: string; status: string; attention?: { kind: string } }[] };
-    assert.equal(j.schema, 1);
+    assert.equal(j.schema, 2);
     assert.deepEqual(j.runs.map((x) => [x.id, x.status, x.attention?.kind]), [[meta.runId, 'waiting', 'gate']]);
   } finally {
     await e.cleanup();
@@ -1037,6 +1037,22 @@ test('a valid ticketless request starts a run named after its pipeline', async (
     assert.match(id, /^dd-alert-20260304-050607-[0-9a-f]{4}$/);
     assert.ok(r.out.includes(`  terminal ${terminalName(id, 'dd-alert', '@driver', 0)}\n`), r.out);
     assert.ok(r.out.includes(`  space "r dd-alert · ${id.slice(-4)}"`), r.out);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status of a ticketless run shows its pipeline instead of a ticket', async () => {
+  const e = await setup();
+  try {
+    await e.writeConfig(PIPELINES, BINDINGS);
+    await e.perc(['run', '--pipeline', 'dd-alert', '--input', 'alert_url=u', '--repo', e.root, '--config', e.configFile, '--profile', 'work']);
+    const id = await onlyRun(e);
+    const one = await e.perc(['status', id]);
+    assert.equal(one.err, '');
+    assert.deepEqual(one.out.split('\n').slice(0, 3), [`run ${id}`, '  pipeline dd-alert', '  profile work']);
+    const list = await e.perc(['status']);
+    assert.match(list.out, new RegExp(`^${id}  running  -  dd-alert  `));
   } finally {
     await e.cleanup();
   }

@@ -304,7 +304,8 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
       return 0;
     }
     deps.out(`run ${runId}`);
-    deps.out(`  ticket ${meta.ticket}`);
+    if (meta.ticket !== undefined) deps.out(`  ticket ${meta.ticket}`);
+    if (meta.pipeline !== 'feature') deps.out(`  pipeline ${meta.pipeline}`);
     deps.out(`  profile ${meta.profile}`);
     deps.out(`  worktree ${meta.worktree}`);
     deps.out(`  branch ${meta.branch}`);
@@ -329,7 +330,8 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
   }
   for (const l of await listRuns(deps.home)) {
     const id = l.meta?.runId ?? path.basename(l.dir);
-    const ticket = l.meta?.ticket ?? '-';
+    // a ticketless run is known by its pipeline
+    const ticket = l.meta?.ticket ?? l.meta?.pipeline ?? '-';
     if (l.error !== undefined || l.meta === undefined) {
       deps.out(`${id}  broken  -  ${ticket}  error: ${l.error}`);
       continue;
@@ -412,6 +414,7 @@ async function confirmed(deps: DriverDeps, question: string): Promise<void> {
 function deleteSummary(p: DeletePlan, deps: DriverDeps): void {
   deps.out(`perc delete will remove run ${p.id}`);
   if (p.ticket !== undefined) deps.out(`  ticket ${p.ticket.ref}${p.ticket.title !== undefined ? ` ${p.ticket.title}` : ''}`);
+  if (p.meta !== undefined && p.meta.pipeline !== 'feature') deps.out(`  pipeline ${p.meta.pipeline}`);
   deps.out(`  status ${p.status}`);
   const wt = p.worktree ?? { path: `<repo>/.worktrees/${p.id}`, state: 'unknown' as const };
   deps.out(`  worktree ${wt.path} (${WORKTREE_STATE[wt.state]})`);
@@ -451,7 +454,7 @@ async function deleteFinished(yes: boolean, deps: DriverDeps, io: Io): Promise<n
   }
   if (!yes) {
     deps.out(`perc delete will remove ${plans.length} finished run(s)`);
-    for (const p of plans) deps.out(`  ${p.id}  ${p.ticket?.ref ?? '-'}  ${p.status}  worktree ${p.worktree?.state ?? 'unknown'}`);
+    for (const p of plans) deps.out(`  ${p.id}  ${p.ticket?.ref ?? p.meta?.pipeline ?? '-'}  ${p.status}  worktree ${p.worktree?.state ?? 'unknown'}`);
     deps.out('  keeps their branches');
     await confirmed(deps, `delete ${plans.length} run(s)? [y/N] `);
   }

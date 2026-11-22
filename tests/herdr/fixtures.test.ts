@@ -20,11 +20,17 @@ test('the fixture covers every state the panel draws', () => {
   assert.deepEqual(t17.steps.filter((s: any) => s.role === 'core' && s.stage === 'implement').map((s: any) => s.id), ['implement.0', 'implement.1']);
 });
 
-test('the fixture is what perc writes: hooks carry their plain stage, loops go back to the implement region start', () => {
+test('the fixture is what perc writes: hooks carry their plain stage, loops go back to the region start of the stage before review', () => {
   const runs = readFixture('status.json').runs.filter((r: any) => r.status !== 'unreadable');
   for (const r of runs) {
-    for (const s of r.steps) assert.match(s.stage, /^(?:intake|groom|plan|implement|review|deliver|before-all|after-all)$/, `${r.id} ${s.id}`);
-    const start = r.steps.find((s: any) => s.stage === 'implement')?.id;
+    // feature's stages are the six core stages; another pipeline's are those of its core steps
+    const stages: string[] =
+      r.pipeline === 'feature'
+        ? ['intake', 'groom', 'plan', 'implement', 'review', 'deliver']
+        : [...new Set<string>(r.steps.filter((s: any) => s.role === 'core').map((s: any) => s.stage))];
+    for (const s of r.steps) assert.ok([...stages, 'before-all', 'after-all'].includes(s.stage), `${r.id} ${s.id}`);
+    const before = stages[stages.indexOf('review') - 1];
+    const start = r.steps.find((s: any) => s.stage === before)?.id;
     for (const l of r.loops.filter((l: any) => l.id === 'review')) assert.equal(l.to, start, r.id);
   }
   const to = (id: string) => runs.find((r: any) => r.id.startsWith(`${id}-`)).loops[0].to;
@@ -32,7 +38,31 @@ test('the fixture is what perc writes: hooks carry their plain stage, loops go b
   assert.equal(runs.find((r: any) => r.id.startsWith('t17-')).currentStep, 'implement.1');
 });
 
-test('the empty fixture has no runs', () => assert.deepEqual(readFixture('empty.json'), { schema: 1, runs: [] }));
+test('the fixture is schema 2: every readable run has its pipeline, inputs, parent, children and opened issues', () => {
+  const j = readFixture('status.json');
+  assert.equal(j.schema, 2);
+  for (const r of j.runs.filter((r: any) => r.status !== 'unreadable')) {
+    assert.equal(typeof r.pipeline, 'string', r.id);
+    assert.equal(typeof r.inputs, 'object', r.id);
+    assert.ok('ticket' in r && 'parent' in r && Array.isArray(r.children) && Array.isArray(r.opened), r.id);
+  }
+});
+
+test('the fixture has a ticketless run and a hotfix run', () => {
+  const runs = readFixture('status.json').runs;
+  const dd = runs.find((r: any) => r.pipeline === 'dd-alert');
+  assert.equal(dd.ticket, null);
+  assert.deepEqual(Object.keys(dd.inputs), ['alert_url']);
+  assert.equal(dd.attention.kind, 'gate');
+  assert.equal(dd.attention.message, 'approve or reject here (no issue to comment on)');
+  assert.equal('commentUrl' in dd.attention, false);
+  const hotfix = runs.find((r: any) => r.pipeline === 'hotfix');
+  assert.equal(hotfix.ticket.number, 21);
+  assert.equal(hotfix.status, 'running');
+  assert.deepEqual(hotfix.steps.filter((s: any) => s.role === 'core').map((s: any) => s.id), ['intake', 'reproduce', 'fix', 'review', 'deliver']);
+});
+
+test('the empty fixture has no runs', () => assert.deepEqual(readFixture('empty.json'), { schema: 2, runs: [] }));
 
 test('the pipelines fixture is what perc pipelines --json writes: feature (default), hotfix, dd-alert and spike', () => {
   const read = readPipelines(fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'pipelines.json'), 'utf8'));

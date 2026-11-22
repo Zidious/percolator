@@ -212,6 +212,40 @@ test('delete --finished deletes only completed and failed runs', async () => {
   }
 });
 
+/** `m` rewritten as a ticketless dd-alert run (no ticket or issue in run.json). */
+async function ticketless(e: Env, m: RunMeta): Promise<RunMeta> {
+  const { ticket: _t, issue: _i, ...rest } = m;
+  const next: RunMeta = { ...rest, pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x' } };
+  await fs.writeFile(path.join(e.dir(m), 'run.json'), JSON.stringify(next, null, 2));
+  return next;
+}
+
+test('delete summary of a ticketless run names its pipeline', async () => {
+  const e = await setup();
+  try {
+    const m = await ticketless(e, await e.prepare({ status: 'completed' }));
+    const a = asker('y');
+    const r = await e.perc(['delete', m.runId], { ...e.deps, ask: a.ask });
+    assert.equal(r.code, 0, r.err);
+    const head = [`perc delete will remove run ${m.runId}`, '  pipeline dd-alert', '  status completed'];
+    assert.deepEqual(r.out.split('\n').slice(0, 3), head);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('delete --finished lists a ticketless run by its pipeline', async () => {
+  const e = await setup();
+  try {
+    const m = await ticketless(e, await e.prepare({ status: 'completed' }));
+    const r = await e.perc(['delete', '--finished'], { ...e.deps, ask: asker('y').ask });
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out.split('\n')[1], `  ${m.runId}  dd-alert  completed  worktree clean`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('delete --finished lists runs and asks once', async () => {
   const e = await setup();
   try {

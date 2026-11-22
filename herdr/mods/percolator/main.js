@@ -49,6 +49,7 @@ import {
   readerFiles,
   readerMax,
   resolvePath,
+  runLabel,
   runningCount,
   selectAfterDelete,
   selectAfterRefresh,
@@ -343,7 +344,7 @@ export default class Percolator extends View {
         width: 440,
         height: 200,
         props: {
-          title: `Clean up #${r.ticket?.number ?? '?'}?`,
+          title: `Clean up ${runLabel(r)}?`,
           detail: `Removes the run's terminals and worktree and keeps its branch and run record (perc clean ${r.id}).`,
           command: { name: `percolator.clean/${r.id}` },
         },

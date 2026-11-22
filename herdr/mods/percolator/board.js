@@ -7,7 +7,7 @@ import { mark } from './mark.js';
 import { SPIN, own, scrollY } from './ui.js';
 
 const title = (r) => (r.status === 'unreadable' ? r.id : ticketTitle(r));
-const number = (r) => (r.status === 'unreadable' ? '?' : `#${r.ticket.number}`);
+const number = (r) => (r.status === 'unreadable' ? '?' : r.ticket ? `#${r.ticket.number}` : '');
 const age = (r, now) => (r.status === 'unreadable' ? '' : ago((needsYou(r) && r.attention.since) || r.createdAt, now));
 
 // the state text truncates alone; the round (when there is one) is a separate child, so it is never cut.
