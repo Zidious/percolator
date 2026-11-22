@@ -94,6 +94,8 @@ import {
   commandLine,
   guessRepo,
   knownRepos,
+  linkedLine,
+  watcherState,
   pipelinesFixture,
   previewRun,
   previewSide,
@@ -193,7 +195,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['dd', 't12', 't2', 't11', 't9', 't4', 't21', 't17', 't16', 't14', 't13', 't8', 't15', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t22', 'dd', 't12', 't2', 't11', 't9', 't4', 't21', 't17', 't16', 't14', 't13', 't8', 't21', 't15', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -201,7 +203,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -281,7 +283,7 @@ test('actionArgv refuses a reject without feedback', () => {
 });
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
-  assert.equal(needsCount(runs()), 6);
+  assert.equal(needsCount(runs()), 7);
   assert.equal(runningCount(runs()), 6);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
@@ -421,8 +423,8 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
   assert.equal(moveRow([], 'gone', 1), null);
 });
 
-test('the fixture has timelines for t8, t3, t2, t4, t16, t17, dd-alert and t21, and none for the rest (an older perc)', () => {
-  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17', 'dd', 't21']);
+test('the fixture has timelines for t8, t3, t2, t4, t16, t17, dd-alert, t21 (hotfix and triage) and t22, and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17', 'dd', 't21', 't21', 't22']);
 });
 
 test('roundView defaults to the latest round and marks it running', () => {
@@ -468,7 +470,7 @@ test('stepAttempts is one step attempts in order', () => {
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
-  assert.deepEqual(cupLabel(runs()), { text: '6 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel(runs()), { text: '7 need you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
   assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
@@ -652,7 +654,7 @@ test('deleteCommand carries the confirmed ids, and deleteCommandIds reads them b
 test('isFinished is true for completed and failed runs only', () => {
   assert.deepEqual(
     runs().filter(isFinished).map((r) => r.id.split('-')[0]),
-    ['t3', 't9', 't15'],
+    ['t3', 't9', 't15', 't21'],
   );
 });
 
@@ -679,10 +681,11 @@ test('deleteConfirm names the run, says what is lost and kept, and that an activ
 
 test('deleteFinishedConfirm lists the finished runs, or is null when there are none', () => {
   const [a, b, c] = ['t3', 't9', 't15'].map((id) => byId(id).id);
+  const d = 't21-triage-20261121-065800-9e3a';
   assert.deepEqual(deleteFinishedConfirm(runs()), {
-    title: 'Delete 3 finished run(s)?',
-    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
-    ids: [a, b, c],
+    title: 'Delete 4 finished run(s)?',
+    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15), ${d} (#21): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    ids: [a, b, c, d],
   });
   assert.equal(deleteFinishedConfirm(runs().filter((r) => !isFinished(r))), null);
 });
@@ -1385,4 +1388,47 @@ test('previewSide is below at 280 and 380 and right at 720', () => {
   assert.equal(previewSide(719), 'below');
   assert.equal(previewSide(720), 'right');
   assert.equal(previewSide(1200), 'right');
+});
+
+test('actionArgv pick approves the gate with the picked pipeline', () => {
+  const r = byId('t22');
+  assert.deepEqual(actionArgv('pick', r, 'hotfix'), ['approve', r.id, '--pipeline', 'hotfix']);
+  for (const name of [undefined, '', '  ']) assert.throws(() => actionArgv('pick', r, name), { message: 'Pick a pipeline' });
+});
+
+const HOTFIX = 't21-hotfix-20261121-070000-4b5c';
+const TRIAGE = 't21-triage-20261121-065800-9e3a';
+
+test('linkedLine for a child and for a parent', () => {
+  const rs = runs();
+  const of = (id: string) => rs.find((r) => r.id === id)!;
+  // the parent is on the child's own ticket, so the line names its pipeline
+  assert.deepEqual(linkedLine(of(HOTFIX), rs), { text: '↳ from triage', run: TRIAGE });
+  assert.deepEqual(linkedLine(of(TRIAGE), rs), { text: '→ 1 run', run: HOTFIX });
+  assert.equal(linkedLine(readable('t8'), rs), null);
+  assert.equal(linkedLine(byId('t5'), rs), null);
+});
+
+test('linkedLine names a parent on another ticket by its number, a ticketless one by its pipeline, a gone one by its id', () => {
+  const child = { ...readable('t8'), parent: 'p1' } as Readable;
+  const parent = (over: Partial<Readable>) => ({ ...readable('t3'), id: 'p1', children: [], ...over }) as Readable;
+  assert.deepEqual(linkedLine(child, [child, parent({})]), { text: '↳ from #3', run: 'p1' });
+  assert.deepEqual(linkedLine(child, [child, parent({ ticket: null, pipeline: 'spike' })]), { text: '↳ from spike', run: 'p1' });
+  assert.deepEqual(linkedLine(child, [child]), { text: '↳ from p1', run: null });
+  const two = parent({ children: [{ id: 'c1', pipeline: 'hotfix', status: 'running' }, { id: 'c2', pipeline: 'hotfix', status: 'completed' }] });
+  assert.deepEqual(linkedLine(two, [two]), { text: '→ 2 runs', run: 'c1' });
+});
+
+test('watcherState labels and argv', () => {
+  const st = load();
+  assert.deepEqual(watcherState(st), { alive: true, label: 'watching 1 repo', argv: ['watch', 'stop'] });
+  const two = { ...st, watcher: { alive: true, since: 'x', repos: ['/a', '/b'] } };
+  assert.equal(watcherState(two).label, 'watching 2 repos');
+  const off = { ...st, watcher: { alive: false, repos: [] } };
+  assert.deepEqual(watcherState(off), { alive: false, label: 'not watching', argv: ['watch', '--repo', '/home/me/src/percolator'] });
+  // with no earlier runs there is no repo to watch: no Start button
+  assert.deepEqual(watcherState({ schema: 2, runs: [], watcher: { alive: false, repos: [] } }), { alive: false, label: 'not watching', argv: null });
+  // a perc without the watcher field reads as not watching
+  const { watcher: _w, ...older } = st;
+  assert.equal(watcherState(older as StatusJson).label, 'not watching');
 });

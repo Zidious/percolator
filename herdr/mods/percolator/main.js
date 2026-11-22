@@ -56,6 +56,7 @@ import {
   showsHere,
   sortRuns,
   visibleRuns,
+  watcherState,
 } from './model.js';
 import { mark } from './mark.js';
 import { board } from './board.js';
@@ -79,6 +80,7 @@ export default class Percolator extends View {
     this.perc = null;
     this.fixture = null;
     this.runs = [];
+    this.watcher = null; // watcherState of the last status: the header's indicator and its Start/Stop
     this.loaded = false;
     this.error = null;
     this.filter = 'active';
@@ -192,6 +194,7 @@ export default class Percolator extends View {
       const got = await fetchStatus(this);
       if (got.ok) {
         this.runs = sortRuns(got.data.runs);
+        this.watcher = watcherState(got.data);
         this.notice = finishedNotice(this.notice, this.runs, false);
         this.error = null;
         this.loaded = true;
@@ -327,9 +330,15 @@ export default class Percolator extends View {
 
   // ── acting ──────────────────────────────────────────────────────────
 
-  act(action, cx) {
+  act(action, cx, pick) {
     const r = this.current();
     if (!r || this.busy) return;
+    if (action === 'pick') {
+      this.actError = null;
+      this.said = null;
+      this.perform('pick', actionArgv('pick', r, pick), cx);
+      return;
+    }
     this.actError = null;
     this.said = null;
     if (action === 'reject') {
@@ -423,6 +432,53 @@ export default class Percolator extends View {
       }
       cx.notify();
     });
+  }
+
+  /** The header's Start watcher / Stop: `perc watch …` or `perc watch stop`; what it says goes beside the tabs. */
+  toggleWatcher(cx) {
+    const argv = this.watcher?.argv;
+    if (!argv || this.busy) return;
+    if (this.conn === 'fixtures') {
+      this.notice = `fixtures: would run perc ${argv.join(' ')}`;
+      cx.notify();
+      return;
+    }
+    this.busy = 'watch';
+    this.notice = null;
+    cx.spawn(async (cx) => {
+      const res = await exec(this.perc.node, [this.perc.cli, ...argv], { timeout: 120000 }).catch((e) => ({
+        code: -1,
+        stdout: '',
+        stderr: String(e?.message ?? e),
+      }));
+      this.busy = null;
+      if (res.code !== 0) this.notice = firstLine(res.stderr) || `perc ${argv.join(' ')} exited ${res.code}`;
+      this.refresh(cx);
+      cx.notify();
+    });
+  }
+
+  /** The watcher in the title bar: a dot and its label, then Start watcher or Stop; narrow, the dot alone (it says both). */
+  watcherChip(t, narrow) {
+    const w = this.watcher;
+    if (!w) return null;
+    const action = w.argv === null ? '' : w.alive ? 'Stop' : 'Start watcher';
+    const dot = div().flex_none().size(7).rounded(4).bg(w.alive ? t.working : t.dim);
+    const run = (_e, cx) => this.toggleWatcher(cx);
+    if (narrow) {
+      const tip = action ? `${w.label} · click: ${action}` : w.label;
+      const el = div().id('watcher').flex_none().px(5).py(4).rounded(4).tooltip(tip).child(dot);
+      return w.argv === null ? el : own(el.cursor_pointer().hover((s) => s.bg(t.hover)).on_click(run));
+    }
+    return h_flex()
+      .flex_none()
+      .gap(6)
+      .items_center()
+      .text_size(10.5)
+      .text_color(t.muted)
+      .child(dot)
+      .child(div().flex_none().child(w.label))
+      .when(Boolean(action), (el) => el.child(link(t, 'watcher', this.busy === 'watch' ? '…' : action, run)));
   }
 
   sendReject(cx) {
@@ -655,6 +711,7 @@ export default class Percolator extends View {
       .when(running > 0 && !narrow, (el) => el.child(chip(`${running} running`, t.working)))
       .when(fit.tabs === 'inline', (el) => el.child(div().flex_none().w(4)).child(tabs))
       .child(div().flex_1())
+      .when(Boolean(this.watcher), (el) => el.child(this.watcherChip(t, narrow || fit.tabs === 'below')))
       .when(this.conn === 'fixtures' && !narrow, (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child('fixtures')))
       .child(
         icon('place', '⧉', window ? 'Dock in the side panel' : 'Pop out into a window', () =>
