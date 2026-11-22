@@ -59,5 +59,5 @@ export async function checkAgents(graph: Graph, mappings: ResolvedMapping[], con
   for (const m of mappings) {
     if (m.as === 'skills' && m.dir === undefined) problems.push(`mapping ${m.from}:${m.file}: skills mappings must use dir`);
   }
-  throwProblems(problems, configFile);
+  throwProblems(problems.map((message) => ({ file: configFile, message })));
 }

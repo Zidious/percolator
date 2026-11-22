@@ -1,4 +1,5 @@
 import { ConfigError } from '../config/load.ts';
+import type { Locator } from '../config/locate.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
 import { CORE_GROOM_GATE, CORE_STAGES } from './core.ts';
 import type { Merged } from './merge.ts';
@@ -15,6 +16,8 @@ export type Step = {
   source: string;
   /** the binding or node is a `required: true` lock */
   locked: boolean;
+  /** where the binding or node was written, for errors */
+  locator?: Locator;
 };
 
 export type BackEdge = {
@@ -51,13 +54,13 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
     if (def.before === undefined && def.after === undefined) {
       throw new GraphError(`extension node "${name}" needs "before" or "after"`, `nodes.${name}`);
     }
-    return { name, def, source: sourced.source, locked: sourced.locked };
+    return { name, def, source: sourced.source, locked: sourced.locked, ...(sourced.locator ? { locator: sourced.locator } : {}) };
   });
 
   const steps: Step[] = [];
   const regionStart = {} as Record<Stage, number>;
-  const pushHook = (h: { name: string; def: NodeDef; source: string; locked: boolean }, stage: Step['stage']) =>
-    steps.push({ id: h.name, name: h.name, stage, role: 'hook', def: h.def, slotLast: false, source: h.source, locked: h.locked });
+  const pushHook = (h: (typeof hooks)[number], stage: Step['stage']) =>
+    steps.push({ id: h.name, name: h.name, stage, role: 'hook', def: h.def, slotLast: false, source: h.source, locked: h.locked, ...(h.locator ? { locator: h.locator } : {}) });
 
   for (const h of hooks.filter((h) => h.def.before === 'all')) pushHook(h, 'before-all');
   for (const stage of CORE_STAGES) {
@@ -79,6 +82,7 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
         slotLast: i === slot.length - 1,
         source: binding.source,
         locked: binding.locked,
+        ...(binding.locator ? { locator: binding.locator } : {}),
       });
     });
     for (const h of hooks.filter((h) => h.def.after === stage)) pushHook(h, stage);

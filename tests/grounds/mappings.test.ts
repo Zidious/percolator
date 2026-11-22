@@ -8,7 +8,7 @@ import { ConfigError } from '../../src/config/load.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
 import { buildGraph } from '../../src/graph/build.ts';
 import { mergeLayers } from '../../src/graph/merge.ts';
-import { checkGraphReferences, resolveMappings } from '../../src/grounds/mappings.ts';
+import { checkGraphReferences, resolveEach, resolveMappings } from '../../src/grounds/mappings.ts';
 
 let tmp: string;
 let grounds: Record<string, ResolvedGround>;
@@ -63,14 +63,19 @@ describe('resolveMappings', () => {
       resolveMappings([mFile('policies/gone.md'), mDir('skills-gone/')], grounds),
       (e: unknown) => {
         assert.ok(e instanceof ConfigError);
-        assert.match(e.message, /company.*policies\/gone\.md[\s\S]*company.*skills-gone/);
+        assert.deepEqual(e.message.split('\n'), [
+          'config: use.0.file: ground "company": policies/gone.md does not exist; fix the path or add it to the ground',
+          'config: use.1.dir: ground "company": skills-gone/ does not exist; fix the path or add it to the ground',
+        ]);
         return true;
       },
     );
   });
 
   test('unknown ground name errors', async () => {
-    await assert.rejects(resolveMappings([mFile('x.md', 'policy', 'nope')], grounds), /nope.*unknown ground/);
+    await assert.rejects(resolveMappings([mFile('x.md', 'policy', 'nope')], grounds), {
+      message: 'config: use.0.from: ground "nope" is not declared; add it under grounds:',
+    });
   });
 
   test('file mapping that is a directory, and dir mapping that is a file, are reported', async () => {
@@ -79,14 +84,19 @@ describe('resolveMappings', () => {
       (e: unknown) => {
         assert.ok(e instanceof ConfigError);
         assert.equal(e.file, 'prof.yaml');
-        assert.match(e.message, /company.*policies.*not a file[\s\S]*company.*policies\/a\.md.*not a directory/);
+        assert.deepEqual(e.message.split('\n'), [
+          'prof.yaml: use.0.file: ground "company": policies is not a file; point it at a file',
+          'prof.yaml: use.1.dir: ground "company": policies/a.md is not a directory; point it at a directory',
+        ]);
         return true;
       },
     );
   });
 
   test('graph mapping must use file, not dir', async () => {
-    await assert.rejects(resolveMappings([mDir('skills', 'graph')], grounds), /company.*skills.*graph.*file/);
+    await assert.rejects(resolveMappings([mDir('skills', 'graph')], grounds), {
+      message: 'config: use.0.dir: ground "company": skills is a graph mapping and must use file, not dir; replace dir: with file:',
+    });
   });
 
   test('paths escaping the ground are reported with the ground and path', async () => {
@@ -99,10 +109,10 @@ describe('resolveMappings', () => {
       (e: unknown) => {
         assert.ok(e instanceof ConfigError);
         assert.deepEqual(e.message.split('\n'), [
-          'config: ground "company": ../team/percolator.yaml is outside the ground',
-          'config: ground "company": ..\\team\\percolator.yaml is outside the ground',
-          `config: ground "company": ${outside} is outside the ground`,
-          'config: ground "company": skills/../../team is outside the ground',
+          'config: use.0.file: ground "company": ../team/percolator.yaml is outside the ground; use a path inside the ground',
+          'config: use.1.file: ground "company": ..\\team\\percolator.yaml is outside the ground; use a path inside the ground',
+          `config: use.2.file: ground "company": ${outside} is outside the ground; use a path inside the ground`,
+          'config: use.3.dir: ground "company": skills/../../team is outside the ground; use a path inside the ground',
         ]);
         return true;
       },
@@ -115,9 +125,9 @@ describe('resolveMappings', () => {
       (e: unknown) => {
         assert.ok(e instanceof ConfigError);
         assert.deepEqual(e.message.split('\n'), [
-          'prof.yaml: ground "company": C:..\\..\\x must not contain ":"',
-          'prof.yaml: ground "company": D:x must not contain ":"',
-          'prof.yaml: ground "company": a:b must not contain ":"',
+          'prof.yaml: use.0.file: ground "company": C:..\\..\\x must not contain ":"; remove the ":"',
+          'prof.yaml: use.1.file: ground "company": D:x must not contain ":"; remove the ":"',
+          'prof.yaml: use.2.file: ground "company": a:b must not contain ":"; remove the ":"',
         ]);
         return true;
       },
@@ -137,8 +147,8 @@ describe('resolveMappings', () => {
       (e: unknown) => {
         assert.ok(e instanceof ConfigError);
         assert.deepEqual(e.message.split('\n'), [
-          'config: ground "company": escape resolves outside the ground (through a symlink)',
-          'config: ground "company": escape/percolator.yaml resolves outside the ground (through a symlink)',
+          'config: use.0.dir: ground "company": escape resolves outside the ground (through a symlink); point it at a path inside the ground',
+          'config: use.1.file: ground "company": escape/percolator.yaml resolves outside the ground (through a symlink); point it at a path inside the ground',
         ]);
         return true;
       },
@@ -168,6 +178,44 @@ describe('checkGraphReferences', () => {
     const ms = await resolveMappings([{ ...mFile('policies/a.md'), applies_to: ['plan.0'] }], grounds);
     await checkGraphReferences(graph, ms, grounds, 'config.yaml');
     const bad = await resolveMappings([{ ...mFile('policies/a.md'), applies_to: ['plan.9'] }], grounds);
-    await assert.rejects(checkGraphReferences(graph, bad, grounds, 'config.yaml'), /applies_to "plan.9": no such stage or node/);
+    await assert.rejects(checkGraphReferences(graph, bad, grounds, 'config.yaml'), {
+      message: 'config.yaml: use.0.applies_to.0: "plan.9" names no stage or node; use "*", a stage or a node name',
+    });
+  });
+
+  test('checkGraphReferences reports applies_to with the entry line', async () => {
+    const graph = buildGraph(
+      mergeLayers([
+        {
+          source: 'test',
+          fragment: {
+            bindings: {
+              intake: { agent: 'claude' },
+              groom: { agent: 'claude' },
+              plan: { agent: 'claude' },
+              implement: { agent: 'claude' },
+              review: { agent: 'claude' },
+              deliver: { builtin: 'github.open_pr' },
+            },
+          },
+        },
+      ]),
+    );
+    const [m] = await resolveMappings([{ ...mFile('policies/a.md'), applies_to: ['*', 'nope'] }], grounds);
+    const located = { ...m!, locator: { file: 'c.yaml', lines: { 'use.0': 4, 'use.0.applies_to.1': 6 } } };
+    await assert.rejects(checkGraphReferences(graph, [located], grounds, 'config.yaml'), {
+      message: 'c.yaml:6: use.0.applies_to.1: "nope" names no stage or node; use "*", a stage or a node name',
+    });
+  });
+
+  test('resolveEach locates problems through the locator', async () => {
+    const { problems } = await resolveEach([mFile('x.md', 'policy', 'corp')], grounds, {
+      source: 'profile:w',
+      configFile: 'c.yaml',
+      locator: { file: 'c.yaml', lines: { 'profiles.w.use.0.from': 5 }, prefix: 'profiles.w' },
+    });
+    assert.deepEqual(problems, [
+      { file: 'c.yaml', line: 5, path: 'profiles.w.use.0.from', message: 'ground "corp" is not declared; add it under grounds:' },
+    ]);
   });
 });

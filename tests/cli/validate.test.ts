@@ -216,10 +216,10 @@ test('every node prompt file is resolved inside its ground before start, all pro
       assert.ok(err instanceof ConfigError);
       assert.equal(err.file, cfg);
       assert.deepEqual(err.message.split('\n'), [
-        `${cfg}: bindings.plan.prompt: ground "company": prompts/missing.md does not exist`,
-        `${cfg}: bindings.implement.0.prompt: ground "nope": unknown ground (prompt x.md)`,
-        `${cfg}: bindings.implement.1.prompt: ground "company": ../team/policies/sdlc.md is outside the ground`,
-        `${cfg}: nodes.lint.prompt: ground "team": C:x must not contain ":"`,
+        `${cfg}:13: profiles.work.bindings.plan.prompt.file: ground "company": prompts/missing.md does not exist; fix the path or add it to the ground`,
+        `${cfg}:14: profiles.work.bindings.implement.0.prompt.from: ground "nope" is not declared; add it under grounds:`,
+        `${cfg}:14: profiles.work.bindings.implement.1.prompt.file: ground "company": ../team/policies/sdlc.md is outside the ground; use a path inside the ground`,
+        `${cfg}:17: profiles.work.nodes.lint.prompt.file: ground "team": C:x must not contain ":"; remove the ":"`,
       ]);
     },
   );
@@ -242,8 +242,8 @@ test('mapping applies_to entries must name a stage, a node or "*"', async () => 
       const err = await validate({ ...opts(), configFile: cfg }).catch((e) => e);
       assert.ok(err instanceof ConfigError);
       assert.deepEqual(err.message.split('\n'), [
-        `${cfg}: mapping team:policies/sdlc.md applies_to "reveiw": no such stage or node`,
-        `${cfg}: mapping team:policies/sdlc.md applies_to "nope": no such stage or node`,
+        `${cfg}:9: profiles.work.use.1.applies_to.4: "reveiw" names no stage or node; use "*", a stage or a node name`,
+        `${cfg}:9: profiles.work.use.1.applies_to.5: "nope" names no stage or node; use "*", a stage or a node name`,
       ]);
     },
   );
