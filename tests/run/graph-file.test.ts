@@ -3,6 +3,8 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
+import { buildGraph } from '../../src/graph/build.ts';
+import { mergePipelines } from '../../src/graph/merge.ts';
 import { readRunGraph, toRunGraph, writeRunGraph } from '../../src/run/graph-file.ts';
 import { validate } from '../../src/validate.ts';
 import { setupRunEnv } from '../helpers/run-env.ts';
@@ -34,6 +36,27 @@ test('toRunGraph maps the default graph', async () => {
   );
   assert.ok(rg.loops.some((l) => l.id === 'review' && l.from === 'review' && l.to === 'implement' && l.max === 3 && l.atCap === 'continue'));
   assert.ok(rg.loops.some((l) => l.id === 'approve-groom' && l.from === 'approve-groom' && l.to === 'groom' && l.atCap === 'escalate'));
+});
+
+test("a router's pick-pipeline gate records the pipelines it may pick, and round-trips", async () => {
+  const triage = mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: { pipelines: { triage: { router: true, stages: ['intake', 'route'], choose: { agent: 'claude', from: ['hotfix', 'feature'] } } } },
+      locator: { file: 'c.yaml', lines: {}, prefix: 'profiles.default' },
+    },
+  ]).triage!;
+  const g = buildGraph(triage);
+  const rg = toRunGraph(g);
+  assert.deepEqual(rg.steps.find((s) => s.id === 'pick-pipeline'), { id: 'pick-pipeline', stage: 'route', role: 'core', kind: 'gate', choices: ['hotfix', 'feature'] });
+  assert.ok(rg.steps.filter((s) => s.id !== 'pick-pipeline').every((s) => !('choices' in s)));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-graph-'));
+  try {
+    await writeRunGraph(dir, g);
+    assert.deepEqual(await readRunGraph(dir), rg);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('readRunGraph returns undefined when absent', async () => {
