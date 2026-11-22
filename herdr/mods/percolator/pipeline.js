@@ -1,7 +1,7 @@
 // The selected run's header and its vertical pipeline: core stages on the spine, hooks on a branch to its right, loop
 // spans in the gutter on its left, the stop strip under a picked row and the active slot under the active row.
 
-import { div } from 'gpui-kit';
+import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
 import { ago, canPick, driverPeek, hookNote, needsYou, pipelineMarks, pipelineRows, pipelineSpans, roundView, slotOpensAgent, ticketTitle, took } from './model.js';
@@ -10,6 +10,9 @@ import { inlineReader, link, own } from './ui.js';
 const GUTTER = 26; // loop spans
 const SPINE = 24;
 const LANE = 6; // between the lines of two loop spans in the gutter
+const RADIUS = 8; // a loop span's corners
+const ARROW = 6; // the arrowhead's width, at the gutter's right edge
+const DIR = 'mods/percolator';
 const short = (id) => id.split('-').pop();
 
 export function header(p, t, r, narrow) {
@@ -73,7 +76,8 @@ const vline = (part, x, c) =>
 
 /**
  * The gutter of row `i` (`between`: the space under it, where a strip or the active slot sits): each loop span is a
- * line from its `from` row's centre up to its `to` row's centre, with a tick toward the spine at both ends.
+ * bracket, a 2px line down the gutter with rounded corners turning toward the spine at its `to` and `from` rows'
+ * centres, and an arrowhead into the `to` row.
  */
 function gutter(t, spans, i, between) {
   const parts = spans.flatMap((s, k) => {
@@ -83,10 +87,19 @@ function gutter(t, spans, i, between) {
     const c = toneColor(t, s.tone);
     const x = 4 + k * LANE;
     if (between) return i < hi ? [vline('full', x, c)] : [];
-    const tick = div().absolute().top('50%').mt(-1).left(x).right(0).h(2).bg(c);
-    if (i === lo) return [vline('bottom', x, c), tick];
-    if (i === hi) return [vline('top', x, c), tick];
-    return [vline('full', x, c)];
+    if (i > lo && i < hi) return [vline('full', x, c)];
+    const top = i === lo;
+    const corner = div()
+      .absolute()
+      .left(x)
+      .right(ARROW)
+      .border_l(2)
+      .border_color(c)
+      .when(top, (el) => el.top('50%').mt(-1).bottom_0().border_t(2).rounded_tl(RADIUS))
+      .when(!top, (el) => el.top_0().bottom('50%').mb(-1).border_b(2).rounded_bl(RADIUS));
+    if (i !== s.to) return [corner];
+    const arrow = svg(`${DIR}/loop-arrow.svg`).absolute().right(0).top('50%').mt(-4).w(ARROW).h(8).text_color(c);
+    return [corner, arrow];
   });
   return div().flex_none().w(GUTTER).relative().children(parts);
 }
