@@ -43,6 +43,7 @@ import {
   pipelineMarks,
   needsCount,
   needsYou,
+  nowTone,
   newlyNeeding,
   notice,
   parseStatus,
@@ -692,6 +693,14 @@ test('an agent-blocked run is a running run to the panel', () => {
   assert.deepEqual(rowState(t13), { tone: 'working', text: 'groom' });
   assert.equal(newlyNeeding([], [t13]).length, 0);
   assert.equal(sortRuns([byId('t3'), t13])[0]!.id, t13.id); // running ranks above completed
+});
+
+test('nowTone: the active stop rings blocked when the run needs you or failed, else working', () => {
+  assert.equal(nowTone(byId('t2')), 'blocked'); // a gate waits on you
+  assert.equal(nowTone(byId('t9')), 'blocked'); // failed, with a box
+  assert.equal(nowTone(byId('t15')), 'blocked'); // failed, no attention
+  assert.equal(nowTone(byId('t13')), 'working'); // an agent-blocked run is running
+  assert.equal(nowTone(byId('t8')), 'working');
 });
 
 const WIDE = { narrow: false, unfolded: [] as string[] };

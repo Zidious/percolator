@@ -4,7 +4,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { ago, canPick, driverPeek, hookNote, needsYou, pipelineMarks, pipelineRows, pipelineSpans, roundView, slotOpensAgent, ticketTitle, took } from './model.js';
+import { ago, canPick, driverPeek, hookNote, nowTone, pipelineMarks, pipelineRows, pipelineSpans, roundView, slotOpensAgent, ticketTitle, took } from './model.js';
 import { inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
@@ -137,8 +137,8 @@ function opensAgent(p, r, el, id) {
   );
 }
 
-/** The colour the active stop rings in: blocked when the run waits on you. */
-const nowColor = (t, r) => (needsYou(r) ? t.blocked : t.working);
+/** The colour the active stop rings in (nowTone). */
+const nowColor = (t, r) => t[nowTone(r)];
 
 function stageStop(p, t, r, row, picked) {
   const gate = row.gate;

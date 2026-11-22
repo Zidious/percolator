@@ -21,6 +21,9 @@ export function parseStatus(stdout) {
 
 /** Whether a run waits on you. A blocked agent does not: Herdr already shows it, so the panel counts that run as running. */
 export const needsYou = (r) => Boolean(r.attention) && r.attention.kind !== 'agent';
+
+/** The tone the active stop rings in: blocked when the run needs you or failed, else working. */
+export const nowTone = (r) => (needsYou(r) || r.status === 'failed' ? 'blocked' : 'working');
 const rank = (r) => (needsYou(r) ? 0 : r.status === 'running' ? 1 : r.status === 'unreadable' ? 3 : 2);
 const created = (r) => (typeof r.createdAt === 'string' ? Date.parse(r.createdAt) || 0 : 0);
 

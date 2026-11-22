@@ -17,6 +17,7 @@ export declare function rowState(run: RunStatusJson): { tone: Tone; text: string
 export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
 export declare function actionArgv(action: Action, run: { id: string }, feedback?: string): string[] | null;
 export declare function needsYou(run: RunStatusJson): boolean;
+export declare function nowTone(run: RunStatusJson): 'blocked' | 'working';
 export declare function needsCount(runs: RunStatusJson[]): number;
 export declare function runningCount(runs: RunStatusJson[]): number;
 export type Loop = Readable['loops'][number];
