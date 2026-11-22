@@ -3,7 +3,7 @@
 // `{ "fixtures": "<file>" }` reads a file instead. Refreshes on changes under ~/.percolator/runs, with a 10s fallback.
 
 import { appHome, exec, home, readTextFile, watchFolder } from 'herdr';
-import { readStatus, resolvePath } from './model.js';
+import { pipelinesFixture, readPipelines, readStatus, resolvePath } from './model.js';
 
 export const firstLine = (text) =>
   String(text ?? '')
@@ -46,6 +46,23 @@ export async function fetchStatus(src) {
     return { ok: false, error: `perc status --json failed: ${why}; check perc is installed and run perc herdr link` };
   }
   return readStatus(res.stdout);
+}
+
+/** One `perc pipelines --repo <repo> --json` (or pipelines.json beside the fixture): readPipelines's result. */
+export async function fetchPipelines(src, repo) {
+  if (src.conn === 'fixtures') {
+    const file = pipelinesFixture(src.fixture);
+    const text = await readTextFile(file).catch(() => null);
+    if (text === null) return { ok: false, error: `${file} not found; put pipelines.json beside the status fixture` };
+    return readPipelines(text);
+  }
+  const argv = [src.perc.cli, 'pipelines', '--repo', repo, '--json'];
+  const res = await exec(src.perc.node, argv, { timeout: 30000 }).catch((e) => ({ code: -1, stdout: '', stderr: String(e?.message ?? e) }));
+  if (res.code !== 0) {
+    const why = firstLine(res.stderr) || `exit ${res.code}`;
+    return { ok: false, error: `perc pipelines --json failed for ${repo}: ${why}; check the repo's Percolator config` };
+  }
+  return readPipelines(res.stdout);
 }
 
 /** Calls `refresh(cx)` every 10s and ~300ms after a burst of changes under ~/.percolator/runs. */
