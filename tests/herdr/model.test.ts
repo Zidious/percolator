@@ -815,6 +815,16 @@ test('pipelineRows marks a step that is not current failed when it failed, escal
   }
 });
 
+test('pipelineRows shows a loop start that sent the run back, under its cap, as past, not failed', () => {
+  assert.equal(row(pipelineRows(byId('t16'), WIDE), 'review').state, 'past'); // review failed, round 2/3: the loop goes on
+  const t4 = readable('t4'); // review escalated at the cap
+  const capped = { ...t4, currentStep: 'deliver' } as RunStatusJson;
+  assert.equal(row(pipelineRows(capped, WIDE), 'review').state, 'failed');
+  const t3 = readable('t3'); // a loop not taken: a failed review is failed
+  const failed = { ...t3, steps: t3.steps.map((s) => (s.id === 'review' ? { ...s, status: 'fail' } : s)) } as RunStatusJson;
+  assert.equal(row(pipelineRows(failed, WIDE), 'review').state, 'failed');
+});
+
 test('pipelineRows has no active row for a completed run or a current step that is not listed', () => {
   assert.deepEqual(pipelineRows(byId('t3'), WIDE).filter((r) => r.state === 'active'), []);
   const lost = { ...readable('t8'), currentStep: 'nope' } as RunStatusJson;

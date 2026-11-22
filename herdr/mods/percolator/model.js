@@ -182,9 +182,13 @@ const SIDE = { 'before-all': 'before', before: 'before', after: 'after', 'after-
 
 const FAILED = new Set(['fail', 'escalate', 'contract_error']);
 
+/** A loop start that sent the run back and is under its cap: its failure is the loop going on, not the run failing. */
+const sentBack = (run, step) =>
+  (run.loops ?? []).some((l) => l.from === step.id && roundOf(l).taken && !roundOf(l).atCap);
+
 function pipeState(run, step) {
   if (step.id === run.currentStep && run.status !== 'completed') return 'active';
-  if (FAILED.has(step.status)) return 'failed';
+  if (FAILED.has(step.status) && !sentBack(run, step)) return 'failed';
   return step.status === 'pending' ? 'future' : 'past';
 }
 
