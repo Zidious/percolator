@@ -19,6 +19,7 @@ import { checkResumable, drive, prUrl } from './run/drive.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
 import type { RunMeta } from './run/meta.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
+import { InputError, parseInputs } from './run/request.ts';
 import type { DriverDeps } from './run/prepare.ts';
 import { attentionNext, driverLiveness, readAttention, runStatusJson, statusJson } from './run/status.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
@@ -26,7 +27,7 @@ import { deciderLogin, readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
 import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
-import { validate } from './validate.ts';
+import { validate, validateAll } from './validate.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
 import { removeWorktree } from './workspace/worktree.ts';
@@ -38,13 +39,15 @@ const USAGE = `usage: perc <command> [options]
 commands:
   init [--config <file>] [--force]
       write the recommended config (default: ~/.percolator/config.yaml)
-  validate [--config <file>] [--profile <name>] [--update]
-      load the config, resolve grounds and mappings, and check the graph
+  validate [--config <file>] [--profile <name>] [--pipeline <name>] [--update]
+      load the config, resolve grounds and mappings, and check the graph of each pipeline
+      (--pipeline: that one only)
       (default config: ~/.percolator/config.yaml)
   schema [--out <file>]
       write the JSON schema for the config (default: schema/percolator.schema.json)
-  run <ticket> [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]
-      start a run: groom, approval, plan, implement, review, PR (default: in its own hc terminal)
+  run [<ticket>] [--pipeline <name>] [--input key=value]... [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]
+      start a run of a pipeline (default: the profile's; feature: groom, approval, plan, implement, review, PR)
+      in its own hc terminal (--foreground: in this one)
   resume <run-id> [--foreground]
       continue a paused or interrupted run (grants one more round at a cap)
   status [<run-id>] [--json]
@@ -66,7 +69,7 @@ options:
 
 class UsageError extends Error {}
 
-type Options = Record<string, { type: 'string' | 'boolean' }>;
+type Options = Record<string, { type: 'string' | 'boolean'; multiple?: boolean }>;
 
 function parse<T extends Options>(args: string[], options: T, allowPositionals = false) {
   try {
@@ -119,7 +122,7 @@ function describe(r: ValidateResult): string {
       : approvers.length === 0
         ? 'none on GitHub (only local perc approve/reject)'
         : approvers.join(', ');
-  const lines = [`profile: ${r.profile}`, `approvers: ${who}`];
+  const lines = [`pipeline: ${r.pipeline.name}${r.pipeline.default ? ' (default)' : ''}`, `profile: ${r.profile}`, `approvers: ${who}`];
   const runtime = Object.entries(r.runtime ?? {});
   if (runtime.length > 0) lines.push(`runtime: ${runtime.map(([k, v]) => `${k} ${String(v)}`).join(', ')}`);
   for (const [name, version] of Object.entries(r.groundVersions)) lines.push(`ground ${name} ${version}`);
@@ -151,15 +154,22 @@ next: perc validate --config ${file} --profile default
 }
 
 async function runValidate(args: string[], io: Io): Promise<number> {
-  const { values } = parse(args, { config: { type: 'string' }, profile: { type: 'string' }, update: { type: 'boolean' } });
+  const { values } = parse(args, {
+    config: { type: 'string' },
+    profile: { type: 'string' },
+    pipeline: { type: 'string' },
+    update: { type: 'boolean' },
+  });
   const configFile = path.resolve(values.config ?? defaultConfig());
-  const r = await validate({
+  const opts = {
     configFile,
     cwd: process.cwd(),
     ...(values.profile !== undefined ? { profile: values.profile } : {}),
     ...(values.update ? { update: true } : {}),
-  });
-  io.stdout(describe(r));
+  };
+  const results = values.pipeline !== undefined ? [await validate({ ...opts, pipeline: values.pipeline })] : await validateAll(opts);
+  // one block per pipeline, a blank line between them
+  io.stdout(results.map(describe).join('\n'));
   return 0;
 }
 
@@ -178,12 +188,17 @@ async function runRun(args: string[], deps: DriverDeps): Promise<number> {
     repo: { type: 'string' },
     config: { type: 'string' },
     profile: { type: 'string' },
+    pipeline: { type: 'string' },
+    input: { type: 'string', multiple: true },
     foreground: { type: 'boolean' },
   });
-  if (positionals.length !== 1) throw new UsageError('run needs <ticket>');
+  if (positionals.length > 1) throw new UsageError('run takes at most one <ticket>');
+  const inputs = parseInputs(values.input ?? []);
   const meta = await prepareRun(
     {
-      ticket: positionals[0]!,
+      ...(positionals[0] !== undefined ? { ticket: positionals[0] } : {}),
+      ...(values.pipeline !== undefined ? { pipeline: values.pipeline } : {}),
+      inputs,
       repoDir: path.resolve(values.repo ?? process.cwd()),
       configFile: values.config ?? defaultConfig(),
       ...(values.profile !== undefined ? { profile: values.profile } : {}),
@@ -511,7 +526,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     io.stderr(`unknown command: ${command}\n\n${USAGE}`);
     return 2;
   } catch (err) {
-    if (err instanceof UsageError) {
+    if (err instanceof UsageError || err instanceof InputError) {
       io.stderr(`${err.message}\n\n${USAGE}`);
       return 2;
     }

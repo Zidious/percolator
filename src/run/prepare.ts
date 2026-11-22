@@ -15,6 +15,7 @@ import { validate } from '../validate.ts';
 import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
 import { defaultWorktreeDir, ensureWorktree, excludeWorktreesDir, removeWorktree } from '../workspace/worktree.ts';
 import { writeRunGraph } from './graph-file.ts';
+import { checkRequest } from './request.ts';
 import { detectBase, driverName, newRunId, spaceName, writeRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 
@@ -54,7 +55,14 @@ export function worktreeIn(root: string, repoName: string, runId: string): strin
  * Every check that can fail cheaply (config, ticket, base) runs before anything is created.
  */
 export async function prepareRun(
-  o: { ticket: string; repoDir: string; configFile: string; profile?: string },
+  o: {
+    ticket?: string;
+    repoDir: string;
+    configFile: string;
+    profile?: string;
+    pipeline?: string;
+    inputs?: Record<string, string>;
+  },
   deps: DriverDeps,
 ): Promise<RunMeta> {
   const configFile = path.resolve(o.configFile);
@@ -63,7 +71,14 @@ export async function prepareRun(
     cwd: o.repoDir,
     home: deps.home,
     ...(o.profile !== undefined ? { profile: o.profile } : {}),
+    ...(o.pipeline !== undefined ? { pipeline: o.pipeline } : {}),
   });
+  checkRequest(v.pipeline, o.ticket, o.inputs ?? {});
+  if (o.ticket === undefined) {
+    throw new Error(
+      `pipeline "${v.pipeline.name}" runs without a ticket, which this perc cannot start yet; pass a ticket to a pipeline that takes one`,
+    );
+  }
   const repoRoot = await cliGit.toplevel(o.repoDir);
   if (repoRoot === undefined) throw new Error(`${o.repoDir} is not inside a git repository`);
   const origin = await cliGit.remoteUrl(repoRoot);
