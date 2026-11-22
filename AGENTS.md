@@ -17,6 +17,7 @@ node src/cli.ts <command> …           # run perc from a checkout; `perc --help
 node src/cli.ts delete <id>...|--finished [--yes]  # remove runs; keeps branches
 pnpm herdr:sync                       # copy herdr/mods/* into the Herdr app (reloads live; keeps perc.json); after any panel/cup change
 node tests/smoke/hc.smoke.ts          # manual smoke tests against the real hc / gh (gh.smoke.ts); flags in each file's header; never in pnpm test
+node tests/smoke/skill.smoke.ts       # sandboxed agent scenarios for skills/percolator-config; --verify <root> afterwards; never in pnpm test
 ```
 
 ## Hard rules

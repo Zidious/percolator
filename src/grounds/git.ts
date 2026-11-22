@@ -27,9 +27,12 @@ export function gitEnv(): NodeJS.ProcessEnv {
   return { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
 }
 
+// Windows git stops at 260-character paths unless core.longpaths is set; grounds live deep under ~/.percolator.
+const PLATFORM_ARGS = process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : [];
+
 export async function runGit(args: string[], cwd?: string): Promise<string> {
   try {
-    const { stdout } = await execFileP('git', args, { env: gitEnv(), ...(cwd === undefined ? {} : { cwd }) });
+    const { stdout } = await execFileP('git', [...PLATFORM_ARGS, ...args], { env: gitEnv(), ...(cwd === undefined ? {} : { cwd }) });
     return stdout.trim();
   } catch (err) {
     const stderr = (err as { stderr?: string }).stderr?.trim() || (err as Error).message;

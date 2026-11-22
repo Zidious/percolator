@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { initConfig } from './config/init.ts';
 import { writeJsonSchema } from './config/json-schema.ts';
+import { effectiveKind } from './config/schema.ts';
+import type { NodeDef } from './config/schema.ts';
 import { loadState } from './engine/state.ts';
 import type { RunState } from './engine/state.ts';
 import { cliHerdrApp } from './herdr/app.ts';
@@ -93,14 +95,42 @@ function onlyRunId(command: string, positionals: string[]): string {
 
 const defaultConfig = () => path.join(os.homedir(), '.percolator', 'config.yaml');
 
+/** What runs a step: `builtin <name>`, `command <argv>`, `gate`, or `<agent>, model …, effort …, skills …`. */
+function runsWith(def: NodeDef): string {
+  const kind = effectiveKind(def);
+  if (kind === 'builtin') return `builtin ${def.builtin}`;
+  if (kind === 'script') return `command ${(def.command ?? []).join(' ')}`;
+  if (kind === 'gate') return 'gate';
+  const skills = [...(def.skill !== undefined ? [def.skill] : []), ...(def.skills ?? [])];
+  return [
+    def.agent,
+    ...(def.model !== undefined ? [`model ${def.model}`] : []),
+    ...(def.effort !== undefined ? [`effort ${def.effort}`] : []),
+    ...(skills.length > 0 ? [`skills ${skills.join(', ')}`] : []),
+  ].join(', ');
+}
+
 function describe(r: ValidateResult): string {
-  const lines = [`profile: ${r.profile}`];
+  const approvers = r.tracker?.approvers;
+  // the gate falls back to the gh user only when the list is absent; an empty list lets no GitHub comment count
+  const who =
+    approvers === undefined
+      ? 'the gh user running perc'
+      : approvers.length === 0
+        ? 'none on GitHub (only local perc approve/reject)'
+        : approvers.join(', ');
+  const lines = [`profile: ${r.profile}`, `approvers: ${who}`];
+  const runtime = Object.entries(r.runtime ?? {});
+  if (runtime.length > 0) lines.push(`runtime: ${runtime.map(([k, v]) => `${k} ${String(v)}`).join(', ')}`);
   for (const [name, version] of Object.entries(r.groundVersions)) lines.push(`ground ${name} ${version}`);
-  for (const m of r.mappings) lines.push(`${m.as} ${m.absPath}`);
+  for (const m of r.mappings) {
+    const scope = m.applies_to.includes('*') ? '' : ` (applies to ${m.applies_to.join(', ')})`;
+    lines.push(`${m.as} ${m.absPath}${scope}`);
+  }
   lines.push('', 'steps:');
   r.graph.steps.forEach((s, i) => {
     const pos = s.role === 'hook' ? ` (${s.def.before !== undefined ? `before ${s.def.before}` : `after ${s.def.after}`})` : '';
-    lines.push(`${i + 1}. ${s.id}${pos}`);
+    lines.push(`${i + 1}. ${s.id}${pos}: ${runsWith(s.def)}`);
   });
   lines.push('', 'back-edges:');
   for (const e of Object.values(r.graph.backEdges)) {

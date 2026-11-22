@@ -106,6 +106,8 @@ test('descriptions state the defaults the code uses', () => {
     ['$.profiles.*.nodes.*.on_fail', /the first run counts/],
     ['$.profiles.*.nodes.*.on_fail.max_rounds', /the first run counts; 1 escalates on the first fail/],
     ['$.profiles.*.nodes.*.timeout_s', /agent and script nodes only/],
+    ['$.profiles.*.nodes.*.effort', /claude only/],
+    ['$.profiles.*.extends', /never inherited; one level only/],
     ['$.profiles.*.nodes.*.command', /program for agent: command/],
     ['$.profiles.*.nodes.*.max_rounds', /read from the last node bound to review/],
     ['$.profiles.*.rules.allowed_models', /when set, every agent node must name one of them/],

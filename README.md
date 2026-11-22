@@ -171,7 +171,22 @@ profiles:
     bindings: { … }                                    # as in the example config
 ```
 
-Profiles are checked in order; the first whose `match.remote` or `match.path` fits the repo wins, and `--profile <name>` picks one by hand. Each profile must bind all six stages, itself or through a `graph` ground.
+Profiles are checked in order; the first whose `match.remote` or `match.path` fits the repo wins, and `--profile <name>` picks one by hand. Each profile must bind all six stages, itself, through a `graph` ground or through the profile it extends.
+
+```yaml
+profiles:
+  acme:                                   # above default, which would also match acme's repos
+    extends: default
+    match: { remote: "github.com/acme/*" }
+    tracker: { kind: github, approvers: [bob] }
+    bindings:
+      implement: { agent: codex }         # replaces default's implement binding whole
+  default:
+    match: { remote: "github.com/*/*" }
+    bindings: { … }
+```
+
+`extends` starts a profile from another one: that profile's bindings, nodes, rules and `use` come first as their own layer, so this profile replaces a stage's binding or a node by name (as a whole: restate any key it should keep) and adds mappings, and a `required: true` there still locks. `tracker` and `runtime` are inherited unless this profile sets them, each as a whole block. `match` and `trust_repo_config` are never inherited. One level only: a profile cannot extend one that extends another.
 
 `tracker.approvers` lists the GitHub logins whose `/percolator approve` or `/percolator reject` comments count at a gate. Without it, only the GitHub user running `perc` counts. Local `perc approve`/`reject` record your `gh` login (the OS user if gh is not logged in).
 
