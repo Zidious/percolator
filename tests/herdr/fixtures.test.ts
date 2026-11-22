@@ -19,4 +19,16 @@ test('the fixture covers every state the panel draws', () => {
   assert.deepEqual(t17.steps.filter((s: any) => s.role === 'core' && s.stage === 'implement').map((s: any) => s.id), ['implement.0', 'implement.1']);
 });
 
+test('the fixture is what perc writes: hooks carry their plain stage, loops go back to the implement region start', () => {
+  const runs = readFixture('status.json').runs.filter((r: any) => r.status !== 'unreadable');
+  for (const r of runs) {
+    for (const s of r.steps) assert.match(s.stage, /^(?:intake|groom|plan|implement|review|deliver|before-all|after-all)$/, `${r.id} ${s.id}`);
+    const start = r.steps.find((s: any) => s.stage === 'implement')?.id;
+    for (const l of r.loops.filter((l: any) => l.id === 'review')) assert.equal(l.to, start, r.id);
+  }
+  const to = (id: string) => runs.find((r: any) => r.id.startsWith(`${id}-`)).loops[0].to;
+  assert.deepEqual([to('t8'), to('t16'), to('t4')], ['lint-plan', 'lint-baseline', 'implement']);
+  assert.equal(runs.find((r: any) => r.id.startsWith('t17-')).currentStep, 'implement.1');
+});
+
 test('the empty fixture has no runs', () => assert.deepEqual(readFixture('empty.json'), { schema: 1, runs: [] }));

@@ -418,8 +418,8 @@ test('attentionTag names each attention kind', () => {
 
 test('shownLoops keeps loops that have gone round; loopLabel says where and how far', () => {
   const [loop] = shownLoops(byId('t8'));
-  assert.equal(loopLabel(loop!, false), '↺ review → implement · round 2 of 3');
-  assert.equal(loopLabel({ ...loop!, round: 3 }, false), '↺ review → implement · round 3 of 3 · cap');
+  assert.equal(loopLabel(loop!, false), '↺ review → lint-plan · round 2 of 3');
+  assert.equal(loopLabel({ ...loop!, round: 3 }, false), '↺ review → lint-plan · round 3 of 3 · cap');
   assert.equal(loopLabel({ ...loop!, round: 3 }, true), '↺ round 3 of 3 · cap');
   assert.equal(loopAtCap({ ...loop!, round: 3 }), true);
   assert.equal(loopAtCap(loop!), false);
@@ -943,10 +943,7 @@ test('pipelineRows makes each core step of a multi-step stage a stage row; folde
   const rows = pipelineRows(byId('t17'), WIDE);
   assert.deepEqual(rowIds(rows), ['intake', 'groom', 'plan', 'prep', 'implement.0', 'implement.1', 'post', 'review', 'deliver']);
   assert.deepEqual(rows.slice(3, 7).map(whereOf), ['before', 'stage', 'stage', 'after']);
-  // the fixture's currentStep is the stage name, which matches no step id, so no row is active
-  assert.deepEqual([row(rows, 'implement.0').state, row(rows, 'implement.1').state], ['past', 'past']);
-  const live = pipelineRows({ ...readable('t17'), currentStep: 'implement.1' } as RunStatusJson, WIDE);
-  assert.deepEqual([row(live, 'implement.0').state, row(live, 'implement.1').state], ['past', 'active']);
+  assert.deepEqual([row(rows, 'implement.0').state, row(rows, 'implement.1').state], ['past', 'active']);
 
   const narrow = pipelineRows(byId('t17'), { narrow: true, unfolded: [] });
   assert.deepEqual(rowIds(narrow), ['intake', 'groom', 'plan', 'implement.0', 'implement.1', 'post', 'review', 'deliver']);
@@ -984,6 +981,14 @@ test('pipelineRows of the t4 run carries the capped round on review', () => {
   assert.equal(review.state, 'active');
 });
 
+test('pipelineRows marks a step that is not current failed when it failed, escalated or broke its contract', () => {
+  const t3 = readable('t3');
+  for (const status of ['fail', 'escalate', 'contract_error'] as const) {
+    const r = { ...t3, steps: t3.steps.map((s) => (s.id === 'plan' ? { ...s, status } : s)) } as RunStatusJson;
+    assert.equal(row(pipelineRows(r, WIDE), 'plan').state, 'failed', status);
+  }
+});
+
 test('pipelineRows has no active row for a completed run or a current step that is not listed', () => {
   assert.deepEqual(pipelineRows(byId('t3'), WIDE).filter((r) => r.state === 'active'), []);
   const lost = { ...readable('t8'), currentStep: 'nope' } as RunStatusJson;
@@ -1000,12 +1005,28 @@ test('pipelineSpans gives a loop as the indexes of its from and to stage rows', 
   assert.deepEqual(pipelineSpans(pipelineRows(r, WIDE), r), [{ from: 5, to: 4, tone: 'blocked' }]);
 });
 
-test('pipelineSpans drops a loop whose end is not a stage row', () => {
+test('pipelineSpans ends a loop on the hook row it targets', () => {
+  const r = byId('t8'); // the loop goes back to lint-plan, the first step of the implement region
+  const rows = pipelineRows(r, WIDE);
+  assert.deepEqual(pipelineSpans(rows, r), [{ from: rowIds(rows).indexOf('review'), to: rowIds(rows).indexOf('lint-plan'), tone: 'working' }]);
+  assert.deepEqual(pipelineSpans(rows, r), [{ from: 8, to: 5, tone: 'working' }]);
+});
+
+test('pipelineSpans ends a loop that targets a folded hook on the row holding it', () => {
+  const r = byId('t16'); // the loop goes back to lint-baseline, folded into implement
+  assert.deepEqual(pipelineSpans(pipelineRows(r, WIDE), r), [{ from: 6, to: 3, tone: 'working' }]);
+  assert.deepEqual(pipelineSpans(pipelineRows(r, { narrow: false, unfolded: ['implement'] }), r), [{ from: 10, to: 3, tone: 'working' }]);
+});
+
+test('pipelineSpans drops a loop whose end is not in the pipeline', () => {
   const r = readable('t4');
   const noTo = { ...r, steps: r.steps.filter((s) => s.id !== 'implement') } as RunStatusJson;
   assert.deepEqual(pipelineSpans(pipelineRows(noTo, WIDE), noTo), []);
   const noFrom = { ...r, loops: [{ ...r.loops[0]!, from: 'nope' }] } as RunStatusJson;
   assert.deepEqual(pipelineSpans(pipelineRows(noFrom, WIDE), noFrom), []);
+  const t16 = readable('t16');
+  const noHook = { ...t16, loops: [{ ...t16.loops[0]!, to: 'nope' }] } as RunStatusJson;
+  assert.deepEqual(pipelineSpans(pipelineRows(noHook, WIDE), noHook), []);
   assert.deepEqual(pipelineSpans([], byId('t5')), []);
 });
 
@@ -1015,4 +1036,9 @@ test('moveStop walks the pipeline rows that have started', () => {
   // t16: the passed before:implement hooks fold away; typecheck has not started, coverage failed
   assert.equal(moveStop(byId('t16'), 'implement', 1), 'coverage');
   assert.equal(moveStop(byId('t16'), 'coverage', 1), 'review');
+});
+
+test('moveStop reaches the hooks of an unfolded stage', () => {
+  assert.equal(moveStop(byId('t16'), 'plan', 1), 'implement');
+  assert.equal(moveStop(byId('t16'), 'plan', 1, ['implement']), 'lint-baseline');
 });

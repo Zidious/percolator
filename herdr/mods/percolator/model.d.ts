@@ -46,7 +46,7 @@ export type PipeRow =
   | { type: 'hook'; step: Step; where: 'before-all' | 'before' | 'after' | 'after-all'; gate: boolean; state: RowState };
 export declare function pipelineRows(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }): PipeRow[];
 export declare function pipelineSpans(rows: PipeRow[], run: RunStatusJson): { from: number; to: number; tone: string }[];
-export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number): string | null;
+export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number, unfolded?: string[]): string | null;
 export declare function moveRow(rows: RunStatusJson[], selId: string | null, dir: number): string | null;
 export type RoundView = {
   attempt: Attempt;

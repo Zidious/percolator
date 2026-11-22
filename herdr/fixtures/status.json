@@ -137,7 +137,7 @@
         {
           "id": "review",
           "from": "review",
-          "to": "implement",
+          "to": "lint-plan",
           "max": 3,
           "atCap": "escalate",
           "round": 2
@@ -1493,7 +1493,7 @@
         },
         {
           "id": "lint-baseline",
-          "stage": "before:implement",
+          "stage": "implement",
           "role": "node",
           "kind": "script",
           "status": "pass",
@@ -1504,7 +1504,7 @@
         },
         {
           "id": "deps-audit",
-          "stage": "before:implement",
+          "stage": "implement",
           "role": "node",
           "kind": "script",
           "status": "pass",
@@ -1515,7 +1515,7 @@
         },
         {
           "id": "license-check",
-          "stage": "before:implement",
+          "stage": "implement",
           "role": "node",
           "kind": "script",
           "status": "pass",
@@ -1526,7 +1526,7 @@
         },
         {
           "id": "format-check",
-          "stage": "before:implement",
+          "stage": "implement",
           "role": "node",
           "kind": "script",
           "status": "pass",
@@ -1547,7 +1547,7 @@
         },
         {
           "id": "typecheck",
-          "stage": "after:implement",
+          "stage": "implement",
           "role": "node",
           "kind": "script",
           "status": "pending",
@@ -1556,7 +1556,7 @@
         },
         {
           "id": "coverage",
-          "stage": "after:implement",
+          "stage": "implement",
           "role": "node",
           "kind": "script",
           "status": "fail",
@@ -1590,7 +1590,7 @@
         {
           "id": "review",
           "from": "review",
-          "to": "implement",
+          "to": "lint-baseline",
           "max": 3,
           "atCap": "escalate",
           "round": 1
@@ -1718,7 +1718,7 @@
       "worktree": "/home/me/src/percolator/.worktrees/t17-20261121-050000-3c4d",
       "createdAt": "2026-11-21T05:00:00.000Z",
       "status": "running",
-      "currentStep": "implement",
+      "currentStep": "implement.1",
       "driver": {
         "alive": true,
         "terminal": "t17_driver_a0_9e27",
@@ -1761,7 +1761,7 @@
         },
         {
           "id": "prep",
-          "stage": "before:implement",
+          "stage": "implement",
           "role": "node",
           "kind": "script",
           "status": "pass",
@@ -1793,7 +1793,7 @@
         },
         {
           "id": "post",
-          "stage": "after:implement",
+          "stage": "implement",
           "role": "node",
           "kind": "script",
           "status": "pending",
