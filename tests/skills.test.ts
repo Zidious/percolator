@@ -42,6 +42,21 @@ test('the config skill covers pipelines and inputs', async () => {
   assert.ok(text.includes('--input'), 'skill must say how a run gets its inputs');
 });
 
+test('the config skill covers routers and triggers', async () => {
+  const text = await fs.readFile(path.join(ROOT, 'skills', 'percolator-config', 'SKILL.md'), 'utf8');
+  const routers = text.split('## Routers')[1]?.split('\n## ')[0];
+  assert.ok(routers !== undefined, 'skill must have a "Routers" section');
+  for (const key of ['router: true', 'routes:', 'choose:', 'fallback:', 'confirm:', 'pick-pipeline', 'perc approve <run-id> --pipeline <name>', 'next:']) {
+    assert.ok(routers.includes(key), `the Routers section must cover ${key}`);
+  }
+  const triggers = text.split('## Triggers')[1]?.split('\n## ')[0];
+  assert.ok(triggers !== undefined, 'skill must have a "Triggers" section');
+  for (const key of ['triggers:', 'schedule:', 'timezone:', 'label:', 'pr_opened:', 'dependabot:', 'check_failed:', 'perc watch']) {
+    assert.ok(triggers.includes(key), `the Triggers section must cover ${key}`);
+  }
+  assert.ok(!text.includes('cannot start it yet'), 'ticket: none pipelines can be started now');
+});
+
 test('the config skill covers every exit', async () => {
   const text = await fs.readFile(path.join(ROOT, 'skills', 'percolator-config', 'SKILL.md'), 'utf8');
   const exits = text.split('## Exits')[1]?.split('\n## ')[0];
