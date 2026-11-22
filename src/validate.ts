@@ -15,6 +15,7 @@ import { cliGit } from './grounds/git.ts';
 import type { Git } from './grounds/git.ts';
 import { checkAgents } from './adapters/check.ts';
 import { collectLayers } from './grounds/layers.ts';
+import type { LayerRoot } from './grounds/layers.ts';
 import { checkGraphReferences } from './grounds/mappings.ts';
 import type { ResolvedMapping } from './grounds/mappings.ts';
 import type { ResolvedGround } from './grounds/resolve.ts';
@@ -76,8 +77,10 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
     ...(opts.update !== undefined ? { update: opts.update } : {}),
     ...(opts.home !== undefined ? { home: opts.home } : {}),
   });
-  const profileRoot = {
+  const profileLocator = { file: opts.configFile, lines, prefix: `profiles.${name}` };
+  const profileRoot: LayerRoot = {
     source: `profile:${name}`,
+    locator: profileLocator,
     use: profile.use ?? [],
     fragment: {
       ...(profile.bindings ? { bindings: profile.bindings } : {}),
@@ -112,7 +115,12 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
   }
   const roots = [profileRoot];
   if (repoLayer) {
-    roots.push({ source: 'repo:.percolator/percolator.yaml', use: repoLayer.data.use ?? [], fragment: repoLayer.data });
+    roots.push({
+      source: 'repo:.percolator/percolator.yaml',
+      use: repoLayer.data.use ?? [],
+      fragment: repoLayer.data,
+      locator: { file: repoFile, lines: repoLayer.lines },
+    });
   }
   const { layers, mappings } = await collectLayers({ roots, grounds, configFile: opts.configFile });
 

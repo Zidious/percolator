@@ -1,11 +1,13 @@
-import { loadFragment } from '../config/load.ts';
+import { loadLocated } from '../config/load.ts';
+import type { Locator } from '../config/locate.ts';
+import { GraphFragmentSchema } from '../config/schema.ts';
 import type { GraphFragment, Mapping } from '../config/schema.ts';
 import { LockViolation } from '../graph/merge.ts';
 import { resolveEach, throwProblems } from './mappings.ts';
 import type { Layer, ResolvedMapping } from './mappings.ts';
 import type { ResolvedGround } from './resolve.ts';
 
-export type LayerRoot = { source: string; use: Mapping[]; fragment: GraphFragment };
+export type LayerRoot = { source: string; use: Mapping[]; fragment: GraphFragment; locator?: Locator };
 
 /**
  * Walks each root's `use` depth-first. An `as: graph` mapping loads its fragment, recurses into the
@@ -38,9 +40,9 @@ export async function collectLayers(o: {
       if (visited.has(key)) continue;
       visited.add(key);
       const source = `ground:${m.ground}/${m.file}@${m.commit.slice(0, 12)}`;
-      const fragment = await loadFragment(m.absPath);
+      const { data: fragment, lines } = await loadLocated(m.absPath, GraphFragmentSchema);
       await walk(source, fragment.use ?? [], source);
-      layers.push({ source, fragment });
+      layers.push({ source, fragment, locator: { file: m.absPath, lines } });
     }
     perLayer.push({ source: layerSource, mappings: resolved.mappings });
   }
@@ -48,7 +50,7 @@ export async function collectLayers(o: {
   for (const root of o.roots) {
     // Only the profile (the user config itself) keeps the short unknown-ground message.
     await walk(root.source, root.use, root.source.startsWith('profile:') ? undefined : root.source);
-    layers.push({ source: root.source, fragment: root.fragment });
+    layers.push({ source: root.source, fragment: root.fragment, ...(root.locator ? { locator: root.locator } : {}) });
   }
   throwProblems(problems, o.configFile);
   return { layers, mappings: mergeMappings(perLayer) };
@@ -86,7 +88,16 @@ export function mergeMappings(perLayer: { source: string; mappings: ResolvedMapp
       const key = `${m.as}:${m.ground}:${rel}`;
       const earlier = out.get(key);
       if (earlier?.required === true) {
-        if (!sameMapping(earlier, m)) throw new LockViolation(`mapping ${m.ground}:${rel} (${m.as})`, earlier.source, m.source);
+        if (!sameMapping(earlier, m)) {
+          throw new LockViolation({
+            target: `${m.ground}:${rel} (${m.as})`,
+            noun: 'mapping',
+            lockedBy: earlier.source,
+            attemptedBy: m.source,
+            attempt: { file: m.source },
+            lock: { file: earlier.source },
+          });
+        }
         continue; // restated identically: the original locker stays the locker
       }
       out.set(key, m);

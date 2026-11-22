@@ -168,7 +168,7 @@ describe('mergeMappings', () => {
         assert.ok(e instanceof LockViolation);
         assert.equal(
           e.message,
-          `mapping team:p.md (policy) is locked by ${COMPANY}; profile:p cannot change it`,
+          `profile:p: mapping team:p.md (policy) is locked by ${COMPANY} (required: true); remove this mapping or restate it exactly`,
         );
         return true;
       },
@@ -193,7 +193,10 @@ describe('mergeMappings', () => {
         ]),
       (e: unknown) => {
         assert.ok(e instanceof LockViolation);
-        assert.equal(e.message, `mapping team:p.md (policy) is locked by ${COMPANY}; repo:r cannot change it`);
+        assert.equal(
+          e.message,
+          `repo:r: mapping team:p.md (policy) is locked by ${COMPANY} (required: true); remove this mapping or restate it exactly`,
+        );
         return true;
       },
     );

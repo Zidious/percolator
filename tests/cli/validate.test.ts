@@ -39,7 +39,23 @@ test('e2e fixture validates and lists steps (relative ground paths resolve again
 });
 
 test('profile overriding locked review fails with locking ground named', async () => {
-  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/config-override.yaml') }), /locked by ground:company/);
+  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/config-override.yaml') }), {
+    message: `${fx('e2e/config-override.yaml')}:13: profiles.work.bindings.review: locked by ${fx('e2e/grounds/company/percolator.yaml')}:2 (required: true); remove this binding or restate it exactly`,
+  });
+});
+
+test('a repo layer changing a locked binding names the repo file', async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    await fs.mkdir(path.dirname(repoFile));
+    await fs.writeFile(repoFile, 'bindings:\n  review: { agent: codex }\n');
+    await assert.rejects(validate({ ...trusted(), cwd }), {
+      message: `${repoFile}:2: bindings.review: locked by ${fx('e2e/grounds/company/percolator.yaml')}:2 (required: true); remove this binding or restate it exactly`,
+    });
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
+  }
 });
 
 test('unbound stages propagate as an error', async () => {

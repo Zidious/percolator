@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ConfigError } from '../config/load.ts';
+import type { Locator } from '../config/locate.ts';
 import { STAGES } from '../config/schema.ts';
 import type { GraphFragment, Mapping } from '../config/schema.ts';
 import type { Graph, Step } from '../graph/build.ts';
@@ -9,7 +10,8 @@ import type { ResolvedGround } from './resolve.ts';
 
 export type ResolvedMapping = Mapping & { absPath: string; ground: string; commit: string; source: string };
 
-export type Layer = { source: string; fragment: GraphFragment };
+/** One merge layer; `locator` says which file (and key prefix) its keys came from, for errors. */
+export type Layer = { source: string; fragment: GraphFragment; locator?: Locator };
 
 // A path must stay inside its ground. Both separators count, so `..\x` is caught on POSIX too.
 function escapesGround(rel: string): boolean {

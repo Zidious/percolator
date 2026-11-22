@@ -264,7 +264,7 @@ Layers merge in order: core, then grounds, then your profile, then the repo. A l
 Changing a locked target fails validation:
 
 ```text
-nodes.audit is locked by ground:team/graph.yaml@3f2a9c1e04b7; profile:default cannot change it
+~/.percolator/config.yaml:14: profiles.default.nodes.audit: locked by ~/.percolator/grounds/team@3f2a9c1e04b7/graph.yaml:5 (required: true); remove this node or restate it exactly
 ```
 
 > [!NOTE]
