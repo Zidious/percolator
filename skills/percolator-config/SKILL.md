@@ -31,6 +31,7 @@ Ask one question at a time and wait for the answer; skip what the request alread
 - extra steps before or after a stage: an agent, a command, or a gate
 - grounds and the `use:` mappings that draw policies, skills or prompts from them
 - the review loop cap (`max_rounds`)
+- another pipeline: a run with its own stages, inputs and exit (see "Pipelines")
 
 Stop asking when the user has nothing more to change.
 
@@ -50,12 +51,18 @@ profiles:                       # checked in order: the FIRST whose match fits w
     runtime: { base: main, worktree_root: …, keep_terminals: false, space: true }
     trust_repo_config: false
     use: [ { from: <ground>, file|dir: …, as: policy|context|skills|plugins|prompt|graph, applies_to: [<stage>…], required: true } ]
-    bindings: { intake: …, groom: …, plan: …, implement: …, review: …, deliver: … }
-    nodes: { <name>: { …, before|after: <stage>|all } }
-    rules: { allowed_agents: […], allowed_models: […], max_rounds_ceiling: n, require_skills: […], required_nodes: […] }
+    pipelines:
+      feature:                                       # the ticket → PR pipeline; the recommended config binds it here
+        default: true                                # what perc run uses without --pipeline
+        bindings: { intake: …, groom: …, plan: …, implement: …, review: …, deliver: … }
+        nodes: { <name>: { …, before|after: <stage>|all } }
+      <other>: { stages: [intake, …, <exit stage>], ticket: …, inputs: …, outputs: …, exit: …, bindings: …, nodes: …, rules: … }
+    bindings: { … }                                  # top-level bindings and nodes also belong to feature
+    nodes: { … }
+    rules: { allowed_agents: […], allowed_models: […], max_rounds_ceiling: n, require_skills: […], required_nodes: […] }   # every pipeline
 ```
 
-Everything except `version` and `grounds` belongs to one profile. A profile inherits nothing unless it sets `extends`. Grounds are shared: every profile's `perc validate` and runs fetch all of them.
+Everything except `version` and `grounds` belongs to one profile. Edit the feature pipeline where the config already has it: the recommended config keeps its bindings and nodes under `pipelines.feature`; an older config may have them at the top of the profile. If one profile sets the same stage or node in both places, `pipelines.feature` wins. Top-level `rules` apply to every pipeline; `pipelines.<p>.rules` to that one only. A profile inherits nothing unless it sets `extends`. Grounds are shared: every profile's `perc validate` and runs fetch all of them.
 
 `tracker.kind: github` is required whenever `tracker` is set. Setting `approvers` replaces the default (the gh user running `perc`): ask for the user's own GitHub login and add it too if they should still approve. Approvers are GitHub logins (not display names, case does not matter) and count at every gate of the profile.
 
@@ -114,6 +121,54 @@ What `extends` takes from the other profile: its bindings, nodes, rules and `use
 
 **Make runs cheaper**: per stage, a smaller `model`, a lower `effort` (claude only), and for review a lower `max_rounds`. Each makes the stage less thorough; ask which one the user wants. Then list every other stage and node still on the expensive model (with the recommended config: `plan`, `implement` and `pr-description`) so the user can decide about them too.
 
+## Pipelines
+
+A profile can run more than one kind of work. Each entry under `pipelines:` is a pipeline: its own stages, inputs, outputs and exit. `feature` (intake, groom, plan, implement, review, deliver, ending in a PR) is the built-in one. Names are lower-case letters, digits and `-`, at most 24 characters.
+
+```yaml
+pipelines:
+  dd-alert:
+    description: Diagnose a Datadog alert and write a report      # shown by perc pipelines
+    ticket: required                 # required (default), optional or none
+    inputs:
+      alert_url: { required: true, description: Link to the alert }
+    stages: [intake, gather, diagnose, report]   # intake first; the last stage is the exit stage
+    outputs:
+      gather: [evidence]             # the stage must write outputs/evidence.md
+      diagnose: [diagnosis]
+    exit: none                       # how the run ends: pr, comment, issue, none, release, pr_review, private_fork_pr (see "Exits")
+    bindings:
+      gather: { agent: claude, model: sonnet, prompt: "Collect what {{input_alert_url}} points at into evidence.md." }
+      diagnose: { agent: claude, model: opus }
+```
+
+- `stages` is required for every pipeline but `feature`. `intake` must come first; when it is unbound it runs `github.intake`, which reads the issue into `ticket.md`. Every other stage needs a binding under `pipelines.<p>.bindings`, except the last one when `exit:` is set (Percolator binds the exit's builtin there).
+- `outputs` lists the keys each stage must write; a stage left out needs none. The `feature` stages keep their fixed outputs (groomed_ticket, plan, summary, findings, pr_url).
+- `inputs` are named values a run gets with `perc run --input <name>=<value>` (repeat `--input` for each); `required: true` refuses a run without it, and an unknown name is refused too. Input names are lower-case letters, digits and `_`. Prompts read them as `{{input_<name>}}`.
+- `ticket: none` means the pipeline takes no issue: `perc run` with a ticket is refused. This perc validates such a pipeline but cannot start it yet (`perc run` says so); use `required` or `optional` for pipelines you want to run now.
+- `default: true` marks the pipeline `perc run` uses without `--pipeline`; at most one per profile. Without one, `feature` is the default.
+- A stage named `review` loops back to the stage before it (3 rounds unless its binding sets `max_rounds`); any other stage loops the same way when its binding sets `max_rounds`.
+- Hooks (`before`/`after`) must name a stage of their own pipeline, or `all`.
+- The `approve-groom` gate is built into `feature` only. Another pipeline gets no gate unless you add one as a node with `kind: gate`.
+
+Start one with `perc run <ticket> --pipeline <name> [--input key=value]…`. `perc pipelines` lists the pipelines a repo can use, with their ticket mode, exit and inputs. Validate each pipeline you touched: `perc validate --config <file> --profile <name> --pipeline <pipeline>` (without `--pipeline` it checks all of them).
+
+## Exits
+
+The last stage of every pipeline is its exit: a builtin Percolator runs itself, never an agent. Set `exit:` and leave the stage unbound (Percolator binds the builtin), or bind the stage to the builtin; if you do both, they must agree. Each exit reads an output an earlier stage writes, so put that key under `outputs:` of the stage before it, and tell that stage's agent to write it.
+
+| `exit` | Builtin | Reads | Needs | Writes |
+|---|---|---|---|---|
+| `pr` | `github.open_pr` | `pr_body` (optional) | | `pr_url` |
+| `comment` | `github.comment` | `comment` (required) | a ticket: not with `ticket: none` | `comment_url` |
+| `issue` | `github.open_issues` | `issues`: one `## <title>` section per issue; none means no issues | | `issue_urls` |
+| `none` | `percolator.report` | | | nothing; outputs stay in the run dir |
+| `release` | `github.release` | `tag`, `release_notes` | input `tag`, or `tag` under `outputs` of an earlier stage | `release_url` |
+| `pr_review` | `github.pr_review` | `review` (required) | input `pr` | `review_url` |
+| `private_fork_pr` | `github.private_fork_pr` | `pr_body` (optional) | input `advisory` (a GHSA id) | `pr_url` |
+
+`perc validate` refuses an exit whose needs are missing and says what to declare. `pr_review` posts a comment review only; it never approves or requests changes. `private_fork_pr` opens the PR in the advisory's temporary private fork, without `Closes #N`.
+
 ## Agents, models and skills
 
 - `agent` is `claude`, `codex` or `command`. `effort` (low, medium, high, xhigh, max) is for `claude` only.
@@ -123,11 +178,12 @@ What `extends` takes from the other profile: its bindings, nodes, rules and `use
 
 ## What the config cannot do
 
-- **Turn off the groom approval.** Every run pauses at `approve-groom` after `groom`; a rejection re-runs `groom` (at most 3 times, then escalates). It is built in, which is why `perc validate` lists it although the config never mentions it. Offer instead: `tracker.approvers` to let others approve, or answering faster with `perc approve <run-id>` or a `/percolator approve` comment on the issue. Extra gates can be added as nodes with `kind: gate`.
+- **Turn off the groom approval.** Every run of the `feature` pipeline pauses at `approve-groom` after `groom`; a rejection re-runs `groom` (at most 3 times, then escalates). It is built in, which is why `perc validate` lists it although the config never mentions it. Offer instead: `tracker.approvers` to let others approve, or answering faster with `perc approve <run-id>` or a `/percolator approve` comment on the issue. Extra gates can be added as nodes with `kind: gate`.
 - **Remove or change a locked target** (`required: true` in a ground). Validation reports the lock and the file that set it; tell the user to change the ground or ask its owner.
 - **Set `effort` on codex or command.** Offer to keep the stage on claude with that effort, or to switch without it.
 - **Give one gate its own approvers.** `tracker.approvers` applies to all gates of the profile.
-- **Bind fewer than six stages.** `intake`, `groom`, `plan`, `implement`, `review`, `deliver` must all be bound.
+- **Bind fewer stages than the pipeline lists.** `feature`'s `intake`, `groom`, `plan`, `implement`, `review`, `deliver` must all be bound; another pipeline must bind every stage it lists (intake and the exit stage can come from defaults, see "Pipelines"). To run different stages, add a pipeline instead.
+- **Run an agent in the exit stage.** The last stage of a pipeline is a builtin that Percolator runs itself (opening the PR, for `feature`); put agents in earlier stages or in a hook before it.
 
 ## 3. Edit the YAML
 
@@ -137,7 +193,7 @@ What `extends` takes from the other profile: its bindings, nodes, rules and `use
 
 ## 4. Validate
 
-Run `perc validate --config <file> --profile <name>` once for each profile you touched.
+Run `perc validate --config <file> --profile <name>` once for each profile you touched. It checks every pipeline of the profile and prints one block per pipeline; add `--pipeline <pipeline>` to check just one.
 
 If it reports errors in the config, fix the config and run it again until it is clean. If it fails for another reason (a ground cannot be cloned or fetched, git or the network fails), stop and show the user the error: do not change git settings or work around it. If the ground is one you just added, take it out again first (grounds are shared, so it breaks every profile), and say what it was for.
 

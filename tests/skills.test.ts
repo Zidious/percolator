@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
+import { EXITS, EXIT_KINDS } from '../src/tracker/index.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
@@ -32,4 +33,20 @@ test('percolator-config skill keeps the rules agents needed most', async () => {
     text.includes('ask the user which repo (and ref) to add; do not pick one yourself'),
     'skill must make the agent ask before adding a git ground the user did not name',
   );
+});
+
+test('the config skill covers pipelines and inputs', async () => {
+  const text = await fs.readFile(path.join(ROOT, 'skills', 'percolator-config', 'SKILL.md'), 'utf8');
+  assert.ok(text.includes('pipelines:'), 'skill must show where pipelines go');
+  assert.ok(text.includes('ticket: none'), 'skill must explain ticket: none');
+  assert.ok(text.includes('--input'), 'skill must say how a run gets its inputs');
+});
+
+test('the config skill covers every exit', async () => {
+  const text = await fs.readFile(path.join(ROOT, 'skills', 'percolator-config', 'SKILL.md'), 'utf8');
+  const exits = text.split('## Exits')[1]?.split('\n## ')[0];
+  assert.ok(exits !== undefined, 'skill must have an "Exits" section');
+  for (const kind of EXIT_KINDS) {
+    assert.ok(exits.includes(`| \`${kind}\` | \`${EXITS[kind].builtin}\` |`), `the Exits section must have a row for ${kind}`);
+  }
 });

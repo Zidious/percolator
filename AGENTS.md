@@ -1,6 +1,6 @@
 # AGENTS.md — working on Percolator
 
-Deterministic "software factory" engine. The `perc` CLI loads layered YAML config (core → grounds → profile → repo), builds a run graph (six core stages + hooks + bounded back-edges), walks it through pluggable runtimes, and persists run state for resume.
+Deterministic "software factory" engine. The `perc` CLI loads layered YAML config (core → grounds → profile → repo), builds a run graph for one pipeline (its stages + hooks + bounded back-edges; `feature` is the six-stage ticket → PR pipeline), walks it through pluggable runtimes, and persists run state for resume.
 
 Update this file when you add a convention, a directory or a command. Do not document what individual functions do; that belongs in the code.
 
@@ -14,6 +14,9 @@ node --test tests/util/paths.test.ts  # focused run
 pnpm build                            # tsc → dist/ (gitignored)
 pnpm schema                           # regenerate schema/percolator.schema.json after changing the zod schema
 node src/cli.ts <command> …           # run perc from a checkout; `perc --help` lists commands
+node src/cli.ts validate [--pipeline <name>]        # check every pipeline of the profile, or one
+node src/cli.ts run <ticket> [--pipeline <name>] [--input key=value]...  # start a run of a pipeline (default: the profile's)
+node src/cli.ts pipelines [--json]                  # list the repo's pipelines (--json: the panel's contract)
 node src/cli.ts delete <id>...|--finished [--yes]  # remove runs; keeps branches
 pnpm herdr:sync                       # mirror herdr/mods/* into the Herdr app (reloads live; removes stale files, keeps perc.json); after any panel/cup change
 node tests/smoke/hc.smoke.ts          # manual smoke tests against the real hc / gh (gh.smoke.ts); flags in each file's header; never in pnpm test
@@ -43,17 +46,19 @@ Read the module before changing it.
 | Dir | What |
 |---|---|
 | `src/cli.ts` | `perc` entry: arg parsing, commands, exit codes (0 ok, 1 error/failed run, 2 usage) |
-| `src/config/` | zod schema (single source for config keys), YAML loading with located errors, profiles |
+| `src/config/` | zod schema (single source for config keys), YAML loading with located errors, profiles; `pipelines.ts`: pipeline specs, the default pipeline, checks across pipelines (routes, next, triggers) |
 | `src/grounds/` | git grounds: resolve and pin (`percolator.lock`), layers, mappings |
 | `src/graph/` | core stages and contracts, layer merge with locks, rules, graph build |
 | `src/engine/` | `runGraph`, run state, `Runtime` interface |
 | `src/runtime/` | `HerdrRuntime`: task rendering, terminal lifecycle, outputs collection |
-| `src/run/` | run lifecycle: prepare, launch/drive, driver lock, metadata |
-| `src/tracker/` | GitHub: tickets, `gh` client, intake, approval gate, PRs; `BUILTIN_NAMES` is the single source of builtin node names |
+| `src/run/` | run lifecycle: prepare, launch/drive, driver lock, metadata; `request.ts`: `--input` parsing and the run request checked against its pipeline; `pipelines-json.ts`: `perc pipelines` |
+| `src/tracker/` | GitHub: tickets, `gh` client, intake, approval gate, PRs; `BUILTIN_NAMES` is the single source of builtin node names, `EXITS` of exit kinds |
+| `src/tracker/exits/` | one handler per exit builtin (comment, issues, report, release, review, private fork PR) |
 | `src/herdr/` | clients for `hc` and `herdr-app` |
 | `src/adapters/` | agent argv builders (`claude`, `codex`, `command`) |
 | `src/workspace/` | worktrees, run/step dirs, ground materialization, skill plugins |
-| `src/util/` | paths, atomic fs, argv-only exec |
+| `src/util/` | paths, atomic fs, argv-only exec; `cron.ts` (cron with time zones, Intl only), `sections.ts` (`## ` sections of drafted issues and slices) |
+| `src/watch/` | trigger polling and the firing ledger (`fired.json`) |
 | `src/validate.ts` | config → graph validation pipeline |
 | `templates/` | recommended config written by `perc init` |
 | `skills/` | agent-agnostic skills shipped in the package |
@@ -71,7 +76,7 @@ Read the module before changing it.
 
 ## Design decisions to keep
 
-- **Six core stages, in order:** `intake`, `groom`, `plan`, `implement`, `review`, `deliver`. All must be bound or the engine refuses to start. No built-in bindings for `groom`…`review`; `perc init` writes the recommended config.
+- **Pipelines:** every pipeline starts with intake and ends with one exit builtin; the feature pipeline's stages are intake, groom, plan, implement, review, deliver, and its approve-groom gate is built in (required) there only. Every stage must be bound or the engine refuses to start. No built-in bindings for `groom`…`review`; `perc init` writes the recommended config (`pipelines.feature`). Top-level `bindings`/`nodes` belong to `feature`; top-level `rules` apply to every pipeline.
 - **Bounded loops:** review caps at 3 rounds, then delivers anyway (the PR body does not carry the findings); a back-edge (`on_fail: { back_to, max_rounds }`) at its cap escalates to the owner.
 - **Locks:** `required: true` wins over merge order. A locked target may only be restated deep-equal; otherwise `LockViolation`, located at the attempt: `"<file>:<line>: <path>: locked by <file>:<line> (required: true); remove this <binding|node|mapping> or restate it exactly"` (mappings read `mapping <name> is locked by …`); a core lock reads `"… locked by Percolator core (required: true); remove this node: <name> is built in"`.
 - **Completion** = `done.json` + `outputs/<key>.md`; hc status is only for attention.
