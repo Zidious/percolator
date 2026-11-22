@@ -873,3 +873,78 @@ test('approve of an unknown run names the missing run record', async () => {
     await e.cleanup();
   }
 });
+
+const PIPELINES = [
+  TRACKER,
+  '    pipelines:',
+  '      dd-alert:',
+  '        stages: [intake, triage, deliver]',
+  '        exit: pr',
+  '        ticket: none',
+  '        inputs:',
+  '          alert_url: { required: true }',
+  '        bindings:',
+  '          triage: { command: [echo, triage] }',
+  '      hotfix:',
+  '        stages: [intake, implement, deliver]',
+  '        exit: pr',
+  '        ticket: optional',
+  '        bindings:',
+  '          implement: { command: [echo, implement] }',
+].join('\n');
+
+/** `perc run` with `args` against a config with the dd-alert and hotfix pipelines; asserts nothing was created. */
+async function runPipelines(args: string[]): Promise<{ code: number; out: string; err: string }> {
+  const e = await setup();
+  try {
+    await e.writeConfig(PIPELINES, BINDINGS);
+    const r = await e.perc(['run', ...args, '--repo', e.root, '--config', e.configFile, '--profile', 'work']);
+    assert.equal(await exists(path.join(e.home, '.percolator', 'runs')), false);
+    assert.equal(await exists(path.join(e.root, '.worktrees')), false);
+    assert.equal(runCalls(e.deps.hc).length, 0);
+    return r;
+  } finally {
+    await e.cleanup();
+  }
+}
+
+test('perc run --pipeline dd-alert without alert_url exits 2', async () => {
+  const r = await runPipelines(['--pipeline', 'dd-alert']);
+  assert.equal(r.code, 2);
+  assert.ok(r.err.startsWith('pipeline "dd-alert" needs input alert_url; pass --input alert_url=<value>\n\nusage: perc'), r.err);
+});
+
+test('perc run with a ticket on a ticket: none pipeline exits 2', async () => {
+  const r = await runPipelines(['#5', '--pipeline', 'dd-alert', '--input', 'alert_url=https://dd/x?a=b']);
+  assert.equal(r.code, 2);
+  assert.ok(
+    r.err.startsWith(
+      'pipeline "dd-alert" takes no ticket (ticket: none); drop the ticket or pick another pipeline with --pipeline\n\nusage: perc',
+    ),
+    r.err,
+  );
+});
+
+test('perc run --input that is not key=value exits 2', async () => {
+  const r = await runPipelines(['#5', '--input', 'oops']);
+  assert.equal(r.code, 2);
+  assert.ok(r.err.startsWith('--input needs key=value, got "oops"\n\nusage: perc'), r.err);
+});
+
+test('perc run takes at most one ticket', async () => {
+  const r = await runPipelines(['#5', '#6']);
+  assert.equal(r.code, 2);
+  assert.ok(r.err.startsWith('run takes at most one <ticket>\n\nusage: perc'), r.err);
+});
+
+test('perc run of an unknown pipeline names the pipelines', async () => {
+  const r = await runPipelines(['#5', '--pipeline', 'nope']);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /: unknown pipeline "nope" in profile "work" \(pipelines: feature, dd-alert, hotfix\); pass one of those to --pipeline\n$/);
+});
+
+test('a valid ticketless request stops before anything is created', async () => {
+  const r = await runPipelines(['--pipeline', 'dd-alert', '--input', 'alert_url=u']);
+  assert.equal(r.code, 1);
+  assert.equal(r.err, 'pipeline "dd-alert" runs without a ticket, which this perc cannot start yet; pass a ticket to a pipeline that takes one\n');
+});

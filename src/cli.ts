@@ -19,6 +19,7 @@ import { checkResumable, drive, prUrl } from './run/drive.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
 import type { RunMeta } from './run/meta.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
+import { InputError, parseInputs } from './run/request.ts';
 import type { DriverDeps } from './run/prepare.ts';
 import { attentionNext, driverLiveness, readAttention, runStatusJson, statusJson } from './run/status.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
@@ -44,8 +45,9 @@ commands:
       (default config: ~/.percolator/config.yaml)
   schema [--out <file>]
       write the JSON schema for the config (default: schema/percolator.schema.json)
-  run <ticket> [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]
-      start a run: groom, approval, plan, implement, review, PR (default: in its own hc terminal)
+  run [<ticket>] [--pipeline <name>] [--input key=value]... [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]
+      start a run of a pipeline (default: the profile's; feature: groom, approval, plan, implement, review, PR)
+      in its own hc terminal (--foreground: in this one)
   resume <run-id> [--foreground]
       continue a paused or interrupted run (grants one more round at a cap)
   status [<run-id>] [--json]
@@ -67,7 +69,7 @@ options:
 
 class UsageError extends Error {}
 
-type Options = Record<string, { type: 'string' | 'boolean' }>;
+type Options = Record<string, { type: 'string' | 'boolean'; multiple?: boolean }>;
 
 function parse<T extends Options>(args: string[], options: T, allowPositionals = false) {
   try {
@@ -186,12 +188,17 @@ async function runRun(args: string[], deps: DriverDeps): Promise<number> {
     repo: { type: 'string' },
     config: { type: 'string' },
     profile: { type: 'string' },
+    pipeline: { type: 'string' },
+    input: { type: 'string', multiple: true },
     foreground: { type: 'boolean' },
   });
-  if (positionals.length !== 1) throw new UsageError('run needs <ticket>');
+  if (positionals.length > 1) throw new UsageError('run takes at most one <ticket>');
+  const inputs = parseInputs(values.input ?? []);
   const meta = await prepareRun(
     {
-      ticket: positionals[0]!,
+      ...(positionals[0] !== undefined ? { ticket: positionals[0] } : {}),
+      ...(values.pipeline !== undefined ? { pipeline: values.pipeline } : {}),
+      inputs,
       repoDir: path.resolve(values.repo ?? process.cwd()),
       configFile: values.config ?? defaultConfig(),
       ...(values.profile !== undefined ? { profile: values.profile } : {}),
@@ -519,7 +526,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     io.stderr(`unknown command: ${command}\n\n${USAGE}`);
     return 2;
   } catch (err) {
-    if (err instanceof UsageError) {
+    if (err instanceof UsageError || err instanceof InputError) {
       io.stderr(`${err.message}\n\n${USAGE}`);
       return 2;
     }

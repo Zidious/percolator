@@ -250,8 +250,9 @@ test('--help lists the run commands', async () => {
   assert.ok(
     r.out.includes(
       [
-        '  run <ticket> [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]',
-        '      start a run: groom, approval, plan, implement, review, PR (default: in its own hc terminal)',
+        '  run [<ticket>] [--pipeline <name>] [--input key=value]... [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]',
+        "      start a run of a pipeline (default: the profile's; feature: groom, approval, plan, implement, review, PR)",
+        '      in its own hc terminal (--foreground: in this one)',
         '  resume <run-id> [--foreground]',
         '      continue a paused or interrupted run (grants one more round at a cap)',
         '  status [<run-id>] [--json]',
@@ -273,10 +274,11 @@ test('--help lists the run commands', async () => {
   );
 });
 
-test('run with no ticket exits 2', async () => {
-  const r = await run(['run']);
+test('run with no ticket on a pipeline that needs one exits 2', async () => {
+  const cfg = await pipelinesConfig();
+  const r = await run(['run', '--repo', tmp, '--config', cfg, '--profile', 'default']);
   assert.equal(r.code, 2);
-  assert.match(r.err, /^run needs <ticket>\n\nusage: perc/);
+  assert.match(r.err, /^pipeline "feature" needs a ticket; pass one: perc run <ticket> --pipeline feature\n\nusage: perc/);
 });
 
 test('herdr link writes perc.json for the running cli and prints the path', async () => {
