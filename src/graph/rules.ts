@@ -1,5 +1,5 @@
 import { ConfigError } from '../config/load.ts';
-import { formatIssue, locate, place } from '../config/locate.ts';
+import { formatIssue, locate, place, slotKey } from '../config/locate.ts';
 import type { Locator, Where } from '../config/locate.ts';
 import { effectiveKind } from '../config/schema.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
@@ -21,7 +21,7 @@ function entries(merged: Merged): Entry[] {
     const nodes = binding?.value ?? [];
     nodes.forEach((node, i) => {
       out.push({
-        target: nodes.length > 1 ? `bindings.${stage}.${i}` : `bindings.${stage}`,
+        target: slotKey(binding!.locator, stage, i, nodes.length),
         node,
         stage,
         source: binding!.source,

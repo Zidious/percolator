@@ -1,5 +1,5 @@
 import { ConfigError } from '../config/load.ts';
-import { locate } from '../config/locate.ts';
+import { locate, slotKey } from '../config/locate.ts';
 import type { Locator, Where } from '../config/locate.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
 import { CORE_GROOM_GATE, CORE_STAGES } from './core.ts';
@@ -19,7 +19,14 @@ export type Step = {
   locked: boolean;
   /** where the binding or node was written, for errors */
   locator?: Locator;
+  /** key path of this step's node in its layer (`bindings.review.0`, `nodes.audit`); see stepKey */
+  key?: string;
 };
+
+/** Key path of the step's node, for errors: its recorded key, else `bindings.<id>` / `nodes.<id>`. */
+export function stepKey(step: Step): string {
+  return step.key ?? `${step.role === 'hook' ? 'nodes' : 'bindings'}.${step.id}`;
+}
 
 export type BackEdge = {
   id: string;
@@ -99,6 +106,7 @@ export function buildGraph(merged: Readonly<Merged>, home?: { profile: string; l
         source: binding.source,
         locked: binding.locked,
         ...(binding.locator ? { locator: binding.locator } : {}),
+        key: slotKey(binding.locator, stage, i, slot.length),
       });
     });
     for (const h of hooks.filter((h) => h.def.after === stage)) pushHook(h, stage);
@@ -125,7 +133,7 @@ export function buildGraph(merged: Readonly<Merged>, home?: { profile: string; l
     const onFail = step.def.on_fail;
     if (!onFail) continue;
     const at = (key: string) =>
-      locate(step.locator, 'config', `${step.role === 'hook' ? 'nodes' : 'bindings'}.${step.id}.${key}`);
+      locate(step.locator, 'config', `${stepKey(step)}.${key}`);
     if (step === lastReview) {
       throw new GraphError('review loop is core-owned; set max_rounds on the review binding instead', at('on_fail'));
     }

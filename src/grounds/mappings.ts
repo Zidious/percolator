@@ -6,6 +6,7 @@ import { formatIssue, locate } from '../config/locate.ts';
 import type { Locator, Problem, Where } from '../config/locate.ts';
 import { STAGES } from '../config/schema.ts';
 import type { GraphFragment, Mapping } from '../config/schema.ts';
+import { stepKey } from '../graph/build.ts';
 import type { Graph, Step } from '../graph/build.ts';
 import { samePath } from '../util/paths.ts';
 import type { ResolvedGround } from './resolve.ts';
@@ -157,7 +158,7 @@ export async function checkGraphReferences(
   for (const step of graph.steps) {
     const prompt = step.def.prompt;
     if (prompt === undefined || typeof prompt === 'string') continue;
-    const target = `${step.role === 'slot' ? 'bindings' : 'nodes'}.${step.id}.prompt`;
+    const target = `${stepKey(step)}.prompt`;
     const at = (key: string) => locate(step.locator, configFile, `${target}.${key}`);
     const ground = grounds[prompt.from];
     if (!ground) {

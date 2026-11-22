@@ -2,6 +2,7 @@ import { BUILTIN_NAMES } from '../tracker/index.ts';
 import { locate } from '../config/locate.ts';
 import type { Problem } from '../config/locate.ts';
 import { effectiveKind } from '../config/schema.ts';
+import { stepKey } from '../graph/build.ts';
 import type { Graph } from '../graph/build.ts';
 import { mappingsFor, throwProblems } from '../grounds/mappings.ts';
 import type { ResolvedMapping } from '../grounds/mappings.ts';
@@ -17,7 +18,7 @@ export async function checkAgents(graph: Graph, mappings: ResolvedMapping[], con
   const known = Object.keys(ADAPTERS);
   for (const step of graph.steps) {
     const kind = effectiveKind(step.def);
-    const target = `${step.role === 'slot' ? 'bindings' : 'nodes'}.${step.id}`;
+    const target = stepKey(step);
     const report = (message: string, key?: string) =>
       problems.push({ ...locate(step.locator, configFile, key === undefined ? target : `${target}.${key}`), message });
     if (kind === 'builtin') {
@@ -58,7 +59,7 @@ export async function checkAgents(graph: Graph, mappings: ResolvedMapping[], con
     if (!adapter.nativeSkills) {
       const skills = [
         ...(step.def.skill !== undefined ? [[step.def.skill, 'skill'] as const] : []),
-        ...(step.def.skills ?? []).map((s) => [s, 'skills'] as const),
+        ...(step.def.skills ?? []).map((s, i) => [s, `skills.${i}`] as const),
       ];
       for (const [skill, key] of skills) {
         if ((await findSkill(skill, applying)) === undefined) {

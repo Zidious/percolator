@@ -70,3 +70,14 @@ export function place(w: Where): string {
 export function formatIssue(message: string, file: string, line?: number, path?: string): string {
   return `${place(line === undefined ? { file } : { file, line })}: ${path ? `${path}: ` : ''}${message}`;
 }
+
+/**
+ * Key path of item `i` of a stage's `count`-node binding: `bindings.<stage>.<i>` for a list, and for
+ * a single node `bindings.<stage>.0` when the locator shows it was written as a one-item list.
+ */
+export function slotKey(loc: Locator | undefined, stage: string, i: number, count: number): string {
+  const base = `bindings.${stage}`;
+  if (count > 1) return `${base}.${i}`;
+  const item = [loc?.prefix, `${base}.0`].filter((s) => s !== undefined && s !== '').join('.');
+  return loc?.lines[item] !== undefined ? `${base}.0` : base;
+}

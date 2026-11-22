@@ -374,3 +374,15 @@ test('deliver cannot be an agent node; script and builtin are fine', () => {
   assert.throws(() => buildGraph(full({}, { deliver: [{ command: ['x'] }, { agent: 'claude' }] })), /deliver cannot be an agent node/);
   buildGraph(full({}, { deliver: { command: ['x'] } }));
 });
+
+test('a one-item list binding is located at its item: bindings.<stage>.0', () => {
+  const merged = fullAt(
+    { 'bindings.implement': 9, 'bindings.implement.0': 10, 'bindings.implement.0.on_fail': 11, 'bindings.implement.0.on_fail.back_to': 12 },
+    {},
+    { implement: [{ agent: 'claude', on_fail: { back_to: 'deliver', max_rounds: 1 } }] },
+  );
+  assert.throws(() => buildGraph(merged), {
+    message: 'g.yaml:12: bindings.implement.0.on_fail.back_to: back_to must point to an earlier stage (got "deliver" at "implement"); use "implement" or an earlier stage',
+    path: 'bindings.implement.0.on_fail.back_to',
+  });
+});

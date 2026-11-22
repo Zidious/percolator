@@ -208,6 +208,31 @@ describe('checkGraphReferences', () => {
     });
   });
 
+  test('a prompt in a one-item list binding is located at its item', async () => {
+    const locator = { file: 'c.yaml', lines: { 'bindings.plan': 3, 'bindings.plan.0': 4, 'bindings.plan.0.prompt': 5, 'bindings.plan.0.prompt.from': 6 } };
+    const graph = buildGraph(
+      mergeLayers([
+        {
+          source: 'test',
+          locator,
+          fragment: {
+            bindings: {
+              intake: { agent: 'claude' },
+              groom: { agent: 'claude' },
+              plan: [{ agent: 'claude', prompt: { from: 'nope', file: 'p.md' } }],
+              implement: { agent: 'claude' },
+              review: { agent: 'claude' },
+              deliver: { builtin: 'github.open_pr' },
+            },
+          },
+        },
+      ]),
+    );
+    await assert.rejects(checkGraphReferences(graph, [], grounds, 'c.yaml'), {
+      message: 'c.yaml:6: bindings.plan.0.prompt.from: ground "nope" is not declared; add it under grounds:',
+    });
+  });
+
   test('resolveEach locates problems through the locator', async () => {
     const { problems } = await resolveEach([mFile('x.md', 'policy', 'corp')], grounds, {
       source: 'profile:w',

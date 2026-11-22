@@ -246,3 +246,17 @@ test('violations are located at the node and name the rule line', () => {
   assert.equal(err.line, 3);
   assert.equal(err.path, 'bindings.implement');
 });
+
+test('a one-item list binding is located at its item', () => {
+  const merged = mergeLayers([
+    {
+      source: 'repo:base',
+      fragment: { bindings: { implement: [{ agent: 'claude' }] } },
+      locator: { file: 'n.yaml', lines: { 'bindings.implement': 3, 'bindings.implement.0': 4 } },
+    },
+    { source: 'rules:0', fragment: { rules: { require_skills: [{ stage: 'implement', skills: ['tdd'] }] } } },
+  ]);
+  const v = checkRules(merged);
+  assert.equal(v[0]!.target, 'bindings.implement.0');
+  assert.deepEqual(v[0]!.where, { file: 'n.yaml', line: 4, path: 'bindings.implement.0' });
+});

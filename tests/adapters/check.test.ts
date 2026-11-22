@@ -80,7 +80,7 @@ test('a skill must be found in the mapped skills or plugins when the agent has n
   const m = mapping('skills', path.join(dir, 'skills'), { dir: 'skills' });
   const g = graphOf({ review: { agent: 'codex', skills: ['g:sec', 'g:missing'] }, plan: { agent: 'claude', skill: 'g:missing' } });
   assert.deepEqual(await problems(checkAgents(g, [m], 'cfg.yaml')), [
-    'cfg.yaml: bindings.review.skills: skill "g:missing" not found in the skills or plugins mapped to it (agent "codex" loads skills from files); map a skills dir that has it, or remove the skill',
+    'cfg.yaml: bindings.review.skills.1: skill "g:missing" not found in the skills or plugins mapped to it (agent "codex" loads skills from files); map a skills dir that has it, or remove the skill',
   ]);
 });
 
@@ -118,5 +118,26 @@ test('problems are located through the step and mapping locators', async () => {
   assert.deepEqual(await problems(checkAgents(g, [m], 'cfg.yaml')), [
     'g.yaml:5: bindings.review.agent: unknown agent "gemini" (known: claude, codex, command); use one of those',
     'g.yaml:3: use.0.file: skills mappings must use dir; replace file: with dir:',
+  ]);
+});
+
+test('a one-item list binding is located at its item, and a missing skill at its list entry', async () => {
+  const lines = {
+    'bindings.review': 4,
+    'bindings.review.0': 5,
+    'bindings.review.0.agent': 5,
+    'bindings.review.0.effort': 6,
+    'bindings.review.0.skills': 7,
+    'bindings.review.0.skills.0': 8,
+    'bindings.review.0.skills.1': 9,
+  };
+  const locator = { file: 'g.yaml', lines };
+  const fragment = { bindings: { ...base, review: [{ agent: 'codex', effort: 'high' as const, skills: ['g:a', 'g:missing'] }] } };
+  const g = buildGraph(mergeLayers([{ source: 'ground:g', fragment, locator }]));
+  const out = await problems(checkAgents(g, [], 'cfg.yaml'));
+  assert.deepEqual(out, [
+    'g.yaml:6: bindings.review.0.effort: agent "codex" does not take "effort"; remove it or use agent "claude"',
+    'g.yaml:8: bindings.review.0.skills.0: skill "g:a" not found in the skills or plugins mapped to it (agent "codex" loads skills from files); map a skills dir that has it, or remove the skill',
+    'g.yaml:9: bindings.review.0.skills.1: skill "g:missing" not found in the skills or plugins mapped to it (agent "codex" loads skills from files); map a skills dir that has it, or remove the skill',
   ]);
 });
