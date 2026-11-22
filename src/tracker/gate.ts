@@ -235,6 +235,9 @@ export function githubGate(o: {
   };
 
   return async (step, ctx, io) => {
+    // a conditional gate (when_output: issues) stops only when there is something to approve
+    const when = step.def?.when_output;
+    if (when !== undefined && !ctx.graph.steps.some((s) => ctx.previousOutputs[s.id]?.[when])) return { status: 'pass', outputs: {} };
     const waitingPath = waitingFile(o.runDir);
     let wroteWaiting = false;
     try {

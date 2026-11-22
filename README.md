@@ -214,6 +214,7 @@ profiles:
 | `max_rounds` | review | Round cap for the review loop (default 3). |
 | `once` | hooks | Skip the hook once it has passed in this run, so a loop does not re-run it. |
 | `timeout_s` | agent, script | Escalate to you if the step is not done after n seconds. Builtins and gates ignore it. |
+| `when_output` | gate | Stop only when an earlier step wrote this output (like `issues`); otherwise the gate passes at once. Rejected on any other kind. |
 | `required` | all | Locks the node: later layers may only restate it unchanged. |
 
 ### Hooks, gates and loops

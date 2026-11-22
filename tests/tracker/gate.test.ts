@@ -710,3 +710,35 @@ test('a gate without an issue waits locally and posts nothing', async () => {
     await rm(e.runDir);
   }
 });
+
+test('a gate with when_output passes at once without the output', async () => {
+  const e = await setup();
+  try {
+    const step = { id: 'approve-issue', def: { kind: 'gate', when_output: 'issues' } } as unknown as Step;
+    const h = githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts, onWaiting: () => assert.fail('the gate waited') });
+    const out = await h(step, e.ctx, e.io);
+    assert.deepEqual(out, { status: 'pass', outputs: {} });
+    assert.deepEqual(e.gh.calls, []);
+    assert.equal(await readWaiting(e.runDir), undefined);
+  } finally {
+    await rm(e.runDir);
+  }
+});
+
+test('a gate with when_output waits when a step wrote that output', async () => {
+  const e = await setup();
+  try {
+    // groom wrote spec: a gate on spec stops for a decision
+    const step = { id: 'approve-groom', def: { kind: 'gate', when_output: 'spec' } } as unknown as Step;
+    const waited: string[] = [];
+    e.onSleep.fn = async (n) => {
+      if (n === 1) await writeDecision(e.runDir, { decision: 'approve', by: 'bob' });
+    };
+    const h = githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts, onWaiting: (s) => void waited.push(s) });
+    const out = await h(step, e.ctx, e.io);
+    assert.equal(out.status, 'pass');
+    assert.deepEqual(waited, ['approve-groom']);
+  } finally {
+    await rm(e.runDir);
+  }
+});
