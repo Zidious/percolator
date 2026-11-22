@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeLayers, LockViolation } from '../../src/graph/merge.ts';
+import { mergeLayers, mergePipelines, LockViolation } from '../../src/graph/merge.ts';
 import { CORE_STAGES, STAGE_CONTRACTS, CORE_GROOM_GATE } from '../../src/graph/core.ts';
 import type { Layer } from '../../src/grounds/mappings.ts';
 
@@ -228,4 +228,90 @@ test('an identical restatement from another file still passes', () => {
   ]);
   assert.equal(m.bindings.review!.source, 'ground:co');
   assert.deepEqual(m.bindings.review!.value, [LOCKED]);
+});
+
+test('top-level bindings merge into feature', () => {
+  const r = mergePipelines([L('a', { bindings: { plan: { agent: 'claude' } } })]);
+  assert.equal(r.feature!.bindings.plan!.value[0]!.agent, 'claude');
+  assert.equal(r.feature!.name, 'feature');
+});
+
+test('pipelines merge per pipeline across layers', () => {
+  const r = mergePipelines([
+    L('a', { pipelines: { hotfix: { bindings: { fix: { agent: 'claude' } } } } }),
+    L('b', { pipelines: { hotfix: { bindings: { fix: { agent: 'codex' } } } } }),
+  ]);
+  assert.equal(r.hotfix!.bindings.fix!.value[0]!.agent, 'codex');
+  assert.equal(r.hotfix!.bindings.fix!.source, 'b');
+});
+
+test('top-level rules apply to every pipeline', () => {
+  const r = mergePipelines([
+    L('a', { rules: { allowed_agents: ['claude'] } }),
+    L('b', { pipelines: { hotfix: { stages: ['intake', 'deliver'] } } }),
+  ]);
+  assert.deepEqual(r.hotfix!.rules.map((x) => x.source), ['a']);
+  assert.deepEqual(r.feature!.rules.map((x) => x.source), ['a']);
+});
+
+test('the groom gate is only in feature', () => {
+  const r = mergePipelines([L('a', { pipelines: { hotfix: { stages: ['intake', 'groom', 'deliver'] } } })]);
+  assert.equal('approve-groom' in r.feature!.nodes, true);
+  assert.equal('approve-groom' in r.hotfix!.nodes, false);
+});
+
+test('pipeline headers merge with their sources', () => {
+  const r = mergePipelines([
+    L('a', { pipelines: { hotfix: { stages: ['intake', 'fix', 'deliver'], exit: 'pr' } } }),
+    L('b', { pipelines: { hotfix: { ticket: 'optional' } } }),
+  ]);
+  assert.deepEqual(r.hotfix!.header.value, { stages: ['intake', 'fix', 'deliver'], exit: 'pr', ticket: 'optional' });
+  assert.equal(r.hotfix!.header.source, 'b');
+  assert.deepEqual(r.feature!.header.value.stages, [...CORE_STAGES]);
+});
+
+const LOCKED_HOTFIX = { required: true, stages: ['intake', 'fix', 'deliver'], exit: 'pr' as const };
+const groundLayer: Layer = {
+  source: 'ground:co/p.yaml',
+  fragment: { pipelines: { hotfix: LOCKED_HOTFIX } },
+  locator: { file: 'p.yaml', lines: { 'pipelines.hotfix': 3 } },
+};
+
+test('a locked pipeline header may only be restated', () => {
+  assert.throws(
+    () =>
+      mergePipelines([
+        groundLayer,
+        {
+          source: 'profile:default',
+          fragment: { pipelines: { hotfix: { stages: ['intake', 'deliver'] } } },
+          locator: { file: 'c.yaml', lines: { 'profiles.default.pipelines.hotfix': 7 }, prefix: 'profiles.default' },
+        },
+      ]),
+    (err: unknown) => {
+      assert.ok(err instanceof LockViolation);
+      assert.equal(err.path, 'profiles.default.pipelines.hotfix');
+      assert.equal(
+        err.message,
+        'c.yaml:7: profiles.default.pipelines.hotfix: locked by p.yaml:3 (required: true); remove this pipeline or restate it exactly',
+      );
+      return true;
+    },
+  );
+});
+
+test('restating a locked header exactly is allowed', () => {
+  const r = mergePipelines([groundLayer, L('profile:default', { pipelines: { hotfix: { ...LOCKED_HOTFIX } } })]);
+  assert.equal(r.hotfix!.header.source, 'ground:co/p.yaml');
+});
+
+test('bindings inside a pipeline locate under pipelines.<p>', () => {
+  const r = mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: { pipelines: { hotfix: { bindings: { fix: { agent: 'claude' } } } } },
+      locator: { file: 'c.yaml', lines: {}, prefix: 'profiles.default' },
+    },
+  ]);
+  assert.equal(r.hotfix!.bindings.fix!.locator!.prefix, 'profiles.default.pipelines.hotfix');
 });
