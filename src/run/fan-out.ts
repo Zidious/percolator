@@ -154,7 +154,7 @@ export function fanOut(o: {
         lines.push(`${c.index}. ${c.title} → ${(await prUrlOf(dir, state)) ?? state.status}`);
       }
       if (failed.length > 0) {
-        return escalate(`percolator.fan_out: slice(s) ${failed.join(', ')} failed; fix and perc resume each, then perc resume ${runId}`);
+        return escalate(`percolator.fan_out: slice(s) ${failed.join(', ')} failed; perc delete each (its branch stays), then perc resume ${runId} to run it again`);
       }
       await fs.mkdir(io.outputsDir, { recursive: true });
       await writeFileAtomic(path.join(io.outputsDir, 'slices_done.md'), `${lines.join('\n')}\n`);
