@@ -195,10 +195,10 @@ Profiles are checked in order; the first whose `match.remote` or `match.path` fi
 | `builtin` | builtin | `github.intake` or `github.open_pr`. |
 | `command` | script | An argv array, never a shell string. `{run_dir}`, `{outputs_dir}` and `{worktree}` are filled in. |
 | `before` / `after` | nodes | Hook point: a stage, or `all`. At most one of the two. |
-| `on_fail` | nodes | `{ back_to: <earlier stage>, max_rounds: n }`: a bounded back-edge. |
+| `on_fail` | nodes | `{ back_to: <earlier stage>, max_rounds: n }`: a bounded back-edge. `n` counts failed rounds, the first run included, so `1` escalates on the first fail. |
 | `max_rounds` | review | Round cap for the review loop (default 3). |
 | `once` | hooks | Skip the hook once it has passed in this run, so a loop does not re-run it. |
-| `timeout_s` | all | Escalate to you if the step is not done after n seconds. |
+| `timeout_s` | agent, script | Escalate to you if the step is not done after n seconds. Builtins and gates ignore it. |
 | `required` | all | Locks the node: later layers may only restate it unchanged. |
 
 ### Hooks, gates and loops
@@ -216,7 +216,7 @@ profiles:
         after: plan
 ```
 
-- `audit` runs after implement. If it fails, the run goes back to implement at most twice, then pauses and escalates to you.
+- `audit` runs after implement. If it fails, the run goes back to implement once; if it fails again (two failed rounds), the run pauses and escalates to you.
 - `sign-off` adds a second human gate after plan, which you answer the same way as `approve-groom`.
 - `back_to` must point to an earlier stage. A `before: all` hook cannot loop.
 - Any step that writes a `pr_body` output sets the PR description; the last one in run order wins.
