@@ -145,3 +145,32 @@ export declare function detailParts(
   run: RunStatusJson,
   o: { cols: Columns; narrow: boolean; unfolded: string[]; stopSel: string | null },
 ): { under: boolean; side: ('box' | 'outcome' | 'strip')[] };
+
+// `perc pipelines --json` (schema 1): steps and loops as a run's, minus the per-run fields.
+export type PipelineInput = { name: string; required: boolean; description?: string };
+export type Pipeline = {
+  name: string;
+  default: boolean;
+  router: boolean;
+  ticket: 'required' | 'optional' | 'none';
+  inputs: PipelineInput[];
+  exit: string;
+  description?: string;
+  steps: { id: string; stage: string; role: 'core' | 'node'; kind: 'agent' | 'builtin' | 'script' | 'gate' }[];
+  loops: Omit<Loop, 'round'>[];
+};
+export type BrokenPipeline = { name: string; error: string };
+export type PipelinesJson = { schema: 1; repo: string; profile: string; pipelines: (Pipeline | BrokenPipeline)[] };
+export type StartChoice = { pipeline: Pipeline; ticket?: string; inputs: Record<string, string>; repo: string | null };
+export declare function readPipelines(stdout: string): { ok: true; data: PipelinesJson } | { ok: false; error: string };
+export declare function pipelinesFixture(statusFixture: string): string;
+export declare function startFields(pipeline: Pipeline): {
+  ticket: 'required' | 'optional' | 'hidden';
+  inputs: { name: string; required: boolean; description: string }[];
+};
+export declare function knownRepos(runs: RunStatusJson[]): string[];
+export declare function ticketRepo(text: string): string | null;
+export declare function guessRepo(ticketText: string, runs: RunStatusJson[]): string | null;
+export declare function startArgv(o: StartChoice & { repo: string }): string[];
+export declare function commandLine(argv: string[]): string;
+export declare function canStart(o: StartChoice): { ok: true } | { ok: false; why: string };

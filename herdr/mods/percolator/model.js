@@ -760,3 +760,85 @@ export function selectAfterRefresh(runs, rows, selId, pending) {
   if (pending && rows.some((r) => r.id === pending.next)) return pending.next;
   return rows[0]?.id ?? null;
 }
+
+// ── starting a run (`perc pipelines --json`, schema 1) ──
+
+const INVALID_PIPELINES = 'perc pipelines --json returned invalid JSON';
+
+/** `perc pipelines --json` stdout → `{ ok: true, data }`, or `{ ok: false, error }` when it is not one this panel knows. */
+export function readPipelines(stdout) {
+  let data;
+  try {
+    data = JSON.parse(stdout);
+  } catch {
+    return { ok: false, error: INVALID_PIPELINES };
+  }
+  if (data === null || typeof data !== 'object' || !Array.isArray(data.pipelines)) return { ok: false, error: INVALID_PIPELINES };
+  if (data.schema !== 1) return { ok: false, error: `perc pipelines --json returned schema ${data.schema}; update the Percolator panel` };
+  return { ok: true, data };
+}
+
+/** In fixtures mode, the pipelines come from pipelines.json beside the status fixture. */
+export function pipelinesFixture(statusFixture) {
+  return `${statusFixture.replace(/[\\/][^\\/]*$/, '')}/pipelines.json`;
+}
+
+/** What the start dialog asks for a pipeline: its ticket field (hidden when it takes none) and its inputs. */
+export function startFields(pipeline) {
+  return {
+    ticket: pipeline.ticket === 'none' ? 'hidden' : pipeline.ticket,
+    inputs: pipeline.inputs.map((i) => ({ name: i.name, required: i.required, description: i.description ?? '' })),
+  };
+}
+
+const newestFirst = (runs) =>
+  runs.filter((r) => r.status !== 'unreadable' && typeof r.repo === 'string').sort((a, b) => created(b) - created(a));
+
+/** The repos earlier runs ran in, each once, most recent first. */
+export function knownRepos(runs) {
+  return [...new Set(newestFirst(runs).map((r) => r.repo))];
+}
+
+const TICKET_URL = /^https?:\/\/([^/\s]+)\/([^/\s]+)\/([^/\s#]+)\/(?:issues|pull)\/\d+\/?$/i;
+const TICKET_REF = /^(?:([^/\s#]+)\/)?([^/\s#]+)\/([^/\s#]+)#\d+$/;
+
+/** The lower-cased `host/owner/repo` of a ticket URL, `owner/repo#n` (github.com) or `host/owner/repo#n`; else null. */
+export function ticketRepo(text) {
+  const t = String(text ?? '').trim();
+  const m = TICKET_URL.exec(t) ?? TICKET_REF.exec(t);
+  if (!m) return null;
+  return `${m[1] ?? 'github.com'}/${m[2]}/${m[3]}`.toLowerCase();
+}
+
+/** The repo of the most recent run on the ticket's GitHub repo, to preselect; null when none ran there. */
+export function guessRepo(ticketText, runs) {
+  const repo = ticketRepo(ticketText);
+  if (repo === null) return null;
+  return newestFirst(runs).find((r) => r.ticket?.ref?.toLowerCase().startsWith(`${repo}#`))?.repo ?? null;
+}
+
+const blank = (v) => typeof v !== 'string' || v.trim() === '';
+
+/** The `perc run` argv for the dialog's choices: inputs in the pipeline's declared order, empty optional ones left out. */
+export function startArgv(o) {
+  const ticket = blank(o.ticket) ? null : o.ticket.trim();
+  const inputs = o.pipeline.inputs.flatMap((i) => {
+    const v = o.inputs[i.name] ?? '';
+    return !i.required && blank(v) ? [] : [['--input', `${i.name}=${v}`]];
+  });
+  return ['run', ...(ticket ? [ticket] : []), '--repo', o.repo, '--pipeline', o.pipeline.name, ...inputs.flat()];
+}
+
+/** The argv as one `perc …` line to show: an argument holding whitespace or `"` is double-quoted, its `"` escaped. */
+export function commandLine(argv) {
+  const quote = (a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
+  return ['perc', ...argv.map(quote)].join(' ');
+}
+
+/** Whether Start can run, else why not: the repo, then the ticket, then the first empty required input. */
+export function canStart(o) {
+  if (blank(o.repo)) return { ok: false, why: 'Pick a repo' };
+  if (o.pipeline.ticket === 'required' && blank(o.ticket)) return { ok: false, why: 'Enter a ticket' };
+  const missing = o.pipeline.inputs.find((i) => i.required && blank(o.inputs[i.name]));
+  return missing ? { ok: false, why: `Enter ${missing.name}` } : { ok: true };
+}
