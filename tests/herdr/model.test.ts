@@ -470,8 +470,8 @@ test('readerPath shows the selected stop first output, else the first review fil
   assert.equal(readerPath(byId('t5'), null), null);
 });
 
-test('the fixture has timelines for t8, t3, t2 and t4, and none for the rest (an older perc)', () => {
-  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4']);
+test('the fixture has timelines for t8, t3, t2, t4, t16 and t17, and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17']);
 });
 
 test('roundView defaults to the latest round and marks it running', () => {
