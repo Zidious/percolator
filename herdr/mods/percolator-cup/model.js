@@ -288,9 +288,10 @@ export function canPick(step) {
 }
 
 /** The started step one pipeline row up (-1) or down (1) from the selected stop, else from the current (or last)
- *  step, over the wide rows with `unfolded` stages open (other folded hooks are skipped); null if none. */
-export function moveStop(run, selected, dir, unfolded = []) {
-  const order = pipelineRows(run, { narrow: false, unfolded }).flatMap((r) => (canPick(r.step) ? [r.step.id] : []));
+ *  step, over the rows the pipeline shows (`narrow`: it folds every passed hook) with `unfolded` stages open (other
+ *  folded hooks are skipped); null if none. */
+export function moveStop(run, selected, dir, unfolded = [], narrow = false) {
+  const order = pipelineRows(run, { narrow, unfolded }).flatMap((r) => (canPick(r.step) ? [r.step.id] : []));
   if (order.length === 0) return null;
   let at = order.indexOf(selected);
   if (at < 0) at = order.indexOf(run.currentStep);
@@ -568,18 +569,12 @@ export function columns(width) {
   return width >= 720 ? 'two' : 'one';
 }
 
-/** Whether the board and pipeline draw narrow: in a narrow panel, and in the 330px left column of two columns. */
-export function leftNarrow(cols, narrow) {
-  return narrow || cols === 'two';
-}
-
 /** The panel's layout from its measured width (zoomed px) and the zoom, all in design px: `narrow` under 720,
- *  `cols`, and `left`, whether the board and pipeline draw narrow. */
+ *  `cols`, and `fold`, under 320, where the pipeline folds every passed hook (the 330px left column of two does
+ *  not). */
 export function panelShape(width, zoom) {
   const w = Math.round(width / zoom); // the width comes zoomed, in floats: 720 at 0.8 reads 575.99
-  const narrow = w < 720;
-  const cols = columns(w);
-  return { narrow, cols, left: leftNarrow(cols, narrow) };
+  return { narrow: w < 720, cols: columns(w), fold: w < 320 };
 }
 
 /** Where the detail's pieces show. `under`: the active slot and the stop strip sit under their rows in the pipeline (one

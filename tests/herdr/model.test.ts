@@ -64,7 +64,6 @@ import {
   boxOutside,
   columns,
   detailParts,
-  leftNarrow,
   panelShape,
   readerFiles,
   readerMax,
@@ -870,6 +869,12 @@ test('moveStop reaches the hooks of an unfolded stage', () => {
   assert.equal(moveStop(byId('t16'), 'plan', 1, ['implement']), 'lint-baseline');
 });
 
+test('moveStop walks the rows a folding (under 320px) pipeline shows', () => {
+  assert.equal(moveStop(byId('t8'), 'groom', 1, [], true), 'plan'); // approve-groom folds into groom
+  assert.equal(moveStop(byId('t8'), 'groom', 1, ['groom'], true), 'approve-groom');
+  assert.equal(moveStop(byId('t8'), 'groom', 1, [], false), 'approve-groom');
+});
+
 test('activeBox names what shows under the active stop', () => {
   const box = (p: string) => activeBox(byId(p));
   assert.equal(box('t2'), 'gate');
@@ -1064,20 +1069,21 @@ test('columns: two columns from 720px wide (the window, a wide panel), else one'
   assert.equal(columns(380), 'one');
 });
 
-test('panelShape: narrow and columns both measure design px, so they agree at any zoom', () => {
-  assert.deepEqual(panelShape(570, 1.5), { narrow: true, cols: 'one', left: true });
-  assert.deepEqual(panelShape(1080, 1.5), { narrow: false, cols: 'two', left: true });
-  assert.deepEqual(panelShape(750, 1.5), { narrow: true, cols: 'one', left: true });
-  assert.deepEqual(panelShape(720, 1), { narrow: false, cols: 'two', left: true });
-  assert.deepEqual(panelShape(380, 1), { narrow: true, cols: 'one', left: true });
-  assert.deepEqual(panelShape(700, 0.8), { narrow: false, cols: 'two', left: true });
-  assert.deepEqual(panelShape(575.99, 0.8), { narrow: false, cols: 'two', left: true }); // 720 at zoom 0.8, measured in floats
+test('panelShape: narrow, columns and fold all measure design px, so they agree at any zoom', () => {
+  assert.deepEqual(panelShape(570, 1.5), { narrow: true, cols: 'one', fold: false });
+  assert.deepEqual(panelShape(1080, 1.5), { narrow: false, cols: 'two', fold: false });
+  assert.deepEqual(panelShape(750, 1.5), { narrow: true, cols: 'one', fold: false });
+  assert.deepEqual(panelShape(720, 1), { narrow: false, cols: 'two', fold: false });
+  assert.deepEqual(panelShape(380, 1), { narrow: true, cols: 'one', fold: false });
+  assert.deepEqual(panelShape(700, 0.8), { narrow: false, cols: 'two', fold: false });
+  assert.deepEqual(panelShape(575.99, 0.8), { narrow: false, cols: 'two', fold: false }); // 720 at zoom 0.8, measured in floats
 });
 
-test('leftNarrow: the 330px left column of two columns draws the board and pipeline narrow', () => {
-  assert.equal(leftNarrow('one', false), false);
-  assert.equal(leftNarrow('one', true), true);
-  assert.equal(leftNarrow('two', false), true);
+test('panelShape folds every passed hook only under 320 design px; the 330px left column of two does not', () => {
+  assert.equal(panelShape(319, 1).fold, true);
+  assert.equal(panelShape(320, 1).fold, false);
+  assert.equal(panelShape(450, 1.5).fold, true); // 300 design px
+  assert.equal(panelShape(255.99, 0.8).fold, false); // 320 at zoom 0.8
 });
 
 test('detailParts: one column keeps the box and strip under their rows; two columns move them to the right column', () => {

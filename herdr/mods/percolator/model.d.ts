@@ -41,7 +41,7 @@ export declare function pipelineSpans(rows: PipeRow[], run: RunStatusJson): { fr
 export declare function pipelineMarks(rows: PipeRow[], stopSel: string | null): { active: number; reached: number; stripAt: number };
 export declare function hookNote(run: RunStatusJson, row: { step: Step; where?: string }, now: number): string;
 export declare function unfoldAfterPick(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }, from: string | null, to: string | null): string[];
-export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number, unfolded?: string[]): string | null;
+export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number, unfolded?: string[], narrow?: boolean): string | null;
 export declare function moveRow(rows: RunStatusJson[], selId: string | null, dir: number): string | null;
 export type RoundView = {
   attempt: Attempt;
@@ -134,8 +134,7 @@ export declare function boxDriver(run: RunStatusJson): { terminal: string; label
 export declare function historyLabel(run: RunStatusJson, open: boolean, now: number): string;
 export type Columns = 'one' | 'two';
 export declare function columns(width: number): Columns;
-export declare function leftNarrow(cols: Columns, narrow: boolean): boolean;
-export declare function panelShape(width: number, zoom: number): { narrow: boolean; cols: Columns; left: boolean };
+export declare function panelShape(width: number, zoom: number): { narrow: boolean; cols: Columns; fold: boolean };
 export declare function detailParts(
   run: RunStatusJson,
   o: { cols: Columns; narrow: boolean; unfolded: string[]; stopSel: string | null },

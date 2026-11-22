@@ -232,11 +232,12 @@ function hookLabel(p, t, r, row) {
     .child(div().min_w(0).ml(6).truncate().text_size(10).text_color(t.dim).child(hookNote(r, row, Date.now())));
 }
 
-/** The vertical pipeline of a readable run; while `under` (one column), the strip opens under the picked row and
- *  `p.activeSlot` under the active one; in two columns they show in the right column. */
-export function pipeline(p, t, r, narrow, under = true) {
+/** The vertical pipeline of a readable run, folding every passed hook when `fold` (under 320px); while `under` (one
+ *  column), the strip opens under the picked row and `p.activeSlot` (drawn `narrow`) under the active one; in two
+ *  columns they show in the right column. */
+export function pipeline(p, t, r, fold, narrow, under = true) {
   if (r.status === 'unreadable') return div();
-  const rows = pipelineRows(r, { narrow, unfolded: p.unfolded });
+  const rows = pipelineRows(r, { narrow: fold, unfolded: p.unfolded });
   if (rows.length === 0) return div();
   const spans = pipelineSpans(rows, r);
   const n = rows.length;

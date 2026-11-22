@@ -68,7 +68,7 @@ const BLOCK = 'percolator-panel';
 const WINDOW = 'percolator.window'; // shared: the open window's overlay id, else null
 const RATIO = 'percolator.boardRatio'; // shared: the board's height as a ratio of the area under the title bar
 const OLD_RATIO = 'board.ratio'; // localStorage, per copy: read when nothing is shared yet
-const MIN_ROWS = { narrow: 106, wide: 72 }; // two rows of the board, in design px
+const MIN_BOARD = 106; // two rows of the board's compact cards, in design px
 const zoom = () => Number(settings()?.zoom) || 1;
 const folderOf = (file) => file.replace(/[\\/][^\\/]*$/, '');
 
@@ -247,7 +247,7 @@ export default class Percolator extends View {
   pickStop(id, cx) {
     const r = this.current();
     if (r && r.status !== 'unreadable') {
-      this.unfolded = unfoldAfterPick(r, { narrow: this.shape().left, unfolded: this.unfolded }, this.stopSel, id);
+      this.unfolded = unfoldAfterPick(r, { narrow: this.shape().fold, unfolded: this.unfolded }, this.stopSel, id);
     }
     this.stopSel = id;
     this.roundSel = null;
@@ -465,7 +465,7 @@ export default class Percolator extends View {
         this.revealRow();
       }
     } else if ((key === 'left' || key === 'right') && r) {
-      this.pickStop(moveStop(r, this.stopSel, key === 'left' ? -1 : 1, this.unfolded), cx);
+      this.pickStop(moveStop(r, this.stopSel, key === 'left' ? -1 : 1, this.unfolded, this.shape().fold), cx);
     } else if (key === 'a' && acts.includes('approve')) this.act('approve', cx);
     else if (key === 'r' && acts.includes('reject')) this.act('reject', cx);
     else if (key === 'g' && acts.includes('grant')) this.act('grant', cx);
@@ -540,16 +540,12 @@ export default class Percolator extends View {
     if (at >= 0) this.boardScroll.scroll_to_item(at);
   }
 
-  /** The panel's layout at its width: `narrow`; `cols`, one or two; `left`, the board and pipeline draw narrow. */
+  /** The panel's layout at its width: `narrow`; `cols`, one or two; `fold`, the pipeline folds every passed hook. */
   shape() {
     return panelShape(this.width, zoom());
   }
 
   // ── the divider between the board and the detail ──────────────────
-
-  minBoard(narrow) {
-    return narrow ? MIN_ROWS.narrow : MIN_ROWS.wide;
-  }
 
   /** The board's ratio: the one being dragged, else the shared one, so the docked panel and the window agree. */
   boardRatio() {
@@ -564,7 +560,7 @@ export default class Percolator extends View {
     return true;
   }
 
-  divider(t, narrow) {
+  divider(t) {
     const on = Boolean(this.drag);
     return div()
       .id('divider')
@@ -709,13 +705,13 @@ export default class Percolator extends View {
 
   // The measured frames (area, board-frame) are drawn from the first frame on, whatever the state: Herdr reports sizes
   // only for elements it has had since the view's first frame. One column or two, they keep their place (area > left).
-  body(t, { narrow, cols, left }) {
+  body(t, { narrow, cols, fold }) {
     const two = cols === 'two';
     const ready = this.conn !== 'missing' && this.loaded;
     const r = ready ? this.current() : null;
     const rows = ready ? this.rows() : [];
-    const parts = r ? detailParts(r, { cols, narrow: left, unfolded: this.unfolded, stopSel: this.stopSel }) : null;
-    const boardMax = boardHeight(this.boardRatio(), this.area, this.minBoard(left));
+    const parts = r ? detailParts(r, { cols, narrow: fold, unfolded: this.unfolded, stopSel: this.stopSel }) : null;
+    const boardMax = boardHeight(this.boardRatio(), this.area, MIN_BOARD);
     const detail = v_flex()
       .id('detail-body')
       .flex_none()
@@ -723,7 +719,7 @@ export default class Percolator extends View {
       .when(Boolean(r), (el) =>
         el
           .when(!two, (el) => el.child(header(this, t, r, narrow)))
-          .child(pipeline(this, t, r, left, parts.under))
+          .child(pipeline(this, t, r, fold, narrow, parts.under))
           .when(!two, (el) => el.child(turn(this, t, r, narrow, parts.side))),
       );
     const leftColumn = v_flex()
@@ -737,9 +733,9 @@ export default class Percolator extends View {
           .flex_none()
           .when(rows.length > 0, (el) => el.max_h(boardMax))
           .on_size_change((size, cx) => this.measured('boardPx', size, cx))
-          .when(ready, (el) => el.child(board(this, t, left, rows))),
+          .when(ready, (el) => el.child(board(this, t, true, rows))), // always its compact cards
       )
-      .when(rows.length > 0, (el) => el.child(this.divider(t, left)))
+      .when(rows.length > 0, (el) => el.child(this.divider(t)))
       .child(
         // One scroll for the whole detail, filled absolutely: overflow_y_scrollbar() wraps the element, so its flex
         // sizing never reaches the layout.
@@ -798,7 +794,7 @@ export default class Percolator extends View {
       .on_mouse_move((e, cx) => {
         if (!this.drag) return;
         const dy = (e.position.y - this.drag.y) / zoom(); // the pointer moves in zoomed pixels
-        this.ratio = dragBoard(this.drag.px, dy, this.area, this.minBoard(at.left));
+        this.ratio = dragBoard(this.drag.px, dy, this.area, MIN_BOARD);
         cx.notify();
       })
       .on_mouse_up('left', (_e, cx) => {
