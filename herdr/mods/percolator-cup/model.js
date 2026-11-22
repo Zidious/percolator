@@ -842,3 +842,32 @@ export function canStart(o) {
   const missing = o.pipeline.inputs.find((i) => i.required && blank(o.inputs[i.name]));
   return missing ? { ok: false, why: `Enter ${missing.name}` } : { ok: true };
 }
+
+/** What "Run next…" offers on a finished run: its ticket and the issues its exit opened, and the pipelines that take a
+ *  ticket; null while a run on its ticket is live, or when it has no ticket to offer. */
+export function runNextChoices(run, pipelines, runs) {
+  if (!isFinished(run)) return null;
+  const ref = run.ticket?.ref;
+  if (ref && runs.some((r) => r.ticket?.ref === ref && ACTIVE.has(r.status))) return null;
+  const tickets = [...(ref ? [ref] : []), ...(run.opened ?? []).map((o) => o.ref)];
+  if (tickets.length === 0) return null;
+  return { tickets, pipelines: pipelines.filter((p) => !p.error && p.ticket !== 'none').map((p) => p.name) };
+}
+
+/** A pipeline as a run that has not started, so pipelineRows, pipelineSpans and pipelineMarks draw its preview. */
+export function previewRun(pipeline) {
+  return {
+    id: 'preview',
+    status: 'pending',
+    steps: pipeline.steps.map((s) => ({ ...s, status: 'pending', attempts: 0, outputs: {} })),
+    loops: pipeline.loops.map((l) => ({ ...l, round: 0 })),
+    timeline: [],
+    ticket: null,
+    pipeline: pipeline.name,
+  };
+}
+
+/** Where the pipeline preview sits beside the start picker: below it under 720px wide, else to its right. */
+export function previewSide(width) {
+  return width < 720 ? 'below' : 'right';
+}

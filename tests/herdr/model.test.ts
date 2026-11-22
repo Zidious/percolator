@@ -93,7 +93,10 @@ import {
   guessRepo,
   knownRepos,
   pipelinesFixture,
+  previewRun,
+  previewSide,
   readPipelines,
+  runNextChoices,
   startArgv,
   startFields,
   ticketRepo,
@@ -1271,4 +1274,69 @@ test('canStart says what is missing: the repo, then the ticket, then the first e
   assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: '  ', inputs: {}, repo: '/r' }), { ok: false, why: 'Enter a ticket' });
   assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: 'o/r#3', inputs: {}, repo: '/r' }), { ok: true });
   assert.deepEqual(canStart({ pipeline: pipe('spike'), inputs: {}, repo: '/r' }), { ok: true });
+});
+
+// ── run next and the pipeline preview ──
+
+const ALL_PIPES = () => [...(JSON.parse(PIPES_RAW).pipelines as Pipeline[]), { name: 'broken', error: 'pipelines.broken: no exit' }];
+const T3 = 'github.com/zidious/percolator#3';
+
+test('run next is hidden while the ticket has a live run', () => {
+  const done = readable('t3');
+  for (const status of ['running', 'waiting', 'paused'] as const) {
+    const live = { ...readable('t8'), id: `t3-${status}`, status, ticket: { ref: T3, number: 3 } } as Readable;
+    assert.equal(runNextChoices(done, ALL_PIPES(), [...runs(), live]), null, status);
+  }
+  assert.equal(runNextChoices(readable('t8'), ALL_PIPES(), runs()), null, 'a running run offers no run next');
+  assert.equal(runNextChoices(byId('t5'), ALL_PIPES(), runs()), null, 'an unreadable run offers none');
+  const old = { ...readable('t9'), id: 't3-old', ticket: { ref: T3, number: 3 } } as Readable;
+  assert.notEqual(runNextChoices(done, ALL_PIPES(), [...runs(), old]), null, 'a failed run on the ticket is not live');
+});
+
+test('run next lists only pipelines that take a ticket', () => {
+  assert.deepEqual(runNextChoices(readable('t3'), ALL_PIPES(), runs()), { tickets: [T3], pipelines: ['feature', 'hotfix', 'spike'] });
+  assert.deepEqual(runNextChoices(readable('t9'), ALL_PIPES(), runs()), {
+    tickets: ['github.com/zidious/percolator#9'],
+    pipelines: ['feature', 'hotfix', 'spike'],
+  });
+});
+
+test('run next offers the issues an issue exit opened', () => {
+  const opened = [
+    { ref: 'github.com/o/r#40', url: 'https://github.com/o/r/issues/40' },
+    { ref: 'github.com/o/r#41', url: 'https://github.com/o/r/issues/41' },
+  ];
+  const withIssues = { ...readable('t3'), opened } as unknown as Readable;
+  assert.deepEqual(runNextChoices(withIssues, ALL_PIPES(), runs())?.tickets, [T3, 'github.com/o/r#40', 'github.com/o/r#41']);
+  const ticketless = { ...readable('t3'), ticket: null, opened } as unknown as Readable;
+  assert.deepEqual(runNextChoices(ticketless, ALL_PIPES(), runs())?.tickets, ['github.com/o/r#40', 'github.com/o/r#41']);
+  assert.equal(runNextChoices({ ...ticketless, opened: [] } as unknown as Readable, ALL_PIPES(), runs()), null);
+  assert.equal(runNextChoices({ ...readable('t3'), ticket: null } as unknown as Readable, ALL_PIPES(), runs()), null);
+});
+
+test('previewRun draws through pipelineRows', () => {
+  const run = previewRun(pipe('hotfix'));
+  assert.deepEqual(
+    { id: run.id, status: run.status, ticket: run.ticket, pipeline: (run as any).pipeline, timeline: run.timeline },
+    { id: 'preview', status: 'pending', ticket: null, pipeline: 'hotfix', timeline: [] },
+  );
+  assert.deepEqual(run.steps[1], { id: 'reproduce', stage: 'reproduce', role: 'core', kind: 'agent', status: 'pending', attempts: 0, outputs: {} });
+  assert.deepEqual(run.loops, [{ id: 'review', from: 'review', to: 'fix', max: 3, atCap: 'continue', round: 0 }]);
+  const rows = pipelineRows(run, { narrow: false, unfolded: [] });
+  const shown = rows.map((r) => r.step.id);
+  for (const id of ['reproduce', 'fix', 'deliver']) assert.ok(shown.includes(id), id);
+  assert.deepEqual(shown, ['intake', 'reproduce', 'fix', 'review', 'deliver']);
+  assert.ok(rows.every((r) => r.state === 'future'));
+  assert.deepEqual(pipelineSpans(rows, run), [{ from: 3, to: 2, tone: 'dim' }]);
+  assert.deepEqual(pipelineMarks(rows, null), { active: -1, reached: -1, stripAt: -1 });
+  const feature = pipelineRows(previewRun(pipe('feature')), { narrow: false, unfolded: [] });
+  assert.deepEqual(feature.map((r) => [r.type, r.step.id]).slice(1, 3), [['stage', 'groom'], ['hook', 'approve-groom']]);
+});
+
+test('previewSide is below at 280 and 380 and right at 720', () => {
+  assert.equal(previewSide(280), 'below');
+  assert.equal(previewSide(380), 'below');
+  assert.equal(previewSide(719), 'below');
+  assert.equal(previewSide(720), 'right');
+  assert.equal(previewSide(1200), 'right');
 });

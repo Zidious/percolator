@@ -174,3 +174,11 @@ export declare function guessRepo(ticketText: string, runs: RunStatusJson[]): st
 export declare function startArgv(o: StartChoice & { repo: string }): string[];
 export declare function commandLine(argv: string[]): string;
 export declare function canStart(o: StartChoice): { ok: true } | { ok: false; why: string };
+export declare function runNextChoices(
+  run: RunStatusJson,
+  pipelines: (Pipeline | BrokenPipeline)[],
+  runs: RunStatusJson[],
+): { tickets: string[]; pipelines: string[] } | null;
+/** Run-shaped (status 'pending', ticket null, plus `pipeline`) so the pipeline functions draw it. */
+export declare function previewRun(pipeline: Pipeline): Readable;
+export declare function previewSide(width: number): 'below' | 'right';
