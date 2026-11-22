@@ -97,7 +97,9 @@ export function checkRules(merged: Merged): Violation[] {
     ] as const) {
       const allowed = rules[rule];
       if (allowed === undefined) continue;
-      const list = allowed.length > 0 ? allowed.join(', ') : '(nothing)';
+      const list = allowed.join(', ');
+      // an empty list admits no agent node at all, so naming a value to pick would be advice no one can follow
+      const none = `${rule} (from ${from(rule)}) allows no ${field}s; use a non-agent node here or change that rule`;
       for (const e of all) {
         const { target, node } = e;
         if (!isAgent(node)) continue;
@@ -109,7 +111,7 @@ export function checkRules(merged: Merged): Violation[] {
             rule,
             source,
             target,
-            message: `has no ${field}, but ${rule} (from ${from(rule)}) requires one of: ${list}; set ${field}: to one of them`,
+            message: allowed.length === 0 ? `has no ${field}, but ${none}` : `has no ${field}, but ${rule} (from ${from(rule)}) requires one of: ${list}; set ${field}: to one of them`,
             where: at(e, target),
           });
           continue;
@@ -121,7 +123,7 @@ export function checkRules(merged: Merged): Violation[] {
           rule,
           source,
           target,
-          message: `uses ${field} "${value}", but ${rule} (from ${from(rule)}) allows: ${list}; use one of those`,
+          message: allowed.length === 0 ? `uses ${field} "${value}", but ${none}` : `uses ${field} "${value}", but ${rule} (from ${from(rule)}) allows: ${list}; use one of those`,
           where: at(e, target),
         });
       }
@@ -177,7 +179,16 @@ export function checkRules(merged: Merged): Violation[] {
       if (typeof req === 'string') continue;
       const want = position(req);
       const got = position(have.value);
-      if (want !== got) {
+      if (want !== got && have.source === 'core') {
+        // a built-in node is locked, so the only thing the user can change is this rule entry
+        out.push({
+          rule: 'required_nodes',
+          source,
+          target: `nodes.${name}`,
+          message: `requires ${name} ${want}, but it is built in and attached ${got}; change or remove this required_nodes entry`,
+          where: locate(ruleLocator, source, `rules.required_nodes.${k}`),
+        });
+      } else if (want !== got) {
         out.push({
           rule: 'required_nodes',
           source,

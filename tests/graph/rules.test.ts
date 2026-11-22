@@ -109,9 +109,36 @@ test('allowed_models fails closed: an agent node without model is a violation, o
   ]);
 });
 
-test('allowed_models: [] with no model reports (nothing)', () => {
+test('allowed_models: [] with no model says no model is allowed', () => {
   const v = checkRules(m({ implement: { agent: 'claude' } }, [{ allowed_models: [] }]));
-  assert.equal(v[0]!.message, 'has no model, but allowed_models (from rules:0) requires one of: (nothing); set model: to one of them');
+  assert.equal(v[0]!.message, 'has no model, but allowed_models (from rules:0) allows no models; use a non-agent node here or change that rule');
+});
+
+test('allowed_models: [] says no model is allowed and what to change instead', () => {
+  const v = checkRules(m({ implement: { agent: 'claude', model: 'opus' } }, [{ allowed_models: [] }]));
+  assert.equal(v[0]!.message, 'uses model "opus", but allowed_models (from rules:0) allows no models; use a non-agent node here or change that rule');
+});
+
+test('allowed_agents: [] says no agent is allowed and what to change instead', () => {
+  const v = checkRules(m({ review: { agent: 'claude' } }, [{ allowed_agents: [] }]));
+  assert.equal(v[0]!.message, 'uses agent "claude", but allowed_agents (from rules:0) allows no agents; use a non-agent node here or change that rule');
+});
+
+test('required_nodes with a position on a core node is reported at the rule entry', () => {
+  const v = mergeLayers([
+    { source: 'repo:base', fragment: {} },
+    {
+      source: 'r.yaml',
+      fragment: { rules: { required_nodes: [{ name: 'approve-groom', after: 'plan' }] } },
+      locator: { file: 'r.yaml', lines: { 'rules.required_nodes': 3, 'rules.required_nodes.0': 4 } },
+    },
+  ]);
+  const [only] = checkRules(v);
+  assert.equal(
+    only!.message,
+    'requires approve-groom after plan, but it is built in and attached after groom; change or remove this required_nodes entry',
+  );
+  assert.deepEqual(only!.where, { file: 'r.yaml', line: 4, path: 'rules.required_nodes.0' });
 });
 
 test('allowed_agents only: an agent node without model is fine', () => {
