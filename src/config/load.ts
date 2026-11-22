@@ -1,13 +1,10 @@
 import type { Document, LineCounter } from 'yaml';
 import type { z } from 'zod';
 import { readYamlFile } from '../util/fs.ts';
+import { formatIssue, indexLines } from './locate.ts';
+import type { LineIndex } from './locate.ts';
 import { GraphFragmentSchema, UserConfigSchema } from './schema.ts';
 import type { GraphFragment, UserConfig } from './schema.ts';
-
-function formatIssue(message: string, file: string, line?: number, path?: string): string {
-  const where = line === undefined ? file : `${file}:${line}`;
-  return `${where}: ${path ? `${path}: ` : ''}${message}`;
-}
 
 type FlatIssue = { path: PropertyKey[]; message: string };
 
@@ -49,8 +46,15 @@ function lineAt(doc: Document, lineCounter: LineCounter, path: PropertyKey[]): n
   return undefined;
 }
 
+export type Located<T> = { data: T; lines: LineIndex };
+
 /** Read a YAML file and parse it with `schema`; every YAML or schema issue becomes one located line of a ConfigError. */
 export async function loadYaml<T extends z.ZodType>(file: string, schema: T): Promise<z.output<T>> {
+  return (await loadLocated(file, schema)).data;
+}
+
+/** loadYaml, plus the line of every key (see indexLines) so later errors can name it. */
+export async function loadLocated<T extends z.ZodType>(file: string, schema: T): Promise<Located<z.output<T>>> {
   const { doc, lineCounter } = await readYamlFile(file);
   if (doc.errors.length > 0) {
     const found = doc.errors.map((e) => ({ message: e.message.split('\n')[0], line: e.linePos?.[0].line }));
@@ -77,7 +81,7 @@ export async function loadYaml<T extends z.ZodType>(file: string, schema: T): Pr
       found.map((f) => formatIssue(f.message, file, f.line, f.path)).join('\n'),
     );
   }
-  return result.data;
+  return { data: result.data, lines: indexLines(doc, lineCounter) };
 }
 
 export function loadUserConfig(file: string): Promise<UserConfig> {

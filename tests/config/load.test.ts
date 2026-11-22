@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { writeJsonSchema } from '../../src/config/json-schema.ts';
-import { ConfigError, loadFragment, loadUserConfig } from '../../src/config/load.ts';
-import { effectiveKind } from '../../src/config/schema.ts';
+import { ConfigError, loadFragment, loadLocated, loadUserConfig } from '../../src/config/load.ts';
+import { effectiveKind, UserConfigSchema } from '../../src/config/schema.ts';
 
 const fx = (name: string) => path.join(import.meta.dirname, '..', 'fixtures', 'config', name);
 
@@ -240,4 +240,11 @@ test('profile runtime block round-trips and tracker takes approvers', async () =
   } finally {
     await fs.rm(path.dirname(file), { recursive: true, force: true, maxRetries: 5 });
   }
+});
+
+test('loadLocated returns data and the line index', async () => {
+  const { data, lines } = await loadLocated(fx('valid.yaml'), UserConfigSchema);
+  assert.deepEqual(data, await loadUserConfig(fx('valid.yaml')));
+  assert.equal(lines['profiles.work'], 3);
+  assert.equal(lines['profiles.work.bindings.implement'], 9);
 });
