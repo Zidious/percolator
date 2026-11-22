@@ -1083,13 +1083,13 @@ test('boxDriver: a failed or stalled box offers the driver peek when there is on
   assert.equal(boxDriver(byId('t16')), null);
 });
 
-test('historyLabel counts the history rows, singular for one, none for an empty history', () => {
-  const now = Date.parse('2026-11-21T04:30:00.000Z');
-  assert.equal(historyLabel(byId('t3'), false, now), 'History ▸ 7 attempts');
-  assert.equal(historyLabel(byId('t3'), true, now), 'History ▾ 7 attempts');
-  assert.equal(historyLabel(byId('t14'), false, now), 'History ▸ 1 attempt');
-  assert.equal(historyLabel(byId('t5'), false, now), 'History ▸');
-  assert.equal(historyLabel(byId('t5'), true, now), 'History ▾');
+test('historyLabel counts the attempts, singular for one, none for an empty history', () => {
+  assert.equal(historyLabel(byId('t3'), false), 'History ▸ 7 attempts');
+  assert.equal(historyLabel(byId('t3'), true), 'History ▾ 7 attempts');
+  assert.equal(historyLabel(byId('t14'), false), 'History ▸ 1 attempt');
+  assert.equal(historyLabel(byId('t5'), false), 'History ▸');
+  assert.equal(historyLabel(byId('t5'), true), 'History ▾');
+  assert.equal(historyLabel(byId('t4'), false), 'History ▸ 10 attempts', 'its loop-cap row is not an attempt');
 });
 
 test('columns: two columns from 720px wide (the window, a wide panel), else one', () => {

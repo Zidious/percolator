@@ -642,9 +642,9 @@ export function boxDriver(run) {
   return kind === 'failed' || kind === 'stalled' ? driverPeek(run) : null;
 }
 
-/** The History fold's label: its arrow and how many rows the history holds. */
-export function historyLabel(run, open, now) {
-  const n = timelineRows(run, now).length;
+/** The History fold's label: its arrow and how many attempts the history holds (loop-cap rows are not attempts). */
+export function historyLabel(run, open) {
+  const n = timelineOf(run).filter((e) => e.kind === 'attempt').length;
   const head = `History ${open ? '▾' : '▸'}`;
   return n === 0 ? head : `${head} ${n} attempt${n === 1 ? '' : 's'}`;
 }

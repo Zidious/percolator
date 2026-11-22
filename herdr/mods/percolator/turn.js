@@ -83,7 +83,7 @@ export function historyFold(p, t, r) {
             p.historyOpen = !p.historyOpen;
             cx.notify();
           })
-          .child(historyLabel(r, open, Date.now())),
+          .child(historyLabel(r, open)),
       ),
     )
     .when(open, (el) =>

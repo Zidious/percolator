@@ -132,7 +132,7 @@ export declare function showsOutcome(run: RunStatusJson): boolean;
 export declare function programInitial(program: string): string;
 export declare function agentNote(card: ReturnType<typeof agentCard>): string | null;
 export declare function boxDriver(run: RunStatusJson): { terminal: string; label: 'Driver pane ↗' } | null;
-export declare function historyLabel(run: RunStatusJson, open: boolean, now: number): string;
+export declare function historyLabel(run: RunStatusJson, open: boolean): string;
 export type Columns = 'one' | 'two';
 export declare function columns(width: number): Columns;
 export declare function panelShape(width: number, zoom: number): { narrow: boolean; cols: Columns; fold: boolean };
