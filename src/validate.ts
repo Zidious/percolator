@@ -127,7 +127,7 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
   const merged = mergeLayers(layers);
   const violations = checkRules(merged);
   if (violations.length > 0) throw new RuleViolationError(violations, opts.configFile);
-  const graph = buildGraph(merged);
+  const graph = buildGraph(merged, { profile: name, locator: profileLocator });
   await checkGraphReferences(graph, mappings, grounds, opts.configFile);
   await checkAgents(graph, mappings, opts.configFile);
   return {

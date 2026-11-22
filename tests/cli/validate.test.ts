@@ -59,7 +59,12 @@ test('a repo layer changing a locked binding names the repo file', async () => {
 });
 
 test('unbound stages propagate as an error', async () => {
-  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/unbound.yaml') }), /unbound/i);
+  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/unbound.yaml') }), {
+    name: 'GraphError',
+    file: fx('e2e/unbound.yaml'),
+    line: 4,
+    message: `${fx('e2e/unbound.yaml')}:4: profile "work" leaves stages unbound: groom, plan, implement, review, deliver; bind each under bindings:`,
+  });
 });
 
 test('a trusted repo layer is merged as the last layer', async () => {

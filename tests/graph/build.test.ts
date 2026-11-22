@@ -31,10 +31,95 @@ test('all six stages unbound are listed together', () => {
     () => buildGraph(mergeLayers([])),
     (e: unknown) => {
       assert.ok(e instanceof GraphError);
-      assert.equal(e.message, 'unbound stages: intake, groom, plan, implement, review, deliver');
+      assert.equal(e.message, 'config: stages unbound: intake, groom, plan, implement, review, deliver; bind each under bindings:');
+      assert.equal(e.file, 'config');
       return true;
     },
   );
+});
+
+const allBut = (stage: string) =>
+  mergeLayers([
+    {
+      source: 'ground:g',
+      fragment: {
+        bindings: Object.fromEntries(
+          ['intake', 'groom', 'plan', 'implement', 'review', 'deliver'].filter((s) => s !== stage).map((s) => [s, { command: ['x'] }]),
+        ),
+      },
+    },
+  ]);
+
+test('unbound stages name the profile at its bindings: line', () => {
+  const home = { profile: 'w', locator: { file: 'c.yaml', lines: { 'profiles.w': 3, 'profiles.w.bindings': 4 }, prefix: 'profiles.w' } };
+  assert.throws(() => buildGraph(allBut('plan'), home), (e: unknown) => {
+    assert.ok(e instanceof GraphError);
+    assert.equal(e.message, 'c.yaml:4: profile "w" leaves stages unbound: plan; bind each under bindings:');
+    assert.equal(e.file, 'c.yaml');
+    assert.equal(e.line, 4);
+    assert.equal(e.path, undefined);
+    return true;
+  });
+});
+
+test('unbound stages fall back to the profile line when it has no bindings: key', () => {
+  const home = { profile: 'w', locator: { file: 'c.yaml', lines: { 'profiles.w': 3 }, prefix: 'profiles.w' } };
+  assert.throws(() => buildGraph(allBut('review'), home), {
+    message: 'c.yaml:3: profile "w" leaves stages unbound: review; bind each under bindings:',
+  });
+});
+
+/** full(), written in g.yaml with the given key lines. */
+function fullAt(lines: Record<string, number>, extra: Pick<GraphFragment, 'nodes'> = {}, bindings: GraphFragment['bindings'] = {}) {
+  const merged = full(extra, bindings);
+  const locator = { file: 'g.yaml', lines };
+  for (const b of Object.values(merged.bindings)) b.locator = locator;
+  for (const n of Object.values(merged.nodes)) if (n.source !== 'core') n.locator = locator;
+  return merged;
+}
+
+test('graph errors give the file and line of the offending key', () => {
+  const cases: [ReturnType<typeof full>, string, string][] = [
+    [
+      fullAt({ 'nodes.x': 5, 'nodes.x.on_fail.back_to': 7 }, { nodes: { x: { after: 'plan', agent: 'claude', on_fail: { back_to: 'deliver', max_rounds: 1 } } } }),
+      'g.yaml:7: nodes.x.on_fail.back_to: back_to must point to an earlier stage (got "deliver" at "x"); use "plan" or an earlier stage',
+      'nodes.x.on_fail.back_to',
+    ],
+    [
+      fullAt({ 'nodes.loose': 5 }, { nodes: { loose: { agent: 'claude' } } }),
+      'g.yaml:5: nodes.loose: extension node "loose" needs "before" or "after"; attach it to a stage or all',
+      'nodes.loose',
+    ],
+    [
+      fullAt({ 'bindings.review': 9 }, {}, { review: { agent: 'claude', on_fail: { back_to: 'implement', max_rounds: 2 } } }),
+      'g.yaml:9: bindings.review.on_fail: review loop is core-owned; set max_rounds on the review binding instead',
+      'bindings.review.on_fail',
+    ],
+    [
+      fullAt({ 'nodes.pre': 5, 'nodes.pre.on_fail': 6 }, { nodes: { pre: { before: 'all', kind: 'script', command: ['x'], on_fail: { back_to: 'intake', max_rounds: 1 } } } }),
+      'g.yaml:6: nodes.pre.on_fail: a before-all hook cannot declare on_fail (no earlier stage to return to); remove on_fail or attach the hook to a stage',
+      'nodes.pre.on_fail',
+    ],
+    [
+      fullAt({ 'nodes.plan.0': 5 }, { nodes: { 'plan.0': { after: 'plan', kind: 'script', command: ['x'] } } }),
+      'g.yaml:5: nodes.plan.0: node "plan.0" clashes with a core step id; rename it',
+      'nodes.plan.0',
+    ],
+    [
+      fullAt({ 'bindings.deliver': 11 }, {}, { deliver: { agent: 'claude' } }),
+      'g.yaml:11: bindings.deliver: deliver cannot be an agent node: Percolator opens the PR itself (use { builtin: github.open_pr })',
+      'bindings.deliver',
+    ],
+  ];
+  for (const [merged, message, p] of cases) {
+    assert.throws(() => buildGraph(merged), (e: unknown) => {
+      assert.ok(e instanceof GraphError);
+      assert.equal(e.message, message);
+      assert.equal(e.file, 'g.yaml');
+      assert.equal(e.path, p);
+      return true;
+    });
+  }
 });
 
 test('orders hooks, slots and core gate', () => {
@@ -70,7 +155,11 @@ test('on_fail creates escalating back-edge', () => {
 test('back_to a later stage is rejected', () => {
   assert.throws(
     () => buildGraph(full({ nodes: { x: { after: 'plan', agent: 'claude', on_fail: { back_to: 'deliver', max_rounds: 1 } } } })),
-    (e: unknown) => e instanceof GraphError && /back_to must point to an earlier stage/.test(e.message) && e.path === 'nodes.x',
+    {
+      name: 'GraphError',
+      path: 'nodes.x.on_fail.back_to',
+      message: 'config: nodes.x.on_fail.back_to: back_to must point to an earlier stage (got "deliver" at "x"); use "plan" or an earlier stage',
+    },
   );
 });
 
@@ -104,7 +193,7 @@ test('before-all hook may not declare on_fail', () => {
       buildGraph(
         full({ nodes: { pre: { before: 'all', kind: 'script', command: ['x'], on_fail: { back_to: 'intake', max_rounds: 1 } } } }),
       ),
-    (e: unknown) => e instanceof GraphError && /before-all/.test(e.message) && e.path === 'nodes.pre',
+    (e: unknown) => e instanceof GraphError && /before-all/.test(e.message) && e.path === 'nodes.pre.on_fail',
   );
 });
 
@@ -153,7 +242,7 @@ test('hook named like a core step id is rejected (review)', () => {
     (e: unknown) =>
       e instanceof GraphError &&
       e.path === 'nodes.review' &&
-      e.message === 'nodes.review: node "review" clashes with a core step id; rename it',
+      e.message === 'config: nodes.review: node "review" clashes with a core step id; rename it',
   );
 });
 
@@ -276,7 +365,7 @@ test('deliver cannot be an agent node; script and builtin are fine', () => {
       assert.ok(e instanceof GraphError);
       assert.equal(
         (e as Error).message,
-        'bindings.deliver: deliver cannot be an agent node: Percolator opens the PR itself (use { builtin: github.open_pr })',
+        'config: bindings.deliver: deliver cannot be an agent node: Percolator opens the PR itself (use { builtin: github.open_pr })',
       );
       assert.equal((e as GraphError).path, 'bindings.deliver');
       return true;

@@ -1,5 +1,6 @@
 import { ConfigError } from '../config/load.ts';
-import type { Locator } from '../config/locate.ts';
+import { locate } from '../config/locate.ts';
+import type { Locator, Where } from '../config/locate.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
 import { CORE_GROOM_GATE, CORE_STAGES } from './core.ts';
 import type { Merged } from './merge.ts';
@@ -38,21 +39,33 @@ export type Graph = {
   failRoutes: Record<string, string>;
 };
 
+/** A graph that cannot be built; reported at `where` (the offending key), or `config` when that is unknown. */
 export class GraphError extends ConfigError {
-  constructor(message: string, path?: string) {
-    super(message, 'graph', undefined, path, path ? `${path}: ${message}` : message);
+  constructor(message: string, where?: Where) {
+    super(message, where?.file ?? 'config', where?.line, where?.path);
     this.name = 'GraphError';
   }
 }
 
-export function buildGraph(merged: Readonly<Merged>): Graph {
+/**
+ * Builds the run graph from merged layers. `home` is the selected profile and where it is written:
+ * unbound stages are reported there, because that is where a binding is added.
+ */
+export function buildGraph(merged: Readonly<Merged>, home?: { profile: string; locator: Locator }): Graph {
   const unbound = CORE_STAGES.filter((s) => merged.bindings[s] === undefined);
-  if (unbound.length > 0) throw new GraphError(`unbound stages: ${unbound.join(', ')}`);
+  if (unbound.length > 0) {
+    if (home === undefined) throw new GraphError(`stages unbound: ${unbound.join(', ')}; bind each under bindings:`);
+    const { path: _path, ...at } = locate(home.locator, 'config', 'bindings');
+    throw new GraphError(`profile "${home.profile}" leaves stages unbound: ${unbound.join(', ')}; bind each under bindings:`, at);
+  }
 
   const hooks = Object.entries(merged.nodes).map(([name, sourced]) => {
     const def = sourced.value;
     if (def.before === undefined && def.after === undefined) {
-      throw new GraphError(`extension node "${name}" needs "before" or "after"`, `nodes.${name}`);
+      throw new GraphError(
+        `extension node "${name}" needs "before" or "after"; attach it to a stage or all`,
+        locate(sourced.locator, 'config', `nodes.${name}`),
+      );
     }
     return { name, def, source: sourced.source, locked: sourced.locked, ...(sourced.locator ? { locator: sourced.locator } : {}) };
   });
@@ -70,7 +83,10 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
     const binding = merged.bindings[stage]!;
     const slot = binding.value;
     if (stage === 'deliver' && slot.some((d) => d.kind === 'agent' || d.agent !== undefined)) {
-      throw new GraphError('deliver cannot be an agent node: Percolator opens the PR itself (use { builtin: github.open_pr })', 'bindings.deliver');
+      throw new GraphError(
+        'deliver cannot be an agent node: Percolator opens the PR itself (use { builtin: github.open_pr })',
+        locate(binding.locator, 'config', 'bindings.deliver'),
+      );
     }
     slot.forEach((def, i) => {
       steps.push({
@@ -92,7 +108,9 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
   const seen = new Set<string>();
   for (const s of steps) {
     if (seen.has(s.id)) {
-      throw new GraphError(`node "${s.id}" clashes with a core step id; rename it`, `nodes.${s.id}`);
+      // the hook is the one to rename, whichever of the two comes first
+      const hook = s.role === 'hook' ? s : steps.find((x) => x.id === s.id && x.role === 'hook');
+      throw new GraphError(`node "${s.id}" clashes with a core step id; rename it`, locate(hook?.locator, 'config', `nodes.${s.id}`));
     }
     seen.add(s.id);
   }
@@ -106,17 +124,24 @@ export function buildGraph(merged: Readonly<Merged>): Graph {
   for (const step of steps) {
     const onFail = step.def.on_fail;
     if (!onFail) continue;
-    const path = step.role === 'hook' ? `nodes.${step.id}` : `bindings.${step.stage}`;
+    const at = (key: string) =>
+      locate(step.locator, 'config', `${step.role === 'hook' ? 'nodes' : 'bindings'}.${step.id}.${key}`);
     if (step === lastReview) {
-      throw new GraphError('review loop is core-owned; set max_rounds on the review binding instead', path);
+      throw new GraphError('review loop is core-owned; set max_rounds on the review binding instead', at('on_fail'));
     }
     if (step.stage === 'before-all') {
-      throw new GraphError('a before-all hook cannot declare on_fail (no earlier stage to return to)', path);
+      throw new GraphError(
+        'a before-all hook cannot declare on_fail (no earlier stage to return to); remove on_fail or attach the hook to a stage',
+        at('on_fail'),
+      );
     }
     // an after-all hook runs past the last stage, so it may target any stage
     const own = step.stage === 'after-all' ? CORE_STAGES.length - 1 : CORE_STAGES.indexOf(step.stage);
     if (CORE_STAGES.indexOf(onFail.back_to) > own) {
-      throw new GraphError(`back_to must point to an earlier stage (got "${onFail.back_to}" at "${step.id}")`, path);
+      throw new GraphError(
+        `back_to must point to an earlier stage (got "${onFail.back_to}" at "${step.id}"); use "${CORE_STAGES[own]}" or an earlier stage`,
+        at('on_fail.back_to'),
+      );
     }
     backEdges[step.id] = {
       id: step.id,
