@@ -47,6 +47,7 @@ import {
   pipelineSpans,
   hookNote,
   unfoldAfterPick,
+  pipelineMarks,
   needsCount,
   needsYou,
   newlyNeeding,
@@ -988,4 +989,22 @@ test('unfoldAfterPick opens a picked stage that holds folded hooks, and folds it
   assert.deepEqual(unfoldAfterPick(t16, WIDE, null, 'plan'), []);
   assert.deepEqual(unfoldAfterPick(byId('t8'), { narrow: true, unfolded: [] }, null, 'intake'), ['intake']);
   assert.deepEqual(unfoldAfterPick(byId('t8'), { narrow: true, unfolded: ['groom'] }, 'groom', 'plan'), ['groom']);
+});
+
+test('pipelineMarks finds the active row, the last reached row and the row the stop strip opens under', () => {
+  const t16 = pipelineRows(byId('t16'), WIDE);
+  assert.deepEqual(pipelineMarks(t16, null), { active: 3, reached: 3, stripAt: -1 });
+  // a picked visible hook opens its strip on its own row; one folded into its stage, on the stage's row
+  assert.deepEqual(pipelineMarks(t16, 'coverage'), { active: 3, reached: 3, stripAt: 5 });
+  assert.deepEqual(pipelineMarks(t16, 'deps-audit'), { active: 3, reached: 3, stripAt: 3 });
+  assert.deepEqual(pipelineMarks(t16, 'nope'), { active: 3, reached: 3, stripAt: -1 });
+
+  // no active row: the spine is reached up to the last row that is not future
+  assert.deepEqual(pipelineMarks(pipelineRows(byId('t3'), WIDE), 'plan'), { active: -1, reached: 6, stripAt: 3 });
+  const t3 = readable('t3');
+  const undelivered = { ...t3, steps: t3.steps.map((s) => (s.id === 'deliver' ? { ...s, status: 'pending' as const } : s)) };
+  assert.deepEqual(pipelineMarks(pipelineRows(undelivered, WIDE), null), { active: -1, reached: 5, stripAt: -1 });
+
+  assert.deepEqual(pipelineMarks(pipelineRows(byId('t5'), WIDE), 'intake'), { active: -1, reached: -1, stripAt: -1 });
+  assert.deepEqual(pipelineMarks([], null), { active: -1, reached: -1, stripAt: -1 });
 });

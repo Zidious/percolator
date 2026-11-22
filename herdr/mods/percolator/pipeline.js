@@ -3,7 +3,7 @@
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { ago, canPick, driverPeek, hookNote, needsYou, pipelineRows, pipelineSpans, roundView, ticketTitle, took } from './model.js';
+import { ago, canPick, driverPeek, hookNote, needsYou, pipelineMarks, pipelineRows, pipelineSpans, roundView, ticketTitle, took } from './model.js';
 import { link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
@@ -82,7 +82,7 @@ function gutter(t, spans, i, between) {
     const c = toneColor(t, s.tone);
     const x = 4 + k * LANE;
     if (between) return i < hi ? [vline('full', x, c)] : [];
-    const tick = div().absolute().top('50%').left(x).right(0).h(2).bg(c);
+    const tick = div().absolute().top('50%').mt(-1).left(x).right(0).h(2).bg(c);
     if (i === lo) return [vline('bottom', x, c), tick];
     if (i === hi) return [vline('top', x, c), tick];
     return [vline('full', x, c)];
@@ -206,11 +206,7 @@ export function pipeline(p, t, r, narrow) {
   if (rows.length === 0) return div();
   const spans = pipelineSpans(rows, r);
   const n = rows.length;
-  const active = rows.findIndex((row) => row.state === 'active');
-  const last = active >= 0 ? active : rows.reduce((at, row, i) => (row.state === 'future' ? at : i), -1);
-  // a picked hook folded into its stage opens its strip under the stage row
-  const holds = (row) => row.step.id === p.stopSel || (row.type === 'stage' && row.folded.some((s) => s.id === p.stopSel));
-  const stripAt = p.stopSel ? rows.findIndex(holds) : -1;
+  const { active, reached: last, stripAt } = pipelineMarks(rows, p.stopSel);
 
   const under = (i, el) =>
     h_flex()
