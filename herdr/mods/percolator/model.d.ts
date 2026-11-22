@@ -100,6 +100,13 @@ export declare function titleLayout(width: number, needs: number): { tabs: 'inli
 export declare function nextBoxH(prev: number, target: number): number;
 export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
 export declare function terminalAddress(live: { address: string; name?: string | null }[], term: string | null | undefined): string | null;
+export declare function activeBox(run: RunStatusJson): 'agent' | 'gate' | 'cap' | 'paused' | 'failed' | 'stalled' | null;
+export declare function agentCard(
+  run: RunStatusJson,
+  live: { address: string; name?: string | null }[],
+  agents: { address: string; status: string; program?: { name: string } }[],
+  now: number,
+): { address: string | null; name: string; status: string; program: string; since: string } | null;
 export declare function driverPeek(run: RunStatusJson | null | undefined): { terminal: string; label: 'Driver pane ↗' } | null;
 export declare function ticketTitle(run: Readable): string;
 export declare function deleteArgv(ids: string[]): string[];

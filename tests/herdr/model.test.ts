@@ -64,6 +64,8 @@ import {
   shownLoops,
   showsHere,
   terminalAddress,
+  activeBox,
+  agentCard,
   ticketTitle,
   sortRuns,
   stepTone,
@@ -1041,4 +1043,32 @@ test('moveStop walks the pipeline rows that have started', () => {
 test('moveStop reaches the hooks of an unfolded stage', () => {
   assert.equal(moveStop(byId('t16'), 'plan', 1), 'implement');
   assert.equal(moveStop(byId('t16'), 'plan', 1, ['implement']), 'lint-baseline');
+});
+
+test('activeBox names what shows under the active stop', () => {
+  const box = (p: string) => activeBox(byId(p));
+  assert.equal(box('t2'), 'gate');
+  assert.equal(box('t4'), 'cap');
+  assert.equal(box('t12'), 'paused');
+  assert.equal(box('t9'), 'failed');
+  assert.equal(box('t11'), 'stalled');
+  assert.equal(box('t13'), 'agent');
+  assert.equal(box('t16'), 'agent');
+  assert.equal(box('t3'), null);
+  assert.equal(box('t5'), null);
+});
+
+test('agentCard links the active stop to its agent terminal', () => {
+  const now = Date.parse('2026-11-21T04:30:00.000Z');
+  const name = 't16_implement_a2_4a92';
+  const step = readable('t16').steps.find((s) => s.id === 'implement')!;
+  const since = took(step, now);
+  assert.ok(since);
+  assert.deepEqual(agentCard(byId('t16'), [], [], now), { address: null, name, status: 'not open', program: 'Agent', since });
+  const live = [{ address: 'w1:7', name }];
+  const agents = [{ address: 'w1:7', status: 'working', program: { name: 'Claude Code' } }];
+  assert.deepEqual(agentCard(byId('t16'), live, agents, now), { address: 'w1:7', name, status: 'working', program: 'Claude Code', since });
+  assert.equal(agentCard(byId('t16'), live, [], now)!.status, 'open');
+  assert.equal(agentCard(byId('t3'), live, agents, now), null);
+  assert.equal(agentCard(byId('t17'), [], [], now)!.name, 't17_implement-1_a1_0641');
 });

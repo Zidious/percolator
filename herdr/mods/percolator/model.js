@@ -586,6 +586,35 @@ export function terminalAddress(live, term) {
   return live.find((x) => x.address === term || x.name === term)?.address ?? null;
 }
 
+const BOXES = ['gate', 'cap', 'paused', 'failed', 'stalled'];
+
+/** What shows under the run's active stop: the attention box for its kind, the agent card while an agent works, else
+ *  nothing. */
+export function activeBox(run) {
+  if (!run || run.status === 'unreadable') return null;
+  const kind = run.attention?.kind;
+  if (BOXES.includes(kind)) return kind;
+  if (kind === 'agent') return 'agent';
+  return run.status === 'running' && run.terminals?.[run.currentStep] ? 'agent' : null;
+}
+
+/** The agent terminal of the run's current step, linked to the live terminal and agent Herdr shows; null when the
+ *  step has no terminal. */
+export function agentCard(run, live, agents, now) {
+  const name = run?.terminals?.[run.currentStep];
+  if (!name) return null;
+  const address = terminalAddress(live, name);
+  const agent = agents.find((a) => a.address === address);
+  const step = (run.steps ?? []).find((s) => s.id === run.currentStep);
+  return {
+    address,
+    name,
+    status: agent?.status ?? (address ? 'open' : 'not open'),
+    program: agent?.program?.name ?? 'Agent',
+    since: step ? took(step, now) : '',
+  };
+}
+
 /** The run's live driver terminal, to peek at (closing a peek leaves it running; closing a pane would end it), or
  *  null when there is none (a finished run, a driver not among the live terminals). */
 export function driverPeek(run) {
