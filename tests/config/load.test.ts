@@ -270,6 +270,115 @@ test('a profile with pipelines loads', async () => {
   );
 });
 
+test('a router pipeline loads', async () => {
+  await withYaml(
+    [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    pipelines:',
+      '      triage:',
+      '        router: true',
+      '        stages: [intake, route]',
+      '        routes: [{ label: bug, to: hotfix }]',
+      '        choose: { agent: claude, effort: high, from: [hotfix, feature], confirm: always }',
+      '        fallback: feature',
+      '',
+    ].join('\n'),
+    async (file) => {
+      const t = (await loadUserConfig(file)).profiles.default!.pipelines!.triage!;
+      assert.deepEqual(t.routes, [{ label: 'bug', to: 'hotfix' }]);
+      assert.deepEqual(t.choose, { agent: 'claude', effort: 'high', from: ['hotfix', 'feature'], confirm: 'always' });
+      assert.equal(t.fallback, 'feature');
+    },
+  );
+});
+
+test('a pipeline may name the next pipeline for its issues', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      split:\n        stages: [intake, deliver]\n        exit: issue\n        next: hotfix\n',
+    async (file) => {
+      assert.equal((await loadUserConfig(file)).profiles.default!.pipelines!.split!.next, 'hotfix');
+    },
+  );
+});
+
+test('a valid trigger list loads', async () => {
+  await withYaml(
+    [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    pipelines:',
+      '      nightly:',
+      '        triggers:',
+      '          - { schedule: "0 3 * * 1-5", timezone: Europe/London, inputs: { area: deps } }',
+      '          - { label: needs-triage }',
+      '          - { pr_opened: true }',
+      '          - { pr_opened: { not_author: [dependabot] } }',
+      '          - { dependabot: true }',
+      '          - { check_failed: { branch: main, workflow: ci.yml } }',
+      '',
+    ].join('\n'),
+    async (file) => {
+      assert.deepEqual((await loadUserConfig(file)).profiles.default!.pipelines!.nightly!.triggers, [
+        { schedule: '0 3 * * 1-5', timezone: 'Europe/London', inputs: { area: 'deps' } },
+        { label: 'needs-triage' },
+        { pr_opened: true },
+        { pr_opened: { not_author: ['dependabot'] } },
+        { dependabot: true },
+        { check_failed: { branch: 'main', workflow: 'ci.yml' } },
+      ]);
+    },
+  );
+});
+
+test('a malformed trigger is reported at its key', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      p:\n        triggers:\n          - check_failed: { workflow: ci.yml }\n',
+    async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.p.triggers.0.check_failed.branch');
+    },
+  );
+});
+
+test('a fan_out loads', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      epic:\n        fan_out: { stage: implement, slices: { from: plan, output: slices }, max_parallel: 2 }\n',
+    async (file) => {
+      assert.deepEqual((await loadUserConfig(file)).profiles.default!.pipelines!.epic!.fan_out, {
+        stage: 'implement',
+        slices: { from: 'plan', output: 'slices' },
+        max_parallel: 2,
+      });
+    },
+  );
+});
+
+test('fan_out.max_parallel is at least 1', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      epic:\n        fan_out: { stage: implement, slices: { from: plan, output: slices }, max_parallel: 0 }\n',
+    async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.epic.fan_out.max_parallel');
+    },
+  );
+});
+
+test('choose.confirm is unsure or always', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      triage:\n        choose: { agent: claude, from: [a], confirm: never }\n',
+    async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.triage.choose.confirm');
+    },
+  );
+});
+
 test('pipeline names must be lower-case identifiers', async () => {
   await withYaml('version: 1\nprofiles:\n  default:\n    pipelines:\n      Hot_Fix:\n        stages: [intake, deliver]\n', async (file) => {
     const err = await loadUserConfig(file).catch((e) => e);

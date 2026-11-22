@@ -8,6 +8,10 @@ export const BUILTIN_NAMES = [
   'github.release',
   'github.pr_review',
   'github.private_fork_pr',
+  'percolator.route_rules',
+  'percolator.route',
+  'percolator.fan_out',
+  'percolator.seed',
 ] as const;
 export type BuiltinName = (typeof BUILTIN_NAMES)[number];
 

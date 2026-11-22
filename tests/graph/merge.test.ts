@@ -282,6 +282,36 @@ test('pipeline headers merge with their sources', () => {
   assert.deepEqual(r.feature!.header.value.stages, [...CORE_STAGES]);
 });
 
+test('router keys are part of the pipeline header', () => {
+  const r = mergePipelines([
+    L('a', { pipelines: { triage: { router: true, stages: ['intake', 'route'], routes: [{ label: 'bug', to: 'hotfix' }] } } }),
+    L('b', { pipelines: { triage: { choose: { agent: 'claude', from: ['hotfix'] }, fallback: 'hotfix' } } }),
+  ]);
+  assert.deepEqual(r.triage!.header.value, {
+    router: true,
+    stages: ['intake', 'route'],
+    routes: [{ label: 'bug', to: 'hotfix' }],
+    choose: { agent: 'claude', from: ['hotfix'] },
+    fallback: 'hotfix',
+  });
+});
+
+test('triggers are part of the pipeline header', () => {
+  const r = mergePipelines([L('a', { pipelines: { p: { stages: ['intake', 'deliver'], triggers: [{ label: 'x' }] } } })]);
+  assert.deepEqual(r.p!.header.value.triggers, [{ label: 'x' }]);
+});
+
+test('fan_out is part of the pipeline header', () => {
+  const fan_out = { stage: 'implement', slices: { from: 'plan', output: 'slices' } };
+  const r = mergePipelines([L('a', { pipelines: { p: { stages: ['intake', 'deliver'], fan_out } } })]);
+  assert.deepEqual(r.p!.header.value.fan_out, fan_out);
+});
+
+test('next is part of the pipeline header', () => {
+  const r = mergePipelines([L('a', { pipelines: { split: { stages: ['intake', 'deliver'], exit: 'issue', next: 'hotfix' } } })]);
+  assert.equal(r.split!.header.value.next, 'hotfix');
+});
+
 const LOCKED_HOTFIX = { required: true, stages: ['intake', 'fix', 'deliver'], exit: 'pr' as const };
 const groundLayer: Layer = {
   source: 'ground:co/p.yaml',

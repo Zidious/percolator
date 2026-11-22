@@ -148,7 +148,7 @@
                       ]
                     },
                     "builtin": {
-                      "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
+                      "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                       "type": "string"
                     },
                     "command": {
@@ -286,7 +286,7 @@
                         ]
                       },
                       "builtin": {
-                        "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
+                        "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                         "type": "string"
                       },
                       "command": {
@@ -433,7 +433,7 @@
                   ]
                 },
                 "builtin": {
-                  "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
+                  "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                   "type": "string"
                 },
                 "command": {
@@ -679,6 +679,292 @@
                     "description": "One named input: perc run --input <name>=<value>."
                   }
                 },
+                "router": {
+                  "description": "This pipeline is a triage router: its last stage, route, hands the ticket to another pipeline; default false.",
+                  "type": "boolean"
+                },
+                "routes": {
+                  "description": "Router only: label rules tried in order before the choose agent; the first match wins.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "description": "Issue label that picks the pipeline."
+                      },
+                      "to": {
+                        "type": "string",
+                        "description": "Pipeline the ticket goes to when the issue has the label."
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "to"
+                    ],
+                    "additionalProperties": false,
+                    "description": "One rule: an issue with this label goes to this pipeline."
+                  }
+                },
+                "choose": {
+                  "description": "Router only: the agent that picks a pipeline when no label rule matched; without it the fallback applies.",
+                  "type": "object",
+                  "properties": {
+                    "agent": {
+                      "type": "string",
+                      "description": "Which agent picks the pipeline."
+                    },
+                    "model": {
+                      "description": "Model the agent uses; default the agent's own.",
+                      "type": "string"
+                    },
+                    "effort": {
+                      "description": "Reasoning effort for the agent (claude only); default the agent's own.",
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh",
+                        "max"
+                      ]
+                    },
+                    "skill": {
+                      "description": "One skill the agent loads.",
+                      "type": "string"
+                    },
+                    "skills": {
+                      "description": "Skills the agent loads.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "prompt": {
+                      "description": "Task prompt for the agent; default: pick one of from and write pick.md (pipeline and whether it is unsure).",
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "from": {
+                              "type": "string",
+                              "description": "Name of the ground the prompt file comes from."
+                            },
+                            "file": {
+                              "type": "string",
+                              "description": "Prompt file inside the ground."
+                            }
+                          },
+                          "required": [
+                            "from",
+                            "file"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "from": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Pipelines the agent may pick from."
+                    },
+                    "confirm": {
+                      "description": "When the pick-pipeline gate asks you to confirm the pick: unsure (only when the agent is unsure) or always; default unsure.",
+                      "type": "string",
+                      "enum": [
+                        "unsure",
+                        "always"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "agent",
+                    "from"
+                  ],
+                  "additionalProperties": false
+                },
+                "fallback": {
+                  "description": "Router only: the pipeline used when nothing else picked one; default the profile's default pipeline, or feature when that is a router.",
+                  "type": "string"
+                },
+                "triggers": {
+                  "description": "What starts runs of this pipeline while perc watch runs: schedule, label, pr_opened, dependabot or check_failed.",
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "schedule": {
+                            "type": "string",
+                            "description": "Cron expression (minute hour day-of-month month day-of-week) of when a ticketless run starts."
+                          },
+                          "timezone": {
+                            "description": "IANA time zone the schedule is read in, like Europe/London; default the time zone of the machine running perc watch.",
+                            "type": "string"
+                          },
+                          "inputs": {
+                            "description": "Inputs each scheduled run gets.",
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "string",
+                              "description": "Value of the input."
+                            }
+                          }
+                        },
+                        "required": [
+                          "schedule"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Start a ticketless run on a cron schedule."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "description": "Issue label that starts a run on the issue."
+                          }
+                        },
+                        "required": [
+                          "label"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Start a run on each issue that gets this label."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "pr_opened": {
+                            "anyOf": [
+                              {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "not_author": {
+                                    "description": "GitHub logins whose pull requests are skipped.",
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ],
+                            "description": "true, or { not_author } to skip some authors; the run gets the PR as input pr."
+                          }
+                        },
+                        "required": [
+                          "pr_opened"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Start a run on each pull request opened."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "dependabot": {
+                            "type": "boolean",
+                            "const": true,
+                            "description": "true; the run gets the PR as input pr."
+                          }
+                        },
+                        "required": [
+                          "dependabot"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Start a run on each Dependabot pull request."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "check_failed": {
+                            "type": "object",
+                            "properties": {
+                              "branch": {
+                                "type": "string",
+                                "description": "Branch whose failed checks start a run."
+                              },
+                              "workflow": {
+                                "description": "Only failures of this workflow (its file name); default any workflow.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "branch"
+                            ],
+                            "additionalProperties": false,
+                            "description": "Which failed check runs start a run; the run gets inputs branch and run_url."
+                          }
+                        },
+                        "required": [
+                          "check_failed"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Start a run when a check fails on a branch."
+                      }
+                    ]
+                  }
+                },
+                "fan_out": {
+                  "description": "Run one stage, and every stage after it, once per slice in parallel linked runs; the run waits for them all.",
+                  "type": "object",
+                  "properties": {
+                    "stage": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+                      "description": "Stage run once per slice, each in its own linked run; neither intake nor the exit stage."
+                    },
+                    "slices": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+                          "description": "Earlier stage that writes the slices."
+                        },
+                        "output": {
+                          "type": "string",
+                          "description": "Output key of that stage holding the slices: one \"## <title>\" section per slice."
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "output"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Where the slices come from."
+                    },
+                    "max_parallel": {
+                      "description": "Most slices running at once; default 3.",
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "stage",
+                    "slices"
+                  ],
+                  "additionalProperties": false
+                },
+                "next": {
+                  "description": "Issue exit only: the pipeline each opened issue starts a linked run of; default none (the issues just stay open).",
+                  "type": "string"
+                },
                 "bindings": {
                   "description": "What runs each of the pipeline's stages; after all layers merge, every stage must be bound.",
                   "type": "object",
@@ -757,7 +1043,7 @@
                             ]
                           },
                           "builtin": {
-                            "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
+                            "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                             "type": "string"
                           },
                           "command": {
@@ -895,7 +1181,7 @@
                               ]
                             },
                             "builtin": {
-                              "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
+                              "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                               "type": "string"
                             },
                             "command": {
@@ -1042,7 +1328,7 @@
                         ]
                       },
                       "builtin": {
-                        "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
+                        "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                         "type": "string"
                       },
                       "command": {
@@ -1257,7 +1543,7 @@
                   }
                 },
                 "required": {
-                  "description": "Locks the pipeline's settings (stages, outputs, exit, ticket, inputs): later layers may only restate them; default false.",
+                  "description": "Locks the pipeline's settings (every key but bindings, nodes, rules and use): later layers may only restate them; default false.",
                   "type": "boolean"
                 }
               },

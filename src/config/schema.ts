@@ -268,6 +268,46 @@ export const PipelineInputSchema = z.strictObject({
   description: z.string().optional().describe('What the input is; shown as the field hint when starting a run.'),
 });
 
+/** What starts a run of a pipeline from perc watch: one of five shapes, told apart by their key. */
+export const TriggerSchema = z.union([
+  z
+    .strictObject({
+      schedule: z.string().describe('Cron expression (minute hour day-of-month month day-of-week) of when a ticketless run starts.'),
+      timezone: z.string().optional().describe('IANA time zone the schedule is read in, like Europe/London; default the time zone of the machine running perc watch.'),
+      inputs: z.record(z.string(), z.string().describe('Value of the input.')).optional().describe('Inputs each scheduled run gets.'),
+    })
+    .describe('Start a ticketless run on a cron schedule.'),
+  z
+    .strictObject({ label: z.string().describe('Issue label that starts a run on the issue.') })
+    .describe('Start a run on each issue that gets this label.'),
+  z
+    .strictObject({
+      pr_opened: z
+        .union([
+          z.literal(true),
+          z.strictObject({
+            not_author: z.array(z.string()).optional().describe('GitHub logins whose pull requests are skipped.'),
+          }),
+        ])
+        .describe('true, or { not_author } to skip some authors; the run gets the PR as input pr.'),
+    })
+    .describe('Start a run on each pull request opened.'),
+  z
+    .strictObject({ dependabot: z.literal(true).describe('true; the run gets the PR as input pr.') })
+    .describe('Start a run on each Dependabot pull request.'),
+  z
+    .strictObject({
+      check_failed: z
+        .strictObject({
+          branch: z.string().describe('Branch whose failed checks start a run.'),
+          workflow: z.string().optional().describe('Only failures of this workflow (its file name); default any workflow.'),
+        })
+        .describe('Which failed check runs start a run; the run gets inputs branch and run_url.'),
+    })
+    .describe('Start a run when a check fails on a branch.'),
+]);
+export type Trigger = z.infer<typeof TriggerSchema>;
+
 export const PipelineSchema = z.strictObject({
   default: z
     .boolean()
@@ -298,6 +338,74 @@ export const PipelineSchema = z.strictObject({
   )
     .optional()
     .describe('Named values a run takes (perc run --input key=value), available to prompts as {{input_<name>}}.'),
+  router: z
+    .boolean()
+    .optional()
+    .describe('This pipeline is a triage router: its last stage, route, hands the ticket to another pipeline; default false.'),
+  routes: z
+    .array(
+      z
+        .strictObject({
+          label: z.string().describe('Issue label that picks the pipeline.'),
+          to: z.string().describe('Pipeline the ticket goes to when the issue has the label.'),
+        })
+        .describe('One rule: an issue with this label goes to this pipeline.'),
+    )
+    .optional()
+    .describe('Router only: label rules tried in order before the choose agent; the first match wins.'),
+  choose: z
+    .strictObject({
+      agent: z.string().describe('Which agent picks the pipeline.'),
+      model: z.string().optional().describe("Model the agent uses; default the agent's own."),
+      effort: z
+        .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+        .optional()
+        .describe("Reasoning effort for the agent (claude only); default the agent's own."),
+      skill: z.string().optional().describe('One skill the agent loads.'),
+      skills: z.array(z.string()).optional().describe('Skills the agent loads.'),
+      prompt: z
+        .union([
+          z.string(),
+          z.strictObject({
+            from: z.string().describe('Name of the ground the prompt file comes from.'),
+            file: z.string().describe('Prompt file inside the ground.'),
+          }),
+        ])
+        .optional()
+        .describe('Task prompt for the agent; default: pick one of from and write pick.md (pipeline and whether it is unsure).'),
+      from: z.array(z.string()).min(1).describe('Pipelines the agent may pick from.'),
+      confirm: z
+        .enum(['unsure', 'always'])
+        .optional()
+        .describe('When the pick-pipeline gate asks you to confirm the pick: unsure (only when the agent is unsure) or always; default unsure.'),
+    })
+    .optional()
+    .describe('Router only: the agent that picks a pipeline when no label rule matched; without it the fallback applies.'),
+  fallback: z
+    .string()
+    .optional()
+    .describe("Router only: the pipeline used when nothing else picked one; default the profile's default pipeline, or feature when that is a router."),
+  triggers: z
+    .array(TriggerSchema)
+    .optional()
+    .describe('What starts runs of this pipeline while perc watch runs: schedule, label, pr_opened, dependabot or check_failed.'),
+  fan_out: z
+    .strictObject({
+      stage: StageNameSchema.describe('Stage run once per slice, each in its own linked run; neither intake nor the exit stage.'),
+      slices: z
+        .strictObject({
+          from: StageNameSchema.describe('Earlier stage that writes the slices.'),
+          output: z.string().describe('Output key of that stage holding the slices: one "## <title>" section per slice.'),
+        })
+        .describe('Where the slices come from.'),
+      max_parallel: z.number().int().min(1).optional().describe('Most slices running at once; default 3.'),
+    })
+    .optional()
+    .describe('Run one stage, and every stage after it, once per slice in parallel linked runs; the run waits for them all.'),
+  next: z
+    .string()
+    .optional()
+    .describe('Issue exit only: the pipeline each opened issue starts a linked run of; default none (the issues just stay open).'),
   bindings: z
     .record(z.string(), BindingSchema.describe('The node that runs this stage, or a list of nodes run in order.'))
     .optional()
@@ -311,7 +419,7 @@ export const PipelineSchema = z.strictObject({
   required: z
     .boolean()
     .optional()
-    .describe("Locks the pipeline's settings (stages, outputs, exit, ticket, inputs): later layers may only restate them; default false."),
+    .describe("Locks the pipeline's settings (every key but bindings, nodes, rules and use): later layers may only restate them; default false."),
 });
 export type Pipeline = z.infer<typeof PipelineSchema>;
 
