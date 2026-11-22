@@ -18,6 +18,9 @@ export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStat
 /** `feedback` is the reject feedback, or the picked pipeline for `pick`. */
 export declare function actionArgv(action: Action, run: { id: string }, feedback?: string): string[] | null;
 export declare function linkedLine(run: RunStatusJson, runs: RunStatusJson[]): { text: string; run: string | null } | null;
+export type SliceRow = { index: number; title: string; id: string; status: RunStatusJson['status'] | 'pending'; stepLabel: string; prUrl?: string };
+export declare function sliceRows(run: RunStatusJson, runs: RunStatusJson[]): SliceRow[];
+export declare function fanOutRow(rows: PipeRow[]): number;
 export declare function watcherState(status: StatusJson): { alive: boolean; label: string; argv: string[] | null };
 export declare function needsYou(run: RunStatusJson): boolean;
 export declare function nowTone(run: RunStatusJson): 'blocked' | 'working';

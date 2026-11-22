@@ -12,6 +12,8 @@ import { readRunGraph } from './graph-file.ts';
 import type { RunGraphLoop, RunGraphStep } from './graph-file.ts';
 import { lockIsLive, pidAlive, readDriverLock } from './lock.ts';
 import type { DriverLock } from './lock.ts';
+import { readFanOut } from './fan-out.ts';
+import type { FanOutFile } from './fan-out.ts';
 import { listRuns } from './meta.ts';
 import type { RunListing, RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
@@ -61,7 +63,7 @@ export type TimelineJson = AttemptJson | CapJson;
 export type LoopJson = RunGraphLoop & { round: number };
 export type TicketJson = { ref: string; number: number; title?: string; url?: string };
 /** A run this one started (route or fan-out child); `slice` only on a fan-out child. */
-export type ChildJson = { id: string; pipeline: string; status: RunStatusJson['status']; slice?: { index: number; title: string } };
+export type ChildJson = { id: string; pipeline: string; status: RunStatusJson['status'] | 'pending'; slice?: { index: number; title: string } };
 export type RunStatusJson =
   | {
       id: string;
@@ -73,7 +75,7 @@ export type RunStatusJson =
       ticket: TicketJson | null;
       /** the run that started this one, else null */
       parent: string | null;
-      /** listed runs whose parent is this run, in listing order */
+      /** fan-out slices by index (pending until started), then listed runs whose parent is this run, in listing order */
       children: ChildJson[];
       /** the issues the run's exit opened, from its latest `issue_urls` output */
       opened: { ref: string; url: string }[];
@@ -471,13 +473,31 @@ async function listedStatus(l: RunListing): Promise<RunStatusJson['status']> {
   }
 }
 
-/** The listed runs whose `run.json` names `id` as their parent, in listing order. */
-async function childrenOf(id: string, listed: RunListing[]): Promise<ChildJson[]> {
-  const out: ChildJson[] = [];
-  for (const l of listed) {
-    if (l.meta?.parent !== id) continue;
-    out.push({ id: l.meta.runId, pipeline: l.meta.pipeline, status: await listedStatus(l) });
+/** A fan-out's slices from `fanout.json`, by index; none when there is none or it can't be read (status never throws on it). */
+async function slicesOf(dir: string): Promise<FanOutFile['children']> {
+  try {
+    const f = await readFanOut(dir);
+    return Array.isArray(f?.children) ? [...f.children].sort((a, b) => a.index - b.index) : [];
+  } catch {
+    return [];
   }
+}
+
+/**
+ * The runs this one started: its fan-out slices first, by index (a slice not started yet is `pending`, on this run's
+ * pipeline), then the other listed runs whose `run.json` names it as their parent, in listing order.
+ */
+async function childrenOf(dir: string, meta: RunMeta, listed: RunListing[]): Promise<ChildJson[]> {
+  const linked = listed.filter((l) => l.meta?.parent === meta.runId);
+  const statusOf = async (l: RunListing) => ({ id: l.meta!.runId, pipeline: l.meta!.pipeline, status: await listedStatus(l) });
+  const slices = await slicesOf(dir);
+  const out: ChildJson[] = [];
+  for (const s of slices) {
+    const l = linked.find((x) => x.meta!.runId === s.id);
+    const base = l ? await statusOf(l) : { id: s.id, pipeline: meta.pipeline, status: 'pending' as const };
+    out.push({ ...base, slice: { index: s.index, title: s.title } });
+  }
+  for (const l of linked) if (!slices.some((s) => s.id === l.meta!.runId)) out.push(await statusOf(l));
   return out;
 }
 
@@ -529,7 +549,7 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, list
     inputs: meta.inputs,
     ticket: await readTicket(dir, meta),
     parent: meta.parent ?? null,
-    children: await childrenOf(meta.runId, listed),
+    children: await childrenOf(dir, meta, listed),
     opened: await openedOf(dir, state),
     repo: meta.repoRoot,
     branch: meta.branch,
