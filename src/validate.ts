@@ -70,6 +70,25 @@ export async function validateAll(opts: ValidateOptions): Promise<ValidateResult
   return out;
 }
 
+/**
+ * Validates every pipeline of the selected profile, keeping each pipeline's own error instead of throwing it.
+ * A config-level error (loading, profile, grounds, default pipeline) still throws.
+ */
+export async function validateEach(
+  opts: ValidateOptions,
+): Promise<{ profile: string; pipelines: Record<string, PipelineSpec>; results: Record<string, ValidateResult | Error> }> {
+  const l = await load(opts);
+  const results: Record<string, ValidateResult | Error> = {};
+  for (const name of Object.keys(l.specs)) {
+    try {
+      results[name] = await validatePipeline(l, name);
+    } catch (err) {
+      results[name] = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+  return { profile: l.name, pipelines: l.specs, results };
+}
+
 type Loaded = {
   configFile: string;
   name: string;
