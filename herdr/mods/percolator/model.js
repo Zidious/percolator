@@ -274,7 +274,8 @@ export function pipelineSpans(rows, run) {
 }
 
 /** Row indexes in a pipeline (-1 when none): the active row; the last row the spine is reached to (the active one, else
- *  the last that is not future); and the row the strip of `stopSel` opens under (its own, or the stage row folding it). */
+ *  the last that is not future); and the row holding `stopSel`, which rings as picked and the strip opens under (its
+ *  own, or the stage row folding it). */
 export function pipelineMarks(rows, stopSel) {
   const active = rows.findIndex((r) => r.state === 'active');
   const reached = active >= 0 ? active : rows.reduce((at, r, i) => (r.state === 'future' ? at : i), -1);

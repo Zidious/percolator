@@ -273,7 +273,8 @@ export function pipeline(p, t, r, fold, narrow, under = true) {
               }),
             )
             .child(gutter(t, spans, i, false))
-            .child(spine(t, i, n, last, false, stage ? stageStop(p, t, r, row, picked) : null))
+            // the ring marks the row holding the picked stop: its own, or the stage row a picked hook folds into
+            .child(spine(t, i, n, last, false, stage ? stageStop(p, t, r, row, i === stripAt) : null))
             .child(stage ? stageLabel(t, r, row) : hookLabel(p, t, r, row)),
         );
         const out = [line];
