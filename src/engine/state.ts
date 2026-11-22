@@ -14,7 +14,8 @@ export type StepRecord = {
 export type RunState = {
   version: 1;
   runId: string;
-  ticket: string;
+  /** absent on a ticketless run */
+  ticket?: string;
   profile: string;
   groundVersions: Record<string, string>;
   cursor: number;
@@ -82,14 +83,14 @@ const STATE_FILE = 'state.json';
 
 export function newState(init: {
   runId: string;
-  ticket: string;
+  ticket?: string;
   profile: string;
   groundVersions: Record<string, string>;
 }): RunState {
   return {
     version: 1,
     runId: init.runId,
-    ticket: init.ticket,
+    ...(init.ticket !== undefined ? { ticket: init.ticket } : {}),
     profile: init.profile,
     groundVersions: init.groundVersions,
     cursor: 0,

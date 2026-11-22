@@ -8,12 +8,21 @@ import { terminalName } from '../runtime/herdr-runtime.ts';
 import { writeFileAtomic } from '../util/fs.ts';
 
 export type RunMeta = {
-  version: 1;
+  version: 2;
   runId: string;
-  /** formatTicket form, `<repo>#<n>` */
-  ticket: string;
+  /** the pipeline the run was started on; a version 1 run.json reads as `feature` */
+  pipeline: string;
+  /** `--input` values the run was started with */
+  inputs: Record<string, string>;
+  /** formatTicket form, `<repo>#<n>`; absent on a ticketless run */
+  ticket?: string;
+  /** normalized origin, lower-case `host/owner/repo` (the ticket's repo when there is one) */
   repo: string;
-  issue: number;
+  /** the ticket's issue number; absent on a ticketless run */
+  issue?: number;
+  /** run id of the run that started this one (route or fan-out child) */
+  parent?: string;
+  /** local clone the run was started from (status JSON's `repo`) */
   repoRoot: string;
   configFile: string;
   profile: string;
@@ -26,14 +35,16 @@ export type RunMeta = {
   createdAt: string;
 };
 
-/** The Herdr space name: repo, issue, and the run id's suffix, so two runs of one issue stay apart. */
-export const spaceName = (m: Pick<RunMeta, 'repo' | 'issue' | 'runId'>): string =>
-  `${m.repo.split('/').at(-1)} #${m.issue} · ${m.runId.slice(-4)}`;
+/**
+ * The Herdr space name: repo, issue (or the pipeline of a ticketless run), and the run id's suffix,
+ * so two runs of one issue stay apart.
+ */
+export const spaceName = (m: Pick<RunMeta, 'repo' | 'issue' | 'pipeline' | 'runId'>): string =>
+  `${m.repo.split('/').at(-1)} ${m.issue !== undefined ? `#${m.issue}` : m.pipeline} · ${m.runId.slice(-4)}`;
 
 const META_FILE = 'run.json';
 const STRINGS = [
   'runId',
-  'ticket',
   'repo',
   'repoRoot',
   'configFile',
@@ -45,10 +56,25 @@ const STRINGS = [
   'createdAt',
 ];
 
+const isInt = (v: unknown): boolean => typeof v === 'number' && Number.isInteger(v);
+const isStringRecord = (v: unknown): boolean =>
+  typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((x) => typeof x === 'string');
+
 function invalidField(r: Record<string, unknown>): string | undefined {
-  if (r.version !== 1) return 'version';
+  if (r.version !== 1 && r.version !== 2) return 'version';
   for (const k of STRINGS) if (typeof r[k] !== 'string') return k;
-  if (typeof r.issue !== 'number' || !Number.isInteger(r.issue)) return 'issue';
+  if (r.version === 1) {
+    // every version 1 run had a ticket
+    if (typeof r.ticket !== 'string') return 'ticket';
+    if (!isInt(r.issue)) return 'issue';
+  } else {
+    if (typeof r.pipeline !== 'string') return 'pipeline';
+    if (!isStringRecord(r.inputs)) return 'inputs';
+    if (r.ticket !== undefined && typeof r.ticket !== 'string') return 'ticket';
+    if (r.issue !== undefined && !isInt(r.issue)) return 'issue';
+    if ((r.ticket === undefined) !== (r.issue === undefined)) return r.ticket === undefined ? 'ticket' : 'issue';
+    if (r.parent !== undefined && typeof r.parent !== 'string') return 'parent';
+  }
   if (typeof r.keepTerminals !== 'boolean') return 'keepTerminals';
   if (r.space !== undefined && typeof r.space !== 'string') return 'space';
   return undefined;
@@ -70,19 +96,49 @@ export async function readRunMeta(dir: string): Promise<RunMeta> {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw bad('not an object');
   const field = invalidField(parsed as Record<string, unknown>);
   if (field !== undefined) throw bad(field);
-  return parsed as RunMeta;
+  const r = parsed as Record<string, unknown>;
+  // the file is never rewritten: a version 1 run reads as feature with no inputs
+  return (r.version === 1 ? { ...r, pipeline: 'feature', inputs: {} } : r) as RunMeta;
 }
 
-/** `t<issue>-<YYYYMMDD>-<HHMMSS>-<rand>` in UTC. */
-export function newRunId(issue: number, now: Date, rand: string = randomBytes(2).toString('hex')): string {
+/**
+ * In UTC: `t<issue>-<YYYYMMDD>-<HHMMSS>-<rand>` for feature on a ticket, `t<issue>-<pipeline>-...` for
+ * another pipeline on a ticket, `<pipeline>-...` for a ticketless run.
+ */
+export function newRunId(
+  o: { issue?: number; pipeline: string },
+  now: Date,
+  rand: string = randomBytes(2).toString('hex'),
+): string {
   const iso = now.toISOString(); // 2026-03-04T05:06:07.000Z
   const date = iso.slice(0, 10).replaceAll('-', '');
   const time = iso.slice(11, 19).replaceAll(':', '');
-  return `t${issue}-${date}-${time}-${rand}`;
+  const head = o.issue === undefined ? o.pipeline : o.pipeline === 'feature' ? `t${o.issue}` : `t${o.issue}-${o.pipeline}`;
+  return `${head}-${date}-${time}-${rand}`;
 }
 
+/** The driver's terminal; `ticket` is the run's ticket, or its pipeline when it has none. */
 export function driverName(runId: string, ticket: string): string {
   return terminalName(runId, ticket, '@driver', 0);
+}
+
+/**
+ * The live (`running` or `paused`) run on `ticket`, if any. With `except.parent`, that parent and its
+ * other children are not counted: a linked child is exempt from its own parent and siblings.
+ */
+export async function liveRunOn(
+  home: string,
+  ticket: string,
+  except: { parent?: string } = {},
+): Promise<{ runId: string; pipeline: string; status: 'running' | 'paused' } | undefined> {
+  for (const l of await listRuns(home)) {
+    const m = l.meta;
+    const status = l.state?.status;
+    if (m === undefined || m.ticket !== ticket || (status !== 'running' && status !== 'paused')) continue;
+    if (except.parent !== undefined && (m.runId === except.parent || m.parent === except.parent)) continue;
+    return { runId: m.runId, pipeline: m.pipeline, status };
+  }
+  return undefined;
 }
 
 export type RunListing = { dir: string; meta?: RunMeta; state?: RunState; error?: string };

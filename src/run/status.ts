@@ -125,7 +125,8 @@ async function readDecision(stepDir: string): Promise<'approve' | 'reject' | und
 const exists = (p: string) => fs.stat(p).then(() => true, () => false);
 
 async function readTicket(dir: string, meta: RunMeta): Promise<{ ref: string; number: number; title?: string; url?: string }> {
-  const ticket = { ref: meta.ticket, number: meta.issue };
+  // a ticketless run shows an empty ref until status JSON schema 2 makes ticket nullable
+  const ticket = { ref: meta.ticket ?? '', number: meta.issue ?? 0 };
   try {
     const i = JSON.parse(await fs.readFile(path.join(dir, 'issue.json'), 'utf8')) as { title?: unknown; url?: unknown };
     return {
@@ -274,7 +275,7 @@ async function attentionOf(o: {
   const { dir, meta, state, waiting, alive } = o;
   const lastEnd = state.history.at(-1)?.endedAt || meta.createdAt;
   const turn = (kind: AttentionKind, step: string | undefined, x: Partial<YourTurnInput> = {}) => {
-    const t = yourTurn({ kind, runId: meta.runId, step: step ?? STAGES[0], ticket: meta.ticket, repoRoot: meta.repoRoot, ...x });
+    const t = yourTurn({ kind, runId: meta.runId, step: step ?? STAGES[0], ticket: meta.ticket ?? '', repoRoot: meta.repoRoot, ...x });
     return { message: t.message, ...(t.detail !== undefined ? { detail: t.detail } : {}) };
   };
   const failing = (step: string | undefined) => (step === undefined ? [] : review(dir, step, latest(state, step)?.outputs));

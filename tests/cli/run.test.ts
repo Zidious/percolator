@@ -37,7 +37,8 @@ type Env = RunEnv & {
   clock: { t: number };
   onWait: { fn: (t: FakeTerminal) => boolean | Promise<boolean> };
   dir(id: string): string;
-  prepare(): Promise<RunMeta>;
+  /** prepares a run on `ticket` (default #5) */
+  prepare(ticket?: string): Promise<RunMeta>;
   perc(argv: string[], deps?: Partial<DriverDeps>): Promise<{ code: number; out: string; err: string }>;
 };
 
@@ -75,7 +76,7 @@ async function setup(): Promise<Env> {
     clock,
     onWait,
     dir,
-    prepare: () => prepareRun({ ticket: '#5', repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps),
+    prepare: (ticket = '#5') => prepareRun({ ticket, repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps),
     perc: async (argv, deps = base.deps) => {
       let out = '';
       let err = '';
@@ -168,7 +169,8 @@ test('status lists runs with details', async () => {
     const metas: RunMeta[] = [];
     for (let i = 0; i < 8; i++) {
       e.clock.t = NOW.getTime() + i * 1000;
-      metas.push(await e.prepare());
+      // one ticket each: a ticket has at most one live run
+      metas.push(await e.prepare(`#${5 + i}`));
     }
     const [waiting, paused, dead, done, live, attended, waitingLive, attendedDead] = metas as RunMeta[] as [
       RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta,
@@ -182,7 +184,7 @@ test('status lists runs with details', async () => {
     };
     const attend = async (m: RunMeta) => {
       await edit(m, (s) => (s.currentStep = 'groom'));
-      const term = terminalName(m.runId, m.ticket, 'groom', 1);
+      const term = terminalName(m.runId, m.ticket!, 'groom', 1);
       await writeJson(path.join(e.dir(m.runId), 'attention.json'), { stepId: 'groom', terminal: term, kind: 'blocked', at: NOW.toISOString() });
       return term;
     };
@@ -218,19 +220,18 @@ test('status lists runs with details', async () => {
     const r = await e.perc(['status']);
     assert.equal(r.err, '');
     assert.equal(r.code, 0);
-    const t = `${REPO}#5`;
     const runFile = path.join(e.dir('t9-broken'), 'run.json');
     assert.equal(
       r.out,
       [
-        `${attendedDead.runId}  running  groom  ${t}  blocked: attend terminal ${deadGroomTerm}; driver not running; perc resume ${attendedDead.runId}`,
-        `${waitingLive.runId}  running  approve-groom  ${t}  waiting for approval: ${url}`,
-        `${attended.runId}  running  groom  ${t}  blocked: attend terminal ${groomTerm}`,
-        `${live.runId}  running  implement  ${t}  driver ${live.driver}`,
-        `${done.runId}  completed  -  ${t}  https://${REPO}/pull/3`,
-        `${dead.runId}  running  plan  ${t}  driver not running; perc resume ${dead.runId}`,
-        `${paused.runId}  paused  approve-groom  ${t}  cap: approve-groom reached 3 rounds`,
-        `${waiting.runId}  running  approve-groom  ${t}  waiting for approval: ${url}; driver not running; perc resume ${waiting.runId}`,
+        `${attendedDead.runId}  running  groom  ${attendedDead.ticket}  blocked: attend terminal ${deadGroomTerm}; driver not running; perc resume ${attendedDead.runId}`,
+        `${waitingLive.runId}  running  approve-groom  ${waitingLive.ticket}  waiting for approval: ${url}`,
+        `${attended.runId}  running  groom  ${attended.ticket}  blocked: attend terminal ${groomTerm}`,
+        `${live.runId}  running  implement  ${live.ticket}  driver ${live.driver}`,
+        `${done.runId}  completed  -  ${done.ticket}  https://${REPO}/pull/3`,
+        `${dead.runId}  running  plan  ${dead.ticket}  driver not running; perc resume ${dead.runId}`,
+        `${paused.runId}  paused  approve-groom  ${paused.ticket}  cap: approve-groom reached 3 rounds`,
+        `${waiting.runId}  running  approve-groom  ${waiting.ticket}  waiting for approval: ${url}; driver not running; perc resume ${waiting.runId}`,
         `t9-broken  broken  -  -  error: Run metadata ${runFile} is missing or invalid: file not found`,
         '',
       ].join('\n'),
@@ -943,8 +944,18 @@ test('perc run of an unknown pipeline names the pipelines', async () => {
   assert.match(r.err, /: unknown pipeline "nope" in profile "work" \(pipelines: feature, dd-alert, hotfix\); pass one of those to --pipeline\n$/);
 });
 
-test('a valid ticketless request stops before anything is created', async () => {
-  const r = await runPipelines(['--pipeline', 'dd-alert', '--input', 'alert_url=u']);
-  assert.equal(r.code, 1);
-  assert.equal(r.err, 'pipeline "dd-alert" runs without a ticket, which this perc cannot start yet; pass a ticket to a pipeline that takes one\n');
+test('a valid ticketless request starts a run named after its pipeline', async () => {
+  const e = await setup();
+  try {
+    await e.writeConfig(PIPELINES, BINDINGS);
+    const r = await e.perc(['run', '--pipeline', 'dd-alert', '--input', 'alert_url=u', '--repo', e.root, '--config', e.configFile, '--profile', 'work']);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    const id = await onlyRun(e);
+    assert.match(id, /^dd-alert-20260304-050607-[0-9a-f]{4}$/);
+    assert.ok(r.out.includes(`  terminal ${terminalName(id, 'dd-alert', '@driver', 0)}\n`), r.out);
+    assert.ok(r.out.includes(`  space "r dd-alert · ${id.slice(-4)}"`), r.out);
+  } finally {
+    await e.cleanup();
+  }
 });

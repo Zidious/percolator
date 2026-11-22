@@ -99,7 +99,7 @@ async function setup(extra = TRACKER): Promise<Env> {
 const exists = (p: string) => fs.lstat(p).then(() => true, () => false);
 const gateComments = (e: Env) => e.deps.gh.issues.get(`${REPO}#5`)!.comments.filter((c) => c.body.includes(GATE_MARKER));
 const calls = (e: Env, method: string) => e.deps.gh.calls.filter((c) => c.method === method);
-const name = (meta: RunMeta, step: string, attempt = 1) => terminalName(meta.runId, meta.ticket, step, attempt);
+const name = (meta: RunMeta, step: string, attempt = 1) => terminalName(meta.runId, meta.ticket ?? meta.pipeline, step, attempt);
 const runs = (e: Env, step: string) => e.deps.hc.calls.filter((c) => c[0] === 'run' && (c[1] as { labels: Record<string, string> }).labels['percolator.step'] === step);
 
 test('drive runs a ticket to a PR', async () => {

@@ -31,7 +31,8 @@ const STALLED_PLAN = {
 type Env = RunEnv & {
   clock: { t: number };
   dir(m: RunMeta): string;
-  prepare(): Promise<RunMeta>;
+  /** prepares a run on `ticket` (default #5) */
+  prepare(ticket?: string): Promise<RunMeta>;
   edit(m: RunMeta, f: (s: RunState) => void): Promise<void>;
   liveDriver(m: RunMeta): void;
   /** `waiting.json` at approve-groom attempt 1, after a groom that produced `groomed_ticket` */
@@ -56,7 +57,7 @@ async function setup(): Promise<Env> {
     ...base,
     clock,
     dir,
-    prepare: () => prepareRun({ ticket: '#5', repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps),
+    prepare: (ticket = '#5') => prepareRun({ ticket, repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps),
     edit,
     liveDriver: (m) => {
       base.deps.hc.add({ name: m.driver, labels: { 'percolator.run': m.runId, 'percolator.role': 'driver' } });
@@ -600,7 +601,7 @@ test('agent blocked', async () => {
     const m = await e.prepare();
     await e.edit(m, (s) => (s.currentStep = 'groom'));
     e.liveDriver(m);
-    const term = terminalName(m.runId, m.ticket, 'groom', 1);
+    const term = terminalName(m.runId, m.ticket!, 'groom', 1);
     e.deps.hc.add({ name: term, labels: { 'percolator.run': m.runId, 'percolator.step': 'groom' } });
     await writeJson(path.join(e.dir(m), 'attention.json'), { stepId: 'groom', terminal: term, kind: 'blocked', at: T1 });
     assert.deepEqual(
@@ -846,17 +847,18 @@ test('status json keeps going past a broken run', async () => {
   try {
     const good = await e.prepare();
     e.clock.t += 1000;
-    const badGraph = await e.prepare();
+    // one ticket each: a ticket has at most one live run
+    const badGraph = await e.prepare('#6');
     await fs.writeFile(path.join(e.dir(badGraph), 'graph.json'), '{"version": 2}');
     const broken = path.join(e.home, '.percolator', 'runs', 't9-broken');
     await fs.mkdir(broken, { recursive: true });
     const graphFile = path.join(e.dir(badGraph), 'graph.json');
     e.clock.t += 1000;
-    const noState = await e.prepare();
+    const noState = await e.prepare('#7');
     const noStateFile = path.join(e.dir(noState), 'state.json');
     await fs.rm(noStateFile);
     e.clock.t += 1000;
-    const badState = await e.prepare();
+    const badState = await e.prepare('#8');
     const badStateFile = path.join(e.dir(badState), 'state.json');
     await fs.writeFile(badStateFile, '{not json');
     assert.deepEqual(await statusJson(e.deps), {
@@ -882,7 +884,7 @@ test('status json reads runs four at a time, in listRuns order', async () => {
   const e = await setup();
   try {
     for (let i = 0; i < 6; i++) {
-      await e.prepare();
+      await e.prepare(`#${5 + i}`);
       e.clock.t += 1000;
     }
     let inFlight = 0;
@@ -1017,7 +1019,7 @@ test('terminals when hc ls returns no labels', async () => {
     const m = await e.prepare();
     await e.edit(m, (s) => (s.currentStep = 'groom'));
     e.liveDriver(m);
-    const term = terminalName(m.runId, m.ticket, 'groom', 1);
+    const term = terminalName(m.runId, m.ticket!, 'groom', 1);
     e.deps.hc.add({ name: term, labels: { 'percolator.run': m.runId, 'percolator.step': 'groom' } });
     const list = e.deps.hc.list.bind(e.deps.hc);
     // like the real hc ls: the label filter applies, but no labels come back

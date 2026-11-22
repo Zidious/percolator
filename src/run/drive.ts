@@ -138,6 +138,7 @@ async function driveHeld(
     const body = `${JSON.stringify({ ...a, at: now().toISOString() }, null, 2)}\n`;
     attentionWrite = attentionWrite.then(() => writeFileAtomic(attentionFile, body)).catch(() => {});
   };
+  if (meta.ticket === undefined) throw new Error(`run ${runId} has no ticket, which this perc cannot drive yet`);
   const ticket = parseTicket(meta.ticket);
   const runtime = new HerdrRuntime({
     hc: deps.hc,
