@@ -18,6 +18,8 @@ import { parseCommand } from './prior-groom.ts';
 export type Decision = {
   decision: 'approve' | 'reject';
   feedback?: string;
+  /** a pick-pipeline gate's answer: `perc approve <run-id> --pipeline <name>` */
+  pipeline?: string;
   by: string;
   via: 'comment' | 'local';
   url?: string;
@@ -29,6 +31,7 @@ const DecisionSchema = z
   .object({
     decision: z.enum(['approve', 'reject']),
     feedback: z.string().optional(),
+    pipeline: z.string().optional(),
     by: z.string(),
     via: z.enum(['comment', 'local']),
     url: z.string().optional(),
@@ -90,7 +93,7 @@ export async function deciderLogin(gh: Gh, username: () => string = () => os.use
 
 export async function writeDecision(
   runDir: string,
-  d: { decision: 'approve' | 'reject'; feedback?: string; by: string },
+  d: { decision: 'approve' | 'reject'; feedback?: string; pipeline?: string; by: string },
 ): Promise<Waiting> {
   const waiting = await readWaiting(runDir);
   if (!waiting) throw new Error('run is not waiting at a gate');

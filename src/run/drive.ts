@@ -24,10 +24,12 @@ import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
 import { ensureWorktree } from '../workspace/worktree.ts';
 import { acquireDriverLock, drivenByProcess, otherLiveLock } from './lock.ts';
 import type { Liveness } from './lock.ts';
-import { readRunMeta } from './meta.ts';
+import { startLinkedRun } from './child.ts';
+import { newRunId, readRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 import { reusePriorGroom } from './reuse-groom.ts';
+import { routeHandoff, routeRules, skipDecidedRoute } from './route.ts';
 
 /** The PR url the deliver step recorded, if any. */
 export async function prUrl(dir: string, state: RunState): Promise<string | undefined> {
@@ -145,6 +147,16 @@ async function driveHeld(
     attentionWrite = attentionWrite.then(() => writeFileAtomic(attentionFile, body)).catch(() => {});
   };
   const ticket = meta.ticket === undefined ? undefined : parseTicket(meta.ticket);
+  // an issue exit's `next`: one linked run of that pipeline per issue it opened
+  const nextRuns = (next: string | undefined) =>
+    next === undefined
+      ? {}
+      : {
+          next: {
+            newId: (url: string) => newRunId({ issue: parseTicket(url).number, pipeline: next }, now()),
+            start: (url: string, child: string) => startLinkedRun({ parent: meta, pipeline: next, ticket: url, runId: child }, deps),
+          },
+        };
   const runtime = new HerdrRuntime({
     hc: deps.hc,
     runId,
@@ -183,7 +195,7 @@ async function driveHeld(
       }),
       'github.comment': githubComment({ gh: deps.gh, runDir: dir, runId }),
       'percolator.report': percolatorReport(),
-      'github.open_issues': githubOpenIssues({ gh: deps.gh, runDir: dir, runId, repo: meta.repo }),
+      'github.open_issues': githubOpenIssues({ gh: deps.gh, runDir: dir, runId, repo: meta.repo, ...nextRuns(v.pipeline.next) }),
       'github.release': githubRelease({
         gh: deps.gh,
         runDir: dir,
@@ -193,6 +205,15 @@ async function driveHeld(
         inputs: meta.inputs,
       }),
       'github.pr_review': githubPrReview({ gh: deps.gh, runDir: dir, runId, inputs: meta.inputs, repo: meta.repo }),
+      'percolator.route_rules': routeRules({
+        gh: deps.gh,
+        runDir: dir,
+        spec: v.pipeline,
+        specs: v.pipelines,
+        profile: v.profile,
+        ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
+      }),
+      'percolator.route': routeHandoff({ deps, meta, spec: v.pipeline, specs: v.pipelines }),
       'github.private_fork_pr': githubPrivateForkPr({
         gh: deps.gh,
         runDir: dir,
@@ -228,7 +249,8 @@ async function driveHeld(
   };
   await save(state);
   // one line per step start and end, so the driver's terminal shows where the run is
-  const reusing = reusePriorGroom(runtime, dir);
+  // each wrapper answers only its own steps (groom; the router's choose agent and pick gate) and passes the rest on
+  const reusing = reusePriorGroom(skipDecidedRoute(runtime, dir, v.pipeline), dir);
   const logged: Runtime = {
     executeStep: async (step, ctx) => {
       deps.out(`${step.id}: started`);

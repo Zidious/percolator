@@ -62,8 +62,8 @@ test('issue exit opens one issue per section', async () => {
       `https://${REPO}/issues/1\nhttps://${REPO}/issues/2\n`,
     );
     assert.deepEqual(JSON.parse(readFileSync(path.join(s.io.stepDir, 'created.json'), 'utf8')), {
-      1: `https://${REPO}/issues/1`,
-      2: `https://${REPO}/issues/2`,
+      1: { url: `https://${REPO}/issues/1` },
+      2: { url: `https://${REPO}/issues/2` },
     });
   } finally {
     await rm(s.runDir);
@@ -143,4 +143,76 @@ test('openedIssues turns issue_urls into refs', () => {
     ],
   );
   assert.deepEqual(openedIssues(''), []);
+});
+
+/** A `next` that names each child after its issue and records what created.json held when it started. */
+function nextRecorder(s: Setup) {
+  const started: { url: string; child: string; recorded: unknown }[] = [];
+  const ids: string[] = [];
+  return {
+    started,
+    ids,
+    next: {
+      newId: (url: string) => {
+        const id = `child-${url.split('/').at(-1)}`;
+        ids.push(id);
+        return id;
+      },
+      start: async (url: string, child: string) => {
+        started.push({ url, child, recorded: JSON.parse(readFileSync(path.join(s.io.stepDir, 'created.json'), 'utf8')) });
+      },
+    },
+  };
+}
+
+test('issue exit with next starts a linked run per new issue', async () => {
+  const s = await setup(DRAFTS);
+  try {
+    const gh = newGh();
+    const r = nextRecorder(s);
+    const out = await githubOpenIssues({ gh, runDir: s.runDir, runId: 'r1', repo: REPO, next: r.next })(step, s.ctx, s.io);
+    assert.equal(out.status, 'pass');
+    const one = { url: `https://${REPO}/issues/1`, child: 'child-1' };
+    const two = { url: `https://${REPO}/issues/2`, child: 'child-2' };
+    // each child id is in created.json before its run starts
+    assert.deepEqual(r.started, [
+      { url: one.url, child: 'child-1', recorded: { 1: one } },
+      { url: two.url, child: 'child-2', recorded: { 1: one, 2: two } },
+    ]);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(s.io.stepDir, 'created.json'), 'utf8')), { 1: one, 2: two });
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('issue exit with next reuses the child ids recorded before a crash', async () => {
+  const s = await setup(DRAFTS, 2);
+  try {
+    const earlier = path.join(s.runDir, 'steps', 'file', '1');
+    await fs.mkdir(earlier, { recursive: true });
+    await fs.writeFile(path.join(earlier, 'created.json'), JSON.stringify({ 1: { url: `https://${REPO}/issues/9`, child: 'child-old' } }));
+    const gh = newGh();
+    const r = nextRecorder(s);
+    await githubOpenIssues({ gh, runDir: s.runDir, runId: 'r1', repo: REPO, next: r.next })(step, s.ctx, s.io);
+    assert.equal(gh.calls.filter((c) => c.method === 'createIssue').length, 1);
+    assert.deepEqual(r.ids, ['child-1']);
+    assert.deepEqual(r.started.map((x) => [x.url, x.child]), [
+      [`https://${REPO}/issues/9`, 'child-old'],
+      [`https://${REPO}/issues/1`, 'child-1'],
+    ]);
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('issue exit escalates when a next run cannot start', async () => {
+  const s = await setup(DRAFTS);
+  try {
+    const gh = newGh();
+    const next = { newId: () => 'child-x', start: async () => Promise.reject(new Error('no space')) };
+    const out = await githubOpenIssues({ gh, runDir: s.runDir, runId: 'r1', repo: REPO, next })(step, s.ctx, s.io);
+    assert.deepEqual(out, { status: 'escalate', outputs: {}, reason: 'github.open_issues: no space' });
+  } finally {
+    await rm(s.runDir);
+  }
 });
