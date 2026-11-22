@@ -5,7 +5,7 @@ import { ConfigError, loadLocated } from './config/load.ts';
 import type { Located } from './config/load.ts';
 import { locate } from './config/locate.ts';
 import type { Where } from './config/locate.ts';
-import { checkGlobalStages, pickPipeline, pipelineSpecs } from './config/pipelines.ts';
+import { checkGlobalStages, checkPipelines, pickPipeline, pipelineSpecs } from './config/pipelines.ts';
 import type { PipelineSpec } from './config/pipelines.ts';
 import { GraphFragmentSchema, UserConfigSchema } from './config/schema.ts';
 import type { GraphFragment, GroundSpec, Profile, UserConfig } from './config/schema.ts';
@@ -121,7 +121,9 @@ async function validatePipeline(l: Loaded, pipelineName: string): Promise<Valida
   // the header's stages are the graph's; rules are checked first, as before pipelines
   const violations = [...checkGlobalStages(merged, pipelines, l.name), ...checkRules(selected, pipeline.stages ?? CORE_STAGES)];
   if (violations.length > 0) throw new RuleViolationError(violations, l.configFile);
-  const graph = buildGraph(selected, { profile: l.name, locator: l.profileLocator });
+  checkPipelines(merged, pipelines, l.name);
+  const descriptions = Object.fromEntries(Object.values(pipelines).map((s) => [s.name, s.description]));
+  const graph = buildGraph(selected, { profile: l.name, locator: l.profileLocator }, { descriptions });
   await checkGraphReferences(graph, mappings, l.grounds, l.configFile);
   await checkAgents(graph, mappings, l.configFile);
   return {

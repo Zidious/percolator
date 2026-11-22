@@ -657,6 +657,33 @@ test("a pipeline's rules are checked against that pipeline's stages", async () =
   );
 });
 
+const triageLines = (from: string) =>
+  ['      triage:', '        router: true', '        stages: [intake, route]', `        choose: { agent: claude, from: [${from}] }`, ''].join('\n');
+
+test('validate refuses a router that routes to an unknown pipeline, whichever pipeline is validated', async () => {
+  await withConfig(
+    (abs) => pipelinesConfig(abs, triageLines('hotfix, nope')),
+    async (cfg) => {
+      await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'hotfix' }), {
+        name: 'ConfigError',
+        message: `${cfg}:25: profiles.default.pipelines.triage.choose.from.1: route to "nope" names no pipeline in profile "default" (pipelines: feature, hotfix, triage); use one of those`,
+      });
+    },
+  );
+});
+
+test("a router's default choose prompt lists the pipelines' descriptions", async () => {
+  await withConfig(
+    (abs) => pipelinesConfig(abs, triageLines('hotfix, feature')).replace('        exit: pr\n        ticket: optional', '        exit: pr\n        description: fix a bug fast\n        ticket: optional'),
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'triage' });
+      const choose = r.graph.steps.find((s) => s.id === 'route.1')!;
+      assert.match(String(choose.def.prompt), /^Pick the pipeline for this ticket from: hotfix: fix a bug fast; feature\. Write pick\.md/);
+      assert.equal(r.pipeline.fallback, 'feature');
+    },
+  );
+});
+
 test('a top-level require_skills naming a stage no pipeline has is a violation', async () => {
   await withConfig(
     (abs) => pipelinesConfig(abs, '    rules:\n      require_skills: [{ stage: tirage, skills: [ops] }]\n'),
