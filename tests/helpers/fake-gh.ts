@@ -1,10 +1,18 @@
 import { checkGhsa, GhError } from '../../src/tracker/gh.ts';
-import type { AdvisoryFork, Gh, Issue, IssueComment, IssueHit, PrReview } from '../../src/tracker/gh.ts';
+import type {
+  AdvisoryFork, FailedRun, Gh, Issue, IssueComment, IssueHit, IssueRef, PrRef, PrReview,
+} from '../../src/tracker/gh.ts';
 
 export type FakeGhMethod =
   | 'issue' | 'comment' | 'editComment' | 'user' | 'findPr' | 'createPr' | 'editPr'
-  | 'createIssue' | 'findIssues' | 'findComment' | 'releaseUrl' | 'createRelease' | 'prReviews' | 'postReview' | 'advisoryFork';
-export type FakePr = { number: number; url: string; repo: string; base: string; head: string; title: string; body: string };
+  | 'createIssue' | 'findIssues' | 'findComment' | 'releaseUrl' | 'createRelease' | 'prReviews' | 'postReview' | 'advisoryFork'
+  | 'listIssues' | 'listPrs' | 'failedRuns';
+export type FakePr = {
+  number: number; url: string; repo: string; base: string; head: string; title: string; body: string;
+  /** Defaults to the fake's user when unset. */
+  author?: string;
+};
+export type FakeRun = FailedRun & { repo: string; branch: string; workflow?: string };
 export type FakeRelease = { repo: string; tag: string; target: string; notes: string; url: string };
 export type FakeReview = { repo: string; number: number; body: string; url: string };
 
@@ -16,6 +24,8 @@ export class FakeGh implements Gh {
   releases: FakeRelease[] = [];
   reviews: FakeReview[] = [];
   forks: ({ repo: string; ghsa: string } & AdvisoryFork)[] = [];
+  runs: FakeRun[] = [];
+  private nextRun = 1;
   /** Login that authors comments made through `comment()` and answers `user()`. */
   userLogin: string;
   /** Contents of each body file at the time of the call, in order (set by `readFile`). */
@@ -208,5 +218,44 @@ export class FakeGh implements Gh {
     const fork = { fullName, cloneUrl: `https://${host}/${fullName}.git` };
     this.forks.push({ repo, ghsa, ...fork });
     return fork;
+  }
+
+  /** Seed an open PR by another author; missing fields get defaults. */
+  addPr(repo: string, p: Partial<FakePr> = {}): FakePr {
+    const number = p.number ?? this.nextPr++;
+    const pr: FakePr = {
+      number, url: `https://${repo}/pull/${number}`, repo, base: 'main', head: `branch-${number}`, title: `PR ${number}`, body: '', ...p,
+    };
+    this.prs.push(pr);
+    return pr;
+  }
+
+  /** Seed a failed workflow run; `workflow` is the file name `--workflow` may also match. */
+  addFailedRun(repo: string, r: { branch: string; workflowName: string; workflow?: string }): FailedRun {
+    const databaseId = this.nextRun++;
+    const run: FakeRun = { databaseId, url: `https://${repo}/actions/runs/${databaseId}`, workflowName: r.workflowName, repo, branch: r.branch };
+    if (r.workflow !== undefined) run.workflow = r.workflow;
+    this.runs.push(run);
+    return { databaseId, url: run.url, workflowName: run.workflowName };
+  }
+
+  async listIssues(repo: string, o: { label: string }): Promise<IssueRef[]> {
+    this.enter('listIssues', [repo, o]);
+    return this.inRepo(repo)
+      .filter((i) => i.state === 'OPEN' && i.labels.includes(o.label))
+      .map((i) => ({ number: i.number, url: i.url }));
+  }
+
+  async listPrs(repo: string): Promise<PrRef[]> {
+    this.enter('listPrs', [repo]);
+    return this.prs.filter((p) => p.repo === repo).map((p) => ({ number: p.number, url: p.url, author: p.author ?? this.userLogin }));
+  }
+
+  async failedRuns(repo: string, o: { branch: string; workflow?: string }): Promise<FailedRun[]> {
+    this.enter('failedRuns', [repo, o]);
+    return this.runs
+      .filter((r) => r.repo === repo && r.branch === o.branch)
+      .filter((r) => o.workflow === undefined || r.workflow === o.workflow || r.workflowName === o.workflow)
+      .map((r) => ({ databaseId: r.databaseId, url: r.url, workflowName: r.workflowName }));
   }
 }

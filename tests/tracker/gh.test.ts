@@ -258,3 +258,34 @@ test('advisoryFork without full_name or clone_url in the reply fails', async () 
   await assert.rejects(cliGh({ exec: rec.exec }).advisoryFork(R, 'GHSA-2345-6789-cfgh'),
     { message: 'gh api advisory fork returned no full_name or clone_url for GHSA-2345-6789-cfgh' });
 });
+
+test('listIssues lists open issues with a label', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '[{"number":3,"url":"iu"}]' });
+  assert.deepEqual(await cliGh({ exec: rec.exec }).listIssues(R, { label: 'perc:triage' }), [{ number: 3, url: 'iu' }]);
+  assert.deepEqual(rec.calls[0]!.args, [
+    'issue', 'list', '--repo', R, '--label', 'perc:triage', '--state', 'open', '--json', 'number,url', '--limit', '100',
+  ]);
+  await assert.rejects(cliGh({ exec: rec.exec }).listIssues(R, { label: '-x' }), { message: 'gh issue list: label must not start with "-": -x' });
+});
+
+test('listPrs lists open pull requests with their author login', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '[{"number":4,"url":"pu","author":{"login":"app/dependabot","is_bot":true}}]' });
+  assert.deepEqual(await cliGh({ exec: rec.exec }).listPrs(R), [{ number: 4, url: 'pu', author: 'app/dependabot' }]);
+  assert.deepEqual(rec.calls[0]!.args, ['pr', 'list', '--repo', R, '--state', 'open', '--json', 'number,url,author', '--limit', '100']);
+});
+
+test('failedRuns lists failed workflow runs on a branch', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '[{"databaseId":77,"url":"ru","workflowName":"CI"}]' });
+  const gh = cliGh({ exec: rec.exec });
+  assert.deepEqual(await gh.failedRuns(R, { branch: 'main' }), [{ databaseId: 77, url: 'ru', workflowName: 'CI' }]);
+  assert.deepEqual(rec.calls[0]!.args, [
+    'run', 'list', '--repo', R, '--branch', 'main', '--status', 'failure', '--json', 'databaseId,url,workflowName', '--limit', '20',
+  ]);
+  await gh.failedRuns(R, { branch: 'main', workflow: 'ci.yml' });
+  assert.deepEqual(rec.calls[1]!.args.slice(-2), ['--workflow', 'ci.yml']);
+  await assert.rejects(gh.failedRuns(R, { branch: '-x' }), { message: 'gh run list: branch must not start with "-": -x' });
+  await assert.rejects(gh.failedRuns(R, { branch: 'main', workflow: '-x' }), { message: 'gh run list: workflow must not start with "-": -x' });
+});

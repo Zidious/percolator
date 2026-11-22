@@ -109,3 +109,39 @@ test('FakeGh advisoryFork returns a fork and refuses a malformed id', async () =
   assert.equal(gh.forks.length, 1);
   await assert.rejects(gh.advisoryFork('github.com/o/r', 'x'), { message: 'advisory "x" is not a GHSA id (GHSA-xxxx-xxxx-xxxx)' });
 });
+
+test('FakeGh listIssues lists open issues with the label', async () => {
+  const R = 'github.com/o/r';
+  const gh = new FakeGh();
+  gh.addIssue(R, 1, { labels: ['perc:triage'] });
+  gh.addIssue(R, 2, { labels: ['bug'] });
+  gh.addIssue(R, 3, { labels: ['perc:triage'], state: 'CLOSED' });
+  gh.addIssue('github.com/o/other', 4, { labels: ['perc:triage'] });
+  assert.deepEqual(await gh.listIssues(R, { label: 'perc:triage' }), [{ number: 1, url: 'https://github.com/o/r/issues/1' }]);
+  assert.deepEqual(gh.calls.at(-1), { method: 'listIssues', args: [R, { label: 'perc:triage' }] });
+});
+
+test('FakeGh listPrs lists the repo PRs with authors', async () => {
+  const R = 'github.com/o/r';
+  const gh = new FakeGh({ user: 'bot' });
+  const url = await gh.createPr(R, { base: 'main', head: 'h', title: 't', bodyFile: 'b' });
+  gh.addPr(R, { head: 'dependabot/npm/x', author: 'app/dependabot' });
+  await gh.createPr('github.com/o/other', { base: 'main', head: 'h', title: 't', bodyFile: 'b' });
+  assert.deepEqual(await gh.listPrs(R), [
+    { number: 1, url, author: 'bot' },
+    { number: 2, url: 'https://github.com/o/r/pull/2', author: 'app/dependabot' },
+  ]);
+});
+
+test('FakeGh failedRuns filters by repo, branch and workflow', async () => {
+  const R = 'github.com/o/r';
+  const gh = new FakeGh();
+  const ci = gh.addFailedRun(R, { branch: 'main', workflowName: 'CI', workflow: 'ci.yml' });
+  const lint = gh.addFailedRun(R, { branch: 'main', workflowName: 'Lint' });
+  gh.addFailedRun(R, { branch: 'dev', workflowName: 'CI' });
+  assert.deepEqual(ci, { databaseId: 1, url: 'https://github.com/o/r/actions/runs/1', workflowName: 'CI' });
+  assert.deepEqual(await gh.failedRuns(R, { branch: 'main' }), [ci, lint]);
+  assert.deepEqual(await gh.failedRuns(R, { branch: 'main', workflow: 'ci.yml' }), [ci]);
+  assert.deepEqual(await gh.failedRuns(R, { branch: 'main', workflow: 'Lint' }), [lint]);
+  assert.deepEqual(await gh.failedRuns('github.com/o/other', { branch: 'main' }), []);
+});

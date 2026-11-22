@@ -15,6 +15,9 @@ export type Issue = {
 export type IssueHit = { number: number; url: string; body: string };
 export type PrReview = { body: string; url: string };
 export type AdvisoryFork = { fullName: string; cloneUrl: string };
+export type IssueRef = { number: number; url: string };
+export type PrRef = { number: number; url: string; author: string };
+export type FailedRun = { databaseId: number; url: string; workflowName: string };
 
 export interface Gh {
   issue(repo: string, n: number): Promise<Issue>;
@@ -41,6 +44,12 @@ export interface Gh {
   postReview(repo: string, n: number, bodyFile: string): Promise<string>;
   /** Creates the temporary private fork of a security advisory. */
   advisoryFork(repo: string, ghsa: string): Promise<AdvisoryFork>;
+  /** Open issues carrying `label` (up to 100). */
+  listIssues(repo: string, o: { label: string }): Promise<IssueRef[]>;
+  /** Open pull requests (up to 100) with their author's login. */
+  listPrs(repo: string): Promise<PrRef[]>;
+  /** Failed workflow runs on `branch` (up to 20), optionally of one workflow. */
+  failedRuns(repo: string, o: { branch: string; workflow?: string }): Promise<FailedRun[]>;
 }
 
 export class GhError extends Error {
@@ -207,6 +216,30 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
       const j = parseJson('api advisory fork', out) as { full_name?: unknown; clone_url?: unknown } | null;
       if (!j?.full_name || !j.clone_url) throw new Error(`gh api advisory fork returned no full_name or clone_url for ${ghsa}`);
       return { fullName: String(j.full_name), cloneUrl: String(j.clone_url) };
+    },
+    async listIssues(repo, p) {
+      noDash('issue list', 'label', p.label);
+      const out = await call('issue list', [
+        'issue', 'list', '--repo', repo, '--label', p.label, '--state', 'open', '--json', 'number,url', '--limit', '100',
+      ]);
+      return list(parseJson('issue list', out)).map((i) => ({ number: Number(i['number']), url: String(i['url'] ?? '') }));
+    },
+    async listPrs(repo) {
+      const out = await call('pr list', ['pr', 'list', '--repo', repo, '--state', 'open', '--json', 'number,url,author', '--limit', '100']);
+      return list(parseJson('pr list', out)).map((p) => ({
+        number: Number(p['number']), url: String(p['url'] ?? ''), author: login(p['author']),
+      }));
+    },
+    async failedRuns(repo, p) {
+      noDash('run list', 'branch', p.branch);
+      if (p.workflow !== undefined) noDash('run list', 'workflow', p.workflow);
+      const out = await call('run list', [
+        'run', 'list', '--repo', repo, '--branch', p.branch, '--status', 'failure', '--json', 'databaseId,url,workflowName', '--limit', '20',
+        ...(p.workflow === undefined ? [] : ['--workflow', p.workflow]),
+      ]);
+      return list(parseJson('run list', out)).map((r) => ({
+        databaseId: Number(r['databaseId']), url: String(r['url'] ?? ''), workflowName: String(r['workflowName'] ?? ''),
+      }));
     },
   };
 }
