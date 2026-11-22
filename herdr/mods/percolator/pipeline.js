@@ -4,7 +4,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { ago, canPick, driverPeek, hookNote, nowTone, pipelineMarks, pipelineRows, pipelineSpans, roundView, slotOpensAgent, ticketTitle, took } from './model.js';
+import { ago, canPick, driverPeek, hookNote, nowTone, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, slotOpensAgent, ticketTitle, took } from './model.js';
 import { inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
@@ -176,7 +176,9 @@ function stageLabel(t, r, row) {
   const st = row.step;
   const c =
     row.state === 'active' ? nowColor(t, r) : row.state === 'failed' ? t.blocked : row.state === 'past' ? t.foreground : t.muted;
-  const spent = row.state === 'past' ? took(st, Date.now()) : '';
+  const now = Date.now();
+  // a loop's target past round 1 says its round and its latest attempt's time
+  const spent = roundNote(r, st.id, now) || (row.state === 'past' ? took(st, now) : '');
   return h_flex()
     .flex_1()
     .min_w(0)

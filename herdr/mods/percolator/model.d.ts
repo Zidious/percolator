@@ -39,6 +39,7 @@ export type PipeRow =
 export declare function pipelineRows(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }): PipeRow[];
 export declare function pipelineSpans(rows: PipeRow[], run: RunStatusJson): { from: number; to: number; tone: string }[];
 export declare function pipelineMarks(rows: PipeRow[], stopSel: string | null): { active: number; reached: number; stripAt: number };
+export declare function roundNote(run: RunStatusJson, stepId: string, now: number): string;
 export declare function hookNote(run: RunStatusJson, row: { step: Step; where?: string }, now: number): string;
 export declare function unfoldAfterPick(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }, from: string | null, to: string | null): string[];
 export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number, unfolded?: string[], narrow?: boolean): string | null;

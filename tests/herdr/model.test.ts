@@ -39,6 +39,7 @@ import {
   pipelineRows,
   pipelineSpans,
   hookNote,
+  roundNote,
   unfoldAfterPick,
   pipelineMarks,
   needsCount,
@@ -921,6 +922,25 @@ test('hookNote says where a hook runs, the gate decision and its time', () => {
   assert.equal(hookNote(byId('t8'), row(t8, 'notify'), now), 'after-all');
   const t2 = pipelineRows(byId('t2'), WIDE);
   assert.equal(hookNote(byId('t2'), row(t2, 'approve-groom'), Date.parse('2026-11-21T03:54:45.575Z')), 'after · waiting 3h');
+});
+
+test('roundNote gives a loop target past round 1 its round and its latest attempt time', () => {
+  const now = Date.parse('2026-11-21T05:00:00.000Z');
+  assert.equal(roundNote(byId('t4'), 'implement', now), 'round 3 · 4m'); // its third attempt took 3m50s
+  assert.equal(roundNote(byId('t16'), 'lint-baseline', now), 'round 2 · 4s');
+  assert.equal(roundNote(byId('t3'), 'implement', now), '', 'round 1');
+  assert.equal(roundNote(byId('t4'), 'review', now), '', 'a loop start, not its target');
+  const t4 = readable('t4');
+  const untimed = { ...t4, timeline: [] } as RunStatusJson;
+  assert.equal(roundNote(untimed, 'implement', now), 'round 3', 'no time to show');
+});
+
+test('hookNote carries the round of a hook a loop goes back to', () => {
+  const now = Date.parse('2026-11-21T05:00:00.000Z');
+  const r = byId('t16');
+  const open = pipelineRows(r, { narrow: false, unfolded: ['implement'] });
+  assert.equal(hookNote(r, row(open, 'lint-baseline'), now), 'before · round 2 · 4s');
+  assert.equal(hookNote(r, row(open, 'deps-audit'), now), 'before · 15s');
 });
 
 test('unfoldAfterPick opens a picked stage that holds folded hooks, and folds it again when it is closed', () => {

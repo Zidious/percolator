@@ -172,6 +172,21 @@ export function roundPill(run, stepId) {
   return { text: `round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r) };
 }
 
+/** The engine's round of a loop that goes back to `stepId`, past round 1; null otherwise. */
+function roundAt(run, stepId) {
+  const loop = (run.loops ?? []).find((l) => l.to === stepId && roundOf(l).n > 1);
+  return loop ? roundOf(loop).n : null;
+}
+
+/** Beside the step a loop goes back to, past round 1: "round N · <time>" (its latest attempt's), else "". */
+export function roundNote(run, stepId, now) {
+  const n = roundAt(run, stepId);
+  if (n === null) return '';
+  const last = stepAttempts(run, stepId).at(-1);
+  const time = last ? took(last, now) : '';
+  return time ? `round ${n} · ${time}` : `round ${n}`;
+}
+
 /** Every loop, taken or not, with its tone. */
 export function loopSpans(run) {
   return (run.loops ?? []).map((l) => ({ id: l.id, from: l.from, to: l.to, tone: loopTone(roundOf(l)) }));
@@ -267,12 +282,14 @@ export function pipelineMarks(rows, stopSel) {
   return { active, reached, stripAt: stopSel ? rows.findIndex(holds) : -1 };
 }
 
-/** The muted note beside a hook row: where it runs, its latest gate decision, how long it took (or has waited). */
+/** The muted note beside a hook row: where it runs, the round when a loop went back to it (past round 1), its latest
+ *  gate decision, how long it took (or has waited). */
 export function hookNote(run, row, now) {
   const s = row.step;
   const waited = s.status === 'waiting' && s.startedAt ? `waiting ${ago(s.startedAt, now)}` : '';
   const decision = decisionNote(stepAttempts(run, s.id).at(-1)?.decision);
-  return [row.where, decision, took(s, now) || waited].filter(Boolean).join(' · ');
+  const n = roundAt(run, s.id);
+  return [row.where, n === null ? '' : `round ${n}`, decision, took(s, now) || waited].filter(Boolean).join(' · ');
 }
 
 /** The stages to show unfolded after the selected stop moves from `from` to `to` (null closes it): a picked stage row
