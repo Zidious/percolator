@@ -15,6 +15,7 @@ pnpm build                            # tsc → dist/ (gitignored)
 pnpm schema                           # regenerate schema/percolator.schema.json after changing the zod schema
 node src/cli.ts <command> …           # run perc from a checkout; `perc --help` lists commands
 node src/cli.ts delete <id>...|--finished [--yes]  # remove runs; keeps branches
+node src/cli.ts watch [--repo <dir>]... [--interval <s>] [--foreground]  # start runs from triggers (hc terminal percolator-watch); `watch stop` ends it
 pnpm herdr:sync                       # mirror herdr/mods/* into the Herdr app (reloads live; removes stale files, keeps perc.json); after any panel/cup change
 node tests/smoke/hc.smoke.ts          # manual smoke tests against the real hc / gh (gh.smoke.ts); flags in each file's header; never in pnpm test
 node tests/smoke/panel.shots.ts [--out dir]   # screenshots of every fixture state at 280/380/720 and in the window; needs Herdr open
@@ -53,6 +54,7 @@ Read the module before changing it.
 | `src/herdr/` | clients for `hc` and `herdr-app` |
 | `src/adapters/` | agent argv builders (`claude`, `codex`, `command`) |
 | `src/workspace/` | worktrees, run/step dirs, ground materialization, skill plugins |
+| `src/watch/` | `perc watch`: trigger polling, the firing ledger (`~/.percolator/watch/fired.json`), the watch loop and its heartbeat (`watch.json`) |
 | `src/util/` | paths, atomic fs, argv-only exec |
 | `src/validate.ts` | config → graph validation pipeline |
 | `templates/` | recommended config written by `perc init` |
@@ -76,5 +78,5 @@ Read the module before changing it.
 - **Locks:** `required: true` wins over merge order. A locked target may only be restated deep-equal; otherwise `LockViolation`, located at the attempt: `"<file>:<line>: <path>: locked by <file>:<line> (required: true); remove this <binding|node|mapping> or restate it exactly"` (mappings read `mapping <name> is locked by …`); a core lock reads `"… locked by Percolator core (required: true); remove this node: <name> is built in"`.
 - **Completion** = `done.json` + `outputs/<key>.md`; hc status is only for attention.
 - **Worktrees in the repo:** `<repo>/.worktrees/<run-id>`, listed in `.git/info/exclude`, so the repo's agent trust covers them. Run dirs stay in `~/.percolator/runs`, reached via `--add-dir` (`~/.percolator` must be trusted in Claude Code once).
-- **Terminal ownership:** a terminal not labelled `percolator.run` = this run is never re-attached, adopted, killed or removed. One exception: `perc delete` ends live terminals whose cwd is inside the run's worktree (the run space's own shell, ones opened there), which would otherwise hold it open on Windows.
+- **Terminal ownership:** a terminal not labelled `percolator.run` = this run is never re-attached, adopted, killed or removed. One exception: `perc delete` ends live terminals whose cwd is inside the run's worktree (the run space's own shell, ones opened there), which would otherwise hold it open on Windows. The watcher terminal (`percolator-watch`, labelled `percolator.role=watcher`) is the only terminal outside any run that perc ends or removes (`perc watch`, `perc watch stop`), and only when it carries that label.
 - **Driver pane:** the panel peeks at the driver (`terminal.peek`), never puts it in a pane: closing a Herdr pane ends its terminal, and with it the run.

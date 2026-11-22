@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { main } from '../../src/cli.ts';
+import { FakeHc } from '../helpers/fake-hc.ts';
 
 const fx = (p: string) => path.resolve(import.meta.dirname, '..', 'fixtures', p);
 
@@ -308,4 +309,98 @@ test('herdr with no or an unknown subcommand is a usage error', async () => {
     assert.match(r.err, /^herdr needs a subcommand: link/);
     assert.match(r.err, /usage/i);
   }
+});
+
+async function runWith(argv: string[], deps: Parameters<typeof main>[2]) {
+  let out = '';
+  let err = '';
+  const code = await main(argv, { stdout: (s) => (out += s), stderr: (s) => (err += s) }, deps);
+  return { code, out, err };
+}
+
+const WATCH_ENTRY = path.resolve('/opt/perc/cli.js');
+
+test('perc watch launches the watcher terminal', async () => {
+  const hc = new FakeHc();
+  const cfg = path.join(tmp, 'watch.yaml');
+  const r = await runWith(['watch', '--repo', tmp, '--repo', fx('.'), '--config', cfg, '--profile', 'work', '--interval', '30'], { hc, home: tmp, entry: WATCH_ENTRY });
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(hc.calls.filter((c) => c[0] === 'run'), [
+    [
+      'run',
+      {
+        name: 'percolator-watch',
+        cwd: tmp,
+        argv: [process.execPath, WATCH_ENTRY, 'watch', '--foreground', '--repo', tmp, '--repo', fx('.'), '--config', cfg, '--profile', 'work', '--interval', '30'],
+        labels: { 'percolator.role': 'watcher' },
+        outliveParent: true,
+      },
+    ],
+  ]);
+  assert.equal(r.out, `watcher started in terminal percolator-watch\n  repos ${tmp}, ${fx('.')}\n  stop with: perc watch stop\n`);
+});
+
+test('perc watch refuses a second watcher', async () => {
+  const hc = new FakeHc();
+  hc.add({ name: 'percolator-watch', labels: { 'percolator.role': 'watcher' } });
+  const r = await runWith(['watch', '--repo', tmp], { hc, home: tmp, entry: WATCH_ENTRY });
+  assert.equal(r.code, 1);
+  assert.equal(r.err, 'perc watch is already running in terminal percolator-watch; perc watch stop to stop it\n');
+  assert.deepEqual(hc.calls.filter((c) => c[0] === 'run'), []);
+});
+
+test('perc watch replaces a finished watcher terminal and leaves a foreign one alone', async () => {
+  const hc = new FakeHc();
+  hc.add({ name: 'percolator-watch', labels: { 'percolator.role': 'watcher' }, state: 'finished' });
+  assert.equal((await runWith(['watch', '--repo', tmp], { hc, home: tmp, entry: WATCH_ENTRY })).code, 0);
+  assert.deepEqual(hc.calls.map((c) => c[0]), ['get', 'rm', 'run']);
+  const other = new FakeHc();
+  other.add({ name: 'percolator-watch', state: 'finished' });
+  const r = await runWith(['watch', '--repo', tmp], { hc: other, home: tmp, entry: WATCH_ENTRY });
+  assert.equal(r.code, 1);
+  assert.equal(r.err, 'terminal percolator-watch is not a Percolator watcher; close or rename it, then run perc watch again\n');
+  assert.deepEqual(other.calls.map((c) => c[0]), ['get']);
+});
+
+test('--interval below 15 is a usage error', async () => {
+  for (const v of ['14', '0']) {
+    const r = await runWith(['watch', '--interval', v], { hc: new FakeHc(), home: tmp, entry: WATCH_ENTRY });
+    assert.equal(r.code, 2);
+    assert.match(r.err, /^--interval must be at least 15 seconds\n\nusage: perc/);
+  }
+  const r = await runWith(['watch', '--interval', '1m'], { hc: new FakeHc(), home: tmp, entry: WATCH_ENTRY });
+  assert.equal(r.code, 2);
+  assert.match(r.err, /^--interval must be a whole number of seconds, got "1m"\n\nusage: perc/);
+});
+
+test('perc watch stop ends the watcher terminal and removes watch.json', async () => {
+  const home = await fs.mkdtemp(path.join(tmp, 'home-'));
+  const file = path.join(home, '.percolator', 'watch', 'watch.json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, '{}');
+  const hc = new FakeHc();
+  hc.add({ name: 'percolator-watch', labels: { 'percolator.role': 'watcher' } });
+  hc.add({ name: 'driver', labels: { 'percolator.run': 'r1', 'percolator.role': 'driver' } });
+  const r = await runWith(['watch', 'stop'], { hc, home, entry: WATCH_ENTRY });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, 'stopped the watcher in terminal percolator-watch\n');
+  assert.deepEqual([...hc.terminals.keys()], ['driver']);
+  assert.equal(await fs.stat(file).then(() => true, () => false), false);
+  const again = await runWith(['watch', 'stop'], { hc, home, entry: WATCH_ENTRY });
+  assert.equal(again.out, 'no watcher running\n');
+});
+
+test('usage lists perc watch', async () => {
+  const r = await run(['--help']);
+  assert.ok(
+    r.out.includes(
+      [
+        '  watch [--repo <dir>]... [--config <file>] [--profile <name>] [--interval <s>] [--foreground] | watch stop',
+        "      start runs from the pipelines' triggers, polling each repo every --interval seconds (default 60, at least 15)",
+        '      in hc terminal percolator-watch (--foreground: in this one); watch stop ends it',
+        '',
+      ].join('\n'),
+    ),
+    r.out,
+  );
 });
