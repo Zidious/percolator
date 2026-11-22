@@ -10,6 +10,8 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { isMap, isScalar, parseDocument } from 'yaml';
+import { expandHome } from '../../src/util/paths.ts';
 
 type Scenario = { id: string; request: string; fresh?: boolean; files?: Record<string, string> };
 
@@ -75,14 +77,40 @@ const root = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-skill-'));
 await fs.writeFile(path.join(root, 'real-hashes.json'), JSON.stringify(Object.fromEntries(await Promise.all(watched.map(async (f) => [f, await sha(f)])))));
 const exists = (p: string) => fs.access(p).then(() => true, () => false);
 
+/**
+ * The config text for a sandbox: each path ground (relative to the config, or under the real ~) is copied
+ * into `into/<name>` and its path rewritten to the copy, so it resolves in the sandbox and agents never
+ * reach the real files. The result is also the diff baseline.
+ */
+async function sandboxConfig(file: string, into: string): Promise<string> {
+  const original = await fs.readFile(file, 'utf8');
+  const doc = parseDocument(original);
+  let rewritten = false;
+  const grounds = doc.get('grounds');
+  if (isMap(grounds)) {
+    for (const pair of grounds.items) {
+      const spec = pair.value;
+      const written = isMap(spec) ? spec.get('path') : undefined;
+      if (!isMap(spec) || typeof written !== 'string') continue;
+      const src = written.startsWith('~') ? expandHome(written) : path.resolve(path.dirname(file), written);
+      const dst = path.join(into, String(isScalar(pair.key) ? pair.key.value : pair.key));
+      await fs.cp(src, dst, { recursive: true });
+      spec.set('path', dst.replaceAll('\\', '/'));
+      rewritten = true;
+    }
+  }
+  return rewritten ? doc.toString() : original; // toString would re-format an untouched config
+}
+
 for (const s of SCENARIOS.filter((x) => !only || only.includes(x.id))) {
   const dir = path.join(root, s.id);
   const home = path.join(dir, 'home');
   const perc = path.join(home, '.percolator');
   await fs.mkdir(perc, { recursive: true });
   if (!s.fresh) {
-    await fs.copyFile(from, path.join(perc, 'config.yaml'));
-    await fs.copyFile(from, path.join(dir, 'original.yaml'));
+    const text = await sandboxConfig(from, path.join(home, 'local-grounds'));
+    await fs.writeFile(path.join(perc, 'config.yaml'), text);
+    await fs.writeFile(path.join(dir, 'original.yaml'), text);
     const lock = path.join(path.dirname(from), 'percolator.lock');
     if (await exists(lock)) await fs.copyFile(lock, path.join(perc, 'percolator.lock'));
   }
