@@ -1,7 +1,7 @@
 import path from 'node:path';
-import type { Stage } from '../config/schema.ts';
+import { STAGES } from '../config/schema.ts';
+import type { FeatureStage } from '../config/schema.ts';
 import type { RunContext } from '../engine/runtime.ts';
-import { STAGE_CONTRACTS } from '../graph/core.ts';
 import type { Step } from '../graph/build.ts';
 import type { MaterializedMapping } from '../workspace/run-dir.ts';
 
@@ -24,7 +24,7 @@ export function renderTemplate(text: string, vars: Record<string, string>): stri
   return out;
 }
 
-export const STAGE_BRIEFS: Readonly<Record<Exclude<Stage, 'deliver'>, string>> = Object.freeze({
+export const STAGE_BRIEFS: Readonly<Record<Exclude<FeatureStage, 'deliver'>, string>> = Object.freeze({
   intake: 'Read ticket {{ticket}} and write its title, body and existing comments to ticket.md.',
   groom:
     'Groom the ticket in the inputs into a ready-to-plan ticket and write it to groomed_ticket.md. Percolator posts it on the issue for approval. If the inputs include findings from an approval gate, revise the groomed ticket to address them. If the inputs include a previous groomed ticket (previous_groom), start from it: keep what still holds, change what the ticket, its comments or the feedback changed; don\'t start over. Record in groomed_ticket.md every decision or clarification the owner gave you in the terminal: the next step sees only your outputs, not this conversation.',
@@ -50,9 +50,22 @@ export type TaskInput = {
   mappings: MaterializedMapping[];
   skills: { native: string[] } | { files: string[] };
   parentTerminal?: string;
+  /** the run's pipeline: the feature stages of `feature` get their own brief */
+  pipeline: string;
+  /** run inputs, available to prompts as {{input_<name>}} */
+  inputs: Record<string, string>;
 };
 
 const bullets = (items: string[]): string => items.map((i) => `- ${i}`).join('\n');
+
+const hasBrief = (pipeline: string, stage: string): stage is Exclude<FeatureStage, 'deliver'> =>
+  pipeline === 'feature' && stage !== 'deliver' && (STAGES as readonly string[]).includes(stage);
+
+function customBrief(stage: string, pipeline: string, required: string[]): string {
+  const brief = `Carry out the "${stage}" stage of pipeline ${pipeline}.`;
+  if (required.length === 0) return brief;
+  return `${brief} Write ${required.map((k) => `${k}.md`).join(', ')} to the outputs directory.`;
+}
 
 export function buildTask(t: TaskInput): string {
   const { step, ctx } = t;
@@ -69,7 +82,10 @@ export function buildTask(t: TaskInput): string {
     base: t.base,
     run_dir: t.runDir,
     outputs_dir: t.outputsDir,
+    pipeline: t.pipeline,
+    ...Object.fromEntries(Object.entries(t.inputs).map(([k, v]) => [`input_${k}`, v])),
   };
+  const required = ctx.graph.contracts[step.stage] ?? [];
 
   const sections: string[] = [
     `# Percolator task: ${step.id} (${step.stage}, round ${ctx.round}/${ctx.maxRounds})\n\n` +
@@ -77,7 +93,10 @@ export function buildTask(t: TaskInput): string {
   ];
 
   if (isSlot) {
-    sections.push(`## Stage contract\n\n${renderTemplate(STAGE_BRIEFS[step.stage as Exclude<Stage, 'deliver'>], vars)}`);
+    const brief = hasBrief(t.pipeline, step.stage)
+      ? renderTemplate(STAGE_BRIEFS[step.stage], vars)
+      : customBrief(step.stage, t.pipeline, required);
+    sections.push(`## Stage contract\n\n${brief}`);
   }
 
   const fallback = isSlot ? 'Carry out the stage contract above.' : "Carry out the node's purpose.";
@@ -116,9 +135,8 @@ export function buildTask(t: TaskInput): string {
   sections.push(`## Workspace\n\nWorktree: ${t.worktree} (branch ${t.branch}, base ${t.base}).`);
 
   let outputs = `## Outputs\n\nWrite each output as a Markdown file in ${t.outputsDir}, named <key>.md.`;
-  if (step.slotLast && isSlot) {
-    const req = STAGE_CONTRACTS[step.stage as Stage].requiredOutputs.map((k) => `${k}.md`);
-    outputs += `\n\nRequired: ${req.join(', ')}`;
+  if (step.slotLast && isSlot && required.length > 0) {
+    outputs += `\n\nRequired: ${required.map((k) => `${k}.md`).join(', ')}`;
   }
   sections.push(outputs);
 

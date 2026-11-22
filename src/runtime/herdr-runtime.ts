@@ -32,6 +32,10 @@ export type HerdrRuntimeOptions = {
   grounds: Record<string, ResolvedGround>;
   space?: string;
   parentTerminal?: string;
+  /** the run's pipeline, for task briefs and {{pipeline}}; default the graph's pipeline */
+  pipeline?: string;
+  /** run inputs, for {{input_<name>}}; default none */
+  inputs?: Record<string, string>;
   keepTerminals?: boolean;
   /** node terminals survive perc exiting (hc --outlive-parent), so a paused run can adopt them; default true */
   outliveParent?: boolean;
@@ -194,6 +198,8 @@ export class HerdrRuntime implements Runtime {
         mappings,
         skills,
         ...(o.parentTerminal !== undefined ? { parentTerminal: o.parentTerminal } : {}),
+        pipeline: o.pipeline ?? ctx.graph.pipeline,
+        inputs: o.inputs ?? {},
       });
       await writeFileAtomic(taskFile, text);
     }
