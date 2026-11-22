@@ -131,3 +131,10 @@ export declare function programInitial(program: string): string;
 export declare function agentNote(card: ReturnType<typeof agentCard>): string | null;
 export declare function boxDriver(run: RunStatusJson): { terminal: string; label: 'Driver pane ↗' } | null;
 export declare function historyLabel(run: RunStatusJson, open: boolean, now: number): string;
+export type Columns = 'one' | 'two';
+export declare function columns(width: number): Columns;
+export declare function leftNarrow(cols: Columns, narrow: boolean): boolean;
+export declare function detailParts(
+  run: RunStatusJson,
+  o: { cols: Columns; narrow: boolean; unfolded: string[]; stopSel: string | null },
+): { under: boolean; side: ('box' | 'outcome' | 'strip')[] };

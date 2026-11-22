@@ -219,8 +219,9 @@ function hookLabel(p, t, r, row) {
     .child(div().min_w(0).ml(6).truncate().text_size(10).text_color(t.dim).child(hookNote(r, row, Date.now())));
 }
 
-/** The vertical pipeline of a readable run; the strip opens under the picked row, `p.activeSlot` under the active one. */
-export function pipeline(p, t, r, narrow) {
+/** The vertical pipeline of a readable run; while `under` (one column), the strip opens under the picked row and
+ *  `p.activeSlot` under the active one; in two columns they show in the right column. */
+export function pipeline(p, t, r, narrow, under = true) {
   if (r.status === 'unreadable') return div();
   const rows = pipelineRows(r, { narrow, unfolded: p.unfolded });
   if (rows.length === 0) return div();
@@ -228,7 +229,7 @@ export function pipeline(p, t, r, narrow) {
   const n = rows.length;
   const { active, reached: last, stripAt } = pipelineMarks(rows, p.stopSel);
 
-  const under = (i, el) =>
+  const below = (i, el) =>
     h_flex()
       .items_stretch()
       .child(gutter(t, spans, i, true))
@@ -260,15 +261,17 @@ export function pipeline(p, t, r, narrow) {
             .child(stage ? stageLabel(t, r, row) : hookLabel(p, t, r, row)),
         );
         const out = [line];
-        if (i === active) out.push(under(i, p.activeSlot ? p.activeSlot(t, r, narrow) : div()));
-        if (i === stripAt) out.push(under(i, stopStrip(p, t, r)));
+        if (!under) return out;
+        if (i === active) out.push(below(i, p.activeSlot ? p.activeSlot(t, r, narrow) : div()));
+        if (i === stripAt) out.push(below(i, stopStrip(p, t, r)));
         return out;
       }),
     );
 }
 
-/** The strip under a picked stop: what it is and its outputs, the picked one (else the first) read under them. */
-export function stopStrip(p, t, r) {
+/** The strip under a picked stop: what it is and its outputs, the picked one (else the first) read under them; with
+ *  `fill` (the right column of two) the reader takes the height left. */
+export function stopStrip(p, t, r, fill = false) {
   const st = (r.steps ?? []).find((s) => s.id === p.stopSel);
   if (!st) return div();
   const kv = (k, v) => h_flex().gap(4).child(div().text_color(t.dim).child(k)).child(div().text_color(t.foreground).child(v));
@@ -283,7 +286,10 @@ export function stopStrip(p, t, r) {
           cx.notify();
         });
   const outputs = Object.entries(shown.outputs ?? {});
+  const grow = fill && Boolean(p.file);
   return v_flex()
+    .when(grow, (el) => el.flex_1().min_h(0))
+    .when(!grow, (el) => el.flex_none())
     .mt(2)
     .mb(8)
     .px(9)
@@ -296,6 +302,7 @@ export function stopStrip(p, t, r) {
     .text_size(11)
     .child(
       h_flex()
+        .flex_none()
         .gap(8)
         .items_center()
         .child(div().min_w(0).truncate().font_semibold().child(st.id))
@@ -309,6 +316,7 @@ export function stopStrip(p, t, r) {
     )
     .child(
       h_flex()
+        .flex_none()
         .flex_wrap()
         .gap_x(10)
         .gap_y(2)
@@ -321,6 +329,7 @@ export function stopStrip(p, t, r) {
     .when(outputs.length > 0, (el) =>
       el.child(
         h_flex()
+          .flex_none()
           .flex_wrap()
           .gap(6)
           .children(
@@ -333,5 +342,5 @@ export function stopStrip(p, t, r) {
           ),
       ),
     )
-    .when(Boolean(p.file), (el) => el.child(inlineReader(p, t, p.file, 'strip-reader')));
+    .when(Boolean(p.file), (el) => el.child(inlineReader(p, t, p.file, 'strip-reader', grow)));
 }

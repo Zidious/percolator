@@ -559,6 +559,28 @@ export function boxOutside(run, o) {
   return pipelineMarks(pipelineRows(run, o), null).active < 0;
 }
 
+/** One column, or two from 720px wide (the window, a wide panel): the board and pipeline on the left, the run on the
+ *  right. */
+export function columns(width) {
+  return width >= 720 ? 'two' : 'one';
+}
+
+/** Whether the board and pipeline draw narrow: in a narrow panel, and in the 330px left column of two columns. */
+export function leftNarrow(cols, narrow) {
+  return narrow || cols === 'two';
+}
+
+/** Where the detail's pieces show. `under`: the active slot and the stop strip sit under their rows in the pipeline (one
+ *  column). `side`, in order: what shows under the pipeline in one column (the box when it has no active row, how the
+ *  run ended), or in the right column of two (the box, how the run ended, then the picked stop's strip). */
+export function detailParts(run, o) {
+  const outcome = showsOutcome(run) ? ['outcome'] : [];
+  if (o.cols === 'one') return { under: true, side: [...(boxOutside(run, o) ? ['box'] : []), ...outcome] };
+  const box = activeBox(run) === null ? [] : ['box'];
+  const picked = o.stopSel !== null && (run.steps ?? []).some((s) => s.id === o.stopSel);
+  return { under: false, side: [...box, ...outcome, ...(picked ? ['strip'] : [])] };
+}
+
 /** Whether the active stop (its stage stop or hook node) opens the agent: one works there in a live terminal. */
 export function slotOpensAgent(run, live) {
   return activeBox(run) === 'agent' && agentAddress(run, live) !== null;

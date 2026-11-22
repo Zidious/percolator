@@ -61,6 +61,9 @@ import {
   agentTone,
   boxActions,
   boxOutside,
+  columns,
+  detailParts,
+  leftNarrow,
   readerFiles,
   readerMax,
   slotOpensAgent,
@@ -1042,4 +1045,36 @@ test('historyLabel counts the history rows, singular for one, none for an empty 
   assert.equal(historyLabel(byId('t14'), false, now), 'History ▸ 1 attempt');
   assert.equal(historyLabel(byId('t5'), false, now), 'History ▸');
   assert.equal(historyLabel(byId('t5'), true, now), 'History ▾');
+});
+
+test('columns: two columns from 720px wide (the window, a wide panel), else one', () => {
+  assert.equal(columns(719), 'one');
+  assert.equal(columns(720), 'two');
+  assert.equal(columns(860), 'two');
+  assert.equal(columns(380), 'one');
+});
+
+test('leftNarrow: the 330px left column of two columns draws the board and pipeline narrow', () => {
+  assert.equal(leftNarrow('one', false), false);
+  assert.equal(leftNarrow('one', true), true);
+  assert.equal(leftNarrow('two', false), true);
+});
+
+test('detailParts: one column keeps the box and strip under their rows; two columns move them to the right column', () => {
+  const one = (stopSel: string | null) => ({ cols: 'one' as const, narrow: false, unfolded: [] as string[], stopSel });
+  const two = (stopSel: string | null) => ({ cols: 'two' as const, narrow: true, unfolded: [] as string[], stopSel });
+  assert.deepEqual(detailParts(byId('t2'), one(null)), { under: true, side: [] }, 'the gate box sits under its stop');
+  assert.deepEqual(detailParts(byId('t2'), one('groom')), { under: true, side: [] }, 'the strip sits under its row');
+  assert.deepEqual(detailParts(byId('t3'), one('review')), { under: true, side: ['outcome'] });
+  const lost = { ...readable('t9'), currentStep: 'gone' } as Readable;
+  assert.deepEqual(detailParts(lost, one(null)), { under: true, side: ['box'] }, 'no active row: the box shows below');
+
+  assert.deepEqual(detailParts(byId('t2'), two(null)), { under: false, side: ['box'] }, 'the gate box moves right');
+  assert.deepEqual(detailParts(byId('t2'), two('groom')), { under: false, side: ['box', 'strip'] }, 'the strip under it');
+  assert.deepEqual(detailParts(lost, two(null)), { under: false, side: ['box'] });
+  assert.deepEqual(detailParts(byId('t16'), two(null)), { under: false, side: ['box'] }, 'the agent card moves right');
+  assert.deepEqual(detailParts(byId('t3'), two(null)), { under: false, side: ['outcome'] });
+  assert.deepEqual(detailParts(byId('t3'), two('review')), { under: false, side: ['outcome', 'strip'] });
+  assert.deepEqual(detailParts(byId('t3'), two('gone')), { under: false, side: ['outcome'] }, 'a stop not in the run');
+  assert.deepEqual(detailParts(byId('t5'), two(null)), { under: false, side: ['outcome'] }, 'unreadable');
 });

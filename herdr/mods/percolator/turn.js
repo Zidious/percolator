@@ -15,12 +15,11 @@ import {
   boxActions,
   boxAsks,
   boxDriver,
-  boxOutside,
   historyLabel,
   programInitial,
-  showsOutcome,
   timelineRows,
 } from './model.js';
+import { stopStrip } from './pipeline.js';
 import { button, inlineReader, own, scrollY } from './ui.js';
 
 const LABELS = {
@@ -199,14 +198,16 @@ function agentBox(p, t, card) {
   );
 }
 
-/** The box of a run that needs you: the tag, the message and its age, the detail, the file to review, the buttons. */
-function attentionBox(p, t, r, kind, narrow) {
+/** The box of a run that needs you: the tag, the message and its age, the detail, the file to review, the buttons.
+ *  With `fill` (the right column of two) its reader takes the height left. */
+function attentionBox(p, t, r, kind, narrow, fill) {
   const a = r.attention;
   const acts = boxActions(r);
   const card = agentCard(r, terminals(), agents(), Date.now());
   const live = Boolean(agentAddress(r, terminals()));
   const drv = boxDriver(r);
   const buttons = h_flex()
+    .flex_none()
     .flex_wrap()
     .gap(8)
     .items_center()
@@ -221,7 +222,10 @@ function attentionBox(p, t, r, kind, narrow) {
     .when(Boolean(a.commentUrl), (el) => el.child(button(t, 'github', 'GitHub ↗', '', (_e, cx) => cx.open_url(a.commentUrl))))
     .when(live, (el) => el.child(button(t, 'open-terminal', 'Open terminal ↗', '', () => p.openAgent())))
     .when(Boolean(drv), (el) => el.child(button(t, 'box-driver', drv.label, '', () => p.peekDriver())));
+  const grow = fill && Boolean(p.boxFile);
   const box = v_flex()
+    .when(grow, (el) => el.flex_1().min_h(0))
+    .when(!grow, (el) => el.flex_none())
     .mt(2)
     .mb(8)
     .px(9)
@@ -233,6 +237,7 @@ function attentionBox(p, t, r, kind, narrow) {
     .border_color(t.blocked)
     .child(
       h_flex()
+        .flex_none()
         .gap(8)
         .items_center()
         .child(tag(attentionTag(kind), t.blocked))
@@ -251,14 +256,15 @@ function attentionBox(p, t, r, kind, narrow) {
           .child(div().min_w(0).truncate().child(`· ${card.name}`)),
       ),
     )
-    .when(Boolean(p.boxFile), (el) => el.child(inlineReader(p, t, p.boxFile, 'box-reader')))
+    .when(Boolean(p.boxFile), (el) => el.child(inlineReader(p, t, p.boxFile, 'box-reader', grow)))
     .when(acts.length > 0 || Boolean(a.commentUrl) || live || Boolean(drv), (el) => el.child(buttons))
     .when(p.rejecting, (el) => el.child(rejectBox(p, t)));
   return said(p, t, box);
 }
 
-/** What shows under the active stop (main.js hands it to the pipeline as `p.activeSlot`). */
-export function activeSlot(p, t, r, narrow) {
+/** What shows under the active stop (main.js hands it to the pipeline as `p.activeSlot`), or at the top of the right
+ *  column of two (`fill`: its reader takes the height left). */
+export function activeSlot(p, t, r, narrow, fill = false) {
   const kind = activeBox(r);
   if (kind === null) return div();
   if (kind === 'agent') {
@@ -266,7 +272,7 @@ export function activeSlot(p, t, r, narrow) {
     if (!card) return div().mt(2).mb(8).text_size(11).text_color(t.dim).child(agentNote(card));
     return agentBox(p, t, card);
   }
-  return attentionBox(p, t, r, kind, narrow);
+  return attentionBox(p, t, r, kind, narrow, fill);
 }
 
 /** How a run with nothing under its active stop stands: delivered, unreadable, or its status. */
@@ -285,15 +291,17 @@ function outcome(t, r) {
   return h_flex().gap(8).items_center().child(tag(r.status.toUpperCase(), t.muted));
 }
 
-/** The lower half: the active box when its stop is not in the pipeline, how a finished run ended, the history fold. */
-export function turn(p, t, r, narrow) {
+/** The lower half (one column) or the right column's body (two, `fill`): the parts detailParts puts there (the active
+ *  box, how a finished run ended, the picked stop's strip), then the history fold. */
+export function turn(p, t, r, narrow, side, fill = false) {
+  const part = (x) => (x === 'box' ? activeSlot(p, t, r, narrow, fill) : x === 'outcome' ? outcome(t, r) : stopStrip(p, t, r, fill));
   const body = v_flex()
-    .flex_none()
+    .when(fill, (el) => el.flex_1().min_h(0))
+    .when(!fill, (el) => el.flex_none())
     .px(16)
     .pt(8)
     .pb(12)
     .gap(10)
-    .when(boxOutside(r, { narrow, unfolded: p.unfolded }), (el) => el.child(activeSlot(p, t, r, narrow)))
-    .when(showsOutcome(r), (el) => el.child(outcome(t, r)));
+    .children(side.map(part));
   return (boxAsks(r) ? body : said(p, t, body)).child(historyFold(p, t, r));
 }

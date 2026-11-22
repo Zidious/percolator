@@ -27,6 +27,8 @@ import {
   agentAddress,
   boardHeight,
   boxActions,
+  columns,
+  detailParts,
   deleteArgv,
   deleteCommand,
   deleteCommandIds,
@@ -37,6 +39,7 @@ import {
   dragBoard,
   driverPeek,
   findNode,
+  leftNarrow,
   titleLayout,
   unfoldAfterPick,
   moveRow,
@@ -62,6 +65,7 @@ import { addressOf, link, own } from './ui.js';
 import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
 
 const NARROW = 720;
+const LEFT = 330; // the left column of two: the board and the pipeline
 const BLOCK = 'percolator-panel';
 const WINDOW = 'percolator.window'; // shared: the open window's overlay id, else null
 const RATIO = 'percolator.boardRatio'; // shared: the board's height as a ratio of the area under the title bar
@@ -245,7 +249,7 @@ export default class Percolator extends View {
   pickStop(id, cx) {
     const r = this.current();
     if (r && r.status !== 'unreadable') {
-      this.unfolded = unfoldAfterPick(r, { narrow: this.width < NARROW, unfolded: this.unfolded }, this.stopSel, id);
+      this.unfolded = unfoldAfterPick(r, { narrow: this.shape().left, unfolded: this.unfolded }, this.stopSel, id);
     }
     this.stopSel = id;
     this.roundSel = null;
@@ -538,6 +542,13 @@ export default class Percolator extends View {
     if (at >= 0) this.boardScroll.scroll_to_item(at);
   }
 
+  /** The panel's layout at its width: `narrow`; `cols`, one or two; `left`, the board and pipeline draw narrow. */
+  shape() {
+    const narrow = this.width < NARROW;
+    const cols = columns(this.width / zoom());
+    return { narrow, cols, left: leftNarrow(cols, narrow) };
+  }
+
   // ── the divider between the board and the detail ──────────────────
 
   minBoard(narrow) {
@@ -701,26 +712,38 @@ export default class Percolator extends View {
   }
 
   // The measured frames (area, board-frame) are drawn from the first frame on, whatever the state: Herdr reports sizes
-  // only for elements it has had since the view's first frame.
-  body(t, narrow) {
+  // only for elements it has had since the view's first frame. One column or two, they keep their place (area > left).
+  body(t, { narrow, cols, left }) {
+    const two = cols === 'two';
     const ready = this.conn !== 'missing' && this.loaded;
     const r = ready ? this.current() : null;
     const rows = ready ? this.rows() : [];
-    const boardMax = boardHeight(this.boardRatio(), this.area, this.minBoard(narrow));
-    return v_flex()
-      .id('area')
-      .flex_1()
+    const parts = r ? detailParts(r, { cols, narrow: left, unfolded: this.unfolded, stopSel: this.stopSel }) : null;
+    const boardMax = boardHeight(this.boardRatio(), this.area, this.minBoard(left));
+    const detail = v_flex()
+      .id('detail-body')
+      .flex_none()
+      .when(!ready && !two, (el) => el.min_h_full().child(this.placeholder(t)))
+      .when(Boolean(r), (el) =>
+        el
+          .when(!two, (el) => el.child(header(this, t, r, narrow)))
+          .child(pipeline(this, t, r, left, parts.under))
+          .when(!two, (el) => el.child(turn(this, t, r, narrow, parts.side))),
+      );
+    const leftColumn = v_flex()
+      .id('left')
       .min_h(0)
-      .on_size_change((size, cx) => this.measured('area', size, cx))
+      .when(two, (el) => el.w(LEFT).flex_none().h_full())
+      .when(!two, (el) => el.flex_1().min_w(0))
       .child(
         v_flex()
           .id('board-frame')
           .flex_none()
           .when(rows.length > 0, (el) => el.max_h(boardMax))
           .on_size_change((size, cx) => this.measured('boardPx', size, cx))
-          .when(ready, (el) => el.child(board(this, t, narrow, rows))),
+          .when(ready, (el) => el.child(board(this, t, left, rows))),
       )
-      .when(rows.length > 0, (el) => el.child(this.divider(t, narrow)))
+      .when(rows.length > 0, (el) => el.child(this.divider(t, left)))
       .child(
         // One scroll for the whole detail, filled absolutely: overflow_y_scrollbar() wraps the element, so its flex
         // sizing never reaches the layout.
@@ -729,34 +752,42 @@ export default class Percolator extends View {
           .flex_1()
           .min_h(0)
           .relative()
-          .child(
-            v_flex()
-              .id('detail')
-              .absolute()
-              .inset_0()
-              .overflow_y_scroll()
-              .child(
-                v_flex()
-                  .id('detail-body')
-                  .flex_none()
-                  .when(!ready, (el) => el.min_h_full().child(this.placeholder(t)))
-                  .when(Boolean(r), (el) =>
-                    el
-                      .child(header(this, t, r, narrow))
-                      .child(pipeline(this, t, r, narrow))
-                      .child(turn(this, t, r, narrow)),
-                  ),
-              ),
-          )
+          .child(v_flex().id('detail').absolute().inset_0().overflow_y_scroll().child(detail))
           .child(Scrollbar.vertical('detail').absolute().inset_0()),
       );
+    // The right column of two: the run's header, then its box (or how it ended) and the picked stop's strip, whose
+    // readers take the height left; it does not scroll as a whole, so the buttons stay in view.
+    const rightColumn = () =>
+      v_flex()
+        .id('right')
+        .flex_1()
+        .min_w(0)
+        .min_h(0)
+        .h_full()
+        .border_l(1)
+        .border_color(t.border)
+        .when(!ready, (el) => el.child(this.placeholder(t)))
+        .when(Boolean(r), (el) =>
+          el.child(div().flex_none().child(header(this, t, r, false))).child(turn(this, t, r, false, parts.side, true)),
+        );
+    return div()
+      .id('area')
+      .flex()
+      .when(two, (el) => el.flex_row().items_stretch())
+      .when(!two, (el) => el.flex_col())
+      .flex_1()
+      .min_h(0)
+      .on_size_change((size, cx) => this.measured('area', size, cx))
+      .child(leftColumn)
+      .when(two, (el) => el.child(rightColumn()));
   }
 
   render(cx) {
     const t = theme();
     this.catchUp(cx);
     this.followFocus(cx);
-    const narrow = this.width < NARROW;
+    const at = this.shape();
+    const { narrow } = at;
     return v_flex()
       .id('root')
       .size_full()
@@ -771,7 +802,7 @@ export default class Percolator extends View {
       .on_mouse_move((e, cx) => {
         if (!this.drag) return;
         const dy = (e.position.y - this.drag.y) / zoom(); // the pointer moves in zoomed pixels
-        this.ratio = dragBoard(this.drag.px, dy, this.area, this.minBoard(narrow));
+        this.ratio = dragBoard(this.drag.px, dy, this.area, this.minBoard(at.left));
         cx.notify();
       })
       .on_mouse_up('left', (_e, cx) => {
@@ -822,7 +853,7 @@ export default class Percolator extends View {
             if (!this.typing) this.handle.focus();
             cx.stop_propagation();
           })
-          .child(this.body(t, narrow)),
+          .child(this.body(t, at)),
       )
       .when(!narrow && this.conn !== 'missing', (el) => el.child(this.hints(t)));
   }

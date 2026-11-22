@@ -71,14 +71,16 @@ export function button(t, id, label, kind, onClick, { busy = false, disabled = f
 }
 
 /** The markdown file at `path` (resolved; its text in `p.files`), with its name and Read full ↗ (the pop-out window).
- *  It scrolls on its own past half the panel. */
-export function inlineReader(p, t, path, id) {
+ *  It scrolls on its own past half the panel; with `fill` (the right column of two) it takes the height left instead. */
+export function inlineReader(p, t, path, id, fill = false) {
   const md = p.files[path];
   return v_flex()
-    .flex_none()
+    .when(fill, (el) => el.flex_1().min_h(0))
+    .when(!fill, (el) => el.flex_none())
     .gap(4)
     .child(
       h_flex()
+        .flex_none()
         .gap(8)
         .items_center()
         .child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child(path.split(/[\\/]/).pop()))
@@ -89,8 +91,8 @@ export function inlineReader(p, t, path, id) {
       own(
         v_flex()
           .id(`${id}-frame`)
-          .flex_none()
-          .max_h(p.readerMaxH())
+          .when(fill, (el) => el.flex_1().min_h(0))
+          .when(!fill, (el) => el.flex_none().max_h(p.readerMaxH()))
           .rounded(6)
           .bg(t.surface)
           .border(1)
