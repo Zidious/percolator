@@ -145,7 +145,8 @@ async function zoomTo(target: number): Promise<void> {
   throw new Error(`could not get the zoom back to ${target}; set it in Herdr's settings`);
 }
 
-const shortId = (id: string): string => id.split('-')[0] ?? id;
+// t23-epic-20261121-090000-7c2a-s1 → t23-epic-s1: unique per run (the slices and the triage pair share a ticket)
+const shortId = (id: string): string => id.replace(/-\d{8}-\d{6}-[0-9a-f]{4}/, '');
 
 // ── back up ──
 const backup = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-panel-shots-backup-'));
