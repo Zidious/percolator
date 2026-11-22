@@ -19,8 +19,9 @@ export function parseStatus(stdout) {
   return { ok: true, data };
 }
 
-const needs = (r) => Boolean(r.attention);
-const rank = (r) => (needs(r) ? 0 : r.status === 'running' ? 1 : r.status === 'unreadable' ? 3 : 2);
+/** Whether a run waits on you. A blocked agent does not: Herdr already shows it, so the panel counts that run as running. */
+export const needsYou = (r) => Boolean(r.attention) && r.attention.kind !== 'agent';
+const rank = (r) => (needsYou(r) ? 0 : r.status === 'running' ? 1 : r.status === 'unreadable' ? 3 : 2);
 const created = (r) => (typeof r.createdAt === 'string' ? Date.parse(r.createdAt) || 0 : 0);
 
 /** A sorted copy: needing you first, then running, then the rest (unreadable last); newest first within each. */
@@ -31,14 +32,14 @@ export function sortRuns(runs) {
 /** "active": everything except completed and failed runs that need nothing; "all": everything. */
 export function visibleRuns(runs, filter) {
   if (filter === 'all') return [...runs];
-  return runs.filter((r) => needs(r) || (r.status !== 'completed' && r.status !== 'failed'));
+  return runs.filter((r) => needsYou(r) || (r.status !== 'completed' && r.status !== 'failed'));
 }
 
 /** The board row's state line and its tone. */
 export function rowState(run) {
   const a = run.attention;
   const step = run.currentStep;
-  if (a) {
+  if (a && a.kind !== 'agent') {
     const blocked = (text) => ({ tone: 'blocked', text });
     switch (a.kind) {
       case 'gate':
@@ -51,8 +52,6 @@ export function rowState(run) {
         return blocked(`failed · ${step}`);
       case 'stalled':
         return blocked('stalled · driver stopped');
-      case 'agent':
-        return blocked(`agent ${a.agentState ?? 'waiting'} · ${step}`);
     }
   }
   if (run.status === 'running') {
@@ -101,8 +100,8 @@ export function xOf(zones, stepId) {
 /** Runs in `next` that need you and did not in `prev` (or were not there); none on the first load (`prev` null). */
 export function newlyNeeding(prev, next) {
   if (prev === null) return [];
-  const had = new Set(prev.filter(needs).map((r) => r.id));
-  return next.filter((r) => needs(r) && !had.has(r.id));
+  const had = new Set(prev.filter(needsYou).map((r) => r.id));
+  return next.filter((r) => needsYou(r) && !had.has(r.id));
 }
 
 /** The `perc` argv for an action, or null when it needs no perc call (open-pane). Feedback stays one element. */
@@ -125,12 +124,12 @@ export function actionArgv(action, run, feedback) {
 
 /** Runs that need you. */
 export function needsCount(runs) {
-  return runs.filter(needs).length;
+  return runs.filter(needsYou).length;
 }
 
 /** Running runs that need nothing from you. */
 export function runningCount(runs) {
-  return runs.filter((r) => r.status === 'running' && !needs(r)).length;
+  return runs.filter((r) => r.status === 'running' && !needsYou(r)).length;
 }
 
 /** parseStatus, and refuses a schema this panel does not know. */
@@ -196,7 +195,7 @@ export function terminalCommands(run) {
   return [...new Set([...cliLines(run), ...(run.attention?.commands ?? [])])];
 }
 
-const TAGS = { gate: 'GATE', cap: 'PAUSED', paused: 'PAUSED', failed: 'FAILED', stalled: 'STALLED', agent: 'AGENT' };
+const TAGS = { gate: 'GATE', cap: 'PAUSED', paused: 'PAUSED', failed: 'FAILED', stalled: 'STALLED' };
 
 /** The tag shown before an attention message. */
 export function attentionTag(kind) {

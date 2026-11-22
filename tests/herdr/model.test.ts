@@ -46,6 +46,7 @@ import {
   canPick,
   moveStop,
   needsCount,
+  needsYou,
   newlyNeeding,
   notice,
   parseStatus,
@@ -161,7 +162,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t13', 't12', 't2', 't11', 't9', 't4', 't17', 't16', 't14', 't8', 't15', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t12', 't2', 't11', 't9', 't4', 't17', 't16', 't14', 't13', 't8', 't15', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -183,7 +184,7 @@ test('rowState gives the tone and the board text for each kind of run', () => {
     ['t12', 'blocked', 'paused · plan'],
     ['t9', 'blocked', 'failed · implement'],
     ['t11', 'blocked', 'stalled · driver stopped'],
-    ['t13', 'blocked', 'agent blocked · groom'],
+    ['t13', 'working', 'groom'],
     ['t8', 'working', 'review', 'round 3/3'],
     ['t3', 'dim', 'delivered · PR #7'],
     ['t5', 'muted', 'unreadable · state.json: Unexpected end of JSON input'],
@@ -296,8 +297,8 @@ test('newlyNeeding returns a run that gained attention', () => {
 
 test('newlyNeeding returns a new run that arrives needing attention', () => {
   const next = runs();
-  const prev = next.filter((r) => !r.id.startsWith('t13-'));
-  assert.deepEqual(ids(newlyNeeding(prev, next)), ['t13']);
+  const prev = next.filter((r) => !r.id.startsWith('t12-'));
+  assert.deepEqual(ids(newlyNeeding(prev, next)), ['t12']);
 });
 
 test('newlyNeeding is empty when nothing changed', () => {
@@ -330,8 +331,8 @@ test('actionArgv refuses a reject without feedback', () => {
 });
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
-  assert.equal(needsCount(runs()), 6);
-  assert.equal(runningCount(runs()), 4);
+  assert.equal(needsCount(runs()), 5);
+  assert.equal(runningCount(runs()), 5);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
 });
@@ -409,7 +410,7 @@ test('terminalCommands lists the action equivalents, then the attention commands
 
 test('attentionTag names each attention kind', () => {
   assert.deepEqual(['gate', 'cap', 'paused', 'failed', 'stalled', 'agent'].map(attentionTag), [
-    'GATE', 'PAUSED', 'PAUSED', 'FAILED', 'STALLED', 'AGENT',
+    'GATE', 'PAUSED', 'PAUSED', 'FAILED', 'STALLED', 'NEEDS YOU',
   ]);
 });
 
@@ -526,7 +527,7 @@ test('readerPath shows the picked round first output', () => {
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
-  assert.deepEqual(cupLabel(runs()), { text: '6 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel(runs()), { text: '5 need you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
   assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
@@ -863,4 +864,12 @@ test('loopSpans lists every loop with its tone', () => {
 
 test('rowState gives the round the engine is in', () => {
   assert.equal(rowState({ ...readable('t16'), currentStep: 'review' }).round, 'round 2/3');
+});
+
+test('an agent-blocked run is a running run to the panel', () => {
+  const t13 = byId('t13');
+  assert.equal(needsYou(t13), false);
+  assert.deepEqual(rowState(t13), { tone: 'working', text: 'groom' });
+  assert.equal(newlyNeeding([], [t13]).length, 0);
+  assert.equal(sortRuns([byId('t3'), t13])[0]!.id, t13.id); // running ranks above completed
 });

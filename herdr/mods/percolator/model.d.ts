@@ -19,6 +19,7 @@ export declare function trainLayout(run: RunStatusJson, narrow: boolean): Zone[]
 export declare function xOf(zones: Zone[], stepId: string): number | null;
 export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
 export declare function actionArgv(action: Action, run: { id: string }, feedback?: string): string[] | null;
+export declare function needsYou(run: RunStatusJson): boolean;
 export declare function needsCount(runs: RunStatusJson[]): number;
 export declare function runningCount(runs: RunStatusJson[]): number;
 export type Loop = Readable['loops'][number];
