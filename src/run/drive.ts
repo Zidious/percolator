@@ -84,7 +84,15 @@ export async function checkResumable(
   const lock = await otherLiveLock(dir, liveness(deps));
   if (lock !== undefined) throw new Error(drivenByProcess(runId, lock));
 
-  const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile, pipeline: meta.pipeline });
+  const v = await validate({
+    configFile: meta.configFile,
+    cwd: meta.repoRoot,
+    home: deps.home,
+    profile: meta.profile,
+    pipeline: meta.pipeline,
+    // a fan-out slice runs its slice's graph
+    ...(meta.fanOut !== undefined ? { sliceFrom: meta.fanOut.from } : {}),
+  });
   if (state.graphFingerprint !== undefined && state.graphFingerprint !== graphFingerprint(v.graph)) {
     throw new Error(`run ${runId} was started with a different graph (config changed since); start a new run`);
   }

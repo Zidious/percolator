@@ -673,6 +673,30 @@ test('validate refuses a router that routes to an unknown pipeline, whichever pi
   );
 });
 
+const epicLines = [
+  '      epic:',
+  '        stages: [intake, plan, implement, deliver]',
+  '        exit: pr',
+  '        bindings:',
+  '          plan: { agent: claude }',
+  '          implement: { agent: claude }',
+  '        fan_out: { stage: implement, slices: { from: plan, output: slices } }',
+  '',
+].join('\n');
+
+test('validate with sliceFrom builds the slice child graph of a fan-out pipeline', async () => {
+  await withConfig(
+    (abs) => pipelinesConfig(abs, epicLines),
+    async (cfg) => {
+      const parent = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'epic' });
+      assert.deepEqual(parent.graph.steps.map((s) => s.id), ['intake', 'plan', 'implement']);
+      const child = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'epic', sliceFrom: 'implement' });
+      assert.deepEqual(child.graph.steps.map((s) => s.id), ['intake', 'implement', 'deliver']);
+      assert.deepEqual(child.graph.steps[0]!.def, { builtin: 'percolator.seed' });
+    },
+  );
+});
+
 test("a router's default choose prompt lists the pipelines' descriptions", async () => {
   await withConfig(
     (abs) => pipelinesConfig(abs, triageLines('hotfix, feature')).replace('        exit: pr\n        ticket: optional', '        exit: pr\n        description: fix a bug fast\n        ticket: optional'),

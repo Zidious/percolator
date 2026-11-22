@@ -22,6 +22,8 @@ export type RunMeta = {
   issue?: number;
   /** run id of the run that started this one (route or fan-out child) */
   parent?: string;
+  /** a fan-out slice: the parent run, the slice's 1-based index, the stage it starts from and its title */
+  fanOut?: FanOutMeta;
   /** local clone the run was started from (status JSON's `repo`) */
   repoRoot: string;
   configFile: string;
@@ -34,6 +36,8 @@ export type RunMeta = {
   driver: string;
   createdAt: string;
 };
+
+export type FanOutMeta = { parent: string; slice: number; from: string; title: string };
 
 /**
  * The Herdr space name: repo, issue (or the pipeline of a ticketless run), and the run id's suffix,
@@ -60,6 +64,12 @@ const isInt = (v: unknown): boolean => typeof v === 'number' && Number.isInteger
 const isStringRecord = (v: unknown): boolean =>
   typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((x) => typeof x === 'string');
 
+function isFanOut(v: unknown): boolean {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const f = v as Record<string, unknown>;
+  return typeof f.parent === 'string' && isInt(f.slice) && typeof f.from === 'string' && typeof f.title === 'string';
+}
+
 function invalidField(r: Record<string, unknown>): string | undefined {
   if (r.version !== 1 && r.version !== 2) return 'version';
   for (const k of STRINGS) if (typeof r[k] !== 'string') return k;
@@ -74,6 +84,7 @@ function invalidField(r: Record<string, unknown>): string | undefined {
     if (r.issue !== undefined && !isInt(r.issue)) return 'issue';
     if ((r.ticket === undefined) !== (r.issue === undefined)) return r.ticket === undefined ? 'ticket' : 'issue';
     if (r.parent !== undefined && typeof r.parent !== 'string') return 'parent';
+    if (r.fanOut !== undefined && !isFanOut(r.fanOut)) return 'fanOut';
   }
   if (typeof r.keepTerminals !== 'boolean') return 'keepTerminals';
   if (r.space !== undefined && typeof r.space !== 'string') return 'space';

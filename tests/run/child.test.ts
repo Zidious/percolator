@@ -4,6 +4,8 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { loadState, saveState } from '../../src/engine/state.ts';
 import { childrenOf, startLinkedRun } from '../../src/run/child.ts';
+import { checkResumable } from '../../src/run/drive.ts';
+import { readRunGraph } from '../../src/run/graph-file.ts';
 import { readRunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { ENTRY, setupRunEnv } from '../helpers/run-env.ts';
@@ -66,6 +68,38 @@ test('startLinkedRun on an existing child only relaunches its driver', async () 
     e.deps.hc.terminals.get(first.driver)!.state = 'finished';
     await startLinkedRun({ parent, pipeline: 'hotfix', ticket: parent.ticket!, runId: 'child-1' }, e.deps);
     assert.equal(runCalls(e).length, 2);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+const EPIC = [
+  '    pipelines:',
+  '      epic:',
+  '        stages: [intake, plan, implement, deliver]',
+  '        exit: pr',
+  '        bindings:',
+  '          plan: { command: [echo, plan] }',
+  '          implement: { command: [echo, implement] }',
+  '        fan_out: { stage: implement, slices: { from: plan, output: slices } }',
+].join('\n');
+
+test('startLinkedRun with fanOut records the slice and builds the slice graph, which resumes', async () => {
+  const e = await setupRunEnv({ extra: EPIC });
+  try {
+    const parent = await prepareRun({ ticket: '#5', pipeline: 'epic', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+    const fanOut = { parent: parent.runId, slice: 2, from: 'implement', title: 'Second' };
+    const child = await startLinkedRun({ parent, pipeline: 'epic', ticket: parent.ticket!, runId: `${parent.runId}-s2`, fanOut }, e.deps);
+    assert.deepEqual(child.fanOut, fanOut);
+    assert.equal(child.branch, `percolator/${parent.runId}-s2`);
+    assert.equal(child.base, parent.base);
+    const dir = path.join(e.home, '.percolator', 'runs', child.runId);
+    assert.deepEqual((await readRunMeta(dir)).fanOut, fanOut);
+    assert.deepEqual((await readRunGraph(dir))!.steps.map((s) => s.id), ['intake', 'implement', 'deliver']);
+    e.deps.hc.terminals.get(child.driver)!.state = 'finished';
+    // the slice graph's fingerprint matches on resume
+    const r = await checkResumable(child.runId, e.deps);
+    assert.deepEqual(r.v.graph.steps.map((s) => s.id), ['intake', 'implement', 'deliver']);
   } finally {
     await e.cleanup();
   }

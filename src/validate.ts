@@ -32,6 +32,8 @@ export type ValidateOptions = {
   profile?: string;
   /** The pipeline to validate (default: the profile's default pipeline). */
   pipeline?: string;
+  /** Build one fan-out slice's graph, from this stage on (a fan-out child run); default the whole (or parent) graph. */
+  sliceFrom?: string;
   update?: boolean;
   home?: string;
   git?: Git;
@@ -59,7 +61,7 @@ export type ValidateResult = {
 /** Validates one pipeline of the selected profile: `opts.pipeline`, or the profile's default. */
 export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
   const l = await load(opts);
-  return validatePipeline(l, pickPipeline(l.specs, opts.pipeline, l.name, l.pipelinesWhere).name);
+  return validatePipeline(l, pickPipeline(l.specs, opts.pipeline, l.name, l.pipelinesWhere).name, opts.sliceFrom);
 }
 
 /** Validates every pipeline of the selected profile in order (grounds resolved once); throws the first error. */
@@ -104,7 +106,7 @@ type Loaded = {
   specs: Record<string, PipelineSpec>;
 };
 
-async function validatePipeline(l: Loaded, pipelineName: string): Promise<ValidateResult> {
+async function validatePipeline(l: Loaded, pipelineName: string, sliceFrom?: string): Promise<ValidateResult> {
   // a pipeline's own use maps like its layer's use, located under pipelines.<p>, just before that layer
   const roots = l.roots.flatMap((r): LayerRoot[] => {
     const use = r.fragment.pipelines?.[pipelineName]?.use ?? [];
@@ -123,7 +125,11 @@ async function validatePipeline(l: Loaded, pipelineName: string): Promise<Valida
   if (violations.length > 0) throw new RuleViolationError(violations, l.configFile);
   checkPipelines(merged, pipelines, l.name);
   const descriptions = Object.fromEntries(Object.values(pipelines).map((s) => [s.name, s.description]));
-  const graph = buildGraph(selected, { profile: l.name, locator: l.profileLocator }, { descriptions });
+  const graph = buildGraph(
+    selected,
+    { profile: l.name, locator: l.profileLocator },
+    { descriptions, ...(sliceFrom !== undefined ? { part: { sliceFrom } } : {}) },
+  );
   await checkGraphReferences(graph, mappings, l.grounds, l.configFile);
   await checkAgents(graph, mappings, l.configFile);
   return {

@@ -131,6 +131,34 @@ test('readRunMeta refuses a v2 run.json without a pipeline', async () => {
   }
 });
 
+test('fanOut round-trips in run.json', async () => {
+  const { dir, cleanup } = await tmp();
+  try {
+    const m: RunMeta = {
+      ...meta('p1-s2', '2026-01-01T00:00:00.000Z'),
+      parent: 'p1',
+      fanOut: { parent: 'p1', slice: 2, from: 'implement', title: 'Second slice' },
+    };
+    await writeRunMeta(dir, m);
+    assert.deepEqual(await readRunMeta(dir), m);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('readRunMeta refuses a fanOut without a slice number', async () => {
+  const { dir, cleanup } = await tmp();
+  try {
+    const bad = { ...meta('p1-s2', 'x'), parent: 'p1', fanOut: { parent: 'p1', slice: 'two', from: 'implement', title: 't' } };
+    await fs.writeFile(path.join(dir, 'run.json'), JSON.stringify(bad));
+    await assert.rejects(readRunMeta(dir), {
+      message: `Run metadata ${path.join(dir, 'run.json')} is missing or invalid: fanOut`,
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
 test('driverName uses terminalName with @driver, attempt 0', () => {
   assert.equal(driverName('r1', 'o/r#7'), terminalName('r1', 'o/r#7', '@driver', 0));
 });

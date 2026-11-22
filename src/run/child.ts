@@ -3,7 +3,7 @@ import { loadState } from '../engine/state.ts';
 import { exists } from '../util/fs.ts';
 import { runDir } from '../workspace/run-dir.ts';
 import { listRuns, readRunMeta } from './meta.ts';
-import type { RunListing, RunMeta } from './meta.ts';
+import type { FanOutMeta, RunListing, RunMeta } from './meta.ts';
 import { launchDriver, prepareRun } from './prepare.ts';
 import type { DriverDeps } from './prepare.ts';
 
@@ -13,7 +13,7 @@ import type { DriverDeps } from './prepare.ts';
  * relaunched only when the run is unfinished and no driver is live.
  */
 export async function startLinkedRun(
-  o: { parent: RunMeta; pipeline: string; ticket?: string; inputs?: Record<string, string>; runId: string },
+  o: { parent: RunMeta; pipeline: string; ticket?: string; inputs?: Record<string, string>; runId: string; fanOut?: FanOutMeta },
   deps: DriverDeps,
 ): Promise<RunMeta> {
   const dir = runDir(deps.home, o.runId);
@@ -35,6 +35,8 @@ export async function startLinkedRun(
       ...(o.inputs !== undefined ? { inputs: o.inputs } : {}),
       parent: o.parent.runId,
       runId: o.runId,
+      // a slice runs from its stage on, based where its parent is
+      ...(o.fanOut !== undefined ? { fanOut: o.fanOut, base: o.parent.base } : {}),
     },
     deps,
   );

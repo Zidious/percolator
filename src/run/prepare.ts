@@ -18,7 +18,7 @@ import { writeRunGraph } from './graph-file.ts';
 import { checkRequest } from './request.ts';
 import { detectBase, driverName, liveRunOn, newRunId, spaceName, writeRunMeta } from './meta.ts';
 import { pipelineFor } from './pick-pipeline.ts';
-import type { RunMeta } from './meta.ts';
+import type { FanOutMeta, RunMeta } from './meta.ts';
 
 export type DriverDeps = {
   hc: Hc;
@@ -67,6 +67,10 @@ export async function prepareRun(
     runId?: string;
     /** the run that starts this one (route or fan-out); exempts it from that run's live-run check */
     parent?: string;
+    /** a fan-out slice: the run builds the slice's graph (from `fanOut.from` on) and records it in run.json */
+    fanOut?: FanOutMeta;
+    /** the base branch (a fan-out slice uses its parent's); default runtime.base, else detected */
+    base?: string;
   },
   deps: DriverDeps,
 ): Promise<RunMeta> {
@@ -78,6 +82,7 @@ export async function prepareRun(
       home: deps.home,
       ...(o.profile !== undefined ? { profile: o.profile } : {}),
       ...(pipeline !== undefined ? { pipeline } : {}),
+      ...(o.fanOut !== undefined ? { sliceFrom: o.fanOut.from } : {}),
     });
   let v = await validateFor(o.pipeline);
   const inputs = o.inputs ?? {};
@@ -137,7 +142,7 @@ export async function prepareRun(
   const now = (deps.now ?? (() => new Date()))();
   const runId = o.runId ?? newRunId({ ...(ref !== undefined ? { issue: ref.number } : {}), pipeline }, now);
   const branch = `percolator/${runId}`;
-  const base = v.runtime?.base ?? (await detectBase(repoRoot));
+  const base = o.base ?? v.runtime?.base ?? (await detectBase(repoRoot));
   if (base === 'HEAD') {
     throw new Error(`cannot detect a base branch (HEAD is detached); set runtime.base in profile "${v.profile}"`);
   }
@@ -180,6 +185,7 @@ export async function prepareRun(
     ...(ref !== undefined ? { ticket: ticket!, issue: ref.number } : {}),
     repo,
     ...(o.parent !== undefined ? { parent: o.parent } : {}),
+    ...(o.fanOut !== undefined ? { fanOut: o.fanOut } : {}),
     repoRoot,
     configFile,
     profile: v.profile,
