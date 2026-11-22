@@ -66,7 +66,7 @@ profiles:                       # checked in order: the FIRST whose match fits w
     rules: { allowed_agents: […], allowed_models: […], max_rounds_ceiling: n, require_skills: […], required_nodes: […] }   # every pipeline
 ```
 
-Everything except `version` and `grounds` belongs to one profile. Edit the feature pipeline where the config already has it: the recommended config keeps its bindings and nodes under `pipelines.feature`; an older config may have them at the top of the profile. If one profile sets the same stage or node in both places, `pipelines.feature` wins. Top-level `rules` apply to every pipeline; `pipelines.<p>.rules` to that one only. A profile inherits nothing unless it sets `extends`. Grounds are shared: every profile's `perc validate` and runs fetch all of them.
+Everything except `version` and `grounds` belongs to one profile. Edit the feature pipeline where the config already has it: the recommended config keeps its bindings and nodes under `pipelines.feature`; an existing config may keep them at the top of the profile instead, and then you edit them where they already are (do not move them under `pipelines.feature`). To add another pipeline to such a profile, a new `pipelines:` block can sit beside them. If one profile sets the same stage or node in both places, `pipelines.feature` wins. Top-level `rules` apply to every pipeline; `pipelines.<p>.rules` to that one only. A profile inherits nothing unless it sets `extends`. Grounds are shared: every profile's `perc validate` and runs fetch all of them.
 
 `tracker.kind: github` is required whenever `tracker` is set. Setting `approvers` replaces the default (the gh user running `perc`): ask for the user's own GitHub login and add it too if they should still approve. Approvers are GitHub logins (not display names, case does not matter) and count at every gate of the profile.
 
@@ -82,7 +82,7 @@ nodes:
     on_fail: { back_to: implement, max_rounds: 2 }
 ```
 
-The command runs in the run's worktree; a non-zero exit is a fail. `max_rounds` counts failed rounds, the first run included: `2` means one retry, then the run pauses and escalates to the owner. (The review loop is different: at its cap it delivers anyway.) Each time review sends the work back to implement, the command runs again and its round count starts fresh; add `once: true` if it should not re-run at all after it has passed.
+The command runs in the run's worktree; a non-zero exit is a fail. `max_rounds` counts failed rounds, the first run included: `2` means one retry, then the run pauses and escalates to the owner. (The review loop is different: at its cap it delivers anyway.) Each time review sends the work back to implement, the command runs again and its round count starts fresh; add `once: true` if it should not re-run at all after it has passed. A hook sits on a stage's edge: `after: implement` and `before: review` both place a node between implement and review, so pick the one that reads best (several nodes on one hook point run in YAML order).
 
 **A human sign-off after a stage**:
 
@@ -214,7 +214,7 @@ pipelines:
     fallback: feature                # optional; default the profile default (feature if the default is itself a router)
 ```
 
-The route is decided in this order: a pipeline the issue names (a `pipeline:<name>` label or an approver's `/percolator run <name>` comment), then the first `routes:` rule whose label the issue has, then the `choose` agent's pick, then `fallback:`. The decision is saved in the run dir as `route.json` before the linked run starts.
+The route is decided in this order: a pipeline the issue names (a `pipeline:<name>` label or an approver's `/percolator run <name>` comment), then the first `routes:` rule whose label the issue has, then the `choose` agent's pick, then `fallback:`. The decision is saved in the run dir as `route.json` before the linked run starts. A matching `routes:` rule skips the pick-pipeline gate (as does a pipeline the issue names): `confirm` only covers the agent's pick, so a ticket a rule routes never waits for a human. To have every ticket confirmed, leave `routes:` out and set `confirm: always`.
 
 - A router needs a ticket (`ticket: required`, the default), and every target (`routes[].to`, `choose.from`, `fallback`) must be a pipeline of the same profile that takes a ticket and is not a router.
 - When the run stops at the `pick-pipeline` gate, the user answers with `perc approve <run-id>` (take the agent's pick, or the fallback when it made none), `perc approve <run-id> --pipeline <name>` (a pipeline from `choose.from` instead), or `perc reject <run-id> <feedback>` (the agent picks again with the feedback, at most 3 rounds).
@@ -271,12 +271,27 @@ pipelines:
       review: { … }
 ```
 
+- Put `fan_out:` on a pipeline of its own (here `epic`), not on `feature`, so small tickets keep their single PR. To send big tickets there, point a router at it: a `routes:` rule (`{ label: epic, to: epic }`) or `epic` in the router's `choose.from` (see "Routers").
 - Each `## ` section of the slices output is one slice; tell the `from` stage's prompt to write them. The slices key need not be listed under `outputs:`: fan-out makes it a required output of the `from` stage.
 - The run (the parent) stops at the fanned stage and starts slice runs `<parent>-s<i>` (1, 2, …), each on branch `percolator/<parent>-s<i>` from the parent's base. A slice run starts with a seed step (the parent's outputs plus `slice.md`, its own section), then runs the fanned stage through the exit. The parent waits for every slice, then completes with `slices_done`, one line per slice with its PR.
 - The split is saved in the parent's run dir as `fanout.json`; a resume reuses it and never splits again.
 - A loop (`on_fail.back_to`, `max_rounds`) in a slice may only go back to the fanned stage or later; `perc validate` refuses one that goes back before it.
-- A failed slice pauses the parent once every slice has finished. A failed run cannot be resumed, so the user runs `perc delete <slice-id>` (the branch stays) and then `perc resume <parent-id>`, which starts that slice again on its branch. If the `from` stage wrote no `## ` sections, the parent pauses at the fan-out step; fix the output, then `perc resume <parent-id>`.
+- A failed slice pauses the parent once every slice has finished, with `percolator.fan_out: slice(s) <slice-ids> failed; perc delete each (its branch stays), then perc resume <parent-id> to run it again`. A failed run cannot be resumed, so the user runs `perc delete <slice-id>` and then `perc resume <parent-id>`, which starts that slice again on its branch. If the `from` stage wrote no `## ` sections, the parent pauses at the fan-out step; fix the output, then `perc resume <parent-id>`.
 - `perc delete <parent-id>` leaves the slice runs alone.
+
+`perc validate --pipeline epic` prints the parent's steps (ending in the fan-out step, `builtin percolator.fan_out`), then a second block with what each slice run walks; check the slice steps and loops there:
+
+```text
+slice runs (fan-out of implement, at most 3 at a time):
+steps:
+1. intake: builtin percolator.seed
+2. implement: claude, model opus, skills superpowers:executing-plans, superpowers:test-driven-development
+3. review: claude, model opus, skills deep-dive-review
+4. deliver: builtin github.open_pr
+
+back-edges:
+review → implement (max 3, continue)
+```
 
 ## Agents, models and skills
 
