@@ -46,6 +46,8 @@ export type ValidateOptions = {
 export type ValidateResult = {
   profile: string;
   graph: Graph;
+  /** A fan-out pipeline's slice-run graph (from fan_out.stage on), beside the parent's `graph`; else undefined. */
+  slice?: Graph;
   mappings: ResolvedMapping[];
   grounds: Record<string, ResolvedGround>;
   groundVersions: Record<string, string>;
@@ -132,9 +134,15 @@ async function validatePipeline(l: Loaded, pipelineName: string, sliceFrom?: str
   );
   await checkGraphReferences(graph, mappings, l.grounds, l.configFile);
   await checkAgents(graph, mappings, l.configFile);
+  const fan = pipeline.fan_out;
+  const slice =
+    fan !== undefined && sliceFrom === undefined
+      ? buildGraph(selected, { profile: l.name, locator: l.profileLocator }, { descriptions, part: { sliceFrom: fan.stage } })
+      : undefined;
   return {
     profile: l.name,
     graph,
+    ...(slice !== undefined ? { slice } : {}),
     mappings,
     grounds: l.grounds,
     groundVersions: Object.fromEntries(Object.values(l.grounds).map((g) => [g.name, groundVersion(g)])),
