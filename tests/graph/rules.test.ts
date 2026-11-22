@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkRules } from '../../src/graph/rules.ts';
+import { checkRules, RuleViolationError } from '../../src/graph/rules.ts';
 import { mergeLayers } from '../../src/graph/merge.ts';
 import type { Merged } from '../../src/graph/merge.ts';
 import type { GraphFragment, Rules } from '../../src/config/schema.ts';
@@ -18,9 +18,8 @@ test('require_skills flags review node missing a skill', () => {
   assert.equal(v[0]!.rule, 'require_skills');
   assert.equal(v[0]!.target, 'bindings.review');
   assert.equal(v[0]!.source, 'rules:0');
-  assert.match(v[0]!.message, /bindings\.review/);
-  assert.match(v[0]!.message, /co:security/);
-  assert.match(v[0]!.message, /rules:0/);
+  assert.equal(v[0]!.message, 'missing required skill(s) co:security, required by require_skills (from rules:0); add them to its skills:');
+  assert.deepEqual(v[0]!.where, { file: 'repo:base', path: 'bindings.review' });
 });
 
 test('require_skills accepts skill or skills', () => {
@@ -45,14 +44,15 @@ test('max_rounds_ceiling applies to default review rounds', () => {
   const v = checkRules(m({ review: { agent: 'claude' } }, [{ max_rounds_ceiling: 2 }]));
   assert.equal(v.length, 1);
   assert.equal(v[0]!.rule, 'max_rounds_ceiling');
-  assert.match(v[0]!.message, /3/);
+  assert.equal(v[0]!.message, 'allows 3 review rounds, over max_rounds_ceiling 2 (from rules:0); set max_rounds to 2 or less');
 });
 
 test('required_nodes missing is a violation', () => {
   const v = checkRules(m({}, [{ required_nodes: ['security-scan'] }]));
   assert.equal(v.length, 1);
   assert.equal(v[0]!.rule, 'required_nodes');
-  assert.match(v[0]!.message, /security-scan/);
+  assert.equal(v[0]!.message, 'node "security-scan" is required by required_nodes but is not defined; add it under nodes:');
+  assert.deepEqual(v[0]!.where, { file: 'rules:0', path: 'rules.required_nodes.0' });
 });
 
 test('required_nodes present passes', () => {
@@ -82,7 +82,7 @@ test('allowed_agents violation names the first excluding rule set and is readabl
   );
   assert.equal(v.length, 1);
   assert.equal(v[0]!.source, 'rules:1');
-  assert.equal(v[0]!.message, 'bindings.review uses agent "codex", but allowed_agents (from rules:1) allows: claude');
+  assert.equal(v[0]!.message, 'uses agent "codex", but allowed_agents (from rules:1) allows: claude; use one of those');
 });
 
 test('allowed_models: excluded model names first excluding set', () => {
@@ -103,14 +103,15 @@ test('allowed_models fails closed: an agent node without model is a violation, o
       rule: 'allowed_models',
       source: 'rules:1',
       target: 'bindings.implement',
-      message: 'bindings.implement has no model, but allowed_models (from rules:1) requires one of: sonnet',
+      message: 'has no model, but allowed_models (from rules:1) requires one of: sonnet; set model: to one of them',
+      where: { file: 'repo:base', path: 'bindings.implement' },
     },
   ]);
 });
 
 test('allowed_models: [] with no model reports (nothing)', () => {
   const v = checkRules(m({ implement: { agent: 'claude' } }, [{ allowed_models: [] }]));
-  assert.equal(v[0]!.message, 'bindings.implement has no model, but allowed_models (from rules:0) requires one of: (nothing)');
+  assert.equal(v[0]!.message, 'has no model, but allowed_models (from rules:0) requires one of: (nothing); set model: to one of them');
 });
 
 test('allowed_agents only: an agent node without model is fine', () => {
@@ -143,7 +144,8 @@ test('on_fail.max_rounds over the ceiling is a violation, on extension nodes too
   );
   assert.equal(v.length, 1);
   assert.equal(v[0]!.target, 'nodes.lint.on_fail');
-  assert.match(v[0]!.message, /5/);
+  assert.equal(v[0]!.message, 'allows 5 rounds, over max_rounds_ceiling 2 (from rules:0); set on_fail.max_rounds to 2 or less');
+  assert.deepEqual(v[0]!.where, { file: 'repo:base', path: 'nodes.lint.on_fail' });
 });
 
 test('max_rounds_ceiling does not flag the core approve-groom gate', () => {
@@ -188,7 +190,7 @@ test('require_skills on a stage bound to a script is a violation', () => {
   assert.equal(v[0]!.source, 'rules:0');
   assert.equal(
     v[0]!.message,
-    'bindings.review has no agent node, but require_skills (from rules:0) requires skill(s) my:review there',
+    'has no agent node, but require_skills (from rules:0) requires skill(s) my:review there; bind an agent node there or remove the rule',
   );
 });
 
@@ -212,6 +214,35 @@ test('required_nodes with a position rejects a moved hook', () => {
   assert.equal(v[0]!.target, 'nodes.threat-model');
   assert.equal(
     v[0]!.message,
-    'node "threat-model" is required after plan by required_nodes (from rules:0), but it is attached before implement',
+    'required after plan by required_nodes (from rules:0), but it is attached before implement; attach it after plan',
   );
+});
+
+test('violations are located at the node and name the rule line', () => {
+  const merged = mergeLayers([
+    {
+      source: 'repo:base',
+      fragment: { bindings: { implement: { agent: 'claude' } }, nodes: { audit: { agent: 'claude', before: 'plan' } } },
+      locator: { file: 'n.yaml', lines: { 'bindings.implement': 3, 'nodes.audit': 7 } },
+    },
+    {
+      source: 'rules:0',
+      fragment: {
+        rules: {
+          require_skills: [{ stage: 'implement', skills: ['tdd'] }],
+          required_nodes: ['missing', { name: 'audit', after: 'implement' }],
+        },
+      },
+      locator: { file: 'r.yaml', lines: { 'rules.require_skills': 2, 'rules.required_nodes': 4, 'rules.required_nodes.0': 5 } },
+    },
+  ]);
+  const err = new RuleViolationError(checkRules(merged), 'config');
+  assert.deepEqual(err.message.split('\n'), [
+    'n.yaml:3: bindings.implement: missing required skill(s) tdd, required by require_skills (from r.yaml:2); add them to its skills:',
+    'r.yaml:5: rules.required_nodes.0: node "missing" is required by required_nodes but is not defined; add it under nodes:',
+    'n.yaml:7: nodes.audit: required after implement by required_nodes (from r.yaml:4), but it is attached before plan; attach it after implement',
+  ]);
+  assert.equal(err.file, 'n.yaml');
+  assert.equal(err.line, 3);
+  assert.equal(err.path, 'bindings.implement');
 });

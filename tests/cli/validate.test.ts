@@ -161,11 +161,13 @@ test('rule violations are thrown as one RuleViolationError against the config fi
       err.violations.map((v) => v.target),
       ['bindings.groom', 'bindings.plan', 'bindings.implement', 'bindings.review'],
     );
+    assert.equal(err.line, 12);
+    const fix = `allowed_agents (from ${cfg}:21) allows: codex; use one of those`;
     assert.deepEqual(err.message.split('\n'), [
-      'bindings.groom uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.plan uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.implement uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.review uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      `${cfg}:12: profiles.work.bindings.groom: uses agent "claude", but ${fix}`,
+      `${cfg}:13: profiles.work.bindings.plan: uses agent "claude", but ${fix}`,
+      `${cfg}:14: profiles.work.bindings.implement: uses agent "claude", but ${fix}`,
+      `${fx('e2e/grounds/company/percolator.yaml')}:2: bindings.review: uses agent "claude", but ${fix}`,
     ]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
