@@ -80,7 +80,7 @@ nodes:
   sign-off: { kind: gate, after: plan }
 ```
 
-The run waits there until the user answers, the same way as `approve-groom`; a rejection fails the run unless the gate has an `on_fail` (for example `{ back_to: implement, max_rounds: 3 }` to send it back). Nodes on the same hook point run in the order they appear in the YAML.
+The run waits there until the user answers, the same way as `approve-groom`; a rejection fails the run unless the gate has an `on_fail` (for the gate above, `{ back_to: plan, max_rounds: 3 }` sends a rejected plan back to be redone; `back_to` must be the gate's stage or an earlier one). Nodes on the same hook point run in the order they appear in the YAML.
 
 **Make a stage follow a file** (policy, coding standards): the file must come from a ground. For a local file, add its directory as a ground:
 
