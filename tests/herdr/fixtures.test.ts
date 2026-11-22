@@ -38,13 +38,13 @@ test('the fixture is what perc writes: hooks carry their plain stage, loops go b
   assert.equal(runs.find((r: any) => r.id.startsWith('t17-')).currentStep, 'implement.1');
 });
 
-test('the fixture is schema 2: every readable run has its pipeline, inputs, parent and children', () => {
+test('the fixture is schema 2: every readable run has its pipeline, inputs, parent, children and opened issues', () => {
   const j = readFixture('status.json');
   assert.equal(j.schema, 2);
   for (const r of j.runs.filter((r: any) => r.status !== 'unreadable')) {
     assert.equal(typeof r.pipeline, 'string', r.id);
     assert.equal(typeof r.inputs, 'object', r.id);
-    assert.ok('ticket' in r && 'parent' in r && Array.isArray(r.children), r.id);
+    assert.ok('ticket' in r && 'parent' in r && Array.isArray(r.children) && Array.isArray(r.opened), r.id);
   }
 });
 

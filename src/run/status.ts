@@ -4,6 +4,7 @@ import path from 'node:path';
 import { STAGES } from '../config/schema.ts';
 import type { RunState, StepRecord } from '../engine/state.ts';
 import { loadState } from '../engine/state.ts';
+import { openedIssues } from '../tracker/exits/issues.ts';
 import { readWaiting } from '../tracker/gate.ts';
 import type { Waiting } from '../tracker/gate.ts';
 import { liveness, prUrl } from './drive.ts';
@@ -70,6 +71,8 @@ export type RunStatusJson =
       parent: string | null;
       /** listed runs whose parent is this run, in listing order */
       children: ChildJson[];
+      /** the issues the run's exit opened, from its latest `issue_urls` output */
+      opened: { ref: string; url: string }[];
       repo: string;
       branch: string;
       worktree: string;
@@ -449,6 +452,18 @@ async function childrenOf(id: string, listed: RunListing[]): Promise<ChildJson[]
   return out;
 }
 
+/** The issues parsed from the latest history record with an `issue_urls` output; none when there is none. */
+async function openedOf(dir: string, state: RunState): Promise<{ ref: string; url: string }[]> {
+  const rel = state.history.findLast((h) => h.outputs['issue_urls'] !== undefined)?.outputs['issue_urls'];
+  if (rel === undefined) return [];
+  try {
+    return openedIssues(await fs.readFile(path.join(dir, rel), 'utf8'));
+  } catch {
+    // a removed output file only means nothing to list
+    return [];
+  }
+}
+
 async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, listed: RunListing[]): Promise<RunStatusJson> {
   const { dir, meta } = l;
   const state = l.state ?? (await loadState(dir));
@@ -486,6 +501,7 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, list
     ticket: await readTicket(dir, meta),
     parent: meta.parent ?? null,
     children: await childrenOf(meta.runId, listed),
+    opened: await openedOf(dir, state),
     repo: meta.repoRoot,
     branch: meta.branch,
     worktree: meta.worktree,

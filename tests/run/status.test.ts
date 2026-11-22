@@ -138,6 +138,7 @@ function expected(m: RunMeta, over: Record<string, unknown>): Record<string, unk
     ticket: { ref: TICKET, number: 5 },
     parent: null,
     children: [],
+    opened: [],
     repo: m.repoRoot,
     branch: m.branch,
     worktree: m.worktree,
@@ -1005,6 +1006,48 @@ test('a failed ticketless run says how to start it again with its pipeline and i
     const again = `perc run --pipeline dd-alert --input alert_url=https://dd/x --repo ${m.repoRoot}`;
     assert.deepEqual(r.attention?.commands, [again]);
     assert.deepEqual(attentionNext(r.attention!, r), [again, `perc delete ${m.runId}`, `perc clean ${m.runId}`]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status lists the issues a run opened', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const write = async (attempt: number, text: string) => {
+      const file = path.join(e.dir(m), rel('ship', attempt, 'issue_urls'));
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, text);
+    };
+    await write(1, `https://${REPO}/issues/40\n`);
+    // the latest issue_urls wins; a line that is not an issue url is skipped
+    await write(2, `https://${REPO}/issues/41\r\nnot a url\n\nhttps://github.com/O/Other/issues/7\n`);
+    await e.edit(m, (s) => {
+      s.status = 'completed';
+      s.history.push(rec('ship', 1, 'pass', { issue_urls: rel('ship', 1, 'issue_urls') }), rec('ship', 2, 'pass', { issue_urls: rel('ship', 2, 'issue_urls') }));
+    });
+    const r = (await e.status(m)) as Readable;
+    assert.deepEqual(r.opened, [
+      { ref: `${REPO}#41`, url: `https://${REPO}/issues/41` },
+      { ref: 'github.com/o/other#7', url: 'https://github.com/O/Other/issues/7' },
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a recorded issue_urls output whose file is gone opens nothing and keeps the run readable', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'completed';
+      s.history.push(rec('ship', 1, 'pass', { issue_urls: rel('ship', 1, 'issue_urls') }));
+    });
+    const r = (await e.status(m)) as Readable;
+    assert.equal(r.status, 'completed');
+    assert.deepEqual(r.opened, []);
   } finally {
     await e.cleanup();
   }
