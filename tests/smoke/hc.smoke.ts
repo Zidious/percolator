@@ -1,7 +1,8 @@
 // Manual smoke test against the REAL `hc` (and, with --space, `herdr-app`). Not part of `pnpm test`.
-//   node tests/smoke/hc.smoke.ts [--space <herdr space id>] [--boot] [--codex]
-// With --boot or --codex alone only those checks run; --space (or no flag) runs the base checks too.
+//   node tests/smoke/hc.smoke.ts [--space <herdr space id>] [--boot] [--codex] [--shim]
+// With --boot, --codex or --shim alone only those checks run; --space (or no flag) runs the base checks too.
 //   --boot   launches `claude` and an idle node program, printing get status/turn each second for 20 s
+//   --shim   (Windows only) runs a .cmd shim (`pnpm`) as a script node would: `pnpm --version` must exit 0, a failing `pnpm test` its own code
 //   --codex  (Windows only) runs `codex --no-daemon --help` through hc, prints the exit code and whether --add-dir shows
 // Creates only terminals it names itself (run id `perc-smoke-<timestamp>`) and always kills and removes them.
 import assert from 'node:assert/strict';
@@ -16,12 +17,12 @@ import { cliHc } from '../../src/herdr/hc.ts';
 import { HerdrRuntime, terminalName } from '../../src/runtime/herdr-runtime.ts';
 import { nodeExec } from '../../src/util/exec.ts';
 
-const { values } = parseArgs({ options: { space: { type: 'string' }, boot: { type: 'boolean' }, codex: { type: 'boolean' } } });
+const { values } = parseArgs({ options: { space: { type: 'string' }, boot: { type: 'boolean' }, codex: { type: 'boolean' }, shim: { type: 'boolean' } } });
 const runId = `perc-smoke-${Date.now()}`;
 const hc = cliHc();
 const owned: string[] = [];
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-const runBase = values.space !== undefined || (!values.boot && !values.codex);
+const runBase = values.space !== undefined || (!values.boot && !values.codex && !values.shim);
 
 const scriptStep: Step = {
   id: 'smoke',
@@ -120,6 +121,28 @@ try {
       const screen = await hc.read(name, 200).catch((err: Error) => `(read failed: ${err.message})`);
       console.log(`--codex: state=${t?.state ?? 'gone'} exitCode=${String(t?.exitCode ?? null)} screenHasAddDir=${screen.includes('--add-dir')}`);
       console.log(screen.split('\n').slice(0, 40).join('\n'));
+    }
+  }
+  if (values.shim) {
+    if (process.platform !== 'win32') {
+      console.log('--shim: skipped (not windows)');
+    } else {
+      await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'shim', scripts: { test: 'node -e "process.exit(3)"' } }));
+      for (const [suffix, argv, want] of [
+        ['sv', ['pnpm', '--version'], 0],
+        ['st', ['pnpm', 'test'], 3],
+      ] as const) {
+        const name = `${runId}-${suffix}`;
+        owned.push(name);
+        await hc.run({ name, cwd: root, argv: [...argv], labels: { 'percolator.run': runId } });
+        let t = await hc.get(name);
+        for (let i = 0; i < 60 && t && t.state !== 'finished'; i++) {
+          await sleep(1000);
+          t = await hc.get(name);
+        }
+        assert.equal(t?.exitCode, want, `--shim: ${argv.join(' ')} exited ${String(t?.exitCode ?? null)}, want ${want}`);
+        console.log(`--shim: ${argv.join(' ')} exit ${want} ok`);
+      }
     }
   }
   console.log('smoke ok');
