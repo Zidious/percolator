@@ -17,6 +17,7 @@ import { deleteRun, isFinished, planDelete } from './run/delete.ts';
 import type { DeletePlan } from './run/delete.ts';
 import { checkResumable, drive, prUrl } from './run/drive.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
+import { pipelinesJson, pipelinesText } from './run/pipelines-json.ts';
 import type { RunMeta } from './run/meta.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
 import { InputError, parseInputs } from './run/request.ts';
@@ -45,6 +46,8 @@ commands:
       (default config: ~/.percolator/config.yaml)
   schema [--out <file>]
       write the JSON schema for the config (default: schema/percolator.schema.json)
+  pipelines [--repo <dir>] [--config <file>] [--profile <name>] [--json]
+      list the pipelines a run in the repo can use, one line each (--json: the panel's contract)
   run [<ticket>] [--pipeline <name>] [--input key=value]... [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]
       start a run of a pipeline (default: the profile's; feature: groom, approval, plan, implement, review, PR)
       in its own hc terminal (--foreground: in this one)
@@ -218,6 +221,23 @@ async function runRun(args: string[], deps: DriverDeps): Promise<number> {
   }
   deps.out(`  worktree ${meta.worktree}`);
   deps.out(`  follow with: perc status ${meta.runId}`);
+  return 0;
+}
+
+async function runPipelines(args: string[], io: Io, home: string): Promise<number> {
+  const { values } = parse(args, {
+    repo: { type: 'string' },
+    config: { type: 'string' },
+    profile: { type: 'string' },
+    json: { type: 'boolean' },
+  });
+  const j = await pipelinesJson({
+    repoDir: path.resolve(values.repo ?? process.cwd()),
+    configFile: values.config ?? defaultConfig(),
+    ...(values.profile !== undefined ? { profile: values.profile } : {}),
+    home,
+  });
+  io.stdout(values.json ? `${JSON.stringify(j, null, 2)}\n` : pipelinesText(j));
   return 0;
 }
 
@@ -514,6 +534,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     if (command === 'init') return await runInit(rest, io);
     if (command === 'validate') return await runValidate(rest, io);
     if (command === 'schema') return await runSchema(rest, io);
+    if (command === 'pipelines') return await runPipelines(rest, io, deps.home ?? os.homedir());
     if (command === 'herdr') return await runHerdr(rest, io, deps.home ?? os.homedir());
     const d = () => driverDeps(io, deps);
     if (command === 'run') return await runRun(rest, d());
