@@ -70,3 +70,26 @@ test('the config skill covers every exit', async () => {
     assert.ok(exits.includes(`| \`${kind}\` | \`${EXITS[kind].builtin}\` |`), `the Exits section must have a row for ${kind}`);
   }
 });
+
+test('the config skill answers what smoke agents got wrong about routes, hooks and fan-out', async () => {
+  const text = await fs.readFile(path.join(ROOT, 'skills', 'percolator-config', 'SKILL.md'), 'utf8');
+  const section = (name: string) => text.split(`\n## ${name}`)[1]?.split('\n## ')[0] ?? '';
+  const keys = section('Where keys go');
+  assert.ok(keys.includes('edit them where they already are'), 'feature bindings stay where an existing config has them');
+  assert.ok(keys.includes('a new `pipelines:` block can sit beside them'), 'a new pipelines block may sit beside top-level bindings');
+  assert.ok(
+    section('Recipes').includes('`after: implement` and `before: review` both place a node between implement and review'),
+    'the hook recipe must say before/after of neighbouring stages are the same place',
+  );
+  const routers = section('Routers');
+  assert.ok(routers.includes('A matching `routes:` rule skips the pick-pipeline gate'), 'label routes never stop at the gate');
+  assert.ok(routers.includes("`confirm` only covers the agent's pick"), 'confirm is about the agent only');
+  const fanOut = section('Fan-out');
+  assert.ok(fanOut.includes('Put `fan_out:` on a pipeline of its own'), 'fan_out goes on a named pipeline');
+  assert.ok(fanOut.includes('routes:'), 'fan-out must say how a router sends big tickets there');
+  assert.ok(fanOut.includes('slice runs (fan-out of implement, at most 3 at a time):'), 'fan-out must show the validate block for slice runs');
+  assert.ok(
+    fanOut.includes('percolator.fan_out: slice(s) <slice-ids> failed; perc delete each (its branch stays), then perc resume <parent-id> to run it again'),
+    'fan-out must quote the failed-slice escalation',
+  );
+});
