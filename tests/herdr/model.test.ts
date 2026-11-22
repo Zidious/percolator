@@ -47,7 +47,6 @@ import {
   notice,
   parseStatus,
   readStatus,
-  readerPath,
   roundView,
   stepAttempts,
   timelineOf,
@@ -64,6 +63,13 @@ import {
   boxOutside,
   readerFiles,
   readerMax,
+  slotOpensAgent,
+  showsOutcome,
+  boxAsks,
+  programInitial,
+  agentNote,
+  boxDriver,
+  historyLabel,
   readFullShown,
   ticketTitle,
   sortRuns,
@@ -348,20 +354,6 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
   assert.equal(moveRow([], 'gone', 1), null);
 });
 
-test('readerPath shows the selected stop first output, else the first review file, else nothing', () => {
-  const gate = readable('t2');
-  assert.equal(readerPath(gate, null), 'samples/groomed_ticket.md');
-  const { timeline: _t, ...older } = gate; // an older perc: the steps' own outputs are read
-  const out = { ...older, steps: gate.steps.map((s) => (s.id === 'groom' ? { ...s, outputs: { groomed_ticket: '/abs/g.md' } } : s)) } as unknown as Readable;
-  assert.equal(readerPath(out, 'groom'), '/abs/g.md');
-  assert.equal(readerPath(out, 'intake'), 'samples/groomed_ticket.md', 'a stop without outputs falls back to the review');
-  assert.equal(readerPath(out, 'gone'), 'samples/groomed_ticket.md');
-  const passed = { ...gate, status: 'running', currentStep: 'plan' } as Readable;
-  delete passed.attention;
-  assert.equal(readerPath(passed, null), null, 'once the gate passes there is nothing to read');
-  assert.equal(readerPath(byId('t5'), null), null);
-});
-
 test('the fixture has timelines for t8, t3, t2, t4, t16 and t17, and none for the rest (an older perc)', () => {
   assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17']);
 });
@@ -406,11 +398,6 @@ test('timelineOf is the run timeline, else one attempt per step that ran, in ord
 test('stepAttempts is one step attempts in order', () => {
   assert.deepEqual(stepAttempts(readable('t8'), 'review').map((a) => a.attempt), [1, 2, 3]);
   assert.deepEqual(stepAttempts(readable('t8'), 'deliver'), []);
-});
-
-test('readerPath shows the picked round first output', () => {
-  assert.equal(readerPath(readable('t8'), 'review', 2), 'samples/findings.md');
-  assert.equal(readerPath(readable('t8'), 'review', null), null, 'the running round has no outputs yet');
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
@@ -969,7 +956,9 @@ test('readerFiles: the box reads the first review file; the strip its picked out
   assert.deepEqual(readerFiles(byId('t13'), null, null, null), { box: null, strip: null }, 'an agent card reads nothing');
   const groom = Object.values(stepAttempts(byId('t2'), 'groom').at(-1)!.outputs ?? {});
   assert.ok(groom.length > 0);
-  assert.deepEqual(readerFiles(byId('t2'), 'groom', null, null), { box: 'samples/groomed_ticket.md', strip: groom[0] });
+  assert.equal(groom[0], 'samples/groomed_ticket.md');
+  assert.deepEqual(readerFiles(byId('t2'), 'groom', null, null), { box: 'samples/groomed_ticket.md', strip: null }, 'the box already reads it');
+  assert.deepEqual(readerFiles(byId('t2'), 'groom', null, 'samples/groomed_ticket.md'), { box: 'samples/groomed_ticket.md', strip: null });
   assert.deepEqual(readerFiles(byId('t2'), 'groom', null, 'x/other.md'), { box: 'samples/groomed_ticket.md', strip: 'x/other.md' });
   assert.deepEqual(readerFiles(byId('t2'), 'plan', null, null), { box: 'samples/groomed_ticket.md', strip: null }, 'not run: no review fallback');
   assert.deepEqual(readerFiles(byId('t2'), null, null, 'x/other.md'), { box: 'samples/groomed_ticket.md', strip: null }, 'no stop: no strip');
@@ -992,4 +981,65 @@ test('boxOutside: an active box with no active row in the pipeline shows below i
   const lost = { ...readable('t9'), currentStep: 'gone' } as Readable;
   assert.equal(boxOutside(lost, WIDE), true);
   assert.equal(boxOutside(byId('t5'), WIDE), false, 'unreadable');
+});
+
+test('readerFiles reads the step outputs of an older perc, and the picked round', () => {
+  const gate = readable('t2');
+  const { timeline: _t, ...older } = gate; // an older perc: the steps' own outputs are read
+  const out = { ...older, steps: gate.steps.map((s) => (s.id === 'groom' ? { ...s, outputs: { groomed_ticket: '/abs/g.md' } } : s)) } as unknown as Readable;
+  assert.equal(readerFiles(out, 'groom', null, null).strip, '/abs/g.md');
+  assert.equal(readerFiles(out, 'intake', null, null).strip, null, 'no outputs: no review fallback');
+  assert.equal(readerFiles(readable('t8'), 'review', 2, null).strip, 'samples/findings.md');
+  assert.equal(readerFiles(readable('t8'), 'review', null, null).strip, null, 'the running round has no outputs yet');
+});
+
+test('slotOpensAgent: the active stop opens the agent while one works there in a live terminal', () => {
+  const name = 't16_implement_a2_4a92';
+  assert.equal(slotOpensAgent(byId('t16'), [{ address: 'w1:7', name }]), true);
+  assert.equal(slotOpensAgent(byId('t16'), []), false, 'not live');
+  const t13 = readable('t13');
+  assert.equal(slotOpensAgent(t13, [{ address: 'w1:2', name: t13.terminals.groom! }]), true, 'a blocked agent');
+  assert.equal(slotOpensAgent(byId('t2'), [{ address: 'w1:1', name: 't2_driver_a0_b90e' }]), false, 'a gate');
+  assert.equal(slotOpensAgent(byId('t5'), []), false);
+});
+
+test('boxAsks and showsOutcome: what the lower half shows besides the history', () => {
+  assert.deepEqual(['t2', 't4', 't12', 't9', 't11', 't13', 't16', 't3', 't14', 't15', 't5'].map((p) => boxAsks(byId(p))), [
+    true, true, true, true, true, false, false, false, false, false, false,
+  ]);
+  assert.deepEqual(['t2', 't16', 't3', 't14', 't15', 't5'].map((p) => showsOutcome(byId(p))), [false, false, true, false, true, true]);
+});
+
+test('programInitial is the badge letter of the agent program', () => {
+  assert.equal(programInitial('Claude Code'), 'C');
+  assert.equal(programInitial('codex'), 'C');
+  assert.equal(programInitial('  amp'), 'A');
+  assert.equal(programInitial(''), '?');
+});
+
+test('agentNote says the agent has not started when the active stop has no agent terminal', () => {
+  assert.equal(agentNote(null), 'agent not started');
+  assert.equal(agentNote({ address: null, name: 'x', status: 'not open', program: 'Agent', since: '' }), null);
+});
+
+test('boxDriver: a failed or stalled box offers the driver peek when there is one', () => {
+  const t11 = readable('t11');
+  const drv = 't11_driver_a0_1111';
+  const stalled = { ...t11, driver: { ...t11.driver, terminal: drv }, terminals: { driver: drv } } as Readable;
+  assert.deepEqual(boxDriver(stalled), { terminal: drv, label: 'Driver pane ↗' });
+  const t9 = readable('t9');
+  const failed = { ...t9, driver: { ...t9.driver, terminal: drv }, terminals: { driver: drv } } as Readable;
+  assert.deepEqual(boxDriver(failed), { terminal: drv, label: 'Driver pane ↗' });
+  assert.equal(boxDriver(byId('t11')), null, 'no live driver');
+  assert.equal(boxDriver(byId('t2')), null, 'a gate: the header has it');
+  assert.equal(boxDriver(byId('t16')), null);
+});
+
+test('historyLabel counts the history rows, singular for one, none for an empty history', () => {
+  const now = Date.parse('2026-11-21T04:30:00.000Z');
+  assert.equal(historyLabel(byId('t3'), false, now), 'History ▸ 7 attempts');
+  assert.equal(historyLabel(byId('t3'), true, now), 'History ▾ 7 attempts');
+  assert.equal(historyLabel(byId('t14'), false, now), 'History ▸ 1 attempt');
+  assert.equal(historyLabel(byId('t5'), false, now), 'History ▸');
+  assert.equal(historyLabel(byId('t5'), true, now), 'History ▾');
 });

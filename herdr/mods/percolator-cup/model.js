@@ -392,14 +392,6 @@ export function timelineRows(run, now) {
     .reverse();
 }
 
-/** What the reader shows: the selected stop's (picked, else latest) round's first output, else the first file to
- *  review, else null (as perc gave it). */
-export function readerPath(run, stopSel, roundSel = null) {
-  const view = stopSel ? roundView(run, stopSel, roundSel) : null;
-  const out = view ? Object.values(view.attempt.outputs ?? {})[0] : undefined;
-  return out ?? run.attention?.review?.[0]?.path ?? null;
-}
-
 // ── the board's height (a ratio of the area under the title bar, so it follows the panel's size and zoom) ──
 
 export const BOARD_RATIO = 0.3;
@@ -540,12 +532,14 @@ export function boxActions(run) {
 }
 
 /** What the inline readers show (as perc gave it): `box`, under an attention box, its first file to review; `strip`, under
- *  the picked stop, the output picked there, else its (picked, else latest) round's first output. */
+ *  the picked stop, the output picked there, else its (picked, else latest) round's first output, unless the box already
+ *  reads that file (it shows once). */
 export function readerFiles(run, stopSel, roundSel, outPick) {
-  const box = BOXES.includes(activeBox(run)) ? (run.attention?.review?.[0]?.path ?? null) : null;
+  const box = boxAsks(run) ? (run.attention?.review?.[0]?.path ?? null) : null;
   if (!stopSel) return { box, strip: null };
   const view = roundView(run, stopSel, roundSel);
-  return { box, strip: outPick ?? (view ? Object.values(view.attempt.outputs ?? {})[0] : undefined) ?? null };
+  const strip = outPick ?? (view ? Object.values(view.attempt.outputs ?? {})[0] : undefined) ?? null;
+  return { box, strip: strip === box ? null : strip };
 }
 
 /** The inline reader's greatest height: half the panel's `area`. */
@@ -563,6 +557,45 @@ export function readFullShown(inWindow) {
 export function boxOutside(run, o) {
   if (activeBox(run) === null) return false;
   return pipelineMarks(pipelineRows(run, o), null).active < 0;
+}
+
+/** Whether the active stop (its stage stop or hook node) opens the agent: one works there in a live terminal. */
+export function slotOpensAgent(run, live) {
+  return activeBox(run) === 'agent' && agentAddress(run, live) !== null;
+}
+
+/** Whether the active box asks you something (gate, cap, paused, failed, stalled): it carries the action errors. */
+export function boxAsks(run) {
+  return BOXES.includes(activeBox(run));
+}
+
+/** Whether the lower half says how the run stands (delivered, unreadable, its status): nothing is under its stop and
+ *  it is not running. */
+export function showsOutcome(run) {
+  return activeBox(run) === null && run.status !== 'running';
+}
+
+/** The letter on the agent card's badge. */
+export function programInitial(program) {
+  return program.trim().slice(0, 1).toUpperCase() || '?';
+}
+
+/** The line under an agent stop with no agent terminal yet, else null (the card shows). */
+export function agentNote(card) {
+  return card ? null : 'agent not started';
+}
+
+/** The driver peek a failed or stalled box offers (its last screen often says why), else null. */
+export function boxDriver(run) {
+  const kind = activeBox(run);
+  return kind === 'failed' || kind === 'stalled' ? driverPeek(run) : null;
+}
+
+/** The History fold's label: its arrow and how many rows the history holds. */
+export function historyLabel(run, open, now) {
+  const n = timelineRows(run, now).length;
+  const head = `History ${open ? '▾' : '▸'}`;
+  return n === 0 ? head : `${head} ${n} attempt${n === 1 ? '' : 's'}`;
 }
 
 /** The run's live driver terminal, to peek at (closing a peek leaves it running; closing a pane would end it), or

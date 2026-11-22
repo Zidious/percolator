@@ -4,7 +4,23 @@
 import { div } from 'gpui-kit';
 import { v_flex, h_flex, Textarea } from 'gpui-base';
 import { agents, terminals } from 'herdr';
-import { activeBox, agentAddress, agentCard, agentTone, ago, attentionTag, boxActions, boxOutside, timelineRows } from './model.js';
+import {
+  activeBox,
+  agentAddress,
+  agentCard,
+  agentNote,
+  agentTone,
+  ago,
+  attentionTag,
+  boxActions,
+  boxAsks,
+  boxDriver,
+  boxOutside,
+  historyLabel,
+  programInitial,
+  showsOutcome,
+  timelineRows,
+} from './model.js';
 import { button, inlineReader, own, scrollY } from './ui.js';
 
 const LABELS = {
@@ -45,7 +61,7 @@ function historyList(t, r) {
     );
 }
 
-/** "History ▸" under the pipeline, closed by default; open, the run history in a box that scrolls past 200px. */
+/** "History ▸ N attempts" under the pipeline, closed by default; open, the run history in a box that scrolls past 200px. */
 export function historyFold(p, t, r) {
   const open = p.historyOpen;
   return v_flex()
@@ -68,7 +84,7 @@ export function historyFold(p, t, r) {
             p.historyOpen = !p.historyOpen;
             cx.notify();
           })
-          .child(open ? 'History ▾' : 'History ▸'),
+          .child(historyLabel(r, open, Date.now())),
       ),
     )
     .when(open, (el) =>
@@ -165,7 +181,7 @@ function agentBox(p, t, card) {
           .justify_center()
           .text_size(10)
           .font_semibold()
-          .child(card.program.slice(0, 1).toUpperCase()),
+          .child(programInitial(card.program)),
       )
       .child(
         v_flex()
@@ -189,6 +205,7 @@ function attentionBox(p, t, r, kind, narrow) {
   const acts = boxActions(r);
   const card = agentCard(r, terminals(), agents(), Date.now());
   const live = Boolean(agentAddress(r, terminals()));
+  const drv = boxDriver(r);
   const buttons = h_flex()
     .flex_wrap()
     .gap(8)
@@ -202,7 +219,8 @@ function attentionBox(p, t, r, kind, narrow) {
       ),
     )
     .when(Boolean(a.commentUrl), (el) => el.child(button(t, 'github', 'GitHub ↗', '', (_e, cx) => cx.open_url(a.commentUrl))))
-    .when(live, (el) => el.child(button(t, 'open-terminal', 'Open terminal ↗', '', () => p.openAgent())));
+    .when(live, (el) => el.child(button(t, 'open-terminal', 'Open terminal ↗', '', () => p.openAgent())))
+    .when(Boolean(drv), (el) => el.child(button(t, 'box-driver', drv.label, '', () => p.peekDriver())));
   const box = v_flex()
     .mt(2)
     .mb(8)
@@ -234,7 +252,7 @@ function attentionBox(p, t, r, kind, narrow) {
       ),
     )
     .when(Boolean(p.boxFile), (el) => el.child(inlineReader(p, t, p.boxFile, 'box-reader')))
-    .when(acts.length > 0 || Boolean(a.commentUrl) || live, (el) => el.child(buttons))
+    .when(acts.length > 0 || Boolean(a.commentUrl) || live || Boolean(drv), (el) => el.child(buttons))
     .when(p.rejecting, (el) => el.child(rejectBox(p, t)));
   return said(p, t, box);
 }
@@ -245,7 +263,7 @@ export function activeSlot(p, t, r, narrow) {
   if (kind === null) return div();
   if (kind === 'agent') {
     const card = agentCard(r, terminals(), agents(), Date.now());
-    if (!card) return div().mt(2).mb(8).text_size(11).text_color(t.dim).child('agent not started');
+    if (!card) return div().mt(2).mb(8).text_size(11).text_color(t.dim).child(agentNote(card));
     return agentBox(p, t, card);
   }
   return attentionBox(p, t, r, kind, narrow);
@@ -269,9 +287,6 @@ function outcome(t, r) {
 
 /** The lower half: the active box when its stop is not in the pipeline, how a finished run ended, the history fold. */
 export function turn(p, t, r, narrow) {
-  const kind = activeBox(r);
-  const ask = kind !== null && kind !== 'agent'; // its box carries the action errors
-  const settled = kind === null && r.status !== 'running';
   const body = v_flex()
     .flex_none()
     .px(16)
@@ -279,6 +294,6 @@ export function turn(p, t, r, narrow) {
     .pb(12)
     .gap(10)
     .when(boxOutside(r, { narrow, unfolded: p.unfolded }), (el) => el.child(activeSlot(p, t, r, narrow)))
-    .when(settled, (el) => el.child(outcome(t, r)));
-  return (ask ? body : said(p, t, body)).child(historyFold(p, t, r));
+    .when(showsOutcome(r), (el) => el.child(outcome(t, r)));
+  return (boxAsks(r) ? body : said(p, t, body)).child(historyFold(p, t, r));
 }

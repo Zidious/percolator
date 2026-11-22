@@ -66,7 +66,6 @@ export type TimelineRow = {
 };
 export declare function clock(iso?: string): string;
 export declare function timelineRows(run: RunStatusJson, now: number): TimelineRow[];
-export declare function readerPath(run: RunStatusJson, stopSel: string | null, roundSel?: number | null): string | null;
 export declare function cupLabel(runs: RunStatusJson[]): { text: string; tone: 'blocked' | 'working' | 'muted' };
 export declare function notice(run: RunStatusJson): {
   title: string;
@@ -125,3 +124,10 @@ export declare function readerFiles(
 export declare function readerMax(area: number): number;
 export declare function readFullShown(inWindow: boolean): boolean;
 export declare function boxOutside(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }): boolean;
+export declare function slotOpensAgent(run: RunStatusJson, live: { address: string; name?: string | null }[]): boolean;
+export declare function boxAsks(run: RunStatusJson): boolean;
+export declare function showsOutcome(run: RunStatusJson): boolean;
+export declare function programInitial(program: string): string;
+export declare function agentNote(card: ReturnType<typeof agentCard>): string | null;
+export declare function boxDriver(run: RunStatusJson): { terminal: string; label: 'Driver pane ↗' } | null;
+export declare function historyLabel(run: RunStatusJson, open: boolean, now: number): string;

@@ -4,7 +4,7 @@
 import { div } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { activeBox, agentAddress, ago, canPick, driverPeek, hookNote, needsYou, pipelineMarks, pipelineRows, pipelineSpans, roundView, ticketTitle, took } from './model.js';
+import { ago, canPick, driverPeek, hookNote, needsYou, pipelineMarks, pipelineRows, pipelineSpans, roundView, slotOpensAgent, ticketTitle, took } from './model.js';
 import { inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
@@ -107,6 +107,23 @@ function spine(t, i, n, last, between, stop) {
     .when(Boolean(stop), (el) => el.child(stop));
 }
 
+/** The active stop `el` (stage stop or hook node), clickable to open the agent when one works there (slotOpensAgent);
+ *  the click stops there, so the row is not picked too. */
+function opensAgent(p, r, el, id) {
+  if (!slotOpensAgent(r, terminals())) return el;
+  return own(
+    el
+      .id(id)
+      .cursor_pointer()
+      .tooltip('Open terminal')
+      .on_click((_e, cx) => {
+        p.openAgent();
+        cx.stop_propagation();
+        cx.notify();
+      }),
+  );
+}
+
 /** The colour the active stop rings in: blocked when the run waits on you. */
 const nowColor = (t, r) => (needsYou(r) ? t.blocked : t.working);
 
@@ -114,8 +131,6 @@ function stageStop(p, t, r, row, picked) {
   const gate = row.gate;
   if (row.state === 'active') {
     const c = nowColor(t, r);
-    // an agent at work: the stop opens its terminal, as its card does
-    const opens = activeBox(r) === 'agent' && Boolean(agentAddress(r, terminals()));
     const stop = div()
       .size(24)
       .rounded(gate ? 4 : 12)
@@ -126,18 +141,7 @@ function stageStop(p, t, r, row, picked) {
       .items_center()
       .justify_center()
       .child(div().size(9).rounded(gate ? 2 : 5).bg(c));
-    if (!opens) return stop;
-    return own(
-      stop
-        .id('now-stop')
-        .cursor_pointer()
-        .tooltip('Open terminal')
-        .on_click((_e, cx) => {
-          p.openAgent();
-          cx.stop_propagation();
-          cx.notify();
-        }),
-    );
+    return opensAgent(p, r, stop, 'now-stop');
   }
   const fill = row.state === 'past' ? t.accent : row.state === 'failed' ? t.blocked : null;
   const dot = div()
@@ -188,19 +192,20 @@ function stageLabel(t, r, row) {
     });
 }
 
-function hookNode(t, r, row) {
+function hookNode(p, t, r, row) {
   const c = row.state === 'active' ? nowColor(t, r) : row.state === 'failed' ? t.blocked : row.state === 'past' ? t.accent : t.border;
   const filled = row.state === 'past' || row.state === 'failed';
-  return div()
+  const node = div()
     .flex_none()
     .size(10)
     .rounded(row.gate ? 2 : 5)
     .border(2)
     .border_color(c)
     .bg(filled ? c : t.surface);
+  return row.state === 'active' ? opensAgent(p, r, node, 'now-node') : node;
 }
 
-function hookLabel(t, r, row) {
+function hookLabel(p, t, r, row) {
   const branch = row.state === 'future' ? t.border : row.state === 'active' ? nowColor(t, r) : t.accent;
   const name = row.state === 'active' ? nowColor(t, r) : row.state === 'failed' ? t.blocked : t.muted;
   return h_flex()
@@ -209,7 +214,7 @@ function hookLabel(t, r, row) {
     .py(2)
     .items_center()
     .child(div().flex_none().ml(-SPINE / 2).w(20).h(2).bg(branch))
-    .child(hookNode(t, r, row))
+    .child(hookNode(p, t, r, row))
     .child(div().flex_none().ml(7).font_family('monospace').text_size(11).text_color(name).child(row.step.id))
     .child(div().min_w(0).ml(6).truncate().text_size(10).text_color(t.dim).child(hookNote(r, row, Date.now())));
 }
@@ -252,7 +257,7 @@ export function pipeline(p, t, r, narrow) {
             )
             .child(gutter(t, spans, i, false))
             .child(spine(t, i, n, last, false, stage ? stageStop(p, t, r, row, picked) : null))
-            .child(stage ? stageLabel(t, r, row) : hookLabel(t, r, row)),
+            .child(stage ? stageLabel(t, r, row) : hookLabel(p, t, r, row)),
         );
         const out = [line];
         if (i === active) out.push(under(i, p.activeSlot ? p.activeSlot(t, r, narrow) : div()));
