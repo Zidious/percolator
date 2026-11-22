@@ -254,6 +254,18 @@ test('top-level rules apply to every pipeline', () => {
   assert.deepEqual(r.feature!.rules.map((x) => x.source), ['a']);
 });
 
+test('rules are marked global or pipeline', () => {
+  const r = mergePipelines([
+    L('a', { rules: { allowed_agents: ['claude'] } }),
+    L('b', { pipelines: { hotfix: { stages: ['intake', 'deliver'], rules: { allowed_models: ['m'] } } } }),
+  ]);
+  assert.deepEqual(r.hotfix!.rules.map((x) => [x.source, x.scope]), [
+    ['a', 'global'],
+    ['b', 'pipeline'],
+  ]);
+  assert.deepEqual(r.feature!.rules.map((x) => [x.source, x.scope]), [['a', 'global']]);
+});
+
 test('the groom gate is only in feature', () => {
   const r = mergePipelines([L('a', { pipelines: { hotfix: { stages: ['intake', 'groom', 'deliver'] } } })]);
   assert.equal('approve-groom' in r.feature!.nodes, true);

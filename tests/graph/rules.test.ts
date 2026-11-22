@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkRules, RuleViolationError } from '../../src/graph/rules.ts';
-import { mergeLayers } from '../../src/graph/merge.ts';
+import { mergeLayers, mergePipelines } from '../../src/graph/merge.ts';
+import { buildGraph } from '../../src/graph/build.ts';
 import type { Merged } from '../../src/graph/merge.ts';
-import type { GraphFragment, Rules } from '../../src/config/schema.ts';
+import type { GraphFragment, Pipeline, Rules } from '../../src/config/schema.ts';
 
 function m(bindings: NonNullable<GraphFragment['bindings']>, rules: Rules[], nodes: GraphFragment['nodes'] = {}): Merged {
   return mergeLayers([
@@ -286,4 +287,56 @@ test('a one-item list binding is located at its item', () => {
   const v = checkRules(merged);
   assert.equal(v[0]!.target, 'bindings.implement.0');
   assert.deepEqual(v[0]!.where, { file: 'n.yaml', line: 4, path: 'bindings.implement.0' });
+});
+
+const HOTFIX: Pipeline = {
+  stages: ['intake', 'reproduce', 'fix', 'review', 'deliver'],
+  bindings: { reproduce: { agent: 'claude' }, fix: { agent: 'claude' }, review: { agent: 'claude' } },
+  exit: 'pr',
+};
+/** hotfix (with pipeline rules `own`) and feature, from one profile layer with top-level rules `global`. */
+function pipelines(own: Rules | undefined, global?: Rules) {
+  return mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: {
+        bindings: { groom: { agent: 'claude' } },
+        ...(global ? { rules: global } : {}),
+        pipelines: { hotfix: { ...HOTFIX, ...(own ? { rules: own } : {}) } },
+      },
+    },
+  ]);
+}
+
+test('require_skills checks a custom stage', () => {
+  const hotfix = pipelines({ require_skills: [{ stage: 'fix', skills: ['tdd'] }] }).hotfix!;
+  const v = checkRules(hotfix, buildGraph(hotfix).stages);
+  assert.deepEqual(
+    v.map((x) => [x.rule, x.target, x.message]),
+    [['require_skills', 'bindings.fix', 'missing required skill(s) tdd, required by require_skills (from profile:default); add them to its skills:']],
+  );
+});
+
+test('a pipeline rule naming a stage it lacks is a violation', () => {
+  const hotfix = pipelines({ require_skills: [{ stage: 'groom', skills: ['tdd'] }] }).hotfix!;
+  const v = checkRules(hotfix, buildGraph(hotfix).stages);
+  assert.deepEqual(
+    v.map((x) => [x.rule, x.message]),
+    [
+      [
+        'require_skills',
+        'names stage "groom", which pipeline "hotfix" does not have (stages: intake, reproduce, fix, review, deliver); use one of those or *',
+      ],
+    ],
+  );
+});
+
+test('a global rule for a stage some pipelines lack is skipped there', () => {
+  const r = pipelines(undefined, { require_skills: [{ stage: 'groom', skills: ['tdd'] }] });
+  assert.deepEqual(checkRules(r.hotfix!, buildGraph(r.hotfix!).stages), []);
+  // the pipeline that has the stage still gets the rule
+  assert.deepEqual(
+    checkRules(r.feature!).map((x) => x.target),
+    ['bindings.groom'],
+  );
 });
