@@ -7,7 +7,6 @@ export type Step = Readable['steps'][number];
 export type Stage = 'intake' | 'groom' | 'plan' | 'implement' | 'review' | 'deliver';
 export type TimelineEntry = Readable['timeline'][number];
 export type Attempt = Extract<TimelineEntry, { kind: 'attempt' }>;
-export type Zone = { stage: Stage; shown: Step[]; hidden: Step[] };
 export type Tone = 'blocked' | 'working' | 'dim' | 'muted';
 
 export declare const STAGES: readonly Stage[];
@@ -15,10 +14,10 @@ export declare function parseStatus(stdout: string): { ok: true; data: StatusJso
 export declare function sortRuns(runs: RunStatusJson[]): RunStatusJson[];
 export declare function visibleRuns(runs: RunStatusJson[], filter: 'active' | 'all'): RunStatusJson[];
 export declare function rowState(run: RunStatusJson): { tone: Tone; text: string; round?: string };
-export declare function trainLayout(run: RunStatusJson, narrow: boolean): Zone[];
-export declare function xOf(zones: Zone[], stepId: string): number | null;
 export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
 export declare function actionArgv(action: Action, run: { id: string }, feedback?: string): string[] | null;
+export declare function needsYou(run: RunStatusJson): boolean;
+export declare function nowTone(run: RunStatusJson): 'blocked' | 'working';
 export declare function needsCount(runs: RunStatusJson[]): number;
 export declare function runningCount(runs: RunStatusJson[]): number;
 export type Loop = Readable['loops'][number];
@@ -28,15 +27,22 @@ export declare function ago(iso: string | undefined, now: number): string;
 export declare function took(step: { startedAt?: string; endedAt?: string; status: string }, now: number): string;
 export declare function stepTone(status: string): 'done' | 'working' | 'blocked' | null;
 export declare function resolvePath(base: string, p: string): string;
-export declare function cliLines(run: RunStatusJson): string[];
-export declare function terminalCommands(run: RunStatusJson): string[];
 export declare function attentionTag(kind: string): string;
-export declare function shownLoops(run: RunStatusJson): Loop[];
-export declare function loopAtCap(loop: Loop): boolean;
-export declare function loopLabelAlign(a: number, b: number): 'start' | 'end';
-export declare function loopLabel(loop: Loop, narrow: boolean): string;
+export declare function roundOf(loop: Loop): { n: number; max: number; taken: boolean; atCap: boolean };
+export declare function roundPill(run: RunStatusJson, stepId: string): { text: string; tone: 'dim' | 'working' | 'blocked' } | null;
+export declare function loopSpans(run: RunStatusJson): { id: string; from: string; to: string; tone: 'dim' | 'working' | 'blocked' }[];
 export declare function canPick(step: { status: string }): boolean;
-export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number): string | null;
+export type RowState = 'past' | 'active' | 'future' | 'failed';
+export type PipeRow =
+  | { type: 'stage'; step: Step; gate: boolean; state: RowState; round: { text: string; tone: string } | null; folded: Step[] }
+  | { type: 'hook'; step: Step; where: 'before-all' | 'before' | 'after' | 'after-all'; gate: boolean; state: RowState };
+export declare function pipelineRows(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }): PipeRow[];
+export declare function pipelineSpans(rows: PipeRow[], run: RunStatusJson): { from: number; to: number; tone: string }[];
+export declare function pipelineMarks(rows: PipeRow[], stopSel: string | null): { active: number; reached: number; stripAt: number };
+export declare function roundNote(run: RunStatusJson, stepId: string, now: number): string;
+export declare function hookNote(run: RunStatusJson, row: { step: Step; where?: string }, now: number): string;
+export declare function unfoldAfterPick(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }, from: string | null, to: string | null): string[];
+export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number, unfolded?: string[], narrow?: boolean): string | null;
 export declare function moveRow(rows: RunStatusJson[], selId: string | null, dir: number): string | null;
 export type RoundView = {
   attempt: Attempt;
@@ -48,9 +54,6 @@ export type RoundView = {
 };
 export declare function timelineOf(run: RunStatusJson): TimelineEntry[];
 export declare function stepAttempts(run: RunStatusJson, stepId: string): Attempt[];
-export declare const COFFEE_LINES: readonly string[];
-export declare function coffeeLine(runId: string, stepId: string): string;
-export declare function runningText(run: RunStatusJson, now: number): string;
 export declare function roundView(run: RunStatusJson, stepId: string, roundSel: number | null): RoundView | null;
 export type TimelineRow = {
   key: string;
@@ -65,7 +68,6 @@ export type TimelineRow = {
 };
 export declare function clock(iso?: string): string;
 export declare function timelineRows(run: RunStatusJson, now: number): TimelineRow[];
-export declare function readerPath(run: RunStatusJson, stopSel: string | null, roundSel?: number | null): string | null;
 export declare function cupLabel(runs: RunStatusJson[]): { text: string; tone: 'blocked' | 'working' | 'muted' };
 export declare function notice(run: RunStatusJson): {
   title: string;
@@ -85,11 +87,16 @@ export declare const BOARD_RATIO: number;
 export declare function boardHeight(ratio: number, area: number, min: number): number;
 export declare function dragBoard(startPx: number, dy: number, area: number, min: number): number;
 export declare function readRatio(stored: unknown): number;
-export declare function fillHeight(view: number, content: number, box: number, min: number): number;
 export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short' };
-export declare function nextBoxH(prev: number, target: number): number;
 export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
 export declare function terminalAddress(live: { address: string; name?: string | null }[], term: string | null | undefined): string | null;
+export declare function activeBox(run: RunStatusJson): 'agent' | 'gate' | 'cap' | 'paused' | 'failed' | 'stalled' | null;
+export declare function agentCard(
+  run: RunStatusJson,
+  live: { address: string; name?: string | null }[],
+  agents: { address: string; status: string; program?: { name: string } }[],
+  now: number,
+): { address: string | null; name: string; status: string; program: string; since: string } | null;
 export declare function driverPeek(run: RunStatusJson | null | undefined): { terminal: string; label: 'Driver pane ↗' } | null;
 export declare function ticketTitle(run: Readable): string;
 export declare function deleteArgv(ids: string[]): string[];
@@ -107,3 +114,34 @@ export declare function selectAfterRefresh(
   selId: string | null,
   pending: { ids: string[]; next: string | null } | null,
 ): string | null;
+export declare function agentTone(status: string): 'blocked' | 'working' | 'muted';
+export declare function agentAddress(run: RunStatusJson, live: { address: string; name?: string | null }[]): string | null;
+export declare function openAgentAt(
+  run: RunStatusJson | null | undefined,
+  live: { address: string; name?: string | null }[],
+  fixtures: boolean,
+): { address: string } | { said: string } | { error: string } | null;
+export declare function boxActions(run: RunStatusJson): Action[];
+export declare function readerFiles(
+  run: RunStatusJson,
+  stopSel: string | null,
+  roundSel: number | null,
+  outPick: string | null,
+): { box: string | null; strip: string | null };
+export declare function readerMax(area: number): number;
+export declare function readFullShown(inWindow: boolean): boolean;
+export declare function boxOutside(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }): boolean;
+export declare function slotOpensAgent(run: RunStatusJson, live: { address: string; name?: string | null }[]): boolean;
+export declare function boxAsks(run: RunStatusJson): boolean;
+export declare function showsOutcome(run: RunStatusJson): boolean;
+export declare function programInitial(program: string): string;
+export declare function agentNote(card: ReturnType<typeof agentCard>): string | null;
+export declare function boxDriver(run: RunStatusJson): { terminal: string; label: 'Driver pane ↗' } | null;
+export declare function historyLabel(run: RunStatusJson, open: boolean): string;
+export type Columns = 'one' | 'two';
+export declare function columns(width: number): Columns;
+export declare function panelShape(width: number, zoom: number): { narrow: boolean; cols: Columns; fold: boolean };
+export declare function detailParts(
+  run: RunStatusJson,
+  o: { cols: Columns; narrow: boolean; unfolded: string[]; stopSel: string | null },
+): { under: boolean; side: ('box' | 'outcome' | 'strip')[] };

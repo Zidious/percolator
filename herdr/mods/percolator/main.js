@@ -17,12 +17,17 @@ import {
   setShared,
   settings,
   shared,
+  terminals,
   theme,
 } from 'herdr';
 import {
   BOARD_RATIO,
   actionArgv,
+  activeBox,
+  openAgentAt,
   boardHeight,
+  boxActions,
+  detailParts,
   deleteArgv,
   deleteCommand,
   deleteCommandIds,
@@ -32,16 +37,17 @@ import {
   finishedNotice,
   dragBoard,
   driverPeek,
-  fillHeight,
   findNode,
-  nextBoxH,
+  panelShape,
   titleLayout,
+  unfoldAfterPick,
   moveRow,
   moveStop,
   needsCount,
   ownsCommands,
   readRatio,
-  readerPath,
+  readerFiles,
+  readerMax,
   resolvePath,
   runningCount,
   selectAfterDelete,
@@ -52,18 +58,17 @@ import {
 } from './model.js';
 import { mark } from './mark.js';
 import { board } from './board.js';
-import { header, train, stopStrip } from './train.js';
-import { turn } from './turn.js';
+import { header, pipeline } from './pipeline.js';
+import { activeSlot, turn } from './turn.js';
 import { addressOf, link, own } from './ui.js';
 import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
 
-const NARROW = 720;
+const LEFT = 330; // the left column of two: the board and the pipeline
 const BLOCK = 'percolator-panel';
 const WINDOW = 'percolator.window'; // shared: the open window's overlay id, else null
 const RATIO = 'percolator.boardRatio'; // shared: the board's height as a ratio of the area under the title bar
 const OLD_RATIO = 'board.ratio'; // localStorage, per copy: read when nothing is shared yet
-const MIN_ROWS = { narrow: 106, wide: 72 }; // two rows of the board, in design px
-const MIN_BOX = 120; // the reader's least height; below it the detail scrolls instead
+const MIN_BOARD = 106; // two rows of the board's compact cards, in design px
 const zoom = () => Number(settings()?.zoom) || 1;
 const folderOf = (file) => file.replace(/[\\/][^\\/]*$/, '');
 
@@ -79,7 +84,9 @@ export default class Percolator extends View {
     this.sel = null;
     this.stopSel = null;
     this.roundSel = null; // the attempt number picked in the stop strip; null = the latest
-    this.file = null;
+    this.unfolded = []; // the selected run's stages whose folded hooks show as rows
+    this.file = null; // the strip's file, read under the picked stop
+    this.boxFile = null; // the file to review, read in the attention box
     this.files = {};
     this.width = 900;
     this.busy = null;
@@ -88,8 +95,6 @@ export default class Percolator extends View {
     this.notice = null; // beside Delete finished runs ↗, seen with or without a selection
     this.deleting = null; // { ids, next, doneAt? }: the delete the owner confirmed and the row to select after it
     this.fetches = 0;
-    this.copied = null;
-    this.cmdsOpen = false;
     this.historyOpen = false;
     this.rejecting = false;
     this.rejectError = null;
@@ -98,10 +103,6 @@ export default class Percolator extends View {
     // Heights in design pixels (zoom 1), measured after each layout.
     this.area = 600; // under the title bar
     this.boardPx = 0; // the board
-    this.detailH = 400; // the detail's viewport
-    this.rest = 0; // what the detail's content takes besides the reader
-    this.boxH = MIN_BOX; // the reader's height, as drawn in the last frame
-    this.boxDrawn = false; // whether the reader was drawn in the last frame
     this.drag = null; // { y, px } while the divider is held
     this.boardScroll = ScrollHandle.new();
     const f = shared('percolator.focus');
@@ -232,6 +233,7 @@ export default class Percolator extends View {
       this.actError = null;
       this.said = null;
       this.feedback.set_value('');
+      this.unfolded = [];
     }
     this.sel = id;
     this.stopSel = null;
@@ -240,8 +242,13 @@ export default class Percolator extends View {
     this.syncReader(cx);
   }
 
-  /** Selects a stop (null closes the strip and goes back to the run's review file). */
+  /** Selects a stop (null closes the strip and goes back to the run's review file); a stage holding folded hooks
+   *  opens them, and folds them again when it is closed. */
   pickStop(id, cx) {
+    const r = this.current();
+    if (r && r.status !== 'unreadable') {
+      this.unfolded = unfoldAfterPick(r, { narrow: this.shape().fold, unfolded: this.unfolded }, this.stopSel, id);
+    }
     this.stopSel = id;
     this.roundSel = null;
     this.outPick = null;
@@ -261,31 +268,45 @@ export default class Percolator extends View {
     this.syncReader(cx);
   }
 
-  /** Points the reader at what the run needs read now (readerPath, or an output picked in the strip) and reads it again:
-   *  the same path can hold new text (a re-groom rewrites groomed_ticket.md). */
+  /** Points the readers at what the run needs read now (readerFiles: the file to review in the attention box, the
+   *  strip's output under the picked stop) and reads them again: the same path can hold new text (a re-groom rewrites
+   *  groomed_ticket.md). */
   syncReader(cx) {
     const r = this.current();
-    const raw = (this.stopSel && this.outPick) || (r ? readerPath(r, this.stopSel, this.roundSel) : null);
-    const path = raw ? this.resolve(raw) : null;
-    this.file = path;
-    if (!path) return;
-    if (this.files[path] === undefined) this.files[path] = null;
-    cx.spawn(async (cx) => {
-      const text = await readTextFile(path).catch(() => null);
-      this.files[path] = text ?? `_${path} could not be read._`;
-      cx.notify();
-    });
+    const raw = r ? readerFiles(r, this.stopSel, this.roundSel, this.outPick ?? null) : { box: null, strip: null };
+    this.file = raw.strip ? this.resolve(raw.strip) : null;
+    this.boxFile = raw.box ? this.resolve(raw.box) : null;
+    for (const path of new Set([this.file, this.boxFile])) {
+      if (!path) continue;
+      if (this.files[path] === undefined) this.files[path] = null;
+      cx.spawn(async (cx) => {
+        const text = await readTextFile(path).catch(() => null);
+        this.files[path] = text ?? `_${path} could not be read._`;
+        cx.notify();
+      });
+    }
   }
 
-  /** A live terminal by its perc name (or address); null when none is live. */
-  addressOf(term) {
-    return addressOf(term);
+  /** The inline readers' greatest height, in design px: half the panel. */
+  readerMaxH() {
+    return readerMax(this.area);
   }
 
-  /** Focuses a terminal perc names: pane.focus takes Herdr's address. */
-  focusTerminal(term) {
-    const terminal = addressOf(term);
-    if (terminal) command('pane.focus', { terminal });
+  /** What the pipeline draws under the active stop. */
+  activeSlot(t, r, narrow) {
+    return activeSlot(this, t, r, narrow);
+  }
+
+  /** Opens the selected run's active agent (agent.focus takes Herdr's address): its card, its stop and Enter call
+   *  this. In fixtures mode, or with its terminal not live, it says so instead. */
+  openAgent() {
+    const at = openAgentAt(this.current(), terminals(), this.conn === 'fixtures');
+    if (!at) return;
+    this.actError = null;
+    this.said = null;
+    if ('said' in at) this.said = at.said;
+    else if ('error' in at) this.actError = at.error;
+    else command('agent.focus', { terminal: at.address });
   }
 
   /** Peeks at the run's driver terminal: closing a peek leaves the driver running (closing a pane would end it). */
@@ -310,7 +331,6 @@ export default class Percolator extends View {
     if (!r || this.busy) return;
     this.actError = null;
     this.said = null;
-    if (action === 'open-pane') return this.focusTerminal(r.attention?.terminal);
     if (action === 'reject') {
       this.rejecting = true;
       this.feedback.focus();
@@ -437,7 +457,7 @@ export default class Percolator extends View {
   /** A key press (or `percolator.key/<key>`); true when it did something. */
   key(key, cx) {
     const r = this.current();
-    const acts = r?.attention?.actions ?? [];
+    const acts = r ? boxActions(r) : [];
     if (key === 'up' || key === 'down') {
       const id = moveRow(this.rows(), this.sel, key === 'up' ? -1 : 1);
       if (id) {
@@ -445,11 +465,12 @@ export default class Percolator extends View {
         this.revealRow();
       }
     } else if ((key === 'left' || key === 'right') && r) {
-      this.pickStop(moveStop(r, this.stopSel, key === 'left' ? -1 : 1), cx);
+      this.pickStop(moveStop(r, this.stopSel, key === 'left' ? -1 : 1, this.unfolded, this.shape().fold), cx);
     } else if (key === 'a' && acts.includes('approve')) this.act('approve', cx);
     else if (key === 'r' && acts.includes('reject')) this.act('reject', cx);
     else if (key === 'g' && acts.includes('grant')) this.act('grant', cx);
     else if (key === 'g' && acts.includes('resume')) this.act('resume', cx);
+    else if (key === 'enter' && r && activeBox(r) === 'agent') this.openAgent();
     else if (key === 'escape') {
       if (this.rejecting) this.closeReject();
       else if (this.stopSel) this.pickStop(null, cx);
@@ -505,20 +526,6 @@ export default class Percolator extends View {
     this.revealRow();
   }
 
-  /** The reader's height: what the detail has left over, at least MIN_BOX. Worked out
-   *  from the viewport and `rest` only (neither depends on it), and kept unless it moves 2px, so it cannot oscillate. */
-  boxHeight() {
-    return this.rest ? nextBoxH(this.boxH, fillHeight(this.detailH, this.rest, 0, MIN_BOX)) : this.boxH;
-  }
-
-  /** The detail's content was laid out with the box drawn last (if any): what the rest takes is the content minus that box. */
-  measureContent(size, cx) {
-    const rest = Math.round(size.height / zoom()) - (this.boxDrawn ? this.boxH : 0);
-    if (rest === this.rest) return;
-    this.rest = rest;
-    cx.notify();
-  }
-
   /** Keeps a measured height in design pixels (Herdr reports them zoomed); a change draws again. */
   measured(key, size, cx) {
     const h = Math.round(size.height / zoom());
@@ -533,11 +540,12 @@ export default class Percolator extends View {
     if (at >= 0) this.boardScroll.scroll_to_item(at);
   }
 
-  // ── the divider between the board and the detail ──────────────────
-
-  minBoard(narrow) {
-    return narrow ? MIN_ROWS.narrow : MIN_ROWS.wide;
+  /** The panel's layout at its width: `narrow`; `cols`, one or two; `fold`, the pipeline folds every passed hook. */
+  shape() {
+    return panelShape(this.width, zoom());
   }
+
+  // ── the divider between the board and the detail ──────────────────
 
   /** The board's ratio: the one being dragged, else the shared one, so the docked panel and the window agree. */
   boardRatio() {
@@ -552,7 +560,7 @@ export default class Percolator extends View {
     return true;
   }
 
-  divider(t, narrow) {
+  divider(t) {
     const on = Boolean(this.drag);
     return div()
       .id('divider')
@@ -674,7 +682,7 @@ export default class Percolator extends View {
       .bg(t.chrome)
       .text_size(10.5)
       .text_color(t.dim)
-      .children(['↑↓ runs', '←→ stops', 'a approve', 'r reject', 'g grant / resume', 'esc close'].map((h) => div().child(h)));
+      .child(div().min_w(0).truncate().child('↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · esc close'));
   }
 
   /** The placeholder while nothing can be shown: not linked yet, or loading. */
@@ -695,29 +703,39 @@ export default class Percolator extends View {
       .child(div().text_size(12).text_color(t.dim).child(this.error ? '' : 'Loading…'));
   }
 
-  // The measured frames (area, board-frame, detail-frame, detail-body) are drawn from the first frame on, whatever the
-  // state: Herdr reports sizes only for elements it has had since the view's first frame.
-  body(t, narrow) {
+  // The measured frames (area, board-frame) are drawn from the first frame on, whatever the state: Herdr reports sizes
+  // only for elements it has had since the view's first frame. One column or two, they keep their place (area > left).
+  body(t, { narrow, cols, fold }) {
+    const two = cols === 'two';
     const ready = this.conn !== 'missing' && this.loaded;
     const r = ready ? this.current() : null;
     const rows = ready ? this.rows() : [];
-    const boardMax = boardHeight(this.boardRatio(), this.area, this.minBoard(narrow));
-    this.boxH = this.boxHeight(); // the box drawn in this frame; measureContent subtracts it after layout
-    this.boxDrawn = Boolean(r && this.file); // only the reader is drawn at boxH
-    return v_flex()
-      .id('area')
-      .flex_1()
+    const parts = r ? detailParts(r, { cols, narrow: fold, unfolded: this.unfolded, stopSel: this.stopSel }) : null;
+    const boardMax = boardHeight(this.boardRatio(), this.area, MIN_BOARD);
+    const detail = v_flex()
+      .id('detail-body')
+      .flex_none()
+      .when(!ready && !two, (el) => el.min_h_full().child(this.placeholder(t)))
+      .when(Boolean(r), (el) =>
+        el
+          .when(!two, (el) => el.child(header(this, t, r, narrow)))
+          .child(pipeline(this, t, r, fold, narrow, parts.under))
+          .when(!two, (el) => el.child(turn(this, t, r, narrow, parts.side))),
+      );
+    const leftColumn = v_flex()
+      .id('left')
       .min_h(0)
-      .on_size_change((size, cx) => this.measured('area', size, cx))
+      .when(two, (el) => el.w(LEFT).flex_none().h_full())
+      .when(!two, (el) => el.flex_1().min_w(0))
       .child(
         v_flex()
           .id('board-frame')
           .flex_none()
           .when(rows.length > 0, (el) => el.max_h(boardMax))
           .on_size_change((size, cx) => this.measured('boardPx', size, cx))
-          .when(ready, (el) => el.child(board(this, t, narrow, rows))),
+          .when(ready, (el) => el.child(board(this, t, true, rows))), // always its compact cards
       )
-      .when(rows.length > 0, (el) => el.child(this.divider(t, narrow)))
+      .when(rows.length > 0, (el) => el.child(this.divider(t)))
       .child(
         // One scroll for the whole detail, filled absolutely: overflow_y_scrollbar() wraps the element, so its flex
         // sizing never reaches the layout.
@@ -726,37 +744,42 @@ export default class Percolator extends View {
           .flex_1()
           .min_h(0)
           .relative()
-          .on_size_change((size, cx) => this.measured('detailH', size, cx))
-          .child(
-            v_flex()
-              .id('detail')
-              .absolute()
-              .inset_0()
-              .overflow_y_scroll()
-              .child(
-                v_flex()
-                  .id('detail-body')
-                  .flex_none()
-                  .on_size_change((size, cx) => this.measureContent(size, cx))
-                  .when(!ready, (el) => el.min_h_full().child(this.placeholder(t)))
-                  .when(Boolean(r), (el) =>
-                    el
-                      .child(header(this, t, r, narrow))
-                      .child(train(this, t, r, narrow))
-                      .when(Boolean(this.stopSel), (el) => el.child(stopStrip(this, t, r)))
-                      .child(turn(this, t, r, narrow)),
-                  ),
-              ),
-          )
+          .child(v_flex().id('detail').absolute().inset_0().overflow_y_scroll().child(detail))
           .child(Scrollbar.vertical('detail').absolute().inset_0()),
       );
+    // The right column of two: the run's header, then its box (or how it ended) and the picked stop's strip, whose
+    // readers take the height left; it does not scroll as a whole, so the buttons stay in view.
+    const rightColumn = () =>
+      v_flex()
+        .id('right')
+        .flex_1()
+        .min_w(0)
+        .min_h(0)
+        .h_full()
+        .border_l(1)
+        .border_color(t.border)
+        .when(!ready, (el) => el.child(this.placeholder(t)))
+        .when(Boolean(r), (el) =>
+          el.child(div().flex_none().child(header(this, t, r, false))).child(turn(this, t, r, false, parts.side, true)),
+        );
+    return div()
+      .id('area')
+      .flex()
+      .when(two, (el) => el.flex_row().items_stretch())
+      .when(!two, (el) => el.flex_col())
+      .flex_1()
+      .min_h(0)
+      .on_size_change((size, cx) => this.measured('area', size, cx))
+      .child(leftColumn)
+      .when(two, (el) => el.child(rightColumn()));
   }
 
   render(cx) {
     const t = theme();
     this.catchUp(cx);
     this.followFocus(cx);
-    const narrow = this.width < NARROW;
+    const at = this.shape();
+    const { narrow } = at;
     return v_flex()
       .id('root')
       .size_full()
@@ -771,7 +794,7 @@ export default class Percolator extends View {
       .on_mouse_move((e, cx) => {
         if (!this.drag) return;
         const dy = (e.position.y - this.drag.y) / zoom(); // the pointer moves in zoomed pixels
-        this.ratio = dragBoard(this.drag.px, dy, this.area, this.minBoard(narrow));
+        this.ratio = dragBoard(this.drag.px, dy, this.area, MIN_BOARD);
         cx.notify();
       })
       .on_mouse_up('left', (_e, cx) => {
@@ -822,7 +845,7 @@ export default class Percolator extends View {
             if (!this.typing) this.handle.focus();
             cx.stop_propagation();
           })
-          .child(this.body(t, narrow)),
+          .child(this.body(t, at)),
       )
       .when(!narrow && this.conn !== 'missing', (el) => el.child(this.hints(t)));
   }

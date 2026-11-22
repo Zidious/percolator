@@ -287,7 +287,7 @@ Changing a locked target fails validation:
 
 ## Steering a run
 
-Anything that needs you shows up in `perc status`, and in any [integration](#integrations) you use.
+Anything that needs you shows up in `perc status`, and in any [integration](#integrations) you use; the Percolator panel leaves an agent blocked in its terminal to Herdr's own agent status (the last row).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagram-lifecycle-dark.svg">
@@ -301,7 +301,7 @@ Anything that needs you shows up in `perc status`, and in any [integration](#int
 | **paused · plan** | A step escalated: it timed out, or twice finished without the outputs its stage needs. | Read its step dir, then `perc resume <id>` re-runs the step |
 | **failed · implement** | A step failed and has no loop to go back through. | A failed run can't be resumed: read its step dir, then `perc delete <id>` (or `perc clean <id>` to keep the record) and start a new run |
 | **stalled · driver stopped** | The driver terminal exited mid-run. | `perc resume <id>` |
-| **agent blocked** | The agent is asking something in its terminal. | Answer it in the agent's terminal |
+| **agent blocked** (in `perc status` and in Herdr's own agent status; the Percolator panel counts the run as running) | The agent is asking something in its terminal. | Answer it in the agent's terminal |
 
 Each step's files are in `~/.percolator/runs/<run-id>/steps/<step>/<attempt>/`: its `done.json` and its `outputs/`. `perc clean` removes the worktree and terminals but keeps this record and the branch; `perc delete` removes the record too and keeps only the branch.
 

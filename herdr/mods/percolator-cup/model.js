@@ -1,4 +1,4 @@
-// The Percolator panel's pure logic: what `perc status --json` (schema 1) means for the board, the train and the
+// The Percolator panel's pure logic: what `perc status --json` (schema 1) means for the board, the pipeline and the
 // actions. No `herdr` imports, so node:test covers it (tests/herdr/model.test.ts); model.d.ts declares it.
 
 export const STAGES = Object.freeze(['intake', 'groom', 'plan', 'implement', 'review', 'deliver']);
@@ -19,8 +19,12 @@ export function parseStatus(stdout) {
   return { ok: true, data };
 }
 
-const needs = (r) => Boolean(r.attention);
-const rank = (r) => (needs(r) ? 0 : r.status === 'running' ? 1 : r.status === 'unreadable' ? 3 : 2);
+/** Whether a run waits on you. A blocked agent does not: Herdr already shows it, so the panel counts that run as running. */
+export const needsYou = (r) => Boolean(r.attention) && r.attention.kind !== 'agent';
+
+/** The tone the active stop rings in: blocked when the run needs you or failed, else working. */
+export const nowTone = (r) => (needsYou(r) || r.status === 'failed' ? 'blocked' : 'working');
+const rank = (r) => (needsYou(r) ? 0 : r.status === 'running' ? 1 : r.status === 'unreadable' ? 3 : 2);
 const created = (r) => (typeof r.createdAt === 'string' ? Date.parse(r.createdAt) || 0 : 0);
 
 /** A sorted copy: needing you first, then running, then the rest (unreadable last); newest first within each. */
@@ -31,14 +35,14 @@ export function sortRuns(runs) {
 /** "active": everything except completed and failed runs that need nothing; "all": everything. */
 export function visibleRuns(runs, filter) {
   if (filter === 'all') return [...runs];
-  return runs.filter((r) => needs(r) || (r.status !== 'completed' && r.status !== 'failed'));
+  return runs.filter((r) => needsYou(r) || (r.status !== 'completed' && r.status !== 'failed'));
 }
 
 /** The board row's state line and its tone. */
 export function rowState(run) {
   const a = run.attention;
   const step = run.currentStep;
-  if (a) {
+  if (a && a.kind !== 'agent') {
     const blocked = (text) => ({ tone: 'blocked', text });
     switch (a.kind) {
       case 'gate':
@@ -51,13 +55,11 @@ export function rowState(run) {
         return blocked(`failed · ${step}`);
       case 'stalled':
         return blocked('stalled · driver stopped');
-      case 'agent':
-        return blocked(`agent ${a.agentState ?? 'waiting'} · ${step}`);
     }
   }
   if (run.status === 'running') {
     const loop = (run.loops ?? []).find((l) => l.from === step && l.round > 0);
-    return loop ? { tone: 'working', text: `${step}`, round: `round ${loop.round}/${loop.max}` } : { tone: 'working', text: `${step}` };
+    return loop ? { tone: 'working', text: `${step}`, round: `round ${roundOf(loop).n}/${loop.max}` } : { tone: 'working', text: `${step}` };
   }
   if (run.status === 'completed') {
     const pr = run.pr?.url.split('/').pop();
@@ -67,42 +69,11 @@ export function rowState(run) {
   return { tone: 'muted', text: run.status };
 }
 
-/**
- * Six zones, one per core stage, each with its steps in execution order: `before-all` hooks first in intake, then
- * the graph order of the stage's steps (before:<stage> hooks, slot steps, after:<stage> hooks), `after-all` hooks
- * last in deliver. Narrow shows only core stops and folds the rest into `hidden` (a zone with no core step shows all).
- */
-export function trainLayout(run, narrow) {
-  const steps = run.steps ?? [];
-  const of = (stage) => steps.filter((s) => s.stage === stage);
-  return STAGES.map((stage, i) => {
-    const all = [
-      ...(i === 0 ? of('before-all') : []),
-      ...of(stage),
-      ...(i === STAGES.length - 1 ? of('after-all') : []),
-    ];
-    const core = all.filter((s) => s.role === 'core');
-    if (!narrow || core.length === 0) return { stage, shown: all, hidden: [] };
-    return { stage, shown: core, hidden: all.filter((s) => s.role !== 'core') };
-  });
-}
-
-/** The centre of a step's stop as % (0–100) of the track; a hidden step sits on its zone's first shown stop. */
-export function xOf(zones, stepId) {
-  for (let i = 0; i < zones.length; i++) {
-    const z = zones[i];
-    let j = z.shown.findIndex((s) => s.id === stepId);
-    if (j < 0 && z.hidden.some((s) => s.id === stepId)) j = 0;
-    if (j >= 0) return ((i + (j + 0.5) / z.shown.length) / zones.length) * 100;
-  }
-  return null;
-}
-
 /** Runs in `next` that need you and did not in `prev` (or were not there); none on the first load (`prev` null). */
 export function newlyNeeding(prev, next) {
   if (prev === null) return [];
-  const had = new Set(prev.filter(needs).map((r) => r.id));
-  return next.filter((r) => needs(r) && !had.has(r.id));
+  const had = new Set(prev.filter(needsYou).map((r) => r.id));
+  return next.filter((r) => needsYou(r) && !had.has(r.id));
 }
 
 /** The `perc` argv for an action, or null when it needs no perc call (open-pane). Feedback stays one element. */
@@ -125,12 +96,12 @@ export function actionArgv(action, run, feedback) {
 
 /** Runs that need you. */
 export function needsCount(runs) {
-  return runs.filter(needs).length;
+  return runs.filter(needsYou).length;
 }
 
 /** Running runs that need nothing from you. */
 export function runningCount(runs) {
-  return runs.filter((r) => r.status === 'running' && !needs(r)).length;
+  return runs.filter((r) => r.status === 'running' && !needsYou(r)).length;
 }
 
 /** parseStatus, and refuses a schema this panel does not know. */
@@ -177,52 +148,160 @@ export function resolvePath(base, p) {
   return ABSOLUTE.test(p) ? p : `${base.replace(/[\\/]+$/, '')}/${p}`;
 }
 
-const CLI = {
-  approve: (id) => `perc approve ${id}`,
-  reject: (id) => `perc reject ${id} -- "<feedback>"`,
-  grant: (id) => `perc resume ${id}`,
-  resume: (id) => `perc resume ${id}`,
-  clean: (id) => `perc clean ${id}`,
-};
-
-/** The terminal commands that do what the run's action buttons do, once each. */
-export function cliLines(run) {
-  const lines = (run.attention?.actions ?? []).flatMap((a) => (CLI[a] ? [CLI[a](run.id)] : []));
-  return [...new Set(lines)];
-}
-
-/** Every terminal command for a run's attention: the actions' perc equivalents, then its own commands, once each. */
-export function terminalCommands(run) {
-  return [...new Set([...cliLines(run), ...(run.attention?.commands ?? [])])];
-}
-
-const TAGS = { gate: 'GATE', cap: 'PAUSED', paused: 'PAUSED', failed: 'FAILED', stalled: 'STALLED', agent: 'AGENT' };
+const TAGS = { gate: 'GATE', cap: 'PAUSED', paused: 'PAUSED', failed: 'FAILED', stalled: 'STALLED' };
 
 /** The tag shown before an attention message. */
 export function attentionTag(kind) {
   return TAGS[kind] ?? 'NEEDS YOU';
 }
 
-/** Loops that have gone round at least once (drawn as arcs). */
-export function shownLoops(run) {
-  return (run.loops ?? []).filter((l) => l.round > 0);
+/** The round the engine is in: `round` counts back-edges already taken, the engine's round is one more, up to the cap. */
+export function roundOf(loop) {
+  return { n: Math.min(1 + loop.round, loop.max), max: loop.max, taken: loop.round > 0, atCap: loop.round >= loop.max };
 }
 
-/** A loop has used all its rounds. */
-export function loopAtCap(loop) {
-  return loop.round >= loop.max;
+function loopTone(r) {
+  return r.atCap ? 'blocked' : r.taken ? 'working' : 'dim';
 }
 
-/** "↺ review → implement · round 2 of 3", "· cap" at the cap; narrow leaves out where. */
-export function loopLabel(loop, narrow) {
-  const where = narrow ? '' : `${loop.from} → ${loop.to} · `;
-  return `↺ ${where}round ${loop.round} of ${loop.max}${loopAtCap(loop) ? ' · cap' : ''}`;
+/** The pill on the step a loop starts from; null when no loop starts there. */
+export function roundPill(run, stepId) {
+  const loop = (run.loops ?? []).find((l) => l.from === stepId);
+  if (!loop) return null;
+  const r = roundOf(loop);
+  return { text: `round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r) };
 }
 
-/** Which end of a loop arc (spanning a% to b% of the track) its label hangs from, so a label wider than the arc grows
- *  toward the middle of the track rather than past its edge. */
-export function loopLabelAlign(a, b) {
-  return (a + b) / 2 > 50 ? 'end' : 'start';
+/** The engine's round of a loop that goes back to `stepId`, past round 1; null otherwise. */
+function roundAt(run, stepId) {
+  const loop = (run.loops ?? []).find((l) => l.to === stepId && roundOf(l).n > 1);
+  return loop ? roundOf(loop).n : null;
+}
+
+/** Beside the step a loop goes back to, past round 1: "round N · <time>" (its latest attempt's), else "". */
+export function roundNote(run, stepId, now) {
+  const n = roundAt(run, stepId);
+  if (n === null) return '';
+  const last = stepAttempts(run, stepId).at(-1);
+  const time = last ? took(last, now) : '';
+  return time ? `round ${n} · ${time}` : `round ${n}`;
+}
+
+/** Every loop, taken or not, with its tone. */
+export function loopSpans(run) {
+  return (run.loops ?? []).map((l) => ({ id: l.id, from: l.from, to: l.to, tone: loopTone(roundOf(l)) }));
+}
+
+const ALL = new Set(['before-all', 'after-all']);
+const SIDE = { 'before-all': 'before', before: 'before', after: 'after', 'after-all': 'after' };
+
+const FAILED = new Set(['fail', 'escalate', 'contract_error']);
+
+/** A loop start that sent the run back and is under its cap: its failure is the loop going on, not the run failing. */
+const sentBack = (run, step) =>
+  (run.loops ?? []).some((l) => l.from === step.id && roundOf(l).taken && !roundOf(l).atCap);
+
+function pipeState(run, step) {
+  if (step.id === run.currentStep && run.status !== 'completed') return 'active';
+  if (FAILED.has(step.status) && !sentBack(run, step)) return 'failed';
+  return step.status === 'pending' ? 'future' : 'past';
+}
+
+/**
+ * The vertical pipeline, top to bottom: `before-all` hooks, then each stage where its first core step (else its first
+ * node) appears in the run, its steps in run order, then `after-all` hooks. A stage's nodes before its first core step
+ * are `before`, the rest `after`; a stage with no core step lists its nodes as `before`. When `narrow`, or a side has
+ * more than 3 passed hooks, that side's passed hooks fold into the stage's first core row (`before-all` counts as
+ * intake's before, `after-all` as deliver's after), unless the stage is in `unfolded`. The active row never folds.
+ */
+export function pipelineRows(run, o) {
+  const steps = run.steps ?? [];
+  const base = (step) => ({ step, gate: step.kind === 'gate', state: pipeState(run, step) });
+  const hook = (step, where) => ({ type: 'hook', ...base(step), where });
+  const allHooks = (where) => steps.filter((s) => s.stage === where).map((s) => hook(s, where));
+
+  const groups = new Map(); // stage → { stage, steps, at: index of its first core step, else of its first node }
+  steps.forEach((s, i) => {
+    if (ALL.has(s.stage)) return;
+    const g = groups.get(s.stage) ?? { stage: s.stage, steps: [], at: i, core: false };
+    if (s.role === 'core' && !g.core) Object.assign(g, { at: i, core: true });
+    g.steps.push(s);
+    groups.set(s.stage, g);
+  });
+  const ordered = [...groups.values()].sort((a, b) => a.at - b.at);
+  const blocks = ordered.map((g) => {
+    const firstCore = g.steps.findIndex((s) => s.role === 'core');
+    // a node between two core steps of one stage counts as `after` its first core step
+    const rows = g.steps.map((s, i) =>
+      s.role === 'core'
+        ? { type: 'stage', ...base(s), round: roundPill(run, s.id), folded: [] }
+        : hook(s, firstCore < 0 || i < firstCore ? 'before' : 'after'),
+    );
+    return { stage: g.stage, rows };
+  });
+  const block = (stage) => blocks.find((b) => b.stage === stage);
+  const before = allHooks('before-all');
+  const after = allHooks('after-all');
+  if (block('intake')) block('intake').rows.unshift(...before);
+  else blocks.unshift({ stage: null, rows: before });
+  if (block('deliver')) block('deliver').rows.push(...after);
+  else blocks.push({ stage: null, rows: after });
+
+  return blocks.flatMap(({ stage, rows }) => {
+    const head = rows.find((r) => r.type === 'stage');
+    if (!head || o.unfolded.includes(stage)) return rows;
+    const fold = new Set();
+    for (const side of ['before', 'after']) {
+      const passed = rows.filter(
+        (r) => r.type === 'hook' && SIDE[r.where] === side && r.step.status === 'pass' && r.state !== 'active',
+      );
+      if (o.narrow || passed.length > 3) for (const r of passed) fold.add(r);
+    }
+    head.folded = rows.filter((r) => fold.has(r)).map((r) => r.step);
+    return rows.filter((r) => !fold.has(r));
+  });
+}
+
+/** Each loop as the row indexes its `from` and `to` steps show in: the step's own row, or for a folded hook the stage
+ *  row holding it; a loop with an end not in the pipeline is left out. */
+export function pipelineSpans(rows, run) {
+  const at = (id) => rows.findIndex((r) => r.step.id === id || (r.type === 'stage' && r.folded.some((s) => s.id === id)));
+  return loopSpans(run).flatMap((l) => {
+    const from = at(l.from);
+    const to = at(l.to);
+    return from < 0 || to < 0 ? [] : [{ from, to, tone: l.tone }];
+  });
+}
+
+/** Row indexes in a pipeline (-1 when none): the active row; the last row the spine is reached to (the active one, else
+ *  the last that is not future); and the row holding `stopSel`, which rings as picked and the strip opens under (its
+ *  own, or the stage row folding it). */
+export function pipelineMarks(rows, stopSel) {
+  const active = rows.findIndex((r) => r.state === 'active');
+  const reached = active >= 0 ? active : rows.reduce((at, r, i) => (r.state === 'future' ? at : i), -1);
+  const holds = (r) => r.step.id === stopSel || (r.type === 'stage' && r.folded.some((s) => s.id === stopSel));
+  return { active, reached, stripAt: stopSel ? rows.findIndex(holds) : -1 };
+}
+
+/** The muted note beside a hook row: where it runs, the round when a loop went back to it (past round 1), its latest
+ *  gate decision, how long it took (or has waited). */
+export function hookNote(run, row, now) {
+  const s = row.step;
+  const waited = s.status === 'waiting' && s.startedAt ? `waiting ${ago(s.startedAt, now)}` : '';
+  const decision = decisionNote(stepAttempts(run, s.id).at(-1)?.decision);
+  const n = roundAt(run, s.id);
+  return [row.where, n === null ? '' : `round ${n}`, decision, took(s, now) || waited].filter(Boolean).join(' · ');
+}
+
+/** The stages to show unfolded after the selected stop moves from `from` to `to` (null closes it): a picked stage row
+ *  holding folded hooks opens; closing an open stage folds it again. */
+export function unfoldAfterPick(run, o, from, to) {
+  if (to === null) {
+    const closed = (run.steps ?? []).find((s) => s.id === from && s.role === 'core')?.stage;
+    return o.unfolded.filter((s) => s !== closed);
+  }
+  const row = pipelineRows(run, o).find((r) => r.step.id === to);
+  return row?.type === 'stage' && row.folded.length > 0 ? [...o.unfolded, row.step.stage] : o.unfolded;
 }
 
 /** Whether a stop can be selected: one that has not started has nothing to show. */
@@ -230,9 +309,11 @@ export function canPick(step) {
   return step.status !== 'pending';
 }
 
-/** The started step one stop left (-1) or right (1) of the selected stop, else of the current (or last) step; null if none. */
-export function moveStop(run, selected, dir) {
-  const order = trainLayout(run, false).flatMap((z) => z.shown.filter(canPick).map((s) => s.id));
+/** The started step one pipeline row up (-1) or down (1) from the selected stop, else from the current (or last)
+ *  step, over the rows the pipeline shows (`narrow`: it folds every passed hook) with `unfolded` stages open (other
+ *  folded hooks are skipped); null if none. */
+export function moveStop(run, selected, dir, unfolded = [], narrow = false) {
+  const order = pipelineRows(run, { narrow, unfolded }).flatMap((r) => (canPick(r.step) ? [r.step.id] : []));
   if (order.length === 0) return null;
   let at = order.indexOf(selected);
   if (at < 0) at = order.indexOf(run.currentStep);
@@ -269,41 +350,6 @@ export function timelineOf(run) {
 /** One step's attempts, in order. */
 export function stepAttempts(run, stepId) {
   return timelineOf(run).filter((e) => e.kind === 'attempt' && e.step === stepId);
-}
-
-/** What the banner says while a step runs, one line picked per run and step. */
-export const COFFEE_LINES = [
-  'Go make an espresso.',
-  'Start another ticket!',
-  'Instant coffee? Not on this watch.',
-  'Time for a pour-over. No rush.',
-  'Grind some beans; this has it.',
-  'Perfect moment for a flat white.',
-  "Stretch your legs. It'll keep.",
-  'Brewing. Unlike instant, worth the wait.',
-  'Go pull a shot.',
-  "The kettle's on. So is the agent.",
-];
-
-/** 32-bit FNV-1a over UTF-16 code units. */
-function fnv1a32(text) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
-  return h >>> 0;
-}
-
-/** The coffee line for a run's step: fixed, so it does not change from one refresh to the next. */
-export function coffeeLine(runId, stepId) {
-  return COFFEE_LINES[fnv1a32(`${runId}/${stepId}`) % COFFEE_LINES.length];
-}
-
-/** "<step> is running[ for <spent>]. <coffee line>" for the running step. */
-export function runningText(run, now) {
-  const step = run.currentStep;
-  const live = stepAttempts(run, step).at(-1);
-  const st = live?.status === 'running' ? live : (run.steps ?? []).find((s) => s.id === step);
-  const spent = st ? took(st, now) : '';
-  return `${step} is running${spent ? ` for ${spent}` : ''}. ${coffeeLine(run.id, step)}`;
 }
 
 /** The round of a step the strip shows: `roundSel` (an attempt number), else the last attempt, with its place among
@@ -372,14 +418,6 @@ export function timelineRows(run, now) {
     .reverse();
 }
 
-/** What the reader shows: the selected stop's (picked, else latest) round's first output, else the first file to
- *  review, else null (as perc gave it). */
-export function readerPath(run, stopSel, roundSel = null) {
-  const view = stopSel ? roundView(run, stopSel, roundSel) : null;
-  const out = view ? Object.values(view.attempt.outputs ?? {})[0] : undefined;
-  return out ?? run.attention?.review?.[0]?.path ?? null;
-}
-
 // ── the board's height (a ratio of the area under the title bar, so it follows the panel's size and zoom) ──
 
 export const BOARD_RATIO = 0.3;
@@ -402,19 +440,6 @@ export function dragBoard(startPx, dy, area, min) {
 export function readRatio(stored) {
   const n = Number(stored);
   return stored != null && n > 0 && n < 1 ? n : BOARD_RATIO;
-}
-
-/** The reader's height: what the detail (`view` tall, holding `content`, of which the reader is `box`) has left over
- *  once everything else is laid out, at least `min` (then the detail scrolls). Whole pixels. */
-export function fillHeight(view, content, box, min) {
-  return Math.round(Math.max(min, view - (content - box)));
-}
-
-/** The reader's next height: `target` in whole pixels, unless it moved less than 2px (then `prev`), so measuring
- *  and rounding cannot swing it between two heights. */
-export function nextBoxH(prev, target) {
-  const next = Math.round(target);
-  return Math.abs(next - prev) < 2 ? prev : next;
 }
 
 /** How the title bar fits `width` design px with `needs` runs needing you: ⧉ and ✕ always stay; the "N need you" chip
@@ -485,6 +510,157 @@ export function showsHere(place, inWindow, blockShown) {
 export function terminalAddress(live, term) {
   if (!term) return null;
   return live.find((x) => x.address === term || x.name === term)?.address ?? null;
+}
+
+const BOXES = ['gate', 'cap', 'paused', 'failed', 'stalled'];
+
+/** What shows under the run's active stop: the attention box for its kind, the agent card while an agent works, else
+ *  nothing. */
+export function activeBox(run) {
+  if (!run || run.status === 'unreadable') return null;
+  const kind = run.attention?.kind;
+  if (BOXES.includes(kind)) return kind;
+  if (kind === 'agent') return 'agent';
+  return run.status === 'running' && run.terminals?.[run.currentStep] ? 'agent' : null;
+}
+
+/** The current step's agent terminal: the one perc lists for the step, else the one its attention names. */
+const agentTerminal = (run) => run?.terminals?.[run.currentStep] ?? run?.attention?.terminal;
+
+/** The agent terminal of the run's current step, linked to the live terminal and agent Herdr shows; null when the
+ *  step has no terminal. */
+export function agentCard(run, live, agents, now) {
+  const name = agentTerminal(run);
+  if (!name) return null;
+  const address = agentAddress(run, live);
+  const agent = agents.find((a) => a.address === address);
+  const step = (run.steps ?? []).find((s) => s.id === run.currentStep);
+  return {
+    address,
+    name,
+    status: agent?.status ?? (address ? 'open' : 'not open'),
+    program: agent?.program?.name ?? 'Agent',
+    since: step ? took(step, now) : '',
+  };
+}
+
+/** The colour of the agent status Herdr reports: blocked and working have their own, anything else is muted. */
+export function agentTone(status) {
+  return status === 'blocked' || status === 'working' ? status : 'muted';
+}
+
+/** The live address of the current step's agent terminal (Open terminal ↗ focuses it), or null: then it is off. */
+export function agentAddress(run, live) {
+  if (!run || run.status === 'unreadable') return null;
+  return terminalAddress(live, agentTerminal(run));
+}
+
+/** What opening the run's agent does: focus its live terminal (`address`); in fixtures mode only say so (`said`); an
+ *  `error` when the terminal is not live; null when the step has no agent terminal. */
+export function openAgentAt(run, live, fixtures) {
+  if (!run || run.status === 'unreadable') return null;
+  const name = agentTerminal(run);
+  if (!name) return null;
+  if (fixtures) return { said: `fixtures: would open ${name}` };
+  const address = terminalAddress(live, name);
+  return address ? { address } : { error: `${name} is not a live terminal; refresh the panel` };
+}
+
+/** The attention's buttons; open-pane is left to Open terminal ↗. */
+export function boxActions(run) {
+  return (run.attention?.actions ?? []).filter((a) => a !== 'open-pane');
+}
+
+/** What the inline readers show (as perc gave it): `box`, under an attention box, its first file to review; `strip`, under
+ *  the picked stop, the output picked there, else its (picked, else latest) round's first output, unless the box already
+ *  reads that file (it shows once). */
+export function readerFiles(run, stopSel, roundSel, outPick) {
+  const box = boxAsks(run) ? (run.attention?.review?.[0]?.path ?? null) : null;
+  if (!stopSel) return { box, strip: null };
+  const view = roundView(run, stopSel, roundSel);
+  const strip = outPick ?? (view ? Object.values(view.attempt.outputs ?? {})[0] : undefined) ?? null;
+  return { box, strip: strip === box ? null : strip };
+}
+
+/** The inline reader's greatest height: half the panel's `area`. */
+export function readerMax(area) {
+  return Math.round(area * 0.5);
+}
+
+/** Read full ↗ pops the panel out into its window, so the window itself does not offer it. */
+export function readFullShown(inWindow) {
+  return !inWindow;
+}
+
+/** Whether the run's active box has no active row to sit under (its current step is not in the pipeline): then it shows
+ *  under the pipeline. */
+export function boxOutside(run, o) {
+  if (activeBox(run) === null) return false;
+  return pipelineMarks(pipelineRows(run, o), null).active < 0;
+}
+
+/** One column, or two from 720px wide (the window, a wide panel): the board and pipeline on the left, the run on the
+ *  right. */
+export function columns(width) {
+  return width >= 720 ? 'two' : 'one';
+}
+
+/** The panel's layout from its measured width (zoomed px) and the zoom, all in design px: `narrow` under 720,
+ *  `cols`, and `fold`, under 320, where the pipeline folds every passed hook (the 330px left column of two does
+ *  not). */
+export function panelShape(width, zoom) {
+  const w = Math.round(width / zoom); // the width comes zoomed, in floats: 720 at 0.8 reads 575.99
+  return { narrow: w < 720, cols: columns(w), fold: w < 320 };
+}
+
+/** Where the detail's pieces show. `under`: the active slot and the stop strip sit under their rows in the pipeline (one
+ *  column). `side`, in order: what shows under the pipeline in one column (the box when it has no active row, how the
+ *  run ended), or in the right column of two (the box, how the run ended, then the picked stop's strip). */
+export function detailParts(run, o) {
+  const outcome = showsOutcome(run) ? ['outcome'] : [];
+  if (o.cols === 'one') return { under: true, side: [...(boxOutside(run, o) ? ['box'] : []), ...outcome] };
+  const box = activeBox(run) === null ? [] : ['box'];
+  const picked = o.stopSel !== null && (run.steps ?? []).some((s) => s.id === o.stopSel);
+  return { under: false, side: [...box, ...outcome, ...(picked ? ['strip'] : [])] };
+}
+
+/** Whether the active stop (its stage stop or hook node) opens the agent: one works there in a live terminal. */
+export function slotOpensAgent(run, live) {
+  return activeBox(run) === 'agent' && agentAddress(run, live) !== null;
+}
+
+/** Whether the active box asks you something (gate, cap, paused, failed, stalled): it carries the action errors. */
+export function boxAsks(run) {
+  return BOXES.includes(activeBox(run));
+}
+
+/** Whether the lower half says how the run stands (delivered, unreadable, its status): nothing is under its stop and
+ *  it is not running. */
+export function showsOutcome(run) {
+  return activeBox(run) === null && run.status !== 'running';
+}
+
+/** The letter on the agent card's badge. */
+export function programInitial(program) {
+  return program.trim().slice(0, 1).toUpperCase() || '?';
+}
+
+/** The line under an agent stop with no agent terminal yet, else null (the card shows). */
+export function agentNote(card) {
+  return card ? null : 'agent not started';
+}
+
+/** The driver peek a failed or stalled box offers (its last screen often says why), else null. */
+export function boxDriver(run) {
+  const kind = activeBox(run);
+  return kind === 'failed' || kind === 'stalled' ? driverPeek(run) : null;
+}
+
+/** The History fold's label: its arrow and how many attempts the history holds (loop-cap rows are not attempts). */
+export function historyLabel(run, open) {
+  const n = timelineOf(run).filter((e) => e.kind === 'attempt').length;
+  const head = `History ${open ? '▾' : '▸'}`;
+  return n === 0 ? head : `${head} ${n} attempt${n === 1 ? '' : 's'}`;
 }
 
 /** The run's live driver terminal, to peek at (closing a peek leaves it running; closing a pane would end it), or

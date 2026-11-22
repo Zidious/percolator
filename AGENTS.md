@@ -15,8 +15,9 @@ pnpm build                            # tsc → dist/ (gitignored)
 pnpm schema                           # regenerate schema/percolator.schema.json after changing the zod schema
 node src/cli.ts <command> …           # run perc from a checkout; `perc --help` lists commands
 node src/cli.ts delete <id>...|--finished [--yes]  # remove runs; keeps branches
-pnpm herdr:sync                       # copy herdr/mods/* into the Herdr app (reloads live; keeps perc.json); after any panel/cup change
+pnpm herdr:sync                       # mirror herdr/mods/* into the Herdr app (reloads live; removes stale files, keeps perc.json); after any panel/cup change
 node tests/smoke/hc.smoke.ts          # manual smoke tests against the real hc / gh (gh.smoke.ts); flags in each file's header; never in pnpm test
+node tests/smoke/panel.shots.ts [--out dir]   # screenshots of every fixture state at 280/380/720 and in the window; needs Herdr open
 node tests/smoke/skill.smoke.ts       # sandboxed agent scenarios for skills/percolator-config; --verify <root> afterwards; never in pnpm test
 ```
 
@@ -56,6 +57,7 @@ Read the module before changing it.
 | `src/validate.ts` | config → graph validation pipeline |
 | `templates/` | recommended config written by `perc init` |
 | `skills/` | agent-agnostic skills shipped in the package |
+| `scripts/` | repo tooling run by package scripts (`herdr-sync.ts`); typechecked, tested under `tests/scripts/` |
 | `herdr/` | Herdr panel (`mods/percolator/`, plain JS, pure logic in `model.js`) and status-bar cup (`mods/percolator-cup/`), layout, fixtures |
 
 ## Conventions

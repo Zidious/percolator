@@ -20,7 +20,7 @@
 <line x1="265" y1="130" x2="265" y2="170" class="s-mut" stroke-width="1.5" marker-end="url(#am)"/>
 <rect x="570" y="50" width="490" height="76" rx="8" class="box-acc" stroke-width="1.5"/>
 <text x="586" y="76" class="t13 ink">Herdr app · Percolator panel + status-bar cup</text>
-<text x="586" y="98" class="tm mut">board of runs · stage train · Approve / Reject /</text>
+<text x="586" y="98" class="tm mut">board of runs · stage pipeline · Approve / Reject /</text>
 <text x="586" y="114" class="tm mut">Resume buttons · “#n needs you” notices</text>
 <line x1="740" y1="130" x2="740" y2="170" class="s-acc" stroke-width="1.5" marker-end="url(#aa)"/>
 <text x="732" y="155" class="tm acc" text-anchor="end">perc approve | reject | resume</text>

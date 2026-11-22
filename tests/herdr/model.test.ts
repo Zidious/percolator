@@ -4,23 +4,16 @@ import path from 'node:path';
 import { test } from 'node:test';
 import {
   STAGES,
-  COFFEE_LINES,
-  coffeeLine,
-  runningText,
   actionArgv,
   ago,
   attentionTag,
   BOARD_RATIO,
   boardHeight,
   dragBoard,
-  fillHeight,
-  nextBoxH,
   titleLayout,
   readRatio,
-  cliLines,
   clock,
   timelineRows,
-  terminalCommands,
   cupLabel,
   cupMoves,
   driverPeek,
@@ -37,36 +30,61 @@ import {
   deleteCommandIds,
   findNode,
   ownsCommands,
-  loopAtCap,
-  loopLabel,
+  roundOf,
+  roundPill,
+  loopSpans,
   moveRow,
   canPick,
   moveStop,
+  pipelineRows,
+  pipelineSpans,
+  hookNote,
+  roundNote,
+  unfoldAfterPick,
+  pipelineMarks,
   needsCount,
+  needsYou,
+  nowTone,
   newlyNeeding,
   notice,
   parseStatus,
   readStatus,
-  readerPath,
   roundView,
   stepAttempts,
   timelineOf,
   resolvePath,
   rowState,
-  loopLabelAlign,
   runningCount,
-  shownLoops,
   showsHere,
   terminalAddress,
+  activeBox,
+  agentCard,
+  agentAddress,
+  openAgentAt,
+  agentTone,
+  boxActions,
+  boxOutside,
+  columns,
+  detailParts,
+  panelShape,
+  readerFiles,
+  readerMax,
+  slotOpensAgent,
+  showsOutcome,
+  boxAsks,
+  programInitial,
+  agentNote,
+  boxDriver,
+  historyLabel,
+  readFullShown,
   ticketTitle,
   sortRuns,
   stepTone,
   took,
-  trainLayout,
   visibleRuns,
-  xOf,
 } from '../../herdr/mods/percolator/model.js';
 import type { RunStatusJson, StatusJson } from '../../src/run/status.ts';
+import type { Loop, PipeRow } from '../../herdr/mods/percolator/model.d.ts';
 import { driverName } from '../../src/run/meta.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
 
@@ -78,7 +96,6 @@ const byId = (prefix: string): RunStatusJson => runs().find((r) => r.id.startsWi
 type Readable = Exclude<RunStatusJson, { status: 'unreadable' }>;
 const readable = (prefix: string) => byId(prefix) as Readable;
 const ids = (rs: { id: string }[]) => rs.map((r) => r.id.split('-')[0]);
-const near = (a: number | null, b: number) => assert.ok(a !== null && Math.abs(a - b) < 1e-9, `${a} is not ${b}`);
 
 test('the fixture covers every attention kind, a running run, a completed run and an unreadable entry', () => {
   const kinds = runs().flatMap((r) => ('attention' in r && r.attention ? [r.attention.kind] : []));
@@ -157,7 +174,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t13', 't12', 't2', 't11', 't9', 't4', 't14', 't8', 't15', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t12', 't2', 't11', 't9', 't4', 't17', 't16', 't14', 't13', 't8', 't15', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -165,7 +182,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -179,8 +196,8 @@ test('rowState gives the tone and the board text for each kind of run', () => {
     ['t12', 'blocked', 'paused · plan'],
     ['t9', 'blocked', 'failed · implement'],
     ['t11', 'blocked', 'stalled · driver stopped'],
-    ['t13', 'blocked', 'agent blocked · groom'],
-    ['t8', 'working', 'review', 'round 2/3'],
+    ['t13', 'working', 'groom'],
+    ['t8', 'working', 'review', 'round 3/3'],
     ['t3', 'dim', 'delivered · PR #7'],
     ['t5', 'muted', 'unreadable · state.json: Unexpected end of JSON input'],
   ];
@@ -193,87 +210,6 @@ test('rowState for a running step outside a loop shows only the step', () => {
 
 test('rowState for a completed run without a PR says delivered', () => {
   assert.deepEqual(rowState({ ...readable('t3'), pr: null }), { tone: 'dim', text: 'delivered' });
-});
-
-test('trainLayout wide shows every step in its zone in execution order', () => {
-  const zones = trainLayout(byId('t8'), false);
-  assert.deepEqual(
-    zones.map((z) => [z.stage, z.shown.map((s) => s.id), z.hidden.map((s) => s.id)]),
-    [
-      ['intake', ['setup', 'intake'], []],
-      ['groom', ['groom', 'approve-groom'], []],
-      ['plan', ['plan'], []],
-      ['implement', ['lint-plan', 'implement', 'security-scan'], []],
-      ['review', ['review'], []],
-      ['deliver', ['deliver', 'notify'], []],
-    ],
-  );
-});
-
-test('trainLayout narrow keeps core steps and folds the hooks', () => {
-  const zones = trainLayout(byId('t8'), true);
-  assert.deepEqual(
-    zones.map((z) => [z.stage, z.shown.map((s) => s.id), z.hidden.map((s) => s.id)]),
-    [
-      ['intake', ['intake'], ['setup']],
-      ['groom', ['groom'], ['approve-groom']],
-      ['plan', ['plan'], []],
-      ['implement', ['implement'], ['lint-plan', 'security-scan']],
-      ['review', ['review'], []],
-      ['deliver', ['deliver'], ['notify']],
-    ],
-  );
-});
-
-test('trainLayout puts before-all hooks first in intake and after-all hooks last in deliver', () => {
-  const r = readable('t3');
-  const hook = (id: string, stage: 'before-all' | 'after-all') =>
-    ({ id, stage, role: 'node', kind: 'script', status: 'pass', attempts: 1, outputs: {} }) as Readable['steps'][number];
-  const steps = [...r.steps.slice(0, 1), hook('late-setup', 'before-all'), hook('early-notify', 'after-all'), ...r.steps.slice(1)];
-  const zones = trainLayout({ ...r, steps }, false);
-  assert.deepEqual(zones[0]!.shown.map((s) => s.id), ['late-setup', 'intake']);
-  assert.deepEqual(zones[5]!.shown.map((s) => s.id), ['deliver', 'early-notify']);
-});
-
-test('trainLayout narrow shows each slot step of a multi-step stage as a core stop', () => {
-  const r = readable('t3');
-  const core = (id: string) =>
-    ({ id, stage: 'implement', role: 'core', kind: 'agent', status: 'pass', attempts: 1, outputs: {} }) as Readable['steps'][number];
-  const steps = r.steps.flatMap((s) => (s.id === 'implement' ? [core('implement.0'), core('implement.1')] : [s]));
-  assert.deepEqual(trainLayout({ ...r, steps }, true)[3]!.shown.map((s) => s.id), ['implement.0', 'implement.1']);
-});
-
-test('trainLayout narrow shows the hooks of a zone that has no core step', () => {
-  const r = readable('t3');
-  const steps = r.steps.map((s) => (s.id === 'plan' ? { ...s, role: 'node' as const } : s));
-  const plan = trainLayout({ ...r, steps }, true)[2]!;
-  assert.deepEqual([plan.shown.map((s) => s.id), plan.hidden], [['plan'], []]);
-});
-
-test('trainLayout of an unreadable run is six empty zones', () => {
-  assert.deepEqual(
-    trainLayout(byId('t5'), false),
-    STAGES.map((stage) => ({ stage, shown: [], hidden: [] })),
-  );
-});
-
-test('xOf gives the centre of a stop as % of the track', () => {
-  const zones = trainLayout(byId('t2'), false);
-  // each zone is a sixth; groom (zone 1) has two stops
-  near(xOf(zones, 'intake'), (0.5 / 6) * 100);
-  near(xOf(zones, 'groom'), (1.25 / 6) * 100);
-  near(xOf(zones, 'approve-groom'), (1.75 / 6) * 100);
-  near(xOf(zones, 'deliver'), (5.5 / 6) * 100);
-});
-
-test('xOf puts a folded step on its zone first shown stop', () => {
-  const zones = trainLayout(byId('t2'), true);
-  assert.equal(xOf(zones, 'approve-groom'), 25);
-  assert.equal(xOf(zones, 'groom'), 25);
-});
-
-test('xOf is null for a step that is not on the train', () => {
-  assert.equal(xOf(trainLayout(byId('t2'), false), 'nope'), null);
 });
 
 test('newlyNeeding is empty on the first load', () => {
@@ -292,8 +228,8 @@ test('newlyNeeding returns a run that gained attention', () => {
 
 test('newlyNeeding returns a new run that arrives needing attention', () => {
   const next = runs();
-  const prev = next.filter((r) => !r.id.startsWith('t13-'));
-  assert.deepEqual(ids(newlyNeeding(prev, next)), ['t13']);
+  const prev = next.filter((r) => !r.id.startsWith('t12-'));
+  assert.deepEqual(ids(newlyNeeding(prev, next)), ['t12']);
 });
 
 test('newlyNeeding is empty when nothing changed', () => {
@@ -326,8 +262,8 @@ test('actionArgv refuses a reject without feedback', () => {
 });
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
-  assert.equal(needsCount(runs()), 6);
-  assert.equal(runningCount(runs()), 2);
+  assert.equal(needsCount(runs()), 5);
+  assert.equal(runningCount(runs()), 5);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
 });
@@ -382,42 +318,10 @@ test('resolvePath keeps absolute paths and joins relative ones to the base folde
   }
 });
 
-test('cliLines gives the perc commands for a run actions, once each', () => {
-  assert.deepEqual(cliLines(byId('t2')), [
-    'perc approve t2-20261121-005347-f0ab',
-    'perc reject t2-20261121-005347-f0ab -- "<feedback>"',
-  ]);
-  const both = { ...readable('t4'), attention: { ...readable('t4').attention!, actions: ['grant', 'resume', 'clean', 'open-pane'] } } as Readable;
-  assert.deepEqual(cliLines(both), ['perc resume t4-20261121-061230-77ab', 'perc clean t4-20261121-061230-77ab']);
-  assert.deepEqual(cliLines(byId('t8')), []);
-});
-
-test('terminalCommands lists the action equivalents, then the attention commands, once each', () => {
-  assert.deepEqual(terminalCommands(byId('t2')), cliLines(byId('t2')));
-  const failed = readable('t9');
-  const cmds = failed.attention!.commands!;
-  assert.ok(cmds.length > 0);
-  assert.deepEqual(terminalCommands(failed), [...cliLines(failed), ...cmds]);
-  const dup = { ...failed, attention: { ...failed.attention!, commands: [...cmds, ...cmds] } } as Readable;
-  assert.deepEqual(terminalCommands(dup), [...cliLines(failed), ...cmds]);
-  assert.deepEqual(terminalCommands(byId('t8')), []);
-});
-
 test('attentionTag names each attention kind', () => {
   assert.deepEqual(['gate', 'cap', 'paused', 'failed', 'stalled', 'agent'].map(attentionTag), [
-    'GATE', 'PAUSED', 'PAUSED', 'FAILED', 'STALLED', 'AGENT',
+    'GATE', 'PAUSED', 'PAUSED', 'FAILED', 'STALLED', 'NEEDS YOU',
   ]);
-});
-
-test('shownLoops keeps loops that have gone round; loopLabel says where and how far', () => {
-  const [loop] = shownLoops(byId('t8'));
-  assert.equal(loopLabel(loop!, false), '↺ review → implement · round 2 of 3');
-  assert.equal(loopLabel({ ...loop!, round: 3 }, false), '↺ review → implement · round 3 of 3 · cap');
-  assert.equal(loopLabel({ ...loop!, round: 3 }, true), '↺ round 3 of 3 · cap');
-  assert.equal(loopAtCap({ ...loop!, round: 3 }), true);
-  assert.equal(loopAtCap(loop!), false);
-  assert.deepEqual(shownLoops({ ...readable('t8'), loops: [{ ...loop!, round: 0 }] }), []);
-  assert.deepEqual(shownLoops(byId('t5')), []);
 });
 
 test('moveStop walks the train in execution order from the selected stop, else the current step', () => {
@@ -456,22 +360,8 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
   assert.equal(moveRow([], 'gone', 1), null);
 });
 
-test('readerPath shows the selected stop first output, else the first review file, else nothing', () => {
-  const gate = readable('t2');
-  assert.equal(readerPath(gate, null), 'samples/groomed_ticket.md');
-  const { timeline: _t, ...older } = gate; // an older perc: the steps' own outputs are read
-  const out = { ...older, steps: gate.steps.map((s) => (s.id === 'groom' ? { ...s, outputs: { groomed_ticket: '/abs/g.md' } } : s)) } as unknown as Readable;
-  assert.equal(readerPath(out, 'groom'), '/abs/g.md');
-  assert.equal(readerPath(out, 'intake'), 'samples/groomed_ticket.md', 'a stop without outputs falls back to the review');
-  assert.equal(readerPath(out, 'gone'), 'samples/groomed_ticket.md');
-  const passed = { ...gate, status: 'running', currentStep: 'plan' } as Readable;
-  delete passed.attention;
-  assert.equal(readerPath(passed, null), null, 'once the gate passes there is nothing to read');
-  assert.equal(readerPath(byId('t5'), null), null);
-});
-
-test('the fixture has timelines for t8, t3, t2 and t4, and none for the rest (an older perc)', () => {
-  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4']);
+test('the fixture has timelines for t8, t3, t2, t4, t16 and t17, and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17']);
 });
 
 test('roundView defaults to the latest round and marks it running', () => {
@@ -516,13 +406,8 @@ test('stepAttempts is one step attempts in order', () => {
   assert.deepEqual(stepAttempts(readable('t8'), 'deliver'), []);
 });
 
-test('readerPath shows the picked round first output', () => {
-  assert.equal(readerPath(readable('t8'), 'review', 2), 'samples/findings.md');
-  assert.equal(readerPath(readable('t8'), 'review', null), null, 'the running round has no outputs yet');
-});
-
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
-  assert.deepEqual(cupLabel(runs()), { text: '6 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel(runs()), { text: '5 need you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
   assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
@@ -600,13 +485,6 @@ test('readRatio: a stored ratio between 0 and 1, else the default', () => {
   assert.equal(BOARD_RATIO, 0.3);
 });
 
-test('fillHeight: the reader takes what the detail has left over, else its minimum and the detail scrolls', () => {
-  assert.equal(fillHeight(600, 500, 200, 120), 300, 'room to spare: it grows to fill');
-  assert.equal(fillHeight(600, 900, 400, 120), 120, 'the rest takes 500 of 600: the minimum');
-  assert.equal(fillHeight(600, 600, 300, 120), 300, 'already filling: it stays');
-  assert.equal(fillHeight(600.4, 500, 200, 120), 300, 'whole pixels');
-});
-
 test('titleLayout: the buttons always fit; the needs chip shortens, then the tabs move to a second row', () => {
   assert.deepEqual(titleLayout(380, 2), { tabs: 'inline', chip: 'long' }, 'the default 380px panel');
   assert.deepEqual(titleLayout(370, 2), { tabs: 'inline', chip: 'long' });
@@ -615,27 +493,6 @@ test('titleLayout: the buttons always fit; the needs chip shortens, then the tab
   assert.deepEqual(titleLayout(260, 2), { tabs: 'below', chip: 'short' });
   assert.deepEqual(titleLayout(300, 0), { tabs: 'inline', chip: 'long' }, 'no chip: the tabs fit inline longer');
   assert.deepEqual(titleLayout(280, 0), { tabs: 'below', chip: 'long' });
-});
-
-test('nextBoxH: the reader keeps its height for a change under 2px, so rounding cannot make it shake', () => {
-  assert.equal(nextBoxH(300, 301), 300);
-  assert.equal(nextBoxH(300, 298.6), 300);
-  assert.equal(nextBoxH(300, 302), 302);
-  assert.equal(nextBoxH(300, 250.4), 250, 'whole pixels');
-  assert.equal(nextBoxH(0, 120), 120, 'the first height');
-});
-
-test('fillHeight converges: from what the rest takes (content minus the box drawn), the next frame gives the same height', () => {
-  const view = 600;
-  const rest = 380; // header, train, buttons...: independent of the box
-  let box = 120;
-  const seen = [];
-  for (let i = 0; i < 4; i++) {
-    const content = rest + box; // what the detail measures with this box drawn
-    box = nextBoxH(box, fillHeight(view, content, box, 120));
-    seen.push(box);
-  }
-  assert.deepEqual(seen, [220, 220, 220, 220]);
 });
 
 const hhmm = (iso: string) => {
@@ -684,37 +541,7 @@ test('timelineRows without a timeline counts a live step as the attempt in progr
 test('rowState keeps the round apart from a long step name, so it is never cut', () => {
   const r = readable('t8');
   const long = { ...r, currentStep: 'security-scan-extended', loops: [{ ...r.loops[0]!, from: 'security-scan-extended' }] };
-  assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'round 2/3' });
-});
-
-test('loopLabelAlign anchors the label to the arc end nearer the middle', () => {
-  assert.equal(loopLabelAlign(60, 90), 'end');
-  assert.equal(loopLabelAlign(10, 30), 'start');
-  assert.equal(loopLabelAlign(40, 60), 'start');
-});
-
-test('COFFEE_LINES has 8 to 12 lines, including the espresso and another ticket', () => {
-  assert.ok(COFFEE_LINES.length >= 8 && COFFEE_LINES.length <= 12);
-  assert.ok(COFFEE_LINES.includes('Go make an espresso.') && COFFEE_LINES.includes('Start another ticket!'));
-});
-
-test('coffeeLine is picked from the run id and the step, the same on every refresh', () => {
-  const id = 't7-20261121-062224-638f';
-  assert.equal(coffeeLine(id, 'groom'), COFFEE_LINES[2]);
-  assert.equal(coffeeLine(id, 'plan'), COFFEE_LINES[1]);
-  assert.equal(coffeeLine(id, 'review'), COFFEE_LINES[4]);
-  assert.equal(coffeeLine(id, 'review'), coffeeLine(id, 'review'));
-});
-
-test('runningText says how long the live attempt has run, then a coffee line', () => {
-  const r = readable('t8'); // review#3 live in the timeline
-  const at = Date.parse(stepAttempts(r, 'review').at(-1)!.startedAt!);
-  assert.equal(runningText(r, at + 180000), `review is running for 3m. ${coffeeLine(r.id, 'review')}`);
-});
-
-test('runningText without a start time leaves the duration out', () => {
-  const r = readable('t11'); // implement running, no startedAt, no timeline
-  assert.equal(runningText(r, 0), `implement is running. ${coffeeLine(r.id, 'implement')}`);
+  assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'round 3/3' });
 });
 
 const T8_DRIVER = 't8_driver_a0_b65d';
@@ -835,4 +662,494 @@ test('selectAfterRefresh keeps a listed selection, else takes the one planned at
   assert.equal(selectAfterRefresh([], [], 'b', null), null);
   // listed in all runs but filtered out of the rows: still the selection, as before
   assert.equal(selectAfterRefresh(rows('a', 'b'), rows('a'), 'b', null), 'b');
+});
+
+test('roundOf counts the round the engine is in', () => {
+  const l = { id: 'review', from: 'review', to: 'implement', max: 3, atCap: 'escalate', round: 0 } as Loop;
+  assert.deepEqual(roundOf(l), { n: 1, max: 3, taken: false, atCap: false });
+  assert.deepEqual(roundOf({ ...l, round: 1 }), { n: 2, max: 3, taken: true, atCap: false });
+  assert.deepEqual(roundOf({ ...l, round: 3 }), { n: 3, max: 3, taken: true, atCap: true });
+});
+
+test('roundPill sits on the loop from step', () => {
+  assert.deepEqual(roundPill(byId('t2'), 'review'), { text: 'round 1/3', tone: 'dim' });
+  assert.deepEqual(roundPill(byId('t16'), 'review'), { text: 'round 2/3', tone: 'working' });
+  assert.deepEqual(roundPill(byId('t4'), 'review'), { text: 'round 3/3 · cap', tone: 'blocked' });
+  assert.equal(roundPill(byId('t4'), 'implement'), null);
+});
+
+test('loopSpans lists every loop with its tone', () => {
+  assert.deepEqual(loopSpans(byId('t2')), [{ id: 'review', from: 'review', to: 'implement', tone: 'dim' }]);
+  assert.deepEqual(loopSpans(byId('t3')).length, 1);
+  assert.deepEqual(loopSpans(byId('t5')), []);
+});
+
+test('rowState gives the round the engine is in', () => {
+  assert.equal(rowState({ ...readable('t16'), currentStep: 'review' }).round, 'round 2/3');
+});
+
+test('an agent-blocked run is a running run to the panel', () => {
+  const t13 = byId('t13');
+  assert.equal(needsYou(t13), false);
+  assert.deepEqual(rowState(t13), { tone: 'working', text: 'groom' });
+  assert.equal(newlyNeeding([], [t13]).length, 0);
+  assert.equal(sortRuns([byId('t3'), t13])[0]!.id, t13.id); // running ranks above completed
+});
+
+test('nowTone: the active stop rings blocked when the run needs you or failed, else working', () => {
+  assert.equal(nowTone(byId('t2')), 'blocked'); // a gate waits on you
+  assert.equal(nowTone(byId('t9')), 'blocked'); // failed, with a box
+  assert.equal(nowTone(byId('t15')), 'blocked'); // failed, no attention
+  assert.equal(nowTone(byId('t13')), 'working'); // an agent-blocked run is running
+  assert.equal(nowTone(byId('t8')), 'working');
+});
+
+const WIDE = { narrow: false, unfolded: [] as string[] };
+const rowIds = (rows: PipeRow[]) => rows.map((r) => r.step.id);
+const row = (rows: PipeRow[], id: string) => rows.find((r) => r.step.id === id)!;
+const whereOf = (r: PipeRow) => (r.type === 'hook' ? r.where : r.type);
+const foldedOf = (r: PipeRow) => (r.type === 'stage' ? r.folded.map((s) => s.id) : null);
+
+test('pipelineRows puts before-all hooks first, then each stage in run order, then after-all hooks', () => {
+  const rows = pipelineRows(byId('t8'), WIDE);
+  // the fixture runs lint-plan before implement and security-scan after it
+  assert.deepEqual(rowIds(rows), ['setup', 'intake', 'groom', 'approve-groom', 'plan', 'lint-plan', 'implement', 'security-scan', 'review', 'deliver', 'notify']);
+  assert.deepEqual(rows.map(whereOf), ['before-all', 'stage', 'stage', 'after', 'stage', 'before', 'stage', 'after', 'stage', 'stage', 'after-all']);
+});
+
+test('pipelineRows gives each row its state, gate and the round pill on stage rows', () => {
+  const rows = pipelineRows(byId('t8'), WIDE);
+  assert.deepEqual(
+    rows.map((r) => r.state),
+    ['past', 'past', 'past', 'past', 'past', 'past', 'past', 'past', 'active', 'future', 'future'],
+  );
+  assert.deepEqual(rows.filter((r) => r.gate).map((r) => r.step.id), ['approve-groom']);
+  const review = row(rows, 'review');
+  assert.equal(review.type === 'stage' && review.round?.text, 'round 3/3');
+  const plan = row(rows, 'plan');
+  assert.equal(plan.type === 'stage' && plan.round, null);
+  assert.deepEqual(foldedOf(plan), []);
+});
+
+test('pipelineRows folds a side with more than 3 passed hooks into the stage row, unless the stage is unfolded', () => {
+  const rows = pipelineRows(byId('t16'), WIDE);
+  assert.deepEqual(foldedOf(row(rows, 'implement')), ['lint-baseline', 'deps-audit', 'license-check', 'format-check']);
+  assert.deepEqual(rowIds(rows), ['intake', 'groom', 'plan', 'implement', 'typecheck', 'coverage', 'review', 'deliver']);
+  assert.deepEqual([row(rows, 'typecheck').type, row(rows, 'typecheck').state], ['hook', 'future']);
+  assert.deepEqual([row(rows, 'coverage').type, row(rows, 'coverage').state], ['hook', 'failed']);
+
+  const open = pipelineRows(byId('t16'), { narrow: false, unfolded: ['implement'] });
+  assert.deepEqual(rowIds(open), ['intake', 'groom', 'plan', 'lint-baseline', 'deps-audit', 'license-check', 'format-check', 'implement', 'typecheck', 'coverage', 'review', 'deliver']);
+  assert.deepEqual(open.slice(3, 9).map(whereOf), ['before', 'before', 'before', 'before', 'stage', 'after']);
+  assert.deepEqual(foldedOf(row(open, 'implement')), []);
+});
+
+test('pipelineRows narrow folds every passed hook, before-all into intake and after-all into deliver', () => {
+  const t8 = readable('t8');
+  const done = { ...t8, status: 'completed', steps: t8.steps.map((s) => ({ ...s, status: 'pass' })) } as RunStatusJson;
+  const rows = pipelineRows(done, { narrow: true, unfolded: [] });
+  assert.deepEqual(rowIds(rows), ['intake', 'groom', 'plan', 'implement', 'review', 'deliver']);
+  assert.deepEqual(rows.map(foldedOf), [['setup'], ['approve-groom'], [], ['lint-plan', 'security-scan'], [], ['notify']]);
+  assert.deepEqual(rowIds(pipelineRows(done, { narrow: true, unfolded: ['intake', 'deliver'] })), ['setup', 'intake', 'groom', 'plan', 'implement', 'review', 'deliver', 'notify']);
+});
+
+test('pipelineRows narrow keeps the active gate as a row', () => {
+  const rows = pipelineRows(byId('t2'), { narrow: true, unfolded: [] });
+  const gate = row(rows, 'approve-groom');
+  assert.deepEqual([gate.type, whereOf(gate), gate.state, gate.gate], ['hook', 'after', 'active', true]);
+  assert.deepEqual(foldedOf(row(rows, 'groom')), []);
+});
+
+test('pipelineRows never folds the active step, even when it passed', () => {
+  const t2 = readable('t2');
+  const r = { ...t2, steps: t2.steps.map((s) => (s.id === 'approve-groom' ? { ...s, status: 'pass' } : s)) } as RunStatusJson;
+  const gate = row(pipelineRows(r, { narrow: true, unfolded: [] }), 'approve-groom');
+  assert.deepEqual([gate.type, gate.state], ['hook', 'active']);
+});
+
+test('pipelineRows makes each core step of a multi-step stage a stage row; folded hooks go on the first', () => {
+  const rows = pipelineRows(byId('t17'), WIDE);
+  assert.deepEqual(rowIds(rows), ['intake', 'groom', 'plan', 'prep', 'implement.0', 'implement.1', 'post', 'review', 'deliver']);
+  assert.deepEqual(rows.slice(3, 7).map(whereOf), ['before', 'stage', 'stage', 'after']);
+  assert.deepEqual([row(rows, 'implement.0').state, row(rows, 'implement.1').state], ['past', 'active']);
+
+  const narrow = pipelineRows(byId('t17'), { narrow: true, unfolded: [] });
+  assert.deepEqual(rowIds(narrow), ['intake', 'groom', 'plan', 'implement.0', 'implement.1', 'post', 'review', 'deliver']);
+  assert.deepEqual(foldedOf(row(narrow, 'implement.0')), ['prep']);
+  assert.deepEqual(foldedOf(row(narrow, 'implement.1')), []);
+});
+
+test('pipelineRows lists the nodes of a stage with no core step as before, where its first node appears, unfolded', () => {
+  const t3 = readable('t3');
+  const sketch = { ...t3.steps[0]!, id: 'sketch', stage: 'plan', role: 'node', kind: 'script', status: 'pass' } as Readable['steps'][number];
+  const steps = [...t3.steps.filter((s) => s.stage !== 'plan'), sketch];
+  const rows = pipelineRows({ ...t3, steps } as RunStatusJson, { narrow: true, unfolded: [] });
+  assert.deepEqual(rowIds(rows), ['intake', 'groom', 'implement', 'review', 'deliver', 'sketch']);
+  assert.equal(whereOf(row(rows, 'sketch')), 'before');
+  assert.deepEqual(foldedOf(row(rows, 'groom')), ['approve-groom']);
+});
+
+test('pipelineRows orders stages by where their first core step appears in the run', () => {
+  const t3 = readable('t3');
+  const steps = [...t3.steps.filter((s) => s.stage !== 'plan'), ...t3.steps.filter((s) => s.stage === 'plan')];
+  assert.deepEqual(rowIds(pipelineRows({ ...t3, steps } as RunStatusJson, WIDE)), ['intake', 'groom', 'approve-groom', 'implement', 'review', 'deliver', 'plan']);
+});
+
+test('pipelineRows places a stage at its first core step, not at a node listed earlier', () => {
+  const t8 = readable('t8');
+  const lint = t8.steps.find((s) => s.id === 'lint-plan')!;
+  const steps = t8.steps.filter((s) => s !== lint);
+  steps.splice(steps.findIndex((s) => s.id === 'plan'), 0, lint); // an implement node listed before plan
+  assert.deepEqual(rowIds(pipelineRows({ ...t8, steps } as RunStatusJson, WIDE)).slice(4, 8), ['plan', 'lint-plan', 'implement', 'security-scan']);
+});
+
+test('pipelineRows of the t4 run carries the capped round on review', () => {
+  const review = row(pipelineRows(byId('t4'), WIDE), 'review');
+  assert.deepEqual(review.type === 'stage' && review.round, { text: 'round 3/3 · cap', tone: 'blocked' });
+  assert.equal(review.state, 'active');
+});
+
+test('pipelineRows marks a step that is not current failed when it failed, escalated or broke its contract', () => {
+  const t3 = readable('t3');
+  for (const status of ['fail', 'escalate', 'contract_error'] as const) {
+    const r = { ...t3, steps: t3.steps.map((s) => (s.id === 'plan' ? { ...s, status } : s)) } as RunStatusJson;
+    assert.equal(row(pipelineRows(r, WIDE), 'plan').state, 'failed', status);
+  }
+});
+
+test('pipelineRows shows a loop start that sent the run back, under its cap, as past, not failed', () => {
+  assert.equal(row(pipelineRows(byId('t16'), WIDE), 'review').state, 'past'); // review failed, round 2/3: the loop goes on
+  const t4 = readable('t4'); // review escalated at the cap
+  const capped = { ...t4, currentStep: 'deliver' } as RunStatusJson;
+  assert.equal(row(pipelineRows(capped, WIDE), 'review').state, 'failed');
+  const t3 = readable('t3'); // a loop not taken: a failed review is failed
+  const failed = { ...t3, steps: t3.steps.map((s) => (s.id === 'review' ? { ...s, status: 'fail' } : s)) } as RunStatusJson;
+  assert.equal(row(pipelineRows(failed, WIDE), 'review').state, 'failed');
+});
+
+test('pipelineRows has no active row for a completed run or a current step that is not listed', () => {
+  assert.deepEqual(pipelineRows(byId('t3'), WIDE).filter((r) => r.state === 'active'), []);
+  const lost = { ...readable('t8'), currentStep: 'nope' } as RunStatusJson;
+  assert.deepEqual(pipelineRows(lost, WIDE).filter((r) => r.state === 'active'), []);
+});
+
+test('pipelineRows is empty for an unreadable run and a run with no steps', () => {
+  assert.deepEqual(pipelineRows(byId('t5'), WIDE), []);
+  assert.deepEqual(pipelineRows({ ...readable('t3'), steps: [] } as RunStatusJson, WIDE), []);
+});
+
+test('pipelineSpans gives a loop as the indexes of its from and to stage rows', () => {
+  const r = byId('t4');
+  assert.deepEqual(pipelineSpans(pipelineRows(r, WIDE), r), [{ from: 5, to: 4, tone: 'blocked' }]);
+});
+
+test('pipelineSpans ends a loop on the hook row it targets', () => {
+  const r = byId('t8'); // the loop goes back to lint-plan, the first step of the implement region
+  const rows = pipelineRows(r, WIDE);
+  assert.deepEqual(pipelineSpans(rows, r), [{ from: rowIds(rows).indexOf('review'), to: rowIds(rows).indexOf('lint-plan'), tone: 'working' }]);
+  assert.deepEqual(pipelineSpans(rows, r), [{ from: 8, to: 5, tone: 'working' }]);
+});
+
+test('pipelineSpans ends a loop that targets a folded hook on the row holding it', () => {
+  const r = byId('t16'); // the loop goes back to lint-baseline, folded into implement
+  assert.deepEqual(pipelineSpans(pipelineRows(r, WIDE), r), [{ from: 6, to: 3, tone: 'working' }]);
+  assert.deepEqual(pipelineSpans(pipelineRows(r, { narrow: false, unfolded: ['implement'] }), r), [{ from: 10, to: 3, tone: 'working' }]);
+});
+
+test('pipelineSpans drops a loop whose end is not in the pipeline', () => {
+  const r = readable('t4');
+  const noTo = { ...r, steps: r.steps.filter((s) => s.id !== 'implement') } as RunStatusJson;
+  assert.deepEqual(pipelineSpans(pipelineRows(noTo, WIDE), noTo), []);
+  const noFrom = { ...r, loops: [{ ...r.loops[0]!, from: 'nope' }] } as RunStatusJson;
+  assert.deepEqual(pipelineSpans(pipelineRows(noFrom, WIDE), noFrom), []);
+  const t16 = readable('t16');
+  const noHook = { ...t16, loops: [{ ...t16.loops[0]!, to: 'nope' }] } as RunStatusJson;
+  assert.deepEqual(pipelineSpans(pipelineRows(noHook, WIDE), noHook), []);
+  assert.deepEqual(pipelineSpans([], byId('t5')), []);
+});
+
+test('moveStop walks the pipeline rows that have started', () => {
+  assert.equal(moveStop(byId('t8'), 'groom', 1), 'approve-groom');
+  assert.equal(moveStop(byId('t8'), 'lint-plan', 1), 'implement');
+  // t16: the passed before:implement hooks fold away; typecheck has not started, coverage failed
+  assert.equal(moveStop(byId('t16'), 'implement', 1), 'coverage');
+  assert.equal(moveStop(byId('t16'), 'coverage', 1), 'review');
+});
+
+test('moveStop reaches the hooks of an unfolded stage', () => {
+  assert.equal(moveStop(byId('t16'), 'plan', 1), 'implement');
+  assert.equal(moveStop(byId('t16'), 'plan', 1, ['implement']), 'lint-baseline');
+});
+
+test('moveStop walks the rows a folding (under 320px) pipeline shows', () => {
+  assert.equal(moveStop(byId('t8'), 'groom', 1, [], true), 'plan'); // approve-groom folds into groom
+  assert.equal(moveStop(byId('t8'), 'groom', 1, ['groom'], true), 'approve-groom');
+  assert.equal(moveStop(byId('t8'), 'groom', 1, [], false), 'approve-groom');
+});
+
+test('activeBox names what shows under the active stop', () => {
+  const box = (p: string) => activeBox(byId(p));
+  assert.equal(box('t2'), 'gate');
+  assert.equal(box('t4'), 'cap');
+  assert.equal(box('t12'), 'paused');
+  assert.equal(box('t9'), 'failed');
+  assert.equal(box('t11'), 'stalled');
+  assert.equal(box('t13'), 'agent');
+  assert.equal(box('t16'), 'agent');
+  assert.equal(box('t3'), null);
+  assert.equal(box('t5'), null);
+});
+
+test('agentCard links the active stop to its agent terminal', () => {
+  const now = Date.parse('2026-11-21T04:30:00.000Z');
+  const name = 't16_implement_a2_4a92';
+  const step = readable('t16').steps.find((s) => s.id === 'implement')!;
+  const since = took(step, now);
+  assert.ok(since);
+  assert.deepEqual(agentCard(byId('t16'), [], [], now), { address: null, name, status: 'not open', program: 'Agent', since });
+  const live = [{ address: 'w1:7', name }];
+  const agents = [{ address: 'w1:7', status: 'working', program: { name: 'Claude Code' } }];
+  assert.deepEqual(agentCard(byId('t16'), live, agents, now), { address: 'w1:7', name, status: 'working', program: 'Claude Code', since });
+  assert.equal(agentCard(byId('t16'), live, [], now)!.status, 'open');
+  assert.equal(agentCard(byId('t3'), live, agents, now), null);
+  assert.equal(agentCard(byId('t17'), [], [], now)!.name, 't17_implement-1_a1_0641');
+});
+
+test('agentCard and agentAddress fall back to the attention terminal when the step lists none', () => {
+  const t13 = readable('t13'); // agent blocked in groom; attention.terminal names its terminal
+  const r = { ...t13, terminals: { driver: t13.terminals.driver } } as RunStatusJson;
+  const live = [{ address: 'w1:9', name: 't13_groom_a1_cc4e' }];
+  assert.equal(agentCard(r, live, [], Date.parse('2026-11-21T04:30:00.000Z'))!.name, 't13_groom_a1_cc4e');
+  assert.equal(agentAddress(r, live), 'w1:9');
+});
+
+test('hookNote says where a hook runs, the gate decision and its time', () => {
+  const now = Date.parse('2026-11-21T03:54:45.575Z');
+  const t8 = pipelineRows(byId('t8'), WIDE);
+  assert.equal(hookNote(byId('t8'), row(t8, 'approve-groom'), now), 'after · approved by @zidious');
+  assert.equal(hookNote(byId('t8'), row(t8, 'security-scan'), now), 'after · 34s');
+  assert.equal(hookNote(byId('t8'), row(t8, 'notify'), now), 'after-all');
+  const t2 = pipelineRows(byId('t2'), WIDE);
+  assert.equal(hookNote(byId('t2'), row(t2, 'approve-groom'), Date.parse('2026-11-21T03:54:45.575Z')), 'after · waiting 3h');
+});
+
+test('roundNote gives a loop target past round 1 its round and its latest attempt time', () => {
+  const now = Date.parse('2026-11-21T05:00:00.000Z');
+  assert.equal(roundNote(byId('t4'), 'implement', now), 'round 3 · 4m'); // its third attempt took 3m50s
+  assert.equal(roundNote(byId('t16'), 'lint-baseline', now), 'round 2 · 4s');
+  assert.equal(roundNote(byId('t3'), 'implement', now), '', 'round 1');
+  assert.equal(roundNote(byId('t4'), 'review', now), '', 'a loop start, not its target');
+  const t4 = readable('t4');
+  const untimed = { ...t4, timeline: [] } as RunStatusJson;
+  assert.equal(roundNote(untimed, 'implement', now), 'round 3', 'no time to show');
+});
+
+test('hookNote carries the round of a hook a loop goes back to', () => {
+  const now = Date.parse('2026-11-21T05:00:00.000Z');
+  const r = byId('t16');
+  const open = pipelineRows(r, { narrow: false, unfolded: ['implement'] });
+  assert.equal(hookNote(r, row(open, 'lint-baseline'), now), 'before · round 2 · 4s');
+  assert.equal(hookNote(r, row(open, 'deps-audit'), now), 'before · 15s');
+});
+
+test('unfoldAfterPick opens a picked stage that holds folded hooks, and folds it again when it is closed', () => {
+  const t16 = byId('t16');
+  assert.deepEqual(unfoldAfterPick(t16, WIDE, null, 'implement'), ['implement']);
+  assert.deepEqual(unfoldAfterPick(t16, { narrow: false, unfolded: ['implement'] }, 'implement', 'lint-baseline'), ['implement']);
+  assert.deepEqual(unfoldAfterPick(t16, { narrow: false, unfolded: ['implement'] }, 'implement', null), []);
+  assert.deepEqual(unfoldAfterPick(t16, WIDE, null, 'plan'), []);
+  assert.deepEqual(unfoldAfterPick(byId('t8'), { narrow: true, unfolded: [] }, null, 'intake'), ['intake']);
+  assert.deepEqual(unfoldAfterPick(byId('t8'), { narrow: true, unfolded: ['groom'] }, 'groom', 'plan'), ['groom']);
+});
+
+test('pipelineMarks finds the active row, the last reached row and the row the stop strip opens under', () => {
+  const t16 = pipelineRows(byId('t16'), WIDE);
+  assert.deepEqual(pipelineMarks(t16, null), { active: 3, reached: 3, stripAt: -1 });
+  // a picked visible hook opens its strip on its own row; one folded into its stage, on the stage's row
+  assert.deepEqual(pipelineMarks(t16, 'coverage'), { active: 3, reached: 3, stripAt: 5 });
+  assert.deepEqual(pipelineMarks(t16, 'deps-audit'), { active: 3, reached: 3, stripAt: 3 });
+  assert.deepEqual(pipelineMarks(t16, 'nope'), { active: 3, reached: 3, stripAt: -1 });
+
+  // no active row: the spine is reached up to the last row that is not future
+  assert.deepEqual(pipelineMarks(pipelineRows(byId('t3'), WIDE), 'plan'), { active: -1, reached: 6, stripAt: 3 });
+  const t3 = readable('t3');
+  const undelivered = { ...t3, steps: t3.steps.map((s) => (s.id === 'deliver' ? { ...s, status: 'pending' as const } : s)) };
+  assert.deepEqual(pipelineMarks(pipelineRows(undelivered, WIDE), null), { active: -1, reached: 5, stripAt: -1 });
+
+  assert.deepEqual(pipelineMarks(pipelineRows(byId('t5'), WIDE), 'intake'), { active: -1, reached: -1, stripAt: -1 });
+  assert.deepEqual(pipelineMarks([], null), { active: -1, reached: -1, stripAt: -1 });
+});
+
+test('agentTone colours the agent status Herdr reports', () => {
+  assert.deepEqual(['blocked', 'working', 'idle', 'done', 'open', 'not open'].map(agentTone), [
+    'blocked',
+    'working',
+    'muted',
+    'muted',
+    'muted',
+    'muted',
+  ]);
+});
+
+test('openAgentAt focuses a live agent terminal, else says why it did not', () => {
+  const name = 't16_implement_a2_4a92';
+  const live = [{ address: 'w1:7', name }];
+  assert.deepEqual(openAgentAt(byId('t16'), live, false), { address: 'w1:7' });
+  assert.deepEqual(openAgentAt(byId('t16'), [], false), { error: `${name} is not a live terminal; refresh the panel` });
+  assert.deepEqual(openAgentAt(byId('t16'), live, true), { said: `fixtures: would open ${name}` });
+  assert.equal(openAgentAt(byId('t11'), live, false), null, 'the step has no terminal');
+  assert.equal(openAgentAt(byId('t5'), live, true), null, 'unreadable');
+});
+
+test('agentAddress is the live terminal of the current step, else null: Open terminal is off without one', () => {
+  const name = 't16_implement_a2_4a92';
+  assert.equal(agentAddress(byId('t16'), [{ address: 'w1:7', name }]), 'w1:7');
+  assert.equal(agentAddress(byId('t16'), []), null, 'not live');
+  assert.equal(agentAddress(byId('t11'), [{ address: 'w1:7', name }]), null, 'the step has no terminal');
+  assert.equal(agentAddress(byId('t5'), [{ address: 'w1:7', name }]), null, 'unreadable');
+});
+
+test('boxActions are the attention buttons without open-pane (Open terminal ↗ does that)', () => {
+  assert.deepEqual(boxActions(byId('t2')), ['approve', 'reject']);
+  assert.deepEqual(boxActions(byId('t13')), []);
+  const both = { ...readable('t4'), attention: { ...readable('t4').attention!, actions: ['grant', 'open-pane'] } } as Readable;
+  assert.deepEqual(boxActions(both), ['grant']);
+  assert.deepEqual(boxActions(byId('t8')), []);
+});
+
+test('readerFiles: the box reads the first review file; the strip its picked output, else its round first output', () => {
+  assert.deepEqual(readerFiles(byId('t2'), null, null, null), { box: 'samples/groomed_ticket.md', strip: null });
+  assert.deepEqual(readerFiles(byId('t12'), null, null, null), { box: null, strip: null }, 'nothing to review');
+  assert.deepEqual(readerFiles(byId('t13'), null, null, null), { box: null, strip: null }, 'an agent card reads nothing');
+  const groom = Object.values(stepAttempts(byId('t2'), 'groom').at(-1)!.outputs ?? {});
+  assert.ok(groom.length > 0);
+  assert.equal(groom[0], 'samples/groomed_ticket.md');
+  assert.deepEqual(readerFiles(byId('t2'), 'groom', null, null), { box: 'samples/groomed_ticket.md', strip: null }, 'the box already reads it');
+  assert.deepEqual(readerFiles(byId('t2'), 'groom', null, 'samples/groomed_ticket.md'), { box: 'samples/groomed_ticket.md', strip: null });
+  assert.deepEqual(readerFiles(byId('t2'), 'groom', null, 'x/other.md'), { box: 'samples/groomed_ticket.md', strip: 'x/other.md' });
+  assert.deepEqual(readerFiles(byId('t2'), 'plan', null, null), { box: 'samples/groomed_ticket.md', strip: null }, 'not run: no review fallback');
+  assert.deepEqual(readerFiles(byId('t2'), null, null, 'x/other.md'), { box: 'samples/groomed_ticket.md', strip: null }, 'no stop: no strip');
+});
+
+test('readerMax: the inline reader is at most half the panel', () => {
+  assert.equal(readerMax(600), 300);
+  assert.equal(readerMax(601), 301);
+  assert.equal(readerMax(0), 0);
+});
+
+test('readFullShown: Read full ↗ pops the panel out, so it shows only when docked', () => {
+  assert.equal(readFullShown(false), true);
+  assert.equal(readFullShown(true), false);
+});
+
+test('boxOutside: an active box with no active row in the pipeline shows below it instead', () => {
+  assert.equal(boxOutside(byId('t2'), WIDE), false, 'under its stop');
+  assert.equal(boxOutside(byId('t3'), WIDE), false, 'no box');
+  const lost = { ...readable('t9'), currentStep: 'gone' } as Readable;
+  assert.equal(boxOutside(lost, WIDE), true);
+  assert.equal(boxOutside(byId('t5'), WIDE), false, 'unreadable');
+});
+
+test('readerFiles reads the step outputs of an older perc, and the picked round', () => {
+  const gate = readable('t2');
+  const { timeline: _t, ...older } = gate; // an older perc: the steps' own outputs are read
+  const out = { ...older, steps: gate.steps.map((s) => (s.id === 'groom' ? { ...s, outputs: { groomed_ticket: '/abs/g.md' } } : s)) } as unknown as Readable;
+  assert.equal(readerFiles(out, 'groom', null, null).strip, '/abs/g.md');
+  assert.equal(readerFiles(out, 'intake', null, null).strip, null, 'no outputs: no review fallback');
+  assert.equal(readerFiles(readable('t8'), 'review', 2, null).strip, 'samples/findings.md');
+  assert.equal(readerFiles(readable('t8'), 'review', null, null).strip, null, 'the running round has no outputs yet');
+});
+
+test('slotOpensAgent: the active stop opens the agent while one works there in a live terminal', () => {
+  const name = 't16_implement_a2_4a92';
+  assert.equal(slotOpensAgent(byId('t16'), [{ address: 'w1:7', name }]), true);
+  assert.equal(slotOpensAgent(byId('t16'), []), false, 'not live');
+  const t13 = readable('t13');
+  assert.equal(slotOpensAgent(t13, [{ address: 'w1:2', name: t13.terminals.groom! }]), true, 'a blocked agent');
+  assert.equal(slotOpensAgent(byId('t2'), [{ address: 'w1:1', name: 't2_driver_a0_b90e' }]), false, 'a gate');
+  assert.equal(slotOpensAgent(byId('t5'), []), false);
+});
+
+test('boxAsks and showsOutcome: what the lower half shows besides the history', () => {
+  assert.deepEqual(['t2', 't4', 't12', 't9', 't11', 't13', 't16', 't3', 't14', 't15', 't5'].map((p) => boxAsks(byId(p))), [
+    true, true, true, true, true, false, false, false, false, false, false,
+  ]);
+  assert.deepEqual(['t2', 't16', 't3', 't14', 't15', 't5'].map((p) => showsOutcome(byId(p))), [false, false, true, false, true, true]);
+});
+
+test('programInitial is the badge letter of the agent program', () => {
+  assert.equal(programInitial('Claude Code'), 'C');
+  assert.equal(programInitial('codex'), 'C');
+  assert.equal(programInitial('  amp'), 'A');
+  assert.equal(programInitial(''), '?');
+});
+
+test('agentNote says the agent has not started when the active stop has no agent terminal', () => {
+  assert.equal(agentNote(null), 'agent not started');
+  assert.equal(agentNote({ address: null, name: 'x', status: 'not open', program: 'Agent', since: '' }), null);
+});
+
+test('boxDriver: a failed or stalled box offers the driver peek when there is one', () => {
+  const t11 = readable('t11');
+  const drv = 't11_driver_a0_1111';
+  const stalled = { ...t11, driver: { ...t11.driver, terminal: drv }, terminals: { driver: drv } } as Readable;
+  assert.deepEqual(boxDriver(stalled), { terminal: drv, label: 'Driver pane ↗' });
+  const t9 = readable('t9');
+  const failed = { ...t9, driver: { ...t9.driver, terminal: drv }, terminals: { driver: drv } } as Readable;
+  assert.deepEqual(boxDriver(failed), { terminal: drv, label: 'Driver pane ↗' });
+  assert.equal(boxDriver(byId('t11')), null, 'no live driver');
+  assert.equal(boxDriver(byId('t2')), null, 'a gate: the header has it');
+  assert.equal(boxDriver(byId('t16')), null);
+});
+
+test('historyLabel counts the attempts, singular for one, none for an empty history', () => {
+  assert.equal(historyLabel(byId('t3'), false), 'History ▸ 7 attempts');
+  assert.equal(historyLabel(byId('t3'), true), 'History ▾ 7 attempts');
+  assert.equal(historyLabel(byId('t14'), false), 'History ▸ 1 attempt');
+  assert.equal(historyLabel(byId('t5'), false), 'History ▸');
+  assert.equal(historyLabel(byId('t5'), true), 'History ▾');
+  assert.equal(historyLabel(byId('t4'), false), 'History ▸ 10 attempts', 'its loop-cap row is not an attempt');
+});
+
+test('columns: two columns from 720px wide (the window, a wide panel), else one', () => {
+  assert.equal(columns(719), 'one');
+  assert.equal(columns(720), 'two');
+  assert.equal(columns(860), 'two');
+  assert.equal(columns(380), 'one');
+});
+
+test('panelShape: narrow, columns and fold all measure design px, so they agree at any zoom', () => {
+  assert.deepEqual(panelShape(570, 1.5), { narrow: true, cols: 'one', fold: false });
+  assert.deepEqual(panelShape(1080, 1.5), { narrow: false, cols: 'two', fold: false });
+  assert.deepEqual(panelShape(750, 1.5), { narrow: true, cols: 'one', fold: false });
+  assert.deepEqual(panelShape(720, 1), { narrow: false, cols: 'two', fold: false });
+  assert.deepEqual(panelShape(380, 1), { narrow: true, cols: 'one', fold: false });
+  assert.deepEqual(panelShape(700, 0.8), { narrow: false, cols: 'two', fold: false });
+  assert.deepEqual(panelShape(575.99, 0.8), { narrow: false, cols: 'two', fold: false }); // 720 at zoom 0.8, measured in floats
+});
+
+test('panelShape folds every passed hook only under 320 design px; the 330px left column of two does not', () => {
+  assert.equal(panelShape(319, 1).fold, true);
+  assert.equal(panelShape(320, 1).fold, false);
+  assert.equal(panelShape(450, 1.5).fold, true); // 300 design px
+  assert.equal(panelShape(255.99, 0.8).fold, false); // 320 at zoom 0.8
+});
+
+test('detailParts: one column keeps the box and strip under their rows; two columns move them to the right column', () => {
+  const one = (stopSel: string | null) => ({ cols: 'one' as const, narrow: false, unfolded: [] as string[], stopSel });
+  const two = (stopSel: string | null) => ({ cols: 'two' as const, narrow: true, unfolded: [] as string[], stopSel });
+  assert.deepEqual(detailParts(byId('t2'), one(null)), { under: true, side: [] }, 'the gate box sits under its stop');
+  assert.deepEqual(detailParts(byId('t2'), one('groom')), { under: true, side: [] }, 'the strip sits under its row');
+  assert.deepEqual(detailParts(byId('t3'), one('review')), { under: true, side: ['outcome'] });
+  const lost = { ...readable('t9'), currentStep: 'gone' } as Readable;
+  assert.deepEqual(detailParts(lost, one(null)), { under: true, side: ['box'] }, 'no active row: the box shows below');
+
+  assert.deepEqual(detailParts(byId('t2'), two(null)), { under: false, side: ['box'] }, 'the gate box moves right');
+  assert.deepEqual(detailParts(byId('t2'), two('groom')), { under: false, side: ['box', 'strip'] }, 'the strip under it');
+  assert.deepEqual(detailParts(lost, two(null)), { under: false, side: ['box'] });
+  assert.deepEqual(detailParts(byId('t16'), two(null)), { under: false, side: ['box'] }, 'the agent card moves right');
+  assert.deepEqual(detailParts(byId('t3'), two(null)), { under: false, side: ['outcome'] });
+  assert.deepEqual(detailParts(byId('t3'), two('review')), { under: false, side: ['outcome', 'strip'] });
+  assert.deepEqual(detailParts(byId('t3'), two('gone')), { under: false, side: ['outcome'] }, 'a stop not in the run');
+  assert.deepEqual(detailParts(byId('t5'), two(null)), { under: false, side: ['outcome'] }, 'unreadable');
 });

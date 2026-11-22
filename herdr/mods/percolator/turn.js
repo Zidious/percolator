@@ -1,9 +1,26 @@
-// The lower half: what the selected run needs from you (or what it is doing), the reader, history and the actions.
+// What sits under the selected run's active stop (the agent card, or the box saying what the run needs from you) and
+// the lower half under the pipeline: how a finished run ended, and the history fold.
 
 import { div } from 'gpui-kit';
-import { v_flex, h_flex, TextView, Textarea } from 'gpui-base';
-import { ago, attentionTag, runningText, terminalCommands, timelineRows } from './model.js';
-import { link, button, own, scrollY } from './ui.js';
+import { v_flex, h_flex, Textarea } from 'gpui-base';
+import { agents, terminals } from 'herdr';
+import {
+  activeBox,
+  agentAddress,
+  agentCard,
+  agentNote,
+  agentTone,
+  ago,
+  attentionTag,
+  boxActions,
+  boxAsks,
+  boxDriver,
+  historyLabel,
+  programInitial,
+  timelineRows,
+} from './model.js';
+import { stopStrip } from './pipeline.js';
+import { button, inlineReader, own, scrollY } from './ui.js';
 
 const LABELS = {
   approve: ['Approve', 'ok'],
@@ -11,34 +28,10 @@ const LABELS = {
   grant: ['Grant a round & resume', 'ok'],
   resume: ['Resume', 'ok'],
   clean: ['Clean up', ''],
-  'open-pane': ['Go to agent pane', ''],
 };
 
 const tag = (label, c) =>
   div().flex_none().px(6).py(1).rounded(4).text_size(10).font_semibold().border(1).border_color(c).text_color(c).child(label);
-
-// The reader fills what the detail has left over (p.boxH, at least a few lines; below that
-// the detail scrolls), and scroll on their own past that.
-const frame = (p, t, id) =>
-  v_flex().id(id).flex_none().h(p.boxH).rounded(6).bg(t.background).border(1).border_color(t.border);
-
-function reader(p, t) {
-  const md = p.files[p.file];
-  return v_flex()
-    .flex_none()
-    .gap(4)
-    .child(div().text_size(11).text_color(t.muted).child(p.file.split(/[\\/]/).pop()))
-    .child(
-      own(
-        frame(p, t, 'reader')
-          .overflow_y_scrollbar()
-          .px(14)
-          .py(10)
-          .text_size(12)
-          .child(TextView.markdown(`md-${p.file}`, md ?? 'loading…')),
-      ),
-    );
-}
 
 const toneColor = (t, tone) => (tone ? t[tone] : t.dim);
 
@@ -67,12 +60,15 @@ function historyList(t, r) {
     );
 }
 
-/** "Run history": a disclosure row like Terminal commands, closed by default; open, a fixed 150px scrolling box (so the reader keeps the height). */
-function historySection(p, t, r) {
+/** "History ▸ N attempts" under the pipeline, closed by default; open, the run history in a box that scrolls past 200px. */
+export function historyFold(p, t, r) {
   const open = p.historyOpen;
   return v_flex()
     .flex_none()
     .gap(6)
+    .pt(8)
+    .border_t(1)
+    .border_color(t.border)
     .child(
       own(
         h_flex()
@@ -80,29 +76,28 @@ function historySection(p, t, r) {
           .gap(6)
           .items_center()
           .cursor_pointer()
-          .text_size(11)
+          .text_size(11.5)
           .text_color(t.muted)
           .hover((s) => s.text_color(t.foreground))
           .on_click((_e, cx) => {
             p.historyOpen = !p.historyOpen;
             cx.notify();
           })
-          .child(div().w(12).flex_none().text_size(12).child(open ? '▾' : '▸'))
-          .child('Run history'),
+          .child(historyLabel(r, open)),
       ),
     )
     .when(open, (el) =>
       el.child(
         own(
           v_flex()
-            .id('history-small-frame')
+            .id('history-frame')
             .flex_none()
-            .h(150)
+            .max_h(200)
             .rounded(6)
             .bg(t.background)
             .border(1)
             .border_color(t.border)
-            .child(scrollY('history-small', historyList(t, r))),
+            .child(scrollY('history', historyList(t, r))),
         ),
       ),
     );
@@ -122,7 +117,7 @@ function rejectBox(p, t) {
           .rounded(6)
           .border(1)
           .border_color(t.blocked)
-          .bg(t.background)
+          .bg(t.surface)
           .text_size(12)
           .text_color(t.foreground)
           .child(Textarea.new(p.feedback).w_full().h_full()),
@@ -130,6 +125,7 @@ function rejectBox(p, t) {
     )
     .child(
       h_flex()
+        .flex_wrap()
         .gap(8)
         .items_center()
         .child(button(t, 'reject-send', 'Send', 'no', (_e, cx) => p.sendReject(cx), { busy: p.busy === 'reject', disabled: Boolean(p.busy) }))
@@ -138,103 +134,81 @@ function rejectBox(p, t) {
     );
 }
 
-/** "Terminal commands": a disclosure row; open, one copyable command per line. The choice lives on the panel. */
-function commandsSection(p, t, cmds, narrow) {
-  const open = p.cmdsOpen;
-  return v_flex()
-    .flex_none()
-    .gap(6)
-    .child(
-      own(
-        h_flex()
-          .id('cmds-toggle')
-          .gap(6)
-          .items_center()
+/** `el` with the error of the last action, or what fixtures mode would have done. */
+function said(p, t, el) {
+  return el
+    .when(Boolean(p.actError), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(p.actError)))
+    .when(Boolean(p.said), (el) => el.child(div().text_size(11).text_color(t.accent).child(p.said)));
+}
+
+/** The agent working the active stop: its program, Herdr's status for it, its terminal; a click opens the terminal.
+ *  Dim and inert while the terminal is not live. Under the stop (`narrow`) the link says just Open ↗. */
+function agentBox(p, t, card, narrow) {
+  const on = Boolean(card.address);
+  return own(
+    h_flex()
+      .id('agent-card')
+      .mt(2)
+      .mb(8)
+      .px(9)
+      .py(6)
+      .gap(8)
+      .items_center()
+      .rounded(7)
+      .bg(t.background)
+      .border(1)
+      .border_color(on ? t.working : t.border)
+      .text_size(11.5)
+      .text_color(on ? t.foreground : t.dim)
+      .when(on, (el) =>
+        el
           .cursor_pointer()
-          .text_size(11)
-          .text_color(t.muted)
-          .hover((s) => s.text_color(t.foreground))
+          .hover((s) => s.bg(t.hover))
           .on_click((_e, cx) => {
-            p.cmdsOpen = !p.cmdsOpen;
+            p.openAgent();
             cx.notify();
-          })
-          .child(div().w(12).flex_none().text_size(12).child(open ? '▾' : '▸'))
-          .child('Terminal commands'),
-      ),
-    )
-    .when(open, (el) =>
-      el.children(
-        cmds.map((c, i) =>
-          h_flex()
-            .gap(8)
-            .items_center()
-            .child(
-              div()
-                .flex_1()
-                .min_w(0)
-                .px(8)
-                .py(4)
-                .rounded(4)
-                .bg(t.raised)
-                .text_size(11)
-                .font_family('monospace')
-                .text_color(t.foreground)
-                .when(!narrow, (el) => el.truncate())
-                .child(c),
-            )
-            .child(
-              link(t, `copy-${i}`, p.copied === c ? 'Copied' : 'Copy', (_e, cx) => {
-                cx.write_to_clipboard(c);
-                p.copied = c;
-                cx.notify();
-              }),
-            ),
-        ),
-      ),
-    );
+          }),
+      )
+      .child(
+        div()
+          .flex_none()
+          .size(18)
+          .rounded(4)
+          .bg(t.raised)
+          .flex()
+          .items_center()
+          .justify_center()
+          .text_size(10)
+          .font_semibold()
+          .child(programInitial(card.program)),
+      )
+      .child(
+        v_flex()
+          .flex_1()
+          .min_w(0)
+          .child(
+            h_flex()
+              .min_w(0)
+              .gap(4)
+              .child(div().flex_none().child(`${card.program} ·`))
+              .child(div().min_w(0).truncate().text_color(t[agentTone(card.status)]).child(card.status)),
+          )
+          .child(div().min_w(0).truncate().text_size(10.5).text_color(t.muted).child(card.since ? `${card.name} · ${card.since}` : card.name)),
+      )
+      .child(div().flex_none().font_semibold().text_color(on ? t.working : t.dim).child(narrow ? 'Open ↗' : 'Open terminal ↗')),
+  );
 }
 
-function banner(p, t, r, narrow) {
+/** The box of a run that needs you: the tag, the message and its age, the detail, the file to review, the buttons.
+ *  With `fill` (the right column of two) its reader takes the height left. */
+function attentionBox(p, t, r, kind, narrow, fill) {
   const a = r.attention;
-  const now = Date.now();
-  if (a) {
-    return h_flex()
-      .gap(8)
-      .items_center()
-      .child(tag(attentionTag(a.kind), t.blocked))
-      .child(div().min_w(0).text_size(13).font_semibold().when(!narrow, (el) => el.truncate()).child(a.message))
-      .child(div().flex_none().text_size(11).text_color(t.dim).child(`${ago(a.since, now)} ago`));
-  }
-  if (r.status === 'running') {
-    const term = r.terminals?.[r.currentStep];
-    return h_flex()
-      .flex_wrap()
-      .gap(8)
-      .items_center()
-      .child(tag('RUNNING', t.working))
-      .child(div().text_size(13).child(runningText(r, now)))
-      .when(Boolean(p.addressOf(term)), (el) => el.child(link(t, 'watch', 'Watch agent ↗', () => p.focusTerminal(term))));
-  }
-  if (r.status === 'completed') {
-    const pr = r.pr?.url;
-    return h_flex()
-      .gap(8)
-      .items_center()
-      .child(tag('DELIVERED', t.done))
-      .child(div().text_size(13).child(pr ? `Opened ${pr.replace(/^https:\/\/github\.com\//, '')}` : 'Done.'));
-  }
-  if (r.status === 'unreadable') {
-    return h_flex().gap(8).items_center().child(tag('UNREADABLE', t.muted)).child(div().min_w(0).text_size(13).truncate().child(r.error));
-  }
-  return h_flex().gap(8).items_center().child(tag(r.status.toUpperCase(), t.muted));
-}
-
-export function turn(p, t, r, narrow) {
-  const a = r.attention;
-  const acts = a?.actions ?? [];
-  const cmds = terminalCommands(r);
-  const say = p.said ? div().text_size(11).text_color(t.accent).child(p.said) : null;
+  const acts = boxActions(r);
+  const card = agentCard(r, terminals(), agents(), Date.now());
+  const live = Boolean(agentAddress(r, terminals()));
+  const drv = boxDriver(r);
   const buttons = h_flex()
+    .flex_none()
     .flex_wrap()
     .gap(8)
     .items_center()
@@ -246,20 +220,92 @@ export function turn(p, t, r, narrow) {
         }),
       ),
     )
-    .when(Boolean(a?.commentUrl), (el) => el.child(button(t, 'github', 'GitHub ↗', '', (_e, cx) => cx.open_url(a.commentUrl))));
-  return v_flex()
-    .flex_none()
+    .when(Boolean(a.commentUrl), (el) => el.child(button(t, 'github', 'GitHub ↗', '', (_e, cx) => cx.open_url(a.commentUrl))))
+    .when(live, (el) => el.child(button(t, 'open-terminal', 'Open terminal ↗', '', () => p.openAgent())))
+    .when(Boolean(drv), (el) => el.child(button(t, 'box-driver', drv.label, '', () => p.peekDriver())));
+  const grow = fill && Boolean(p.boxFile);
+  const box = v_flex()
+    .when(grow, (el) => el.flex_1().min_h(0))
+    .when(!grow, (el) => el.flex_none())
+    .mt(2)
+    .mb(8)
+    .px(9)
+    .py(8)
+    .gap(8)
+    .rounded(7)
+    .bg(t.background)
+    .border(1)
+    .border_color(t.blocked)
+    .child(
+      // narrow: the tag and the age on a line of their own, so the message wraps at its words, not inside them
+      h_flex()
+        .flex_none()
+        .gap(8)
+        .items_center()
+        .child(tag(attentionTag(kind), t.blocked))
+        .when(!narrow, (el) => el.child(div().flex_1().min_w(0).text_size(12.5).font_semibold().child(a.message)))
+        .when(narrow, (el) => el.child(div().flex_1()))
+        .child(div().flex_none().text_size(11).text_color(t.dim).child(`${ago(a.since, Date.now())} ago`)),
+    )
+    .when(narrow, (el) => el.child(div().text_size(12.5).font_semibold().child(a.message)))
+    .when(Boolean(a.detail), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(a.detail)))
+    .when(Boolean(card), (el) =>
+      el.child(
+        h_flex()
+          .gap(4)
+          .text_size(11)
+          .text_color(t.muted)
+          .child(div().flex_none().child(`${card.program} ·`))
+          .child(div().flex_none().text_color(t[agentTone(card.status)]).child(card.status))
+          .child(div().min_w(0).truncate().child(`· ${card.name}`)),
+      ),
+    )
+    .when(Boolean(p.boxFile), (el) => el.child(inlineReader(p, t, p.boxFile, 'box-reader', grow)))
+    .when(acts.length > 0 || Boolean(a.commentUrl) || live || Boolean(drv), (el) => el.child(buttons))
+    .when(p.rejecting, (el) => el.child(rejectBox(p, t)));
+  return said(p, t, box);
+}
+
+/** What shows under the active stop (main.js hands it to the pipeline as `p.activeSlot`), or at the top of the right
+ *  column of two (`fill`: its reader takes the height left). */
+export function activeSlot(p, t, r, narrow, fill = false) {
+  const kind = activeBox(r);
+  if (kind === null) return div();
+  if (kind === 'agent') {
+    const card = agentCard(r, terminals(), agents(), Date.now());
+    if (!card) return div().mt(2).mb(8).text_size(11).text_color(t.dim).child(agentNote(card));
+    return agentBox(p, t, card, narrow);
+  }
+  return attentionBox(p, t, r, kind, narrow, fill);
+}
+
+/** How a run with nothing under its active stop stands: delivered, unreadable, or its status. */
+function outcome(t, r) {
+  if (r.status === 'completed') {
+    const pr = r.pr?.url;
+    return h_flex()
+      .gap(8)
+      .items_center()
+      .child(tag('DELIVERED', t.done))
+      .child(div().min_w(0).truncate().text_size(12.5).child(pr ? `Opened ${pr.replace(/^https:\/\/github\.com\//, '')}` : 'Done.'));
+  }
+  if (r.status === 'unreadable') {
+    return h_flex().gap(8).items_center().child(tag('UNREADABLE', t.muted)).child(div().min_w(0).text_size(12.5).truncate().child(r.error));
+  }
+  return h_flex().gap(8).items_center().child(tag(r.status.toUpperCase(), t.muted));
+}
+
+/** The lower half (one column) or the right column's body (two, `fill`): the parts detailParts puts there (the active
+ *  box, how a finished run ended, the picked stop's strip), then the history fold. */
+export function turn(p, t, r, narrow, side, fill = false) {
+  const part = (x) => (x === 'box' ? activeSlot(p, t, r, narrow, fill) : x === 'outcome' ? outcome(t, r) : stopStrip(p, t, r, fill));
+  const body = v_flex()
+    .when(fill, (el) => el.flex_1().min_h(0))
+    .when(!fill, (el) => el.flex_none())
     .px(16)
-    .pt(12)
+    .pt(8)
     .pb(12)
     .gap(10)
-    .child(banner(p, t, r, narrow))
-    .when(Boolean(a?.detail), (el) => el.child(div().text_size(12).text_color(t.muted).child(a.detail)))
-    .when(Boolean(p.file), (el) => el.child(reader(p, t)))
-    .when(p.rejecting, (el) => el.child(rejectBox(p, t)))
-    .when(acts.length > 0, (el) => el.child(buttons))
-    .when(Boolean(p.actError), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(p.actError)))
-    .when(Boolean(say), (el) => el.child(say))
-    .child(historySection(p, t, r))
-    .when(cmds.length > 0, (el) => el.child(commandsSection(p, t, cmds, narrow)));
+    .children(side.map(part));
+  return (boxAsks(r) ? body : said(p, t, body)).child(historyFold(p, t, r));
 }
