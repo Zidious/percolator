@@ -17,12 +17,16 @@ import {
   setShared,
   settings,
   shared,
+  terminals,
   theme,
 } from 'herdr';
 import {
   BOARD_RATIO,
   actionArgv,
+  activeBox,
+  agentAddress,
   boardHeight,
+  boxActions,
   deleteArgv,
   deleteCommand,
   deleteCommandIds,
@@ -32,9 +36,7 @@ import {
   finishedNotice,
   dragBoard,
   driverPeek,
-  fillHeight,
   findNode,
-  nextBoxH,
   titleLayout,
   unfoldAfterPick,
   moveRow,
@@ -42,7 +44,8 @@ import {
   needsCount,
   ownsCommands,
   readRatio,
-  readerPath,
+  readerFiles,
+  readerMax,
   resolvePath,
   runningCount,
   selectAfterDelete,
@@ -54,7 +57,7 @@ import {
 import { mark } from './mark.js';
 import { board } from './board.js';
 import { header, pipeline } from './pipeline.js';
-import { turn } from './turn.js';
+import { activeSlot, turn } from './turn.js';
 import { addressOf, link, own } from './ui.js';
 import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
 
@@ -64,7 +67,6 @@ const WINDOW = 'percolator.window'; // shared: the open window's overlay id, els
 const RATIO = 'percolator.boardRatio'; // shared: the board's height as a ratio of the area under the title bar
 const OLD_RATIO = 'board.ratio'; // localStorage, per copy: read when nothing is shared yet
 const MIN_ROWS = { narrow: 106, wide: 72 }; // two rows of the board, in design px
-const MIN_BOX = 120; // the reader's least height; below it the detail scrolls instead
 const zoom = () => Number(settings()?.zoom) || 1;
 const folderOf = (file) => file.replace(/[\\/][^\\/]*$/, '');
 
@@ -81,7 +83,8 @@ export default class Percolator extends View {
     this.stopSel = null;
     this.roundSel = null; // the attempt number picked in the stop strip; null = the latest
     this.unfolded = []; // the selected run's stages whose folded hooks show as rows
-    this.file = null;
+    this.file = null; // the strip's file, read under the picked stop
+    this.boxFile = null; // the file to review, read in the attention box
     this.files = {};
     this.width = 900;
     this.busy = null;
@@ -90,8 +93,6 @@ export default class Percolator extends View {
     this.notice = null; // beside Delete finished runs ↗, seen with or without a selection
     this.deleting = null; // { ids, next, doneAt? }: the delete the owner confirmed and the row to select after it
     this.fetches = 0;
-    this.copied = null;
-    this.cmdsOpen = false;
     this.historyOpen = false;
     this.rejecting = false;
     this.rejectError = null;
@@ -100,10 +101,6 @@ export default class Percolator extends View {
     // Heights in design pixels (zoom 1), measured after each layout.
     this.area = 600; // under the title bar
     this.boardPx = 0; // the board
-    this.detailH = 400; // the detail's viewport
-    this.rest = 0; // what the detail's content takes besides the reader
-    this.boxH = MIN_BOX; // the reader's height, as drawn in the last frame
-    this.boxDrawn = false; // whether the reader was drawn in the last frame
     this.drag = null; // { y, px } while the divider is held
     this.boardScroll = ScrollHandle.new();
     const f = shared('percolator.focus');
@@ -269,31 +266,45 @@ export default class Percolator extends View {
     this.syncReader(cx);
   }
 
-  /** Points the reader at what the run needs read now (readerPath, or an output picked in the strip) and reads it again:
-   *  the same path can hold new text (a re-groom rewrites groomed_ticket.md). */
+  /** Points the readers at what the run needs read now (readerFiles: the file to review in the attention box, the
+   *  strip's output under the picked stop) and reads them again: the same path can hold new text (a re-groom rewrites
+   *  groomed_ticket.md). */
   syncReader(cx) {
     const r = this.current();
-    const raw = (this.stopSel && this.outPick) || (r ? readerPath(r, this.stopSel, this.roundSel) : null);
-    const path = raw ? this.resolve(raw) : null;
-    this.file = path;
-    if (!path) return;
-    if (this.files[path] === undefined) this.files[path] = null;
-    cx.spawn(async (cx) => {
-      const text = await readTextFile(path).catch(() => null);
-      this.files[path] = text ?? `_${path} could not be read._`;
-      cx.notify();
-    });
+    const raw = r ? readerFiles(r, this.stopSel, this.roundSel, this.outPick ?? null) : { box: null, strip: null };
+    this.file = raw.strip ? this.resolve(raw.strip) : null;
+    this.boxFile = raw.box ? this.resolve(raw.box) : null;
+    for (const path of new Set([this.file, this.boxFile])) {
+      if (!path) continue;
+      if (this.files[path] === undefined) this.files[path] = null;
+      cx.spawn(async (cx) => {
+        const text = await readTextFile(path).catch(() => null);
+        this.files[path] = text ?? `_${path} could not be read._`;
+        cx.notify();
+      });
+    }
   }
 
-  /** A live terminal by its perc name (or address); null when none is live. */
-  addressOf(term) {
-    return addressOf(term);
+  /** The inline readers' greatest height, in design px: half the panel. */
+  readerMaxH() {
+    return readerMax(this.area);
   }
 
-  /** Focuses a terminal perc names: pane.focus takes Herdr's address. */
+  /** What the pipeline draws under the active stop. */
+  activeSlot(t, r, narrow) {
+    return activeSlot(this, t, r, narrow);
+  }
+
+  /** Focuses a terminal perc names (or Herdr addresses) as an agent: agent.focus takes Herdr's address. */
   focusTerminal(term) {
     const terminal = addressOf(term);
-    if (terminal) command('pane.focus', { terminal });
+    if (terminal) command('agent.focus', { terminal });
+  }
+
+  /** Opens the selected run's active agent: its card, its stop and Enter call this. */
+  openAgent() {
+    const r = this.current();
+    if (r) this.focusTerminal(agentAddress(r, terminals()));
   }
 
   /** Peeks at the run's driver terminal: closing a peek leaves the driver running (closing a pane would end it). */
@@ -318,7 +329,6 @@ export default class Percolator extends View {
     if (!r || this.busy) return;
     this.actError = null;
     this.said = null;
-    if (action === 'open-pane') return this.focusTerminal(r.attention?.terminal);
     if (action === 'reject') {
       this.rejecting = true;
       this.feedback.focus();
@@ -445,7 +455,7 @@ export default class Percolator extends View {
   /** A key press (or `percolator.key/<key>`); true when it did something. */
   key(key, cx) {
     const r = this.current();
-    const acts = r?.attention?.actions ?? [];
+    const acts = r ? boxActions(r) : [];
     if (key === 'up' || key === 'down') {
       const id = moveRow(this.rows(), this.sel, key === 'up' ? -1 : 1);
       if (id) {
@@ -458,6 +468,7 @@ export default class Percolator extends View {
     else if (key === 'r' && acts.includes('reject')) this.act('reject', cx);
     else if (key === 'g' && acts.includes('grant')) this.act('grant', cx);
     else if (key === 'g' && acts.includes('resume')) this.act('resume', cx);
+    else if (key === 'enter' && r && activeBox(r) === 'agent') this.openAgent();
     else if (key === 'escape') {
       if (this.rejecting) this.closeReject();
       else if (this.stopSel) this.pickStop(null, cx);
@@ -511,20 +522,6 @@ export default class Percolator extends View {
     if (!this.rows().some((r) => r.id === f.run)) this.filter = 'all';
     this.select(f.run, cx);
     this.revealRow();
-  }
-
-  /** The reader's height: what the detail has left over, at least MIN_BOX. Worked out
-   *  from the viewport and `rest` only (neither depends on it), and kept unless it moves 2px, so it cannot oscillate. */
-  boxHeight() {
-    return this.rest ? nextBoxH(this.boxH, fillHeight(this.detailH, this.rest, 0, MIN_BOX)) : this.boxH;
-  }
-
-  /** The detail's content was laid out with the box drawn last (if any): what the rest takes is the content minus that box. */
-  measureContent(size, cx) {
-    const rest = Math.round(size.height / zoom()) - (this.boxDrawn ? this.boxH : 0);
-    if (rest === this.rest) return;
-    this.rest = rest;
-    cx.notify();
   }
 
   /** Keeps a measured height in design pixels (Herdr reports them zoomed); a change draws again. */
@@ -682,7 +679,7 @@ export default class Percolator extends View {
       .bg(t.chrome)
       .text_size(10.5)
       .text_color(t.dim)
-      .children(['↑↓ runs', '←→ stops', 'a approve', 'r reject', 'g grant / resume', 'esc close'].map((h) => div().child(h)));
+      .child(div().min_w(0).truncate().child('↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · esc close'));
   }
 
   /** The placeholder while nothing can be shown: not linked yet, or loading. */
@@ -703,15 +700,13 @@ export default class Percolator extends View {
       .child(div().text_size(12).text_color(t.dim).child(this.error ? '' : 'Loading…'));
   }
 
-  // The measured frames (area, board-frame, detail-frame, detail-body) are drawn from the first frame on, whatever the
-  // state: Herdr reports sizes only for elements it has had since the view's first frame.
+  // The measured frames (area, board-frame) are drawn from the first frame on, whatever the state: Herdr reports sizes
+  // only for elements it has had since the view's first frame.
   body(t, narrow) {
     const ready = this.conn !== 'missing' && this.loaded;
     const r = ready ? this.current() : null;
     const rows = ready ? this.rows() : [];
     const boardMax = boardHeight(this.boardRatio(), this.area, this.minBoard(narrow));
-    this.boxH = this.boxHeight(); // the box drawn in this frame; measureContent subtracts it after layout
-    this.boxDrawn = Boolean(r && this.file); // only the reader is drawn at boxH
     return v_flex()
       .id('area')
       .flex_1()
@@ -734,7 +729,6 @@ export default class Percolator extends View {
           .flex_1()
           .min_h(0)
           .relative()
-          .on_size_change((size, cx) => this.measured('detailH', size, cx))
           .child(
             v_flex()
               .id('detail')
@@ -745,7 +739,6 @@ export default class Percolator extends View {
                 v_flex()
                   .id('detail-body')
                   .flex_none()
-                  .on_size_change((size, cx) => this.measureContent(size, cx))
                   .when(!ready, (el) => el.min_h_full().child(this.placeholder(t)))
                   .when(Boolean(r), (el) =>
                     el

@@ -3,8 +3,9 @@
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { ago, canPick, driverPeek, hookNote, needsYou, pipelineMarks, pipelineRows, pipelineSpans, roundView, ticketTitle, took } from './model.js';
-import { link, own } from './ui.js';
+import { terminals } from 'herdr';
+import { activeBox, agentAddress, ago, canPick, driverPeek, hookNote, needsYou, pipelineMarks, pipelineRows, pipelineSpans, roundView, ticketTitle, took } from './model.js';
+import { inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
 const SPINE = 24;
@@ -109,11 +110,13 @@ function spine(t, i, n, last, between, stop) {
 /** The colour the active stop rings in: blocked when the run waits on you. */
 const nowColor = (t, r) => (needsYou(r) ? t.blocked : t.working);
 
-function stageStop(t, r, row, picked) {
+function stageStop(p, t, r, row, picked) {
   const gate = row.gate;
   if (row.state === 'active') {
     const c = nowColor(t, r);
-    return div()
+    // an agent at work: the stop opens its terminal, as its card does
+    const opens = activeBox(r) === 'agent' && Boolean(agentAddress(r, terminals()));
+    const stop = div()
       .size(24)
       .rounded(gate ? 4 : 12)
       .border(2)
@@ -123,6 +126,18 @@ function stageStop(t, r, row, picked) {
       .items_center()
       .justify_center()
       .child(div().size(9).rounded(gate ? 2 : 5).bg(c));
+    if (!opens) return stop;
+    return own(
+      stop
+        .id('now-stop')
+        .cursor_pointer()
+        .tooltip('Open terminal')
+        .on_click((_e, cx) => {
+          p.openAgent();
+          cx.stop_propagation();
+          cx.notify();
+        }),
+    );
   }
   const fill = row.state === 'past' ? t.accent : row.state === 'failed' ? t.blocked : null;
   const dot = div()
@@ -236,7 +251,7 @@ export function pipeline(p, t, r, narrow) {
               }),
             )
             .child(gutter(t, spans, i, false))
-            .child(spine(t, i, n, last, false, stage ? stageStop(t, r, row, picked) : null))
+            .child(spine(t, i, n, last, false, stage ? stageStop(p, t, r, row, picked) : null))
             .child(stage ? stageLabel(t, r, row) : hookLabel(t, r, row)),
         );
         const out = [line];
@@ -247,7 +262,7 @@ export function pipeline(p, t, r, narrow) {
     );
 }
 
-/** The strip under a picked stop: what it is and its outputs (they open in the reader). */
+/** The strip under a picked stop: what it is and its outputs, the picked one (else the first) read under them. */
 export function stopStrip(p, t, r) {
   const st = (r.steps ?? []).find((s) => s.id === p.stopSel);
   if (!st) return div();
@@ -312,5 +327,6 @@ export function stopStrip(p, t, r) {
             ),
           ),
       ),
-    );
+    )
+    .when(Boolean(p.file), (el) => el.child(inlineReader(p, t, p.file, 'strip-reader')));
 }

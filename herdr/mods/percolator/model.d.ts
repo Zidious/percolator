@@ -26,8 +26,6 @@ export declare function ago(iso: string | undefined, now: number): string;
 export declare function took(step: { startedAt?: string; endedAt?: string; status: string }, now: number): string;
 export declare function stepTone(status: string): 'done' | 'working' | 'blocked' | null;
 export declare function resolvePath(base: string, p: string): string;
-export declare function cliLines(run: RunStatusJson): string[];
-export declare function terminalCommands(run: RunStatusJson): string[];
 export declare function attentionTag(kind: string): string;
 export declare function roundOf(loop: Loop): { n: number; max: number; taken: boolean; atCap: boolean };
 export declare function roundPill(run: RunStatusJson, stepId: string): { text: string; tone: 'dim' | 'working' | 'blocked' } | null;
@@ -54,9 +52,6 @@ export type RoundView = {
 };
 export declare function timelineOf(run: RunStatusJson): TimelineEntry[];
 export declare function stepAttempts(run: RunStatusJson, stepId: string): Attempt[];
-export declare const COFFEE_LINES: readonly string[];
-export declare function coffeeLine(runId: string, stepId: string): string;
-export declare function runningText(run: RunStatusJson, now: number): string;
 export declare function roundView(run: RunStatusJson, stepId: string, roundSel: number | null): RoundView | null;
 export type TimelineRow = {
   key: string;
@@ -91,9 +86,7 @@ export declare const BOARD_RATIO: number;
 export declare function boardHeight(ratio: number, area: number, min: number): number;
 export declare function dragBoard(startPx: number, dy: number, area: number, min: number): number;
 export declare function readRatio(stored: unknown): number;
-export declare function fillHeight(view: number, content: number, box: number, min: number): number;
 export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short' };
-export declare function nextBoxH(prev: number, target: number): number;
 export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
 export declare function terminalAddress(live: { address: string; name?: string | null }[], term: string | null | undefined): string | null;
 export declare function activeBox(run: RunStatusJson): 'agent' | 'gate' | 'cap' | 'paused' | 'failed' | 'stalled' | null;
@@ -120,3 +113,15 @@ export declare function selectAfterRefresh(
   selId: string | null,
   pending: { ids: string[]; next: string | null } | null,
 ): string | null;
+export declare function agentTone(status: string): 'blocked' | 'working' | 'muted';
+export declare function agentAddress(run: RunStatusJson, live: { address: string; name?: string | null }[]): string | null;
+export declare function boxActions(run: RunStatusJson): Action[];
+export declare function readerFiles(
+  run: RunStatusJson,
+  stopSel: string | null,
+  roundSel: number | null,
+  outPick: string | null,
+): { box: string | null; strip: string | null };
+export declare function readerMax(area: number): number;
+export declare function readFullShown(inWindow: boolean): boolean;
+export declare function boxOutside(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }): boolean;

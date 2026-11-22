@@ -145,25 +145,6 @@ export function resolvePath(base, p) {
   return ABSOLUTE.test(p) ? p : `${base.replace(/[\\/]+$/, '')}/${p}`;
 }
 
-const CLI = {
-  approve: (id) => `perc approve ${id}`,
-  reject: (id) => `perc reject ${id} -- "<feedback>"`,
-  grant: (id) => `perc resume ${id}`,
-  resume: (id) => `perc resume ${id}`,
-  clean: (id) => `perc clean ${id}`,
-};
-
-/** The terminal commands that do what the run's action buttons do, once each. */
-export function cliLines(run) {
-  const lines = (run.attention?.actions ?? []).flatMap((a) => (CLI[a] ? [CLI[a](run.id)] : []));
-  return [...new Set(lines)];
-}
-
-/** Every terminal command for a run's attention: the actions' perc equivalents, then its own commands, once each. */
-export function terminalCommands(run) {
-  return [...new Set([...cliLines(run), ...(run.attention?.commands ?? [])])];
-}
-
 const TAGS = { gate: 'GATE', cap: 'PAUSED', paused: 'PAUSED', failed: 'FAILED', stalled: 'STALLED' };
 
 /** The tag shown before an attention message. */
@@ -345,41 +326,6 @@ export function stepAttempts(run, stepId) {
   return timelineOf(run).filter((e) => e.kind === 'attempt' && e.step === stepId);
 }
 
-/** What the banner says while a step runs, one line picked per run and step. */
-export const COFFEE_LINES = [
-  'Go make an espresso.',
-  'Start another ticket!',
-  'Instant coffee? Not on this watch.',
-  'Time for a pour-over. No rush.',
-  'Grind some beans; this has it.',
-  'Perfect moment for a flat white.',
-  "Stretch your legs. It'll keep.",
-  'Brewing. Unlike instant, worth the wait.',
-  'Go pull a shot.',
-  "The kettle's on. So is the agent.",
-];
-
-/** 32-bit FNV-1a over UTF-16 code units. */
-function fnv1a32(text) {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
-  return h >>> 0;
-}
-
-/** The coffee line for a run's step: fixed, so it does not change from one refresh to the next. */
-export function coffeeLine(runId, stepId) {
-  return COFFEE_LINES[fnv1a32(`${runId}/${stepId}`) % COFFEE_LINES.length];
-}
-
-/** "<step> is running[ for <spent>]. <coffee line>" for the running step. */
-export function runningText(run, now) {
-  const step = run.currentStep;
-  const live = stepAttempts(run, step).at(-1);
-  const st = live?.status === 'running' ? live : (run.steps ?? []).find((s) => s.id === step);
-  const spent = st ? took(st, now) : '';
-  return `${step} is running${spent ? ` for ${spent}` : ''}. ${coffeeLine(run.id, step)}`;
-}
-
 /** The round of a step the strip shows: `roundSel` (an attempt number), else the last attempt, with its place among
  *  the rounds and its neighbours' numbers. `mark` is set on the last round only. Null when the step has not run. */
 export function roundView(run, stepId, roundSel) {
@@ -478,19 +424,6 @@ export function readRatio(stored) {
   return stored != null && n > 0 && n < 1 ? n : BOARD_RATIO;
 }
 
-/** The reader's height: what the detail (`view` tall, holding `content`, of which the reader is `box`) has left over
- *  once everything else is laid out, at least `min` (then the detail scrolls). Whole pixels. */
-export function fillHeight(view, content, box, min) {
-  return Math.round(Math.max(min, view - (content - box)));
-}
-
-/** The reader's next height: `target` in whole pixels, unless it moved less than 2px (then `prev`), so measuring
- *  and rounding cannot swing it between two heights. */
-export function nextBoxH(prev, target) {
-  const next = Math.round(target);
-  return Math.abs(next - prev) < 2 ? prev : next;
-}
-
 /** How the title bar fits `width` design px with `needs` runs needing you: ⧉ and ✕ always stay; the "N need you" chip
  *  shortens to "N" first, then the Active/All tabs move to a row of their own. */
 export function titleLayout(width, needs) {
@@ -578,7 +511,7 @@ export function activeBox(run) {
 export function agentCard(run, live, agents, now) {
   const name = run?.terminals?.[run.currentStep];
   if (!name) return null;
-  const address = terminalAddress(live, name);
+  const address = agentAddress(run, live);
   const agent = agents.find((a) => a.address === address);
   const step = (run.steps ?? []).find((s) => s.id === run.currentStep);
   return {
@@ -588,6 +521,48 @@ export function agentCard(run, live, agents, now) {
     program: agent?.program?.name ?? 'Agent',
     since: step ? took(step, now) : '',
   };
+}
+
+/** The colour of the agent status Herdr reports: blocked and working have their own, anything else is muted. */
+export function agentTone(status) {
+  return status === 'blocked' || status === 'working' ? status : 'muted';
+}
+
+/** The live address of the current step's agent terminal (Open terminal ↗ focuses it), or null: then it is off. */
+export function agentAddress(run, live) {
+  if (!run || run.status === 'unreadable') return null;
+  return terminalAddress(live, run.terminals?.[run.currentStep]);
+}
+
+/** The attention's buttons; open-pane is left to Open terminal ↗. */
+export function boxActions(run) {
+  return (run.attention?.actions ?? []).filter((a) => a !== 'open-pane');
+}
+
+/** What the inline readers show (as perc gave it): `box`, under an attention box, its first file to review; `strip`, under
+ *  the picked stop, the output picked there, else its (picked, else latest) round's first output. */
+export function readerFiles(run, stopSel, roundSel, outPick) {
+  const box = BOXES.includes(activeBox(run)) ? (run.attention?.review?.[0]?.path ?? null) : null;
+  if (!stopSel) return { box, strip: null };
+  const view = roundView(run, stopSel, roundSel);
+  return { box, strip: outPick ?? (view ? Object.values(view.attempt.outputs ?? {})[0] : undefined) ?? null };
+}
+
+/** The inline reader's greatest height: half the panel's `area`. */
+export function readerMax(area) {
+  return Math.round(area * 0.5);
+}
+
+/** Read full ↗ pops the panel out into its window, so the window itself does not offer it. */
+export function readFullShown(inWindow) {
+  return !inWindow;
+}
+
+/** Whether the run's active box has no active row to sit under (its current step is not in the pipeline): then it shows
+ *  under the pipeline. */
+export function boxOutside(run, o) {
+  if (activeBox(run) === null) return false;
+  return pipelineMarks(pipelineRows(run, o), null).active < 0;
 }
 
 /** The run's live driver terminal, to peek at (closing a peek leaves it running; closing a pane would end it), or

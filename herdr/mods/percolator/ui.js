@@ -1,9 +1,9 @@
-// Small view pieces the panel's files share: terminal addresses, the spinner, links and buttons.
+// Small view pieces the panel's files share: terminal addresses, the spinner, links, buttons and the inline reader.
 
 import { div } from 'gpui-kit';
-import { Scrollbar } from 'gpui-base';
+import { Scrollbar, TextView, h_flex, v_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { terminalAddress } from './model.js';
+import { readFullShown, terminalAddress } from './model.js';
 
 /** The Herdr address of a live terminal perc names (or addresses), else null: pane.focus takes addresses. */
 export const addressOf = (term) => terminalAddress(terminals(), term);
@@ -68,4 +68,34 @@ export function button(t, id, label, kind, onClick, { busy = false, disabled = f
           : label,
       ),
   );
+}
+
+/** The markdown file at `path` (resolved; its text in `p.files`), with its name and Read full ↗ (the pop-out window).
+ *  It scrolls on its own past half the panel. */
+export function inlineReader(p, t, path, id) {
+  const md = p.files[path];
+  return v_flex()
+    .flex_none()
+    .gap(4)
+    .child(
+      h_flex()
+        .gap(8)
+        .items_center()
+        .child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child(path.split(/[\\/]/).pop()))
+        .child(div().flex_1())
+        .when(readFullShown(p.inWindow()), (el) => el.child(link(t, `${id}-full`, 'Read full ↗', () => p.popOut()))),
+    )
+    .child(
+      own(
+        v_flex()
+          .id(`${id}-frame`)
+          .flex_none()
+          .max_h(p.readerMaxH())
+          .rounded(6)
+          .bg(t.surface)
+          .border(1)
+          .border_color(t.border)
+          .child(scrollY(id, v_flex().px(12).py(8).text_size(12).child(TextView.markdown(`md-${path}`, md ?? 'loading…')))),
+      ),
+    );
 }

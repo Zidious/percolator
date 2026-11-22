@@ -4,23 +4,16 @@ import path from 'node:path';
 import { test } from 'node:test';
 import {
   STAGES,
-  COFFEE_LINES,
-  coffeeLine,
-  runningText,
   actionArgv,
   ago,
   attentionTag,
   BOARD_RATIO,
   boardHeight,
   dragBoard,
-  fillHeight,
-  nextBoxH,
   titleLayout,
   readRatio,
-  cliLines,
   clock,
   timelineRows,
-  terminalCommands,
   cupLabel,
   cupMoves,
   driverPeek,
@@ -65,6 +58,13 @@ import {
   terminalAddress,
   activeBox,
   agentCard,
+  agentAddress,
+  agentTone,
+  boxActions,
+  boxOutside,
+  readerFiles,
+  readerMax,
+  readFullShown,
   ticketTitle,
   sortRuns,
   stepTone,
@@ -306,27 +306,6 @@ test('resolvePath keeps absolute paths and joins relative ones to the base folde
   }
 });
 
-test('cliLines gives the perc commands for a run actions, once each', () => {
-  assert.deepEqual(cliLines(byId('t2')), [
-    'perc approve t2-20261121-005347-f0ab',
-    'perc reject t2-20261121-005347-f0ab -- "<feedback>"',
-  ]);
-  const both = { ...readable('t4'), attention: { ...readable('t4').attention!, actions: ['grant', 'resume', 'clean', 'open-pane'] } } as Readable;
-  assert.deepEqual(cliLines(both), ['perc resume t4-20261121-061230-77ab', 'perc clean t4-20261121-061230-77ab']);
-  assert.deepEqual(cliLines(byId('t8')), []);
-});
-
-test('terminalCommands lists the action equivalents, then the attention commands, once each', () => {
-  assert.deepEqual(terminalCommands(byId('t2')), cliLines(byId('t2')));
-  const failed = readable('t9');
-  const cmds = failed.attention!.commands!;
-  assert.ok(cmds.length > 0);
-  assert.deepEqual(terminalCommands(failed), [...cliLines(failed), ...cmds]);
-  const dup = { ...failed, attention: { ...failed.attention!, commands: [...cmds, ...cmds] } } as Readable;
-  assert.deepEqual(terminalCommands(dup), [...cliLines(failed), ...cmds]);
-  assert.deepEqual(terminalCommands(byId('t8')), []);
-});
-
 test('attentionTag names each attention kind', () => {
   assert.deepEqual(['gate', 'cap', 'paused', 'failed', 'stalled', 'agent'].map(attentionTag), [
     'GATE', 'PAUSED', 'PAUSED', 'FAILED', 'STALLED', 'NEEDS YOU',
@@ -513,13 +492,6 @@ test('readRatio: a stored ratio between 0 and 1, else the default', () => {
   assert.equal(BOARD_RATIO, 0.3);
 });
 
-test('fillHeight: the reader takes what the detail has left over, else its minimum and the detail scrolls', () => {
-  assert.equal(fillHeight(600, 500, 200, 120), 300, 'room to spare: it grows to fill');
-  assert.equal(fillHeight(600, 900, 400, 120), 120, 'the rest takes 500 of 600: the minimum');
-  assert.equal(fillHeight(600, 600, 300, 120), 300, 'already filling: it stays');
-  assert.equal(fillHeight(600.4, 500, 200, 120), 300, 'whole pixels');
-});
-
 test('titleLayout: the buttons always fit; the needs chip shortens, then the tabs move to a second row', () => {
   assert.deepEqual(titleLayout(380, 2), { tabs: 'inline', chip: 'long' }, 'the default 380px panel');
   assert.deepEqual(titleLayout(370, 2), { tabs: 'inline', chip: 'long' });
@@ -528,27 +500,6 @@ test('titleLayout: the buttons always fit; the needs chip shortens, then the tab
   assert.deepEqual(titleLayout(260, 2), { tabs: 'below', chip: 'short' });
   assert.deepEqual(titleLayout(300, 0), { tabs: 'inline', chip: 'long' }, 'no chip: the tabs fit inline longer');
   assert.deepEqual(titleLayout(280, 0), { tabs: 'below', chip: 'long' });
-});
-
-test('nextBoxH: the reader keeps its height for a change under 2px, so rounding cannot make it shake', () => {
-  assert.equal(nextBoxH(300, 301), 300);
-  assert.equal(nextBoxH(300, 298.6), 300);
-  assert.equal(nextBoxH(300, 302), 302);
-  assert.equal(nextBoxH(300, 250.4), 250, 'whole pixels');
-  assert.equal(nextBoxH(0, 120), 120, 'the first height');
-});
-
-test('fillHeight converges: from what the rest takes (content minus the box drawn), the next frame gives the same height', () => {
-  const view = 600;
-  const rest = 380; // header, train, buttons...: independent of the box
-  let box = 120;
-  const seen = [];
-  for (let i = 0; i < 4; i++) {
-    const content = rest + box; // what the detail measures with this box drawn
-    box = nextBoxH(box, fillHeight(view, content, box, 120));
-    seen.push(box);
-  }
-  assert.deepEqual(seen, [220, 220, 220, 220]);
 });
 
 const hhmm = (iso: string) => {
@@ -598,30 +549,6 @@ test('rowState keeps the round apart from a long step name, so it is never cut',
   const r = readable('t8');
   const long = { ...r, currentStep: 'security-scan-extended', loops: [{ ...r.loops[0]!, from: 'security-scan-extended' }] };
   assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'round 3/3' });
-});
-
-test('COFFEE_LINES has 8 to 12 lines, including the espresso and another ticket', () => {
-  assert.ok(COFFEE_LINES.length >= 8 && COFFEE_LINES.length <= 12);
-  assert.ok(COFFEE_LINES.includes('Go make an espresso.') && COFFEE_LINES.includes('Start another ticket!'));
-});
-
-test('coffeeLine is picked from the run id and the step, the same on every refresh', () => {
-  const id = 't7-20261121-062224-638f';
-  assert.equal(coffeeLine(id, 'groom'), COFFEE_LINES[2]);
-  assert.equal(coffeeLine(id, 'plan'), COFFEE_LINES[1]);
-  assert.equal(coffeeLine(id, 'review'), COFFEE_LINES[4]);
-  assert.equal(coffeeLine(id, 'review'), coffeeLine(id, 'review'));
-});
-
-test('runningText says how long the live attempt has run, then a coffee line', () => {
-  const r = readable('t8'); // review#3 live in the timeline
-  const at = Date.parse(stepAttempts(r, 'review').at(-1)!.startedAt!);
-  assert.equal(runningText(r, at + 180000), `review is running for 3m. ${coffeeLine(r.id, 'review')}`);
-});
-
-test('runningText without a start time leaves the duration out', () => {
-  const r = readable('t11'); // implement running, no startedAt, no timeline
-  assert.equal(runningText(r, 0), `implement is running. ${coffeeLine(r.id, 'implement')}`);
 });
 
 const T8_DRIVER = 't8_driver_a0_b65d';
@@ -1007,4 +934,62 @@ test('pipelineMarks finds the active row, the last reached row and the row the s
 
   assert.deepEqual(pipelineMarks(pipelineRows(byId('t5'), WIDE), 'intake'), { active: -1, reached: -1, stripAt: -1 });
   assert.deepEqual(pipelineMarks([], null), { active: -1, reached: -1, stripAt: -1 });
+});
+
+test('agentTone colours the agent status Herdr reports', () => {
+  assert.deepEqual(['blocked', 'working', 'idle', 'done', 'open', 'not open'].map(agentTone), [
+    'blocked',
+    'working',
+    'muted',
+    'muted',
+    'muted',
+    'muted',
+  ]);
+});
+
+test('agentAddress is the live terminal of the current step, else null: Open terminal is off without one', () => {
+  const name = 't16_implement_a2_4a92';
+  assert.equal(agentAddress(byId('t16'), [{ address: 'w1:7', name }]), 'w1:7');
+  assert.equal(agentAddress(byId('t16'), []), null, 'not live');
+  assert.equal(agentAddress(byId('t11'), [{ address: 'w1:7', name }]), null, 'the step has no terminal');
+  assert.equal(agentAddress(byId('t5'), [{ address: 'w1:7', name }]), null, 'unreadable');
+});
+
+test('boxActions are the attention buttons without open-pane (Open terminal ↗ does that)', () => {
+  assert.deepEqual(boxActions(byId('t2')), ['approve', 'reject']);
+  assert.deepEqual(boxActions(byId('t13')), []);
+  const both = { ...readable('t4'), attention: { ...readable('t4').attention!, actions: ['grant', 'open-pane'] } } as Readable;
+  assert.deepEqual(boxActions(both), ['grant']);
+  assert.deepEqual(boxActions(byId('t8')), []);
+});
+
+test('readerFiles: the box reads the first review file; the strip its picked output, else its round first output', () => {
+  assert.deepEqual(readerFiles(byId('t2'), null, null, null), { box: 'samples/groomed_ticket.md', strip: null });
+  assert.deepEqual(readerFiles(byId('t12'), null, null, null), { box: null, strip: null }, 'nothing to review');
+  assert.deepEqual(readerFiles(byId('t13'), null, null, null), { box: null, strip: null }, 'an agent card reads nothing');
+  const groom = Object.values(stepAttempts(byId('t2'), 'groom').at(-1)!.outputs ?? {});
+  assert.ok(groom.length > 0);
+  assert.deepEqual(readerFiles(byId('t2'), 'groom', null, null), { box: 'samples/groomed_ticket.md', strip: groom[0] });
+  assert.deepEqual(readerFiles(byId('t2'), 'groom', null, 'x/other.md'), { box: 'samples/groomed_ticket.md', strip: 'x/other.md' });
+  assert.deepEqual(readerFiles(byId('t2'), 'plan', null, null), { box: 'samples/groomed_ticket.md', strip: null }, 'not run: no review fallback');
+  assert.deepEqual(readerFiles(byId('t2'), null, null, 'x/other.md'), { box: 'samples/groomed_ticket.md', strip: null }, 'no stop: no strip');
+});
+
+test('readerMax: the inline reader is at most half the panel', () => {
+  assert.equal(readerMax(600), 300);
+  assert.equal(readerMax(601), 301);
+  assert.equal(readerMax(0), 0);
+});
+
+test('readFullShown: Read full ↗ pops the panel out, so it shows only when docked', () => {
+  assert.equal(readFullShown(false), true);
+  assert.equal(readFullShown(true), false);
+});
+
+test('boxOutside: an active box with no active row in the pipeline shows below it instead', () => {
+  assert.equal(boxOutside(byId('t2'), WIDE), false, 'under its stop');
+  assert.equal(boxOutside(byId('t3'), WIDE), false, 'no box');
+  const lost = { ...readable('t9'), currentStep: 'gone' } as Readable;
+  assert.equal(boxOutside(lost, WIDE), true);
+  assert.equal(boxOutside(byId('t5'), WIDE), false, 'unreadable');
 });
