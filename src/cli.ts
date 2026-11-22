@@ -29,6 +29,7 @@ import { cliGh } from './tracker/gh.ts';
 import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
 import { validate, validateAll } from './validate.ts';
+import { WATCH_TERMINAL, WATCHER_LABELS, watchFile, watchLoop } from './watch/watch.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
 import { removeWorktree } from './workspace/worktree.ts';
@@ -48,6 +49,9 @@ commands:
       write the JSON schema for the config (default: schema/percolator.schema.json)
   pipelines [--repo <dir>] [--config <file>] [--profile <name>] [--json]
       list the pipelines a run in the repo can use, one line each (--json: the panel's contract)
+  watch [--repo <dir>]... [--config <file>] [--profile <name>] [--interval <s>] [--foreground] | watch stop
+      start runs from the pipelines' triggers, polling each repo every --interval seconds (default 60, at least 15)
+      in hc terminal percolator-watch (--foreground: in this one); watch stop ends it
   run [<ticket>] [--pipeline <name>] [--input key=value]... [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]
       start a run of a pipeline (default: the profile's; feature: groom, approval, plan, implement, review, PR)
       in its own hc terminal (--foreground: in this one)
@@ -500,6 +504,81 @@ async function runDrive(args: string[], deps: DriverDeps): Promise<number> {
   return exitOf(await drive(onlyRunId('drive', positionals), deps));
 }
 
+/** The `--interval` of perc watch, in whole seconds, at least 15. */
+function intervalArg(v: string | undefined): number {
+  if (v === undefined) return 60;
+  if (!/^\d+$/.test(v)) throw new UsageError(`--interval must be a whole number of seconds, got "${v}"`);
+  const s = Number(v);
+  if (s < 15) throw new UsageError('--interval must be at least 15 seconds');
+  return s;
+}
+
+async function runWatch(args: string[], deps: DriverDeps): Promise<number> {
+  const { values, positionals } = parseWith(args, {
+    repo: { type: 'string', multiple: true },
+    config: { type: 'string' },
+    profile: { type: 'string' },
+    interval: { type: 'string' },
+    foreground: { type: 'boolean' },
+  });
+  if (positionals.length > 0 && !(positionals.length === 1 && positionals[0] === 'stop')) {
+    throw new UsageError(`watch takes no arguments other than stop, got "${positionals.join(' ')}"`);
+  }
+  if (positionals[0] === 'stop') return stopWatch(deps);
+  const intervalS = intervalArg(values.interval);
+  const repos = (values.repo ?? [process.cwd()]).map((r) => path.resolve(r));
+  const configFile = path.resolve(values.config ?? defaultConfig());
+  const o = { repos, configFile, ...(values.profile !== undefined ? { profile: values.profile } : {}), intervalS };
+  if (values.foreground) {
+    deps.out(`watching ${repos.join(', ')} every ${intervalS}s`);
+    await watchLoop(o, deps);
+    return 0;
+  }
+  const existing = await deps.hc.get(WATCH_TERMINAL);
+  if (existing) {
+    if (existing.labels['percolator.role'] !== WATCHER_LABELS['percolator.role']) {
+      throw new Error(`terminal ${WATCH_TERMINAL} is not a Percolator watcher; close or rename it, then run perc watch again`);
+    }
+    if (existing.state === 'live') throw new Error(`perc watch is already running in terminal ${WATCH_TERMINAL}; perc watch stop to stop it`);
+    await deps.hc.rm(WATCH_TERMINAL);
+  }
+  await deps.hc.run({
+    name: WATCH_TERMINAL,
+    cwd: repos[0]!,
+    argv: [
+      process.execPath,
+      deps.entry,
+      'watch',
+      '--foreground',
+      ...repos.flatMap((r) => ['--repo', r]),
+      '--config',
+      configFile,
+      ...(o.profile !== undefined ? ['--profile', o.profile] : []),
+      '--interval',
+      String(intervalS),
+    ],
+    labels: { ...WATCHER_LABELS },
+    outliveParent: true,
+  });
+  deps.out(`watcher started in terminal ${WATCH_TERMINAL}`);
+  deps.out(`  repos ${repos.join(', ')}`);
+  deps.out('  stop with: perc watch stop');
+  return 0;
+}
+
+/** Ends every terminal labelled as the watcher (and only those), then forgets its heartbeat. */
+async function stopWatch(deps: DriverDeps): Promise<number> {
+  const watchers = await deps.hc.list({ labels: { ...WATCHER_LABELS }, all: true });
+  for (const t of watchers) {
+    const id = t.name ?? t.address;
+    if (t.state === 'live') await deps.hc.kill(id);
+    await deps.hc.rm(id);
+  }
+  await fs.rm(watchFile(deps.home), { force: true });
+  deps.out(watchers.length === 0 ? 'no watcher running' : `stopped the watcher in terminal ${watchers.map((t) => t.name ?? t.address).join(', ')}`);
+  return 0;
+}
+
 const ttyAsk = (question: string) => askLine(question, { input: process.stdin, output: process.stdout });
 
 /** Fills in the real clients for missing deps; `out` always writes lines to `io.stdout`. */
@@ -546,6 +625,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     if (command === 'clean') return await runClean(rest, d());
     if (command === 'delete') return await runDelete(rest, d(), io);
     if (command === 'drive') return await runDrive(rest, d());
+    if (command === 'watch') return await runWatch(rest, d());
     io.stderr(`unknown command: ${command}\n\n${USAGE}`);
     return 2;
   } catch (err) {
