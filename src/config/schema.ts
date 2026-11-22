@@ -75,7 +75,7 @@ export const NodeDefSchema = z
     effort: z
       .enum(['low', 'medium', 'high', 'xhigh', 'max'])
       .optional()
-      .describe("Reasoning effort for the agent (agent nodes only); default the agent's own."),
+      .describe("Reasoning effort for the agent (agent nodes only, claude only); default the agent's own."),
     skill: z.string().optional().describe('One skill the agent loads (agent nodes only).'),
     skills: z.array(z.string()).optional().describe('Skills the agent loads (agent nodes only).'),
     prompt: z
@@ -268,6 +268,12 @@ export type GraphFragment = z.infer<typeof GraphFragmentSchema>;
 const stringOrList = z.union([z.string(), z.array(z.string())]);
 
 export const ProfileSchema = z.strictObject({
+  extends: z
+    .string()
+    .optional()
+    .describe(
+      "Another profile this one starts from: its bindings, nodes, rules and use come first as their own layer, and its tracker and runtime apply unless this profile sets them; match and trust_repo_config are never inherited; one level only.",
+    ),
   ...graphFragmentShape,
   match: z
     .strictObject({

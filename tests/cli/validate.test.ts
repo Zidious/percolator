@@ -381,3 +381,157 @@ test('validate passes the selected profile runtime and tracker blocks through as
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
 });
+
+// A base profile and a child that extends it, written to a temp config; `child` is spliced in under `acme:`.
+async function withExtends(
+  child: string,
+  fn: (cfg: string) => Promise<void>,
+  base = '',
+  plan = '      plan: { agent: claude, model: opus }',
+): Promise<void> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-ext-'));
+  try {
+    const cfg = path.join(dir, 'config.yaml');
+    await fs.writeFile(
+      cfg,
+      [
+        'version: 1',
+        'grounds:',
+        `  team: { path: ${JSON.stringify(fx('e2e/grounds/team'))} }`,
+        'profiles:',
+        '  base:',
+        '    match: { remote: "github.com/*/*" }',
+        '    tracker: { kind: github, approvers: [alice] }',
+        '    runtime: { space: false }',
+        '    use:',
+        '      - { from: team, file: policies/sdlc.md, as: policy }',
+        '    bindings:',
+        '      intake: { builtin: github.intake }',
+        '      groom: { agent: claude, model: opus }',
+        plan,
+        '      implement: { agent: claude, model: opus }',
+        '      review: { agent: claude, model: opus }',
+        '      deliver: { builtin: github.open_pr }',
+        '    nodes:',
+        '      lint: { command: [pnpm, lint], after: implement }',
+        ...(base ? [base] : []),
+        '  acme:',
+        child,
+        '',
+      ].join('\n'),
+    );
+    await fn(cfg);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
+}
+
+test('a profile that extends another starts from its bindings, nodes, use, tracker and runtime', async () => {
+  await withExtends(
+    ['    extends: base', '    bindings:', '      implement: { agent: codex, model: gpt-5.5 }'].join('\n'),
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg, profile: 'acme' });
+      const def = (id: string) => r.graph.steps.find((s) => s.id === id)!.def;
+      assert.deepEqual(def('implement'), { agent: 'codex', model: 'gpt-5.5' });
+      assert.deepEqual(def('plan'), { agent: 'claude', model: 'opus' });
+      assert.deepEqual(def('lint').command, ['pnpm', 'lint']);
+      assert.deepEqual(r.mappings.map((m) => m.as), ['policy']);
+      assert.deepEqual(r.tracker, { kind: 'github', approvers: ['alice'] });
+      assert.deepEqual(r.runtime, { space: false });
+    },
+  );
+});
+
+test('an extending profile replaces tracker and runtime as whole blocks and adds to use', async () => {
+  await withExtends(
+    [
+      '    extends: base',
+      '    tracker: { kind: github }',
+      '    runtime: { keep_terminals: true }',
+      '    use:',
+      '      - { from: team, dir: policies, as: context }',
+    ].join('\n'),
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg, profile: 'acme' });
+      assert.deepEqual(r.tracker, { kind: 'github' });
+      assert.deepEqual(r.runtime, { keep_terminals: true });
+      assert.deepEqual(r.mappings.map((m) => m.as), ['policy', 'context']);
+    },
+  );
+});
+
+test('an extending profile does not inherit match: it is picked only by its own', async () => {
+  await withExtends('    extends: base\n    match: { remote: "github.com/acme/*" }', async (cfg) => {
+    const git = new FakeGit();
+    git.urls.set(fx('e2e/repo'), 'https://github.com/other/repo.git');
+    const { profile: _picked, ...auto } = opts();
+    const r = await validate({ ...auto, configFile: cfg, git });
+    assert.equal(r.profile, 'base');
+  });
+});
+
+test('an extending profile does not inherit trust_repo_config', async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    await fs.mkdir(path.dirname(repoFile));
+    await fs.writeFile(repoFile, 'nodes:\n  repo-check:\n    command: [echo, hi]\n    after: plan\n');
+    await withExtends(
+      '    extends: base',
+      async (cfg) => {
+        await assert.rejects(validate({ ...opts(), cwd, configFile: cfg, profile: 'acme' }), {
+          message: `${cfg}:21: profiles.acme: ${repoFile} exists, but profile "acme" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
+        });
+      },
+      '    trust_repo_config: true',
+    );
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test('an extending profile cannot change a binding its base locked', async () => {
+  await withExtends(
+    '    extends: base\n    bindings:\n      plan: { agent: codex }',
+    async (cfg) => {
+      await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'acme' }), {
+        message: `${cfg}:23: profiles.acme.bindings.plan: locked by ${cfg}:14 (required: true); remove this binding or restate it exactly`,
+      });
+    },
+    '',
+    '      plan: { agent: claude, model: opus, required: true }',
+  );
+});
+
+test('extends must name another existing profile', async () => {
+  await withExtends('    extends: nope', async (cfg) => {
+    await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'acme' }), {
+      message: `${cfg}:21: profiles.acme.extends: unknown profile "nope" (profiles: base, acme); extend one of those`,
+    });
+  });
+  await withExtends('    extends: acme', async (cfg) => {
+    await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'acme' }), {
+      message: `${cfg}:21: profiles.acme.extends: a profile cannot extend itself; extend another profile or remove extends`,
+    });
+  });
+});
+
+test('extends is one level only', async () => {
+  await withExtends(
+    '    extends: mid',
+    async (cfg) => {
+      await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'acme' }), {
+        message: `${cfg}:23: profiles.acme.extends: profile "mid" extends "base" itself; extends is one level only, so extend "base" directly`,
+      });
+    },
+    '  mid:\n    extends: base',
+  );
+});
+
+test('a broken extends is reported even when another profile is selected', async () => {
+  await withExtends('    extends: nope', async (cfg) => {
+    await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'base' }), {
+      message: `${cfg}:21: profiles.acme.extends: unknown profile "nope" (profiles: base, acme); extend one of those`,
+    });
+  });
+});
