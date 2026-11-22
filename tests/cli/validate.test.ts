@@ -268,12 +268,25 @@ test('validate rejects an unknown agent before any agent starts', async () => {
         .replace('      - { from: company, file: percolator.yaml, as: graph }\n', '')
         .replace('      deliver:', '      review: { agent: gemini }\n      deliver:'),
     async (cfg) => {
-      await assert.rejects(
-        validate({ ...opts(), configFile: cfg }),
-        /bindings\.review: unknown agent "gemini" \(known: claude, codex, command\)/,
-      );
+      await assert.rejects(validate({ ...opts(), configFile: cfg }), {
+        message: `${cfg}:14: profiles.work.bindings.review.agent: unknown agent "gemini" (known: claude, codex, command); use one of those`,
+      });
     },
   );
+});
+
+test('an agent problem in the repo layer names the repo file and line', async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    await fs.mkdir(path.dirname(repoFile));
+    await fs.writeFile(repoFile, 'nodes:\n  rc:\n    agent: nope\n    after: plan\n');
+    await assert.rejects(validate({ ...trusted(), cwd }), {
+      message: `${repoFile}:3: nodes.rc.agent: unknown agent "nope" (known: claude, codex, command); use one of those`,
+    });
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
+  }
 });
 
 test('validate walks fragment use', async () => {

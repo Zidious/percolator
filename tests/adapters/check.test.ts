@@ -48,7 +48,7 @@ test('the built-in agents pass', async () => {
 test('effort on an agent that cannot take it is reported; on claude it passes', async () => {
   const g = graphOf({ review: { agent: 'codex', effort: 'high' }, plan: { agent: 'claude', effort: 'medium' } });
   assert.deepEqual(await problems(checkAgents(g, [], 'cfg.yaml')), [
-    'cfg.yaml: bindings.review: agent "codex" does not take "effort"; remove it or use agent "claude"',
+    'cfg.yaml: bindings.review.effort: agent "codex" does not take "effort"; remove it or use agent "claude"',
   ]);
 });
 
@@ -58,10 +58,10 @@ test('unknown agent, missing command and a dashed command are all reported, hook
     { audit: { after: 'review', agent: 'nope' } },
   );
   assert.deepEqual(await problems(checkAgents(g, [], 'cfg.yaml')), [
-    'cfg.yaml: bindings.plan: agent "command" needs "command" (the program to run)',
-    'cfg.yaml: bindings.implement: command must not start with "-"',
-    'cfg.yaml: bindings.review: unknown agent "gemini" (known: claude, codex, command)',
-    'cfg.yaml: nodes.audit: unknown agent "nope" (known: claude, codex, command)',
+    'cfg.yaml: bindings.plan: agent "command" needs "command" (the program to run); add command: [program, ...args]',
+    'cfg.yaml: bindings.implement.command: command must not start with "-"; put the program first',
+    'cfg.yaml: bindings.review.agent: unknown agent "gemini" (known: claude, codex, command); use one of those',
+    'cfg.yaml: nodes.audit.agent: unknown agent "nope" (known: claude, codex, command); use one of those',
   ]);
 });
 
@@ -69,7 +69,7 @@ test('an agent that cannot load plugins is refused a plugins mapping', async () 
   const g = graphOf({ review: { agent: 'codex' } });
   const m = mapping('plugins', '/p', { dir: 'plug', applies_to: ['review'] });
   assert.deepEqual(await problems(checkAgents(g, [m], 'cfg.yaml')), [
-    'cfg.yaml: bindings.review: agent "codex" cannot load plugins, but mapping g:plug (plugins) applies to it',
+    "cfg.yaml: bindings.review: agent \"codex\" cannot load plugins, but mapping g:plug (plugins) applies to it; narrow that mapping's applies_to or use agent \"claude\"",
   ]);
 });
 
@@ -80,26 +80,43 @@ test('a skill must be found in the mapped skills or plugins when the agent has n
   const m = mapping('skills', path.join(dir, 'skills'), { dir: 'skills' });
   const g = graphOf({ review: { agent: 'codex', skills: ['g:sec', 'g:missing'] }, plan: { agent: 'claude', skill: 'g:missing' } });
   assert.deepEqual(await problems(checkAgents(g, [m], 'cfg.yaml')), [
-    'cfg.yaml: bindings.review: skill "g:missing" not found in the skills or plugins mapped to it (agent "codex" loads skills from files)',
+    'cfg.yaml: bindings.review.skills: skill "g:missing" not found in the skills or plugins mapped to it (agent "codex" loads skills from files); map a skills dir that has it, or remove the skill',
   ]);
 });
 
 test('skills mappings must use dir', async () => {
-  const m = mapping('skills', '/x/a.md', { dir: undefined, file: 'a.md' });
+  const m = mapping('skills', '/x/a.md', { dir: undefined, file: 'a.md', path: 'use.2' });
   assert.deepEqual(await problems(checkAgents(graphOf({}), [m], 'cfg.yaml')), [
-    'cfg.yaml: mapping g:a.md: skills mappings must use dir',
+    'cfg.yaml: use.2.file: skills mappings must use dir; replace file: with dir:',
   ]);
 });
 
 test('an unknown builtin is reported with the known names, alongside other problems', async () => {
   const g = graphOf({ intake: { builtin: 'read-ticket' }, review: { agent: 'gemini' } }, { audit: { after: 'review', builtin: 'nope' } });
   assert.deepEqual(await problems(checkAgents(g, [], 'cfg.yaml')), [
-    'cfg.yaml: bindings.intake: unknown builtin "read-ticket" (known: github.intake, github.open_pr)',
-    'cfg.yaml: bindings.review: unknown agent "gemini" (known: claude, codex, command)',
-    'cfg.yaml: nodes.audit: unknown builtin "nope" (known: github.intake, github.open_pr)',
+    'cfg.yaml: bindings.intake.builtin: unknown builtin "read-ticket" (known: github.intake, github.open_pr); use one of those',
+    'cfg.yaml: bindings.review.agent: unknown agent "gemini" (known: claude, codex, command); use one of those',
+    'cfg.yaml: nodes.audit.builtin: unknown builtin "nope" (known: github.intake, github.open_pr); use one of those',
   ]);
 });
 
 test('the known builtins pass', async () => {
   await checkAgents(graphOf({ deliver: { builtin: 'github.open_pr' } }), [], 'cfg.yaml');
+});
+
+test('a skill: (singular) is reported at .skill', async () => {
+  const g = graphOf({ review: { agent: 'codex', skill: 'g:missing' } });
+  assert.deepEqual(await problems(checkAgents(g, [], 'cfg.yaml')), [
+    'cfg.yaml: bindings.review.skill: skill "g:missing" not found in the skills or plugins mapped to it (agent "codex" loads skills from files); map a skills dir that has it, or remove the skill',
+  ]);
+});
+
+test('problems are located through the step and mapping locators', async () => {
+  const locator = { file: 'g.yaml', lines: { 'bindings.review': 4, 'bindings.review.agent': 5, 'use.0': 2, 'use.0.file': 3 } };
+  const g = buildGraph(mergeLayers([{ source: 'ground:g', fragment: { bindings: { ...base, review: { agent: 'gemini' } } }, locator }]));
+  const m = mapping('skills', '/x/a.md', { dir: undefined, file: 'a.md', path: 'use.0', locator });
+  assert.deepEqual(await problems(checkAgents(g, [m], 'cfg.yaml')), [
+    'g.yaml:5: bindings.review.agent: unknown agent "gemini" (known: claude, codex, command); use one of those',
+    'g.yaml:3: use.0.file: skills mappings must use dir; replace file: with dir:',
+  ]);
 });
