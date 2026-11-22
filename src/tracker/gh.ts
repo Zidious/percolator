@@ -199,8 +199,12 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
     },
     async prReviews(repo, n) {
       const { host, slug } = apiRepo('api pr reviews', repo);
-      const out = await call('api pr reviews', ['api', ...host, `repos/${slug}/pulls/${n}/reviews`, '--jq', '[.[]|{body,url:.html_url}]']);
-      return list(parseJson('api pr reviews', out)).map((r) => ({ body: String(r['body'] ?? ''), url: String(r['url'] ?? '') }));
+      const out = await call('api pr reviews', [
+        'api', ...host, '--paginate', `repos/${slug}/pulls/${n}/reviews`, '--jq', '[.[]|{body,url:.html_url}]',
+      ]);
+      // --paginate runs the jq filter per page: one compact array per line
+      const pages = out.split('\n').filter((l) => l.trim() !== '').map((l) => list(parseJson('api pr reviews', l)));
+      return pages.flat().map((r) => ({ body: String(r['body'] ?? ''), url: String(r['url'] ?? '') }));
     },
     async postReview(repo, n, bodyFile) {
       const { host, slug } = apiRepo('api pr review', repo);
