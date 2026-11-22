@@ -1,0 +1,320 @@
+// The selected run's header and its vertical pipeline: core stages on the spine, hooks on a branch to its right, loop
+// spans in the gutter on its left, the stop strip under a picked row and the active slot under the active row.
+
+import { div } from 'gpui-kit';
+import { v_flex, h_flex } from 'gpui-base';
+import { ago, canPick, driverPeek, hookNote, needsYou, pipelineRows, pipelineSpans, roundView, ticketTitle, took } from './model.js';
+import { link, own } from './ui.js';
+
+const GUTTER = 26; // loop spans
+const SPINE = 24;
+const LANE = 6; // between the lines of two loop spans in the gutter
+const short = (id) => id.split('-').pop();
+
+export function header(p, t, r, narrow) {
+  if (r.status === 'unreadable') {
+    return v_flex()
+      .px(16)
+      .pt(14)
+      .gap(5)
+      .child(div().text_size(15).font_semibold().child(r.id))
+      .child(div().text_size(11).text_color(t.dim).child('This run could not be read.'))
+      .child(h_flex().gap(6).items_center().child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx))));
+  }
+  const drv = driverPeek(r);
+  const now = Date.now();
+  return v_flex()
+    .px(16)
+    .pt(14)
+    .gap(5)
+    .child(
+      h_flex()
+        .gap(8)
+        .items_center()
+        .child(div().flex_none().text_size(15).font_semibold().child(`#${r.ticket.number}`))
+        .child(div().min_w(0).text_size(15).truncate().child(ticketTitle(r))),
+    )
+    .child(
+      h_flex()
+        .gap(6)
+        .items_center()
+        .when(Boolean(r.ticket.url), (el) => el.child(link(t, 'issue', 'Issue ↗', (_e, cx) => cx.open_url(r.ticket.url))))
+        .when(Boolean(r.pr?.url), (el) => el.child(link(t, 'pr', 'PR ↗', (_e, cx) => cx.open_url(r.pr.url))))
+        .when(Boolean(drv), (el) => el.child(link(t, 'driver', drv.label, () => p.peekDriver())))
+        .child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx)))
+        .child(
+          div()
+            .min_w(0)
+            .truncate()
+            .text_size(11)
+            .text_color(t.dim)
+            .child(
+              narrow
+                ? `started ${ago(r.createdAt, now)} ago · ${short(r.id)}`
+                : `${r.branch ?? ''} · started ${ago(r.createdAt, now)} ago · ${short(r.id)}`,
+            ),
+        ),
+    );
+}
+
+const toneColor = (t, tone) => (tone === 'working' ? t.working : tone === 'blocked' ? t.blocked : t.dim);
+
+/** A piece of a vertical line, absolutely placed in its column: the top half, the bottom half or the whole height. */
+const vline = (part, x, c) =>
+  div()
+    .absolute()
+    .left(x)
+    .w(2)
+    .bg(c)
+    .when(part === 'top', (el) => el.top_0().h('50%'))
+    .when(part === 'bottom', (el) => el.top('50%').bottom_0())
+    .when(part === 'full', (el) => el.top_0().bottom_0());
+
+/**
+ * The gutter of row `i` (`between`: the space under it, where a strip or the active slot sits): each loop span is a
+ * line from its `from` row's centre up to its `to` row's centre, with a tick toward the spine at both ends.
+ */
+function gutter(t, spans, i, between) {
+  const parts = spans.flatMap((s, k) => {
+    const lo = Math.min(s.from, s.to);
+    const hi = Math.max(s.from, s.to);
+    if (lo === hi || i < lo || i > hi) return [];
+    const c = toneColor(t, s.tone);
+    const x = 4 + k * LANE;
+    if (between) return i < hi ? [vline('full', x, c)] : [];
+    const tick = div().absolute().top('50%').left(x).right(0).h(2).bg(c);
+    if (i === lo) return [vline('bottom', x, c), tick];
+    if (i === hi) return [vline('top', x, c), tick];
+    return [vline('full', x, c)];
+  });
+  return div().flex_none().w(GUTTER).relative().children(parts);
+}
+
+/** The spine of row `i`: accent up to and including the reached row `last`, border after it. */
+function spine(t, i, n, last, between, stop) {
+  const c = (on) => (on ? t.accent : t.border);
+  const x = SPINE / 2 - 1;
+  return h_flex()
+    .flex_none()
+    .w(SPINE)
+    .relative()
+    .items_center()
+    .justify_center()
+    .when(between, (el) => el.when(i < n - 1, (el) => el.child(vline('full', x, c(i < last)))))
+    .when(!between && i > 0, (el) => el.child(vline('top', x, c(i <= last))))
+    .when(!between && i < n - 1, (el) => el.child(vline('bottom', x, c(i < last))))
+    .when(Boolean(stop), (el) => el.child(stop));
+}
+
+/** The colour the active stop rings in: blocked when the run waits on you. */
+const nowColor = (t, r) => (needsYou(r) ? t.blocked : t.working);
+
+function stageStop(t, r, row, picked) {
+  const gate = row.gate;
+  if (row.state === 'active') {
+    const c = nowColor(t, r);
+    return div()
+      .size(24)
+      .rounded(gate ? 4 : 12)
+      .border(2)
+      .border_color(c)
+      .bg(t.surface)
+      .flex()
+      .items_center()
+      .justify_center()
+      .child(div().size(9).rounded(gate ? 2 : 5).bg(c));
+  }
+  const fill = row.state === 'past' ? t.accent : row.state === 'failed' ? t.blocked : null;
+  const dot = div()
+    .size(16)
+    .rounded(gate ? 4 : 8)
+    .border(2)
+    .border_color(fill ?? t.border)
+    .bg(fill ?? t.surface);
+  // the ring around a picked stop; always there, so picking does not move the row
+  return div()
+    .p(2)
+    .rounded(gate ? 6 : 12)
+    .border(1)
+    .border_color(picked ? t.foreground : t.surface)
+    .child(dot);
+}
+
+function stageLabel(t, r, row) {
+  const st = row.step;
+  const c =
+    row.state === 'active' ? nowColor(t, r) : row.state === 'failed' ? t.blocked : row.state === 'past' ? t.foreground : t.muted;
+  const spent = row.state === 'past' ? took(st, Date.now()) : '';
+  return h_flex()
+    .flex_1()
+    .min_w(0)
+    .pl(8)
+    .py(6)
+    .gap(8)
+    .items_center()
+    .child(div().flex_none().text_size(11.5).font_semibold().text_color(c).child(st.id.toUpperCase()))
+    .when(Boolean(spent), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(spent)))
+    .when(row.folded.length > 0, (el) =>
+      el.child(
+        div()
+          .flex_none()
+          .text_size(11)
+          .text_color(t.muted)
+          .tooltip(`also ${row.folded.map((f) => f.id).join(', ')}`)
+          .child(`+${row.folded.length}`),
+      ),
+    )
+    .child(div().flex_1())
+    .when(Boolean(row.round), (el) => {
+      const rc = toneColor(t, row.round.tone);
+      return el.child(
+        div().flex_none().px(7).py(1).rounded(9).border(1).border_color(rc).text_size(10).text_color(rc).child(row.round.text),
+      );
+    });
+}
+
+function hookNode(t, r, row) {
+  const c = row.state === 'active' ? nowColor(t, r) : row.state === 'failed' ? t.blocked : row.state === 'past' ? t.accent : t.border;
+  const filled = row.state === 'past' || row.state === 'failed';
+  return div()
+    .flex_none()
+    .size(10)
+    .rounded(row.gate ? 2 : 5)
+    .border(2)
+    .border_color(c)
+    .bg(filled ? c : t.surface);
+}
+
+function hookLabel(t, r, row) {
+  const branch = row.state === 'future' ? t.border : row.state === 'active' ? nowColor(t, r) : t.accent;
+  const name = row.state === 'active' ? nowColor(t, r) : row.state === 'failed' ? t.blocked : t.muted;
+  return h_flex()
+    .flex_1()
+    .min_w(0)
+    .py(2)
+    .items_center()
+    .child(div().flex_none().ml(-SPINE / 2).w(20).h(2).bg(branch))
+    .child(hookNode(t, r, row))
+    .child(div().flex_none().ml(7).font_family('monospace').text_size(11).text_color(name).child(row.step.id))
+    .child(div().min_w(0).ml(6).truncate().text_size(10).text_color(t.dim).child(hookNote(r, row, Date.now())));
+}
+
+/** The vertical pipeline of a readable run; the strip opens under the picked row, `p.activeSlot` under the active one. */
+export function pipeline(p, t, r, narrow) {
+  if (r.status === 'unreadable') return div();
+  const rows = pipelineRows(r, { narrow, unfolded: p.unfolded });
+  if (rows.length === 0) return div();
+  const spans = pipelineSpans(rows, r);
+  const n = rows.length;
+  const active = rows.findIndex((row) => row.state === 'active');
+  const last = active >= 0 ? active : rows.reduce((at, row, i) => (row.state === 'future' ? at : i), -1);
+  // a picked hook folded into its stage opens its strip under the stage row
+  const holds = (row) => row.step.id === p.stopSel || (row.type === 'stage' && row.folded.some((s) => s.id === p.stopSel));
+  const stripAt = p.stopSel ? rows.findIndex(holds) : -1;
+
+  const under = (i, el) =>
+    h_flex()
+      .items_stretch()
+      .child(gutter(t, spans, i, true))
+      .child(spine(t, i, n, last, true, null))
+      .child(div().flex_1().min_w(0).pl(8).child(el));
+
+  return v_flex()
+    .mx(16)
+    .mt(10)
+    .children(
+      rows.flatMap((row, i) => {
+        const st = row.step;
+        const picked = st.id === p.stopSel;
+        const stage = row.type === 'stage';
+        const line = own(
+          h_flex()
+            .id(`stop-${st.id}`)
+            .items_stretch()
+            .min_h(stage ? 34 : 24)
+            .tooltip(`${st.id} · ${st.kind} · ${st.status}`)
+            .when(canPick(st), (el) =>
+              el.cursor_pointer().on_click((_e, cx) => {
+                p.pickStop(picked ? null : st.id, cx);
+                cx.notify();
+              }),
+            )
+            .child(gutter(t, spans, i, false))
+            .child(spine(t, i, n, last, false, stage ? stageStop(t, r, row, picked) : null))
+            .child(stage ? stageLabel(t, r, row) : hookLabel(t, r, row)),
+        );
+        const out = [line];
+        if (i === active) out.push(under(i, p.activeSlot ? p.activeSlot(t, r, narrow) : div()));
+        if (i === stripAt) out.push(under(i, stopStrip(p, t, r)));
+        return out;
+      }),
+    );
+}
+
+/** The strip under a picked stop: what it is and its outputs (they open in the reader). */
+export function stopStrip(p, t, r) {
+  const st = (r.steps ?? []).find((s) => s.id === p.stopSel);
+  if (!st) return div();
+  const kv = (k, v) => h_flex().gap(4).child(div().text_color(t.dim).child(k)).child(div().text_color(t.foreground).child(v));
+  const rv = roundView(r, st.id, p.roundSel); // null for a step that has not run: its own values show
+  const shown = rv?.attempt ?? st;
+  const spent = took(shown, Date.now());
+  const step = (glyph, to, id) =>
+    to === null
+      ? div().flex_none().px(4).text_color(t.dim).child(glyph)
+      : link(t, id, glyph, (_e, cx) => {
+          p.pickRound(to, cx);
+          cx.notify();
+        });
+  const outputs = Object.entries(shown.outputs ?? {});
+  return v_flex()
+    .mt(2)
+    .mb(8)
+    .px(9)
+    .py(7)
+    .gap(5)
+    .rounded(7)
+    .bg(t.background)
+    .border(1)
+    .border_color(t.border)
+    .text_size(11)
+    .child(
+      h_flex()
+        .gap(8)
+        .items_center()
+        .child(div().min_w(0).truncate().font_semibold().child(st.id))
+        .child(div().flex_1())
+        .when(rv !== null && rv.of > 1, (el) =>
+          el
+            .child(step('‹', rv.prev, 'round-prev'))
+            .child(div().flex_none().text_color(t.dim).child(`round ${rv.n} of ${rv.of}${rv.mark ? ` · ${rv.mark}` : ''}`))
+            .child(step('›', rv.next, 'round-next')),
+        ),
+    )
+    .child(
+      h_flex()
+        .flex_wrap()
+        .gap_x(10)
+        .gap_y(2)
+        .child(kv('kind', st.kind))
+        .child(kv('stage', st.stage))
+        .child(kv('status', shown.status))
+        .child(kv('attempts', String(st.attempts ?? 0)))
+        .when(Boolean(spent), (el) => el.child(kv('took', spent))),
+    )
+    .when(outputs.length > 0, (el) =>
+      el.child(
+        h_flex()
+          .flex_wrap()
+          .gap(6)
+          .children(
+            outputs.map(([k, path]) =>
+              link(t, `out-${k}`, `${k}.md`, (_e, cx) => {
+                p.pickOutput(path, cx);
+                cx.notify();
+              }).when(p.file === p.resolve(path), (el) => el.text_color(t.accent)),
+            ),
+          ),
+      ),
+    );
+}

@@ -1,4 +1,4 @@
-// The Percolator panel's pure logic: what `perc status --json` (schema 1) means for the board, the train and the
+// The Percolator panel's pure logic: what `perc status --json` (schema 1) means for the board, the pipeline and the
 // actions. No `herdr` imports, so node:test covers it (tests/herdr/model.test.ts); model.d.ts declares it.
 
 export const STAGES = Object.freeze(['intake', 'groom', 'plan', 'implement', 'review', 'deliver']);
@@ -64,37 +64,6 @@ export function rowState(run) {
   }
   if (run.status === 'unreadable') return { tone: 'muted', text: `unreadable · ${run.error}` };
   return { tone: 'muted', text: run.status };
-}
-
-/**
- * Six zones, one per core stage, each with its steps in execution order: `before-all` hooks first in intake, then
- * the graph order of the stage's steps (before:<stage> hooks, slot steps, after:<stage> hooks), `after-all` hooks
- * last in deliver. Narrow shows only core stops and folds the rest into `hidden` (a zone with no core step shows all).
- */
-export function trainLayout(run, narrow) {
-  const steps = run.steps ?? [];
-  const of = (stage) => steps.filter((s) => s.stage === stage);
-  return STAGES.map((stage, i) => {
-    const all = [
-      ...(i === 0 ? of('before-all') : []),
-      ...of(stage),
-      ...(i === STAGES.length - 1 ? of('after-all') : []),
-    ];
-    const core = all.filter((s) => s.role === 'core');
-    if (!narrow || core.length === 0) return { stage, shown: all, hidden: [] };
-    return { stage, shown: core, hidden: all.filter((s) => s.role !== 'core') };
-  });
-}
-
-/** The centre of a step's stop as % (0–100) of the track; a hidden step sits on its zone's first shown stop. */
-export function xOf(zones, stepId) {
-  for (let i = 0; i < zones.length; i++) {
-    const z = zones[i];
-    let j = z.shown.findIndex((s) => s.id === stepId);
-    if (j < 0 && z.hidden.some((s) => s.id === stepId)) j = 0;
-    if (j >= 0) return ((i + (j + 0.5) / z.shown.length) / zones.length) * 100;
-  }
-  return null;
 }
 
 /** Runs in `next` that need you and did not in `prev` (or were not there); none on the first load (`prev` null). */
@@ -202,11 +171,6 @@ export function attentionTag(kind) {
   return TAGS[kind] ?? 'NEEDS YOU';
 }
 
-/** Loops that have gone round at least once (drawn as arcs). */
-export function shownLoops(run) {
-  return (run.loops ?? []).filter((l) => l.round > 0);
-}
-
 /** The round the engine is in: `round` counts back-edges already taken, the engine's round is one more, up to the cap. */
 export function roundOf(loop) {
   return { n: Math.min(1 + loop.round, loop.max), max: loop.max, taken: loop.round > 0, atCap: loop.round >= loop.max };
@@ -227,23 +191,6 @@ export function roundPill(run, stepId) {
 /** Every loop, taken or not, with its tone. */
 export function loopSpans(run) {
   return (run.loops ?? []).map((l) => ({ id: l.id, from: l.from, to: l.to, tone: loopTone(roundOf(l)) }));
-}
-
-/** A loop has used all its rounds. */
-export function loopAtCap(loop) {
-  return loop.round >= loop.max;
-}
-
-/** "↺ review → implement · round 2 of 3", "· cap" at the cap; narrow leaves out where. */
-export function loopLabel(loop, narrow) {
-  const where = narrow ? '' : `${loop.from} → ${loop.to} · `;
-  return `↺ ${where}round ${loop.round} of ${loop.max}${loopAtCap(loop) ? ' · cap' : ''}`;
-}
-
-/** Which end of a loop arc (spanning a% to b% of the track) its label hangs from, so a label wider than the arc grows
- *  toward the middle of the track rather than past its edge. */
-export function loopLabelAlign(a, b) {
-  return (a + b) / 2 > 50 ? 'end' : 'start';
 }
 
 const ALL = new Set(['before-all', 'after-all']);
@@ -321,6 +268,25 @@ export function pipelineSpans(rows, run) {
     const to = at(l.to);
     return from < 0 || to < 0 ? [] : [{ from, to, tone: l.tone }];
   });
+}
+
+/** The muted note beside a hook row: where it runs, its latest gate decision, how long it took (or has waited). */
+export function hookNote(run, row, now) {
+  const s = row.step;
+  const waited = s.status === 'waiting' && s.startedAt ? `waiting ${ago(s.startedAt, now)}` : '';
+  const decision = decisionNote(stepAttempts(run, s.id).at(-1)?.decision);
+  return [row.where, decision, took(s, now) || waited].filter(Boolean).join(' · ');
+}
+
+/** The stages to show unfolded after the selected stop moves from `from` to `to` (null closes it): a picked stage row
+ *  holding folded hooks opens; closing an open stage folds it again. */
+export function unfoldAfterPick(run, o, from, to) {
+  if (to === null) {
+    const closed = (run.steps ?? []).find((s) => s.id === from && s.role === 'core')?.stage;
+    return o.unfolded.filter((s) => s !== closed);
+  }
+  const row = pipelineRows(run, o).find((r) => r.step.id === to);
+  return row?.type === 'stage' && row.folded.length > 0 ? [...o.unfolded, row.step.stage] : o.unfolded;
 }
 
 /** Whether a stop can be selected: one that has not started has nothing to show. */

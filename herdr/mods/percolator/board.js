@@ -1,4 +1,4 @@
-// The board: one row per run (needing you first, then running, then newest), with its state line; the train below shows the pipeline.
+// The board: one row per run (needing you first, then running, then newest), with its state line; the pipeline below shows its stages.
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';

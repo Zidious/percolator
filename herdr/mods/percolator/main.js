@@ -36,6 +36,7 @@ import {
   findNode,
   nextBoxH,
   titleLayout,
+  unfoldAfterPick,
   moveRow,
   moveStop,
   needsCount,
@@ -52,7 +53,7 @@ import {
 } from './model.js';
 import { mark } from './mark.js';
 import { board } from './board.js';
-import { header, train, stopStrip } from './train.js';
+import { header, pipeline } from './pipeline.js';
 import { turn } from './turn.js';
 import { addressOf, link, own } from './ui.js';
 import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
@@ -79,6 +80,7 @@ export default class Percolator extends View {
     this.sel = null;
     this.stopSel = null;
     this.roundSel = null; // the attempt number picked in the stop strip; null = the latest
+    this.unfolded = []; // the selected run's stages whose folded hooks show as rows
     this.file = null;
     this.files = {};
     this.width = 900;
@@ -232,6 +234,7 @@ export default class Percolator extends View {
       this.actError = null;
       this.said = null;
       this.feedback.set_value('');
+      this.unfolded = [];
     }
     this.sel = id;
     this.stopSel = null;
@@ -240,8 +243,13 @@ export default class Percolator extends View {
     this.syncReader(cx);
   }
 
-  /** Selects a stop (null closes the strip and goes back to the run's review file). */
+  /** Selects a stop (null closes the strip and goes back to the run's review file); a stage holding folded hooks
+   *  opens them, and folds them again when it is closed. */
   pickStop(id, cx) {
+    const r = this.current();
+    if (r && r.status !== 'unreadable') {
+      this.unfolded = unfoldAfterPick(r, { narrow: this.width < NARROW, unfolded: this.unfolded }, this.stopSel, id);
+    }
     this.stopSel = id;
     this.roundSel = null;
     this.outPick = null;
@@ -445,7 +453,7 @@ export default class Percolator extends View {
         this.revealRow();
       }
     } else if ((key === 'left' || key === 'right') && r) {
-      this.pickStop(moveStop(r, this.stopSel, key === 'left' ? -1 : 1), cx);
+      this.pickStop(moveStop(r, this.stopSel, key === 'left' ? -1 : 1, this.unfolded), cx);
     } else if (key === 'a' && acts.includes('approve')) this.act('approve', cx);
     else if (key === 'r' && acts.includes('reject')) this.act('reject', cx);
     else if (key === 'g' && acts.includes('grant')) this.act('grant', cx);
@@ -742,8 +750,7 @@ export default class Percolator extends View {
                   .when(Boolean(r), (el) =>
                     el
                       .child(header(this, t, r, narrow))
-                      .child(train(this, t, r, narrow))
-                      .when(Boolean(this.stopSel), (el) => el.child(stopStrip(this, t, r)))
+                      .child(pipeline(this, t, r, narrow))
                       .child(turn(this, t, r, narrow)),
                   ),
               ),

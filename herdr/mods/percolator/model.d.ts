@@ -7,7 +7,6 @@ export type Step = Readable['steps'][number];
 export type Stage = 'intake' | 'groom' | 'plan' | 'implement' | 'review' | 'deliver';
 export type TimelineEntry = Readable['timeline'][number];
 export type Attempt = Extract<TimelineEntry, { kind: 'attempt' }>;
-export type Zone = { stage: Stage; shown: Step[]; hidden: Step[] };
 export type Tone = 'blocked' | 'working' | 'dim' | 'muted';
 
 export declare const STAGES: readonly Stage[];
@@ -15,8 +14,6 @@ export declare function parseStatus(stdout: string): { ok: true; data: StatusJso
 export declare function sortRuns(runs: RunStatusJson[]): RunStatusJson[];
 export declare function visibleRuns(runs: RunStatusJson[], filter: 'active' | 'all'): RunStatusJson[];
 export declare function rowState(run: RunStatusJson): { tone: Tone; text: string; round?: string };
-export declare function trainLayout(run: RunStatusJson, narrow: boolean): Zone[];
-export declare function xOf(zones: Zone[], stepId: string): number | null;
 export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
 export declare function actionArgv(action: Action, run: { id: string }, feedback?: string): string[] | null;
 export declare function needsYou(run: RunStatusJson): boolean;
@@ -32,13 +29,9 @@ export declare function resolvePath(base: string, p: string): string;
 export declare function cliLines(run: RunStatusJson): string[];
 export declare function terminalCommands(run: RunStatusJson): string[];
 export declare function attentionTag(kind: string): string;
-export declare function shownLoops(run: RunStatusJson): Loop[];
-export declare function loopAtCap(loop: Loop): boolean;
 export declare function roundOf(loop: Loop): { n: number; max: number; taken: boolean; atCap: boolean };
 export declare function roundPill(run: RunStatusJson, stepId: string): { text: string; tone: 'dim' | 'working' | 'blocked' } | null;
 export declare function loopSpans(run: RunStatusJson): { id: string; from: string; to: string; tone: 'dim' | 'working' | 'blocked' }[];
-export declare function loopLabelAlign(a: number, b: number): 'start' | 'end';
-export declare function loopLabel(loop: Loop, narrow: boolean): string;
 export declare function canPick(step: { status: string }): boolean;
 export type RowState = 'past' | 'active' | 'future' | 'failed';
 export type PipeRow =
@@ -46,6 +39,8 @@ export type PipeRow =
   | { type: 'hook'; step: Step; where: 'before-all' | 'before' | 'after' | 'after-all'; gate: boolean; state: RowState };
 export declare function pipelineRows(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }): PipeRow[];
 export declare function pipelineSpans(rows: PipeRow[], run: RunStatusJson): { from: number; to: number; tone: string }[];
+export declare function hookNote(run: RunStatusJson, row: { step: Step; where?: string }, now: number): string;
+export declare function unfoldAfterPick(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }, from: string | null, to: string | null): string[];
 export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number, unfolded?: string[]): string | null;
 export declare function moveRow(rows: RunStatusJson[], selId: string | null, dir: number): string | null;
 export type RoundView = {

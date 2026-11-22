@@ -37,16 +37,16 @@ import {
   deleteCommandIds,
   findNode,
   ownsCommands,
-  loopAtCap,
   roundOf,
   roundPill,
   loopSpans,
-  loopLabel,
   moveRow,
   canPick,
   moveStop,
   pipelineRows,
   pipelineSpans,
+  hookNote,
+  unfoldAfterPick,
   needsCount,
   needsYou,
   newlyNeeding,
@@ -59,9 +59,7 @@ import {
   timelineOf,
   resolvePath,
   rowState,
-  loopLabelAlign,
   runningCount,
-  shownLoops,
   showsHere,
   terminalAddress,
   activeBox,
@@ -70,9 +68,7 @@ import {
   sortRuns,
   stepTone,
   took,
-  trainLayout,
   visibleRuns,
-  xOf,
 } from '../../herdr/mods/percolator/model.js';
 import type { RunStatusJson, StatusJson } from '../../src/run/status.ts';
 import type { Loop, PipeRow } from '../../herdr/mods/percolator/model.d.ts';
@@ -87,7 +83,6 @@ const byId = (prefix: string): RunStatusJson => runs().find((r) => r.id.startsWi
 type Readable = Exclude<RunStatusJson, { status: 'unreadable' }>;
 const readable = (prefix: string) => byId(prefix) as Readable;
 const ids = (rs: { id: string }[]) => rs.map((r) => r.id.split('-')[0]);
-const near = (a: number | null, b: number) => assert.ok(a !== null && Math.abs(a - b) < 1e-9, `${a} is not ${b}`);
 
 test('the fixture covers every attention kind, a running run, a completed run and an unreadable entry', () => {
   const kinds = runs().flatMap((r) => ('attention' in r && r.attention ? [r.attention.kind] : []));
@@ -202,87 +197,6 @@ test('rowState for a running step outside a loop shows only the step', () => {
 
 test('rowState for a completed run without a PR says delivered', () => {
   assert.deepEqual(rowState({ ...readable('t3'), pr: null }), { tone: 'dim', text: 'delivered' });
-});
-
-test('trainLayout wide shows every step in its zone in execution order', () => {
-  const zones = trainLayout(byId('t8'), false);
-  assert.deepEqual(
-    zones.map((z) => [z.stage, z.shown.map((s) => s.id), z.hidden.map((s) => s.id)]),
-    [
-      ['intake', ['setup', 'intake'], []],
-      ['groom', ['groom', 'approve-groom'], []],
-      ['plan', ['plan'], []],
-      ['implement', ['lint-plan', 'implement', 'security-scan'], []],
-      ['review', ['review'], []],
-      ['deliver', ['deliver', 'notify'], []],
-    ],
-  );
-});
-
-test('trainLayout narrow keeps core steps and folds the hooks', () => {
-  const zones = trainLayout(byId('t8'), true);
-  assert.deepEqual(
-    zones.map((z) => [z.stage, z.shown.map((s) => s.id), z.hidden.map((s) => s.id)]),
-    [
-      ['intake', ['intake'], ['setup']],
-      ['groom', ['groom'], ['approve-groom']],
-      ['plan', ['plan'], []],
-      ['implement', ['implement'], ['lint-plan', 'security-scan']],
-      ['review', ['review'], []],
-      ['deliver', ['deliver'], ['notify']],
-    ],
-  );
-});
-
-test('trainLayout puts before-all hooks first in intake and after-all hooks last in deliver', () => {
-  const r = readable('t3');
-  const hook = (id: string, stage: 'before-all' | 'after-all') =>
-    ({ id, stage, role: 'node', kind: 'script', status: 'pass', attempts: 1, outputs: {} }) as Readable['steps'][number];
-  const steps = [...r.steps.slice(0, 1), hook('late-setup', 'before-all'), hook('early-notify', 'after-all'), ...r.steps.slice(1)];
-  const zones = trainLayout({ ...r, steps }, false);
-  assert.deepEqual(zones[0]!.shown.map((s) => s.id), ['late-setup', 'intake']);
-  assert.deepEqual(zones[5]!.shown.map((s) => s.id), ['deliver', 'early-notify']);
-});
-
-test('trainLayout narrow shows each slot step of a multi-step stage as a core stop', () => {
-  const r = readable('t3');
-  const core = (id: string) =>
-    ({ id, stage: 'implement', role: 'core', kind: 'agent', status: 'pass', attempts: 1, outputs: {} }) as Readable['steps'][number];
-  const steps = r.steps.flatMap((s) => (s.id === 'implement' ? [core('implement.0'), core('implement.1')] : [s]));
-  assert.deepEqual(trainLayout({ ...r, steps }, true)[3]!.shown.map((s) => s.id), ['implement.0', 'implement.1']);
-});
-
-test('trainLayout narrow shows the hooks of a zone that has no core step', () => {
-  const r = readable('t3');
-  const steps = r.steps.map((s) => (s.id === 'plan' ? { ...s, role: 'node' as const } : s));
-  const plan = trainLayout({ ...r, steps }, true)[2]!;
-  assert.deepEqual([plan.shown.map((s) => s.id), plan.hidden], [['plan'], []]);
-});
-
-test('trainLayout of an unreadable run is six empty zones', () => {
-  assert.deepEqual(
-    trainLayout(byId('t5'), false),
-    STAGES.map((stage) => ({ stage, shown: [], hidden: [] })),
-  );
-});
-
-test('xOf gives the centre of a stop as % of the track', () => {
-  const zones = trainLayout(byId('t2'), false);
-  // each zone is a sixth; groom (zone 1) has two stops
-  near(xOf(zones, 'intake'), (0.5 / 6) * 100);
-  near(xOf(zones, 'groom'), (1.25 / 6) * 100);
-  near(xOf(zones, 'approve-groom'), (1.75 / 6) * 100);
-  near(xOf(zones, 'deliver'), (5.5 / 6) * 100);
-});
-
-test('xOf puts a folded step on its zone first shown stop', () => {
-  const zones = trainLayout(byId('t2'), true);
-  assert.equal(xOf(zones, 'approve-groom'), 25);
-  assert.equal(xOf(zones, 'groom'), 25);
-});
-
-test('xOf is null for a step that is not on the train', () => {
-  assert.equal(xOf(trainLayout(byId('t2'), false), 'nope'), null);
 });
 
 test('newlyNeeding is empty on the first load', () => {
@@ -416,17 +330,6 @@ test('attentionTag names each attention kind', () => {
   assert.deepEqual(['gate', 'cap', 'paused', 'failed', 'stalled', 'agent'].map(attentionTag), [
     'GATE', 'PAUSED', 'PAUSED', 'FAILED', 'STALLED', 'NEEDS YOU',
   ]);
-});
-
-test('shownLoops keeps loops that have gone round; loopLabel says where and how far', () => {
-  const [loop] = shownLoops(byId('t8'));
-  assert.equal(loopLabel(loop!, false), '↺ review → lint-plan · round 2 of 3');
-  assert.equal(loopLabel({ ...loop!, round: 3 }, false), '↺ review → lint-plan · round 3 of 3 · cap');
-  assert.equal(loopLabel({ ...loop!, round: 3 }, true), '↺ round 3 of 3 · cap');
-  assert.equal(loopAtCap({ ...loop!, round: 3 }), true);
-  assert.equal(loopAtCap(loop!), false);
-  assert.deepEqual(shownLoops({ ...readable('t8'), loops: [{ ...loop!, round: 0 }] }), []);
-  assert.deepEqual(shownLoops(byId('t5')), []);
 });
 
 test('moveStop walks the train in execution order from the selected stop, else the current step', () => {
@@ -694,12 +597,6 @@ test('rowState keeps the round apart from a long step name, so it is never cut',
   const r = readable('t8');
   const long = { ...r, currentStep: 'security-scan-extended', loops: [{ ...r.loops[0]!, from: 'security-scan-extended' }] };
   assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'round 3/3' });
-});
-
-test('loopLabelAlign anchors the label to the arc end nearer the middle', () => {
-  assert.equal(loopLabelAlign(60, 90), 'end');
-  assert.equal(loopLabelAlign(10, 30), 'start');
-  assert.equal(loopLabelAlign(40, 60), 'start');
 });
 
 test('COFFEE_LINES has 8 to 12 lines, including the espresso and another ticket', () => {
@@ -1071,4 +968,24 @@ test('agentCard links the active stop to its agent terminal', () => {
   assert.equal(agentCard(byId('t16'), live, [], now)!.status, 'open');
   assert.equal(agentCard(byId('t3'), live, agents, now), null);
   assert.equal(agentCard(byId('t17'), [], [], now)!.name, 't17_implement-1_a1_0641');
+});
+
+test('hookNote says where a hook runs, the gate decision and its time', () => {
+  const now = Date.parse('2026-11-21T03:54:45.575Z');
+  const t8 = pipelineRows(byId('t8'), WIDE);
+  assert.equal(hookNote(byId('t8'), row(t8, 'approve-groom'), now), 'after · approved by @zidious');
+  assert.equal(hookNote(byId('t8'), row(t8, 'security-scan'), now), 'after · 34s');
+  assert.equal(hookNote(byId('t8'), row(t8, 'notify'), now), 'after-all');
+  const t2 = pipelineRows(byId('t2'), WIDE);
+  assert.equal(hookNote(byId('t2'), row(t2, 'approve-groom'), Date.parse('2026-11-21T03:54:45.575Z')), 'after · waiting 3h');
+});
+
+test('unfoldAfterPick opens a picked stage that holds folded hooks, and folds it again when it is closed', () => {
+  const t16 = byId('t16');
+  assert.deepEqual(unfoldAfterPick(t16, WIDE, null, 'implement'), ['implement']);
+  assert.deepEqual(unfoldAfterPick(t16, { narrow: false, unfolded: ['implement'] }, 'implement', 'lint-baseline'), ['implement']);
+  assert.deepEqual(unfoldAfterPick(t16, { narrow: false, unfolded: ['implement'] }, 'implement', null), []);
+  assert.deepEqual(unfoldAfterPick(t16, WIDE, null, 'plan'), []);
+  assert.deepEqual(unfoldAfterPick(byId('t8'), { narrow: true, unfolded: [] }, null, 'intake'), ['intake']);
+  assert.deepEqual(unfoldAfterPick(byId('t8'), { narrow: true, unfolded: ['groom'] }, 'groom', 'plan'), ['groom']);
 });
