@@ -303,6 +303,47 @@ test('a pipeline may name the next pipeline for its issues', async () => {
   );
 });
 
+test('a valid trigger list loads', async () => {
+  await withYaml(
+    [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    pipelines:',
+      '      nightly:',
+      '        triggers:',
+      '          - { schedule: "0 3 * * 1-5", timezone: Europe/London, inputs: { area: deps } }',
+      '          - { label: needs-triage }',
+      '          - { pr_opened: true }',
+      '          - { pr_opened: { not_author: [dependabot] } }',
+      '          - { dependabot: true }',
+      '          - { check_failed: { branch: main, workflow: ci.yml } }',
+      '',
+    ].join('\n'),
+    async (file) => {
+      assert.deepEqual((await loadUserConfig(file)).profiles.default!.pipelines!.nightly!.triggers, [
+        { schedule: '0 3 * * 1-5', timezone: 'Europe/London', inputs: { area: 'deps' } },
+        { label: 'needs-triage' },
+        { pr_opened: true },
+        { pr_opened: { not_author: ['dependabot'] } },
+        { dependabot: true },
+        { check_failed: { branch: 'main', workflow: 'ci.yml' } },
+      ]);
+    },
+  );
+});
+
+test('a malformed trigger is reported at its key', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      p:\n        triggers:\n          - check_failed: { workflow: ci.yml }\n',
+    async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.p.triggers.0.check_failed.branch');
+    },
+  );
+});
+
 test('choose.confirm is unsure or always', async () => {
   await withYaml(
     'version: 1\nprofiles:\n  default:\n    pipelines:\n      triage:\n        choose: { agent: claude, from: [a], confirm: never }\n',

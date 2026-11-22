@@ -793,6 +793,132 @@
                   "description": "Router only: the pipeline used when nothing else picked one; default the profile's default pipeline, or feature when that is a router.",
                   "type": "string"
                 },
+                "triggers": {
+                  "description": "What starts runs of this pipeline while perc watch runs: schedule, label, pr_opened, dependabot or check_failed.",
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "schedule": {
+                            "type": "string",
+                            "description": "Cron expression (minute hour day-of-month month day-of-week) of when a ticketless run starts."
+                          },
+                          "timezone": {
+                            "description": "IANA time zone the schedule is read in, like Europe/London; default the time zone of the machine running perc watch.",
+                            "type": "string"
+                          },
+                          "inputs": {
+                            "description": "Inputs each scheduled run gets.",
+                            "type": "object",
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "additionalProperties": {
+                              "type": "string",
+                              "description": "Value of the input."
+                            }
+                          }
+                        },
+                        "required": [
+                          "schedule"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Start a ticketless run on a cron schedule."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "label": {
+                            "type": "string",
+                            "description": "Issue label that starts a run on the issue."
+                          }
+                        },
+                        "required": [
+                          "label"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Start a run on each issue that gets this label."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "pr_opened": {
+                            "anyOf": [
+                              {
+                                "type": "boolean",
+                                "const": true
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "not_author": {
+                                    "description": "GitHub logins whose pull requests are skipped.",
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ],
+                            "description": "true, or { not_author } to skip some authors; the run gets the PR as input pr."
+                          }
+                        },
+                        "required": [
+                          "pr_opened"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Start a run on each pull request opened."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "dependabot": {
+                            "type": "boolean",
+                            "const": true,
+                            "description": "true; the run gets the PR as input pr."
+                          }
+                        },
+                        "required": [
+                          "dependabot"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Start a run on each Dependabot pull request."
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "check_failed": {
+                            "type": "object",
+                            "properties": {
+                              "branch": {
+                                "type": "string",
+                                "description": "Branch whose failed checks start a run."
+                              },
+                              "workflow": {
+                                "description": "Only failures of this workflow (its file name); default any workflow.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "branch"
+                            ],
+                            "additionalProperties": false,
+                            "description": "Which failed check runs start a run; the run gets inputs branch and run_url."
+                          }
+                        },
+                        "required": [
+                          "check_failed"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Start a run when a check fails on a branch."
+                      }
+                    ]
+                  }
+                },
                 "next": {
                   "description": "Issue exit only: the pipeline each opened issue starts a linked run of; default none (the issues just stay open).",
                   "type": "string"

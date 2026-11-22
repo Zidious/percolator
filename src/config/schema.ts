@@ -268,6 +268,46 @@ export const PipelineInputSchema = z.strictObject({
   description: z.string().optional().describe('What the input is; shown as the field hint when starting a run.'),
 });
 
+/** What starts a run of a pipeline from perc watch: one of five shapes, told apart by their key. */
+export const TriggerSchema = z.union([
+  z
+    .strictObject({
+      schedule: z.string().describe('Cron expression (minute hour day-of-month month day-of-week) of when a ticketless run starts.'),
+      timezone: z.string().optional().describe('IANA time zone the schedule is read in, like Europe/London; default the time zone of the machine running perc watch.'),
+      inputs: z.record(z.string(), z.string().describe('Value of the input.')).optional().describe('Inputs each scheduled run gets.'),
+    })
+    .describe('Start a ticketless run on a cron schedule.'),
+  z
+    .strictObject({ label: z.string().describe('Issue label that starts a run on the issue.') })
+    .describe('Start a run on each issue that gets this label.'),
+  z
+    .strictObject({
+      pr_opened: z
+        .union([
+          z.literal(true),
+          z.strictObject({
+            not_author: z.array(z.string()).optional().describe('GitHub logins whose pull requests are skipped.'),
+          }),
+        ])
+        .describe('true, or { not_author } to skip some authors; the run gets the PR as input pr.'),
+    })
+    .describe('Start a run on each pull request opened.'),
+  z
+    .strictObject({ dependabot: z.literal(true).describe('true; the run gets the PR as input pr.') })
+    .describe('Start a run on each Dependabot pull request.'),
+  z
+    .strictObject({
+      check_failed: z
+        .strictObject({
+          branch: z.string().describe('Branch whose failed checks start a run.'),
+          workflow: z.string().optional().describe('Only failures of this workflow (its file name); default any workflow.'),
+        })
+        .describe('Which failed check runs start a run; the run gets inputs branch and run_url.'),
+    })
+    .describe('Start a run when a check fails on a branch.'),
+]);
+export type Trigger = z.infer<typeof TriggerSchema>;
+
 export const PipelineSchema = z.strictObject({
   default: z
     .boolean()
@@ -345,6 +385,10 @@ export const PipelineSchema = z.strictObject({
     .string()
     .optional()
     .describe("Router only: the pipeline used when nothing else picked one; default the profile's default pipeline, or feature when that is a router."),
+  triggers: z
+    .array(TriggerSchema)
+    .optional()
+    .describe('What starts runs of this pipeline while perc watch runs: schedule, label, pr_opened, dependabot or check_failed.'),
   next: z
     .string()
     .optional()
