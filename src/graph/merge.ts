@@ -85,6 +85,8 @@ export function mergePipelines(layers: Layer[]): Record<string, MergedPipeline> 
     if (fragment.rules) globalRules.push({ value: structuredClone(fragment.rules), source, locked: false, ...(locator ? { locator } : {}) });
     for (const [name, def] of Object.entries(fragment.pipelines ?? {})) {
       const target = pipeline(name);
+      // errors about the pipeline as a whole point at the first layer that names it
+      if (target.header.locator === undefined && locator !== undefined) target.header.locator = locator;
       const header = headerOf(def);
       if (Object.keys(header).length > 0 || def.required === true) {
         const existing = target.header;

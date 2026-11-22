@@ -2,8 +2,11 @@ import { ConfigError } from '../config/load.ts';
 import { locate, slotKey } from '../config/locate.ts';
 import type { Locator, Where } from '../config/locate.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
-import { CORE_GROOM_GATE, CORE_STAGES } from './core.ts';
-import type { Merged } from './merge.ts';
+import { EXIT_BUILTIN, EXIT_KINDS } from '../tracker/index.ts';
+import type { ExitKind } from '../tracker/index.ts';
+import { CORE_GROOM_GATE, FEATURE, STAGE_CONTRACTS } from './core.ts';
+import type { PipelineHeader } from './core.ts';
+import type { Merged, MergedPipeline, Sourced } from './merge.ts';
 
 export type Step = {
   id: string;
@@ -39,6 +42,15 @@ export type BackEdge = {
 };
 
 export type Graph = {
+  /** the pipeline this graph runs */
+  pipeline: string;
+  /** the pipeline's stages, in order; the last one is the exit stage */
+  stages: string[];
+  /** stage → output keys its last slot node must write */
+  contracts: Record<string, string[]>;
+  exit: ExitKind | 'route';
+  /** stages whose last slot loops back to the stage before them (review, and any with max_rounds) */
+  loopStages: string[];
   steps: Step[];
   regionStart: Record<Stage, number>;
   backEdges: Record<string, BackEdge>;
@@ -54,27 +66,145 @@ export class GraphError extends ConfigError {
   }
 }
 
+const EXIT_VERB: Record<ExitKind, string> = { pr: 'opens the PR' };
+
 /**
- * Builds the run graph from merged layers. `home` is the selected profile and where it is written:
- * unbound stages are reported there, because that is where a binding is added.
+ * Output keys each stage of a pipeline must write. feature keeps the core contracts; other pipelines
+ * take their `outputs`, falling back to the core contract of a stage named like a feature stage, and
+ * the exit's own output on the exit stage.
  */
-export function buildGraph(merged: Readonly<Merged>, home?: { profile: string; locator: Locator }): Graph {
-  const unbound = CORE_STAGES.filter((s) => merged.bindings[s] === undefined);
-  if (unbound.length > 0) {
-    if (home === undefined) throw new GraphError(`stages unbound: ${unbound.join(', ')}; bind each under bindings:`);
-    const { path: _path, ...at } = locate(home.locator, 'config', 'bindings');
-    throw new GraphError(`profile "${home.profile}" leaves stages unbound: ${unbound.join(', ')}; bind each under bindings:`, at);
+export function contractsFor(header: PipelineHeader, name: string): Record<string, string[]> {
+  const stages = header.stages ?? [];
+  const exitOutputs: Record<ExitKind, string[]> = { pr: ['pr_url'] };
+  const out: Record<string, string[]> = {};
+  stages.forEach((stage, i) => {
+    const core = (STAGE_CONTRACTS as Record<string, { requiredOutputs: readonly string[] }>)[stage]?.requiredOutputs;
+    if (name === 'feature') {
+      out[stage] = [...(core ?? [])];
+      return;
+    }
+    const own = header.outputs?.[stage];
+    if (stage === 'intake') out[stage] = [...new Set(['ticket', ...(own ?? [])])];
+    else if (i === stages.length - 1 && header.exit !== undefined) out[stage] = [...new Set([...exitOutputs[header.exit], ...(own ?? [])])];
+    else out[stage] = [...(own ?? core ?? [])];
+  });
+  return out;
+}
+
+function describeNode(d: NodeDef): string {
+  if (d.builtin !== undefined) return `builtin ${d.builtin}`;
+  if (d.kind === 'gate') return 'a gate';
+  if (d.agent !== undefined) return `agent ${d.agent}`;
+  return 'a command';
+}
+
+/**
+ * Builds the run graph of one pipeline from merged layers (a plain Merged is the feature pipeline).
+ * `home` is the selected profile and where it is written: unbound stages are reported there, because
+ * that is where a binding is added.
+ */
+export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { profile: string; locator: Locator }): Graph {
+  const named = 'header' in merged ? (merged as MergedPipeline) : undefined;
+  const name = named?.name ?? 'feature';
+  const isFeature = name === 'feature';
+  const { name: _f, ...featureHeader } = FEATURE;
+  const headerSourced: Sourced<PipelineHeader> = named?.header ?? { value: featureHeader as PipelineHeader, source: 'core', locked: false };
+  const header = headerSourced.value;
+  const at = (key: string) => locate(headerSourced.locator, 'config', `pipelines.${name}${key}`);
+
+  if (header.stages === undefined) {
+    if (!isFeature) {
+      throw new GraphError(`pipeline "${name}" needs stages: list them, starting with intake and ending with its exit stage`, at(''));
+    }
+  }
+  const stages = [...(header.stages ?? FEATURE.stages ?? [])];
+  if (stages[0] !== 'intake') {
+    throw new GraphError(`pipeline "${name}" must start with intake; add intake as its first stage`, at('.stages'));
+  }
+  stages.forEach((s, i) => {
+    if (stages.indexOf(s) !== i) {
+      throw new GraphError(`stage "${s}" is listed twice in pipeline "${name}"; list each stage once`, at(`.stages.${i}`));
+    }
+  });
+  const exitStage = stages.at(-1)!;
+
+  // what runs each stage: the merged bindings, plus the defaults a named pipeline gets
+  const bindings: Record<string, Sourced<NodeDef[]>> = { ...merged.bindings };
+  let exit: ExitKind | undefined = header.exit;
+  if (!isFeature) {
+    bindings.intake ??= { value: [{ builtin: 'github.intake' }], source: 'core', locked: false };
+    const bound = bindings[exitStage];
+    if (bound === undefined && exit !== undefined) {
+      bindings[exitStage] = { value: [{ builtin: EXIT_BUILTIN[exit] }], source: 'core', locked: false };
+    }
   }
 
-  const hooks = Object.entries(merged.nodes).map(([name, sourced]) => {
+  const unbound = stages.filter((s) => bindings[s] === undefined);
+  if (!isFeature && unbound.includes(exitStage) && exit === undefined) {
+    throw new GraphError(
+      `pipeline "${name}" has no exit: bind its last stage "${exitStage}" to one of ${EXIT_KINDS.map((k) => EXIT_BUILTIN[k]).join(', ')} or set exit:`,
+      at(''),
+    );
+  }
+  if (unbound.length > 0) {
+    if (isFeature) {
+      if (home === undefined) throw new GraphError(`stages unbound: ${unbound.join(', ')}; bind each under bindings:`);
+      const { path: _path, ...where } = locate(home.locator, 'config', 'bindings');
+      throw new GraphError(`profile "${home.profile}" leaves stages unbound: ${unbound.join(', ')}; bind each under bindings:`, where);
+    }
+    const message = `pipeline "${name}" in profile "${home?.profile ?? 'default'}" leaves stages unbound: ${unbound.join(', ')}; bind each under pipelines.${name}.bindings:`;
+    if (home === undefined) throw new GraphError(message, at(''));
+    const { path: _path, ...where } = locate(home.locator, 'config', `pipelines.${name}.bindings`);
+    throw new GraphError(message, where);
+  }
+
+  // the exit stage: never an agent; on a named pipeline its binding and exit: agree
+  const exitBinding = bindings[exitStage]!;
+  const exitAt = () => locate(exitBinding.locator, 'config', `bindings.${exitStage}`);
+  if (exitBinding.value.some((d) => d.kind === 'agent' || d.agent !== undefined)) {
+    const kind = exit ?? 'pr';
+    throw new GraphError(
+      `${exitStage} cannot be an agent node: Percolator ${EXIT_VERB[kind]} itself (use { builtin: ${EXIT_BUILTIN[kind]} })`,
+      exitAt(),
+    );
+  }
+  if (!isFeature) {
+    const only = exitBinding.value.length === 1 ? exitBinding.value[0]! : undefined;
+    if (exit === undefined) {
+      exit = EXIT_KINDS.find((k) => only?.builtin === EXIT_BUILTIN[k]);
+      if (exit === undefined) {
+        throw new GraphError(
+          `pipeline "${name}" has no exit: bind its last stage "${exitStage}" to one of ${EXIT_KINDS.map((k) => EXIT_BUILTIN[k]).join(', ')} or set exit:`,
+          at(''),
+        );
+      }
+    } else if (only?.builtin !== EXIT_BUILTIN[exit]) {
+      const wrong = exitBinding.value.find((d) => d.builtin !== EXIT_BUILTIN[exit!]) ?? exitBinding.value[0]!;
+      throw new GraphError(
+        `exit ${exit} runs ${EXIT_BUILTIN[exit]}, but stage "${exitStage}" is bound to ${describeNode(wrong)}; bind it to { builtin: ${EXIT_BUILTIN[exit]} } or change exit`,
+        exitAt(),
+      );
+    }
+  }
+
+  const hooks = Object.entries(merged.nodes).map(([nodeName, sourced]) => {
     const def = sourced.value;
     if (def.before === undefined && def.after === undefined) {
       throw new GraphError(
-        `extension node "${name}" needs "before" or "after"; attach it to a stage or all`,
-        locate(sourced.locator, 'config', `nodes.${name}`),
+        `extension node "${nodeName}" needs "before" or "after"; attach it to a stage or all`,
+        locate(sourced.locator, 'config', `nodes.${nodeName}`),
       );
     }
-    return { name, def, source: sourced.source, locked: sourced.locked, ...(sourced.locator ? { locator: sourced.locator } : {}) };
+    for (const point of ['before', 'after'] as const) {
+      const target = def[point];
+      if (target !== undefined && target !== 'all' && !stages.includes(target)) {
+        throw new GraphError(
+          `"${point}: ${target}" names no stage of pipeline "${name}" (stages: ${stages.join(', ')}); attach it to one of those or all`,
+          locate(sourced.locator, 'config', `nodes.${nodeName}.${point}`),
+        );
+      }
+    }
+    return { name: nodeName, def, source: sourced.source, locked: sourced.locked, ...(sourced.locator ? { locator: sourced.locator } : {}) };
   });
 
   const steps: Step[] = [];
@@ -83,18 +213,12 @@ export function buildGraph(merged: Readonly<Merged>, home?: { profile: string; l
     steps.push({ id: h.name, name: h.name, stage, role: 'hook', def: h.def, slotLast: false, source: h.source, locked: h.locked, ...(h.locator ? { locator: h.locator } : {}) });
 
   for (const h of hooks.filter((h) => h.def.before === 'all')) pushHook(h, 'before-all');
-  for (const stage of CORE_STAGES) {
+  for (const stage of stages) {
     const before = hooks.filter((h) => h.def.before === stage);
     regionStart[stage] = steps.length;
     for (const h of before) pushHook(h, stage);
-    const binding = merged.bindings[stage]!;
+    const binding = bindings[stage]!;
     const slot = binding.value;
-    if (stage === 'deliver' && slot.some((d) => d.kind === 'agent' || d.agent !== undefined)) {
-      throw new GraphError(
-        'deliver cannot be an agent node: Percolator opens the PR itself (use { builtin: github.open_pr })',
-        locate(binding.locator, 'config', 'bindings.deliver'),
-      );
-    }
     slot.forEach((def, i) => {
       steps.push({
         id: slot.length > 1 ? `${stage}.${i}` : stage,
@@ -123,38 +247,57 @@ export function buildGraph(merged: Readonly<Merged>, home?: { profile: string; l
     seen.add(s.id);
   }
 
-  const ceiling = Math.min(...merged.rules.map((r) => r.value.max_rounds_ceiling ?? Infinity));
-  const reviewSlot = merged.bindings.review!.value;
-  const lastReview = steps.findLast((s) => s.role === 'slot' && s.stage === 'review')!;
-  const lastReviewRegion = steps.findLastIndex((s) => s.stage === 'review');
+  // loop stages: review always (default 3 rounds), any other stage whose last slot node sets max_rounds
+  const lastSlotOf = (stage: string) => steps.findLast((s) => s.role === 'slot' && s.stage === stage)!;
+  const loopStages = stages.filter((stage) => stage === 'review' || lastSlotOf(stage).def.max_rounds !== undefined);
+  if (loopStages[0] === 'intake') {
+    const step = lastSlotOf('intake');
+    throw new GraphError(
+      'stage "intake" cannot loop: there is no stage before it; remove max_rounds',
+      locate(step.locator, 'config', `bindings.intake`),
+    );
+  }
+  const loopLast = new Map(loopStages.map((stage) => [lastSlotOf(stage), stage]));
 
+  const ceiling = Math.min(...merged.rules.map((r) => r.value.max_rounds_ceiling ?? Infinity));
   const backEdges: Record<string, BackEdge> = {};
   for (const step of steps) {
     const onFail = step.def.on_fail;
     if (!onFail) continue;
-    const at = (key: string) =>
-      locate(step.locator, 'config', `${stepKey(step)}.${key}`);
-    if (step === lastReview) {
-      throw new GraphError('review loop is core-owned; set max_rounds on the review binding instead', at('on_fail'));
+    const where = (key: string) => locate(step.locator, 'config', `${stepKey(step)}.${key}`);
+    const loopStage = loopLast.get(step);
+    if (loopStage !== undefined) {
+      throw new GraphError(
+        loopStage === 'review'
+          ? 'review loop is core-owned; set max_rounds on the review binding instead'
+          : `${loopStage} loop is set by max_rounds on its binding; remove on_fail from its last node`,
+        where('on_fail'),
+      );
     }
     if (step.stage === 'before-all') {
       throw new GraphError(
         'a before-all hook cannot declare on_fail (no earlier stage to return to); remove on_fail or attach the hook to a stage',
-        at('on_fail'),
+        where('on_fail'),
+      );
+    }
+    if (!stages.includes(onFail.back_to)) {
+      throw new GraphError(
+        `back_to "${onFail.back_to}" is not a stage of pipeline "${name}" (stages: ${stages.join(', ')}); use one of those`,
+        where('on_fail.back_to'),
       );
     }
     // an after-all hook runs past the last stage, so it may target any stage
-    const own = step.stage === 'after-all' ? CORE_STAGES.length - 1 : CORE_STAGES.indexOf(step.stage);
-    if (CORE_STAGES.indexOf(onFail.back_to) > own) {
+    const own = step.stage === 'after-all' ? stages.length - 1 : stages.indexOf(step.stage);
+    if (stages.indexOf(onFail.back_to) > own) {
       throw new GraphError(
-        `back_to must point to an earlier stage (got "${onFail.back_to}" at "${step.id}"); use "${CORE_STAGES[own]}" or an earlier stage`,
-        at('on_fail.back_to'),
+        `back_to must point to an earlier stage (got "${onFail.back_to}" at "${step.id}"); use "${stages[own]}" or an earlier stage`,
+        where('on_fail.back_to'),
       );
     }
     backEdges[step.id] = {
       id: step.id,
       fromStepId: step.id,
-      toStepIndex: regionStart[onFail.back_to],
+      toStepIndex: regionStart[onFail.back_to]!,
       jumpAfterIndex: steps.indexOf(step),
       // rule checks exempt the core gate, so its cap is clamped to the ceiling here
       maxRounds: step.role === 'hook' && step.id === CORE_GROOM_GATE.name ? Math.min(onFail.max_rounds, ceiling) : onFail.max_rounds,
@@ -162,20 +305,33 @@ export function buildGraph(merged: Readonly<Merged>, home?: { profile: string; l
     };
   }
 
-  backEdges[lastReview.id] = {
-    id: lastReview.id,
-    fromStepId: lastReview.id,
-    toStepIndex: regionStart.implement,
-    // after:review hooks run every round, so the jump happens after the last review-region step
-    jumpAfterIndex: lastReviewRegion,
-    maxRounds: reviewSlot[reviewSlot.length - 1]!.max_rounds ?? 3,
-    onCap: 'continue',
-  };
-
   const failRoutes: Record<string, string> = {};
-  // any review slot node's fail is a review round; a step's own on_fail is more specific
-  for (const s of steps) if (s.role === 'slot' && s.stage === 'review') failRoutes[s.id] = lastReview.id;
+  for (const stage of loopStages) {
+    const last = lastSlotOf(stage);
+    const previous = stages[stages.indexOf(stage) - 1]!;
+    backEdges[last.id] = {
+      id: last.id,
+      fromStepId: last.id,
+      toStepIndex: regionStart[previous]!,
+      // after-hooks of the stage run every round, so the jump happens after the stage's last step
+      jumpAfterIndex: steps.findLastIndex((s) => s.stage === stage),
+      maxRounds: last.def.max_rounds ?? 3,
+      onCap: 'continue',
+    };
+    // any slot node's fail in a loop stage is a round of it; a step's own on_fail is more specific
+    for (const s of steps) if (s.role === 'slot' && s.stage === stage) failRoutes[s.id] = last.id;
+  }
   for (const id of Object.keys(backEdges)) failRoutes[id] = id;
 
-  return { steps, regionStart, backEdges, failRoutes };
+  return {
+    pipeline: name,
+    stages,
+    contracts: contractsFor({ ...header, stages, ...(exit !== undefined ? { exit } : {}) }, name),
+    exit: exit ?? 'pr',
+    loopStages,
+    steps,
+    regionStart,
+    backEdges,
+    failRoutes,
+  };
 }

@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { buildGraph, GraphError } from '../../src/graph/build.ts';
 import { mappingsFor } from '../../src/grounds/mappings.ts';
 import type { Mapping } from '../../src/config/schema.ts';
-import { mergeLayers } from '../../src/graph/merge.ts';
+import { mergeLayers, mergePipelines } from '../../src/graph/merge.ts';
+import { STAGE_CONTRACTS } from '../../src/graph/core.ts';
+import type { Pipeline } from '../../src/config/schema.ts';
 import type { GraphFragment } from '../../src/config/schema.ts';
 
 function full(extra: Pick<GraphFragment, 'nodes'> = {}, bindings: GraphFragment['bindings'] = {}) {
@@ -385,4 +387,201 @@ test('a one-item list binding is located at its item: bindings.<stage>.0', () =>
     message: 'g.yaml:12: bindings.implement.0.on_fail.back_to: back_to must point to an earlier stage (got "deliver" at "implement"); use "implement" or an earlier stage',
     path: 'bindings.implement.0.on_fail.back_to',
   });
+});
+
+// ---- pipelines ----
+
+const HOTFIX: Pipeline = {
+  stages: ['intake', 'reproduce', 'fix', 'review', 'deliver'],
+  outputs: { reproduce: ['failing_test'] },
+  bindings: { reproduce: { agent: 'claude' }, fix: { agent: 'claude' }, review: { agent: 'claude' } },
+  exit: 'pr',
+};
+/** The hotfix pipeline, merged from one profile layer at c.yaml (prefix profiles.default). */
+function hotfix(over: Partial<Pipeline> = {}, lines: Record<string, number> = {}) {
+  const bindings = Object.fromEntries(
+    Object.entries({ ...HOTFIX.bindings, ...over.bindings }).filter(([, v]) => v !== undefined),
+  ) as Pipeline['bindings'];
+  const p = { ...HOTFIX, ...over, bindings };
+  return mergePipelines([
+    { source: 'profile:default', fragment: { pipelines: { hotfix: p } }, locator: { file: 'c.yaml', lines, prefix: 'profiles.default' } },
+  ]).hotfix!;
+}
+function hotfixWithout(key: 'stages' | 'exit', bindings: Pipeline['bindings'] = {}) {
+  const p: Pipeline = { ...HOTFIX, bindings: { ...HOTFIX.bindings, ...bindings } };
+  delete p[key];
+  return mergePipelines([
+    { source: 'profile:default', fragment: { pipelines: { hotfix: p } }, locator: { file: 'c.yaml', lines: {}, prefix: 'profiles.default' } },
+  ]).hotfix!;
+}
+const HOME = {
+  profile: 'default',
+  locator: { file: 'c.yaml', lines: { 'profiles.default': 2, 'profiles.default.pipelines.hotfix': 4 }, prefix: 'profiles.default' },
+};
+
+function throwsAt(fn: () => unknown, message: string, p: string | undefined) {
+  assert.throws(fn, (e: unknown) => {
+    assert.ok(e instanceof GraphError);
+    assert.equal(e.message, message);
+    assert.equal(e.path, p);
+    return true;
+  });
+}
+
+test("builds the chosen pipeline's stages in order", () => {
+  const g = buildGraph(hotfix());
+  assert.equal(g.pipeline, 'hotfix');
+  assert.deepEqual(g.stages, ['intake', 'reproduce', 'fix', 'review', 'deliver']);
+  assert.deepEqual(g.steps.map((s) => s.id), ['intake', 'reproduce', 'fix', 'review', 'deliver']);
+  assert.equal(g.exit, 'pr');
+});
+
+test("contracts come from the pipeline's outputs", () => {
+  assert.deepEqual(buildGraph(hotfix()).contracts, {
+    intake: ['ticket'],
+    reproduce: ['failing_test'],
+    fix: [],
+    review: ['findings'],
+    deliver: ['pr_url'],
+  });
+});
+
+test('feature contracts are unchanged', () => {
+  const g = buildGraph(full());
+  assert.deepEqual(g.contracts, Object.fromEntries(Object.entries(STAGE_CONTRACTS).map(([k, v]) => [k, [...v.requiredOutputs]])));
+  assert.equal(g.pipeline, 'feature');
+});
+
+test('exit implied by exit: pr when deliver is unbound; intake defaults to github.intake', () => {
+  const g = buildGraph(hotfix());
+  assert.deepEqual(g.steps.at(-1)!.def, { builtin: 'github.open_pr' });
+  assert.deepEqual(g.steps[0]!.def, { builtin: 'github.intake' });
+});
+
+test('a pipeline must start with intake', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ stages: ['reproduce', 'deliver'] }, { 'profiles.default.pipelines.hotfix.stages': 6 })),
+    'c.yaml:6: profiles.default.pipelines.hotfix.stages: pipeline "hotfix" must start with intake; add intake as its first stage',
+    'profiles.default.pipelines.hotfix.stages',
+  );
+});
+
+test('duplicate stages are refused', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ stages: ['intake', 'fix', 'fix', 'deliver'] })),
+    'c.yaml: profiles.default.pipelines.hotfix.stages.2: stage "fix" is listed twice in pipeline "hotfix"; list each stage once',
+    'profiles.default.pipelines.hotfix.stages.2',
+  );
+});
+
+test('a pipeline other than feature needs stages', () => {
+  throwsAt(
+    () => buildGraph(hotfixWithout('stages')),
+    'c.yaml: profiles.default.pipelines.hotfix: pipeline "hotfix" needs stages: list them, starting with intake and ending with its exit stage',
+    'profiles.default.pipelines.hotfix',
+  );
+});
+
+test('a named pipeline lists its unbound stages', () => {
+  assert.throws(() => buildGraph(hotfix({ bindings: { fix: undefined as never } }), HOME), (e: unknown) => {
+    assert.ok(e instanceof GraphError);
+    assert.equal(
+      e.message,
+      'c.yaml:4: pipeline "hotfix" in profile "default" leaves stages unbound: fix; bind each under pipelines.hotfix.bindings:',
+    );
+    return true;
+  });
+});
+
+test('a pipeline without an exit is refused', () => {
+  throwsAt(
+    () => buildGraph(hotfixWithout('exit')),
+    'c.yaml: profiles.default.pipelines.hotfix: pipeline "hotfix" has no exit: bind its last stage "deliver" to one of github.open_pr or set exit:',
+    'profiles.default.pipelines.hotfix',
+  );
+});
+
+test('a builtin exit binding implies the exit', () => {
+  assert.equal(buildGraph(hotfixWithout('exit', { deliver: { builtin: 'github.open_pr' } })).exit, 'pr');
+});
+
+test('exit and binding must agree', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ bindings: { deliver: { command: ['x'] } } }, { 'profiles.default.pipelines.hotfix.bindings.deliver': 9 })),
+    'c.yaml:9: profiles.default.pipelines.hotfix.bindings.deliver: exit pr runs github.open_pr, but stage "deliver" is bound to a command; bind it to { builtin: github.open_pr } or change exit',
+    'profiles.default.pipelines.hotfix.bindings.deliver',
+  );
+});
+
+test('the exit stage of any pipeline cannot be an agent node', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ bindings: { deliver: { agent: 'claude' } } })),
+    'c.yaml: profiles.default.pipelines.hotfix.bindings.deliver: deliver cannot be an agent node: Percolator opens the PR itself (use { builtin: github.open_pr })',
+    'profiles.default.pipelines.hotfix.bindings.deliver',
+  );
+});
+
+test('a hook naming an unknown stage is refused', () => {
+  throwsAt(
+    () =>
+      buildGraph(
+        hotfix(
+          { nodes: { lint: { kind: 'script', command: ['x'], after: 'groom' } } },
+          { 'profiles.default.pipelines.hotfix.nodes.lint.after': 12 },
+        ),
+      ),
+    'c.yaml:12: profiles.default.pipelines.hotfix.nodes.lint.after: "after: groom" names no stage of pipeline "hotfix" (stages: intake, reproduce, fix, review, deliver); attach it to one of those or all',
+    'profiles.default.pipelines.hotfix.nodes.lint.after',
+  );
+});
+
+test('a feature hook naming an unknown stage is refused', () => {
+  assert.throws(() => buildGraph(full({ nodes: { x: { kind: 'script', command: ['x'], before: 'nope' } } })), {
+    message:
+      'config: nodes.x.before: "before: nope" names no stage of pipeline "feature" (stages: intake, groom, plan, implement, review, deliver); attach it to one of those or all',
+  });
+});
+
+test('back_to an unknown stage is refused', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ nodes: { t: { kind: 'script', command: ['x'], after: 'fix', on_fail: { back_to: 'plan', max_rounds: 2 } } } })),
+    'c.yaml: profiles.default.pipelines.hotfix.nodes.t.on_fail.back_to: back_to "plan" is not a stage of pipeline "hotfix" (stages: intake, reproduce, fix, review, deliver); use one of those',
+    'profiles.default.pipelines.hotfix.nodes.t.on_fail.back_to',
+  );
+});
+
+test('max_rounds on any stage loops back to the stage before it', () => {
+  const g = buildGraph(hotfix({ bindings: { fix: { agent: 'claude', max_rounds: 2 } } }));
+  assert.deepEqual(g.backEdges.fix, {
+    id: 'fix',
+    fromStepId: 'fix',
+    toStepIndex: g.regionStart.reproduce,
+    jumpAfterIndex: g.steps.findIndex((s) => s.id === 'fix'),
+    maxRounds: 2,
+    onCap: 'continue',
+  });
+  assert.deepEqual(g.loopStages, ['fix', 'review']);
+  assert.equal(g.failRoutes.fix, 'fix');
+  assert.equal(g.backEdges.review!.toStepIndex, g.regionStart.fix);
+});
+
+test('intake cannot loop', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ bindings: { intake: { builtin: 'github.intake', kind: 'builtin', max_rounds: 2 } } })),
+    'c.yaml: profiles.default.pipelines.hotfix.bindings.intake: stage "intake" cannot loop: there is no stage before it; remove max_rounds',
+    'profiles.default.pipelines.hotfix.bindings.intake',
+  );
+});
+
+test('a custom loop stage refuses on_fail on its last node', () => {
+  throwsAt(
+    () =>
+      buildGraph(hotfix({ bindings: { fix: { agent: 'claude', max_rounds: 2, on_fail: { back_to: 'reproduce', max_rounds: 2 } } } })),
+    'c.yaml: profiles.default.pipelines.hotfix.bindings.fix.on_fail: fix loop is set by max_rounds on its binding; remove on_fail from its last node',
+    'profiles.default.pipelines.hotfix.bindings.fix.on_fail',
+  );
+});
+
+test('the feature graph keeps its loop stages', () => {
+  assert.deepEqual(buildGraph(full()).loopStages, ['review']);
 });
