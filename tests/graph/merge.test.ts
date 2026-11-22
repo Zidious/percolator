@@ -296,7 +296,12 @@ test('router keys are part of the pipeline header', () => {
   });
 });
 
-const LOCKED_HOTFIX ={ required: true, stages: ['intake', 'fix', 'deliver'], exit: 'pr' as const };
+test('next is part of the pipeline header', () => {
+  const r = mergePipelines([L('a', { pipelines: { split: { stages: ['intake', 'deliver'], exit: 'issue', next: 'hotfix' } } })]);
+  assert.equal(r.split!.header.value.next, 'hotfix');
+});
+
+const LOCKED_HOTFIX = { required: true, stages: ['intake', 'fix', 'deliver'], exit: 'pr' as const };
 const groundLayer: Layer = {
   source: 'ground:co/p.yaml',
   fragment: { pipelines: { hotfix: LOCKED_HOTFIX } },

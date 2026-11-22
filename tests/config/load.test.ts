@@ -294,6 +294,15 @@ test('a router pipeline loads', async () => {
   );
 });
 
+test('a pipeline may name the next pipeline for its issues', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      split:\n        stages: [intake, deliver]\n        exit: issue\n        next: hotfix\n',
+    async (file) => {
+      assert.equal((await loadUserConfig(file)).profiles.default!.pipelines!.split!.next, 'hotfix');
+    },
+  );
+});
+
 test('choose.confirm is unsure or always', async () => {
   await withYaml(
     'version: 1\nprofiles:\n  default:\n    pipelines:\n      triage:\n        choose: { agent: claude, from: [a], confirm: never }\n',

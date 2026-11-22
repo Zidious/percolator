@@ -48,7 +48,7 @@ export class LockViolation extends ConfigError {
 /** One pipeline after every layer merged: what runs its stages, plus its header (stages, exit, ticket, inputs…). */
 export type MergedPipeline = Merged & { name: string; header: Sourced<PipelineHeader> };
 
-const HEADER_KEYS = ['default', 'description', 'stages', 'outputs', 'exit', 'ticket', 'inputs', 'router', 'routes', 'choose', 'fallback'] as const;
+const HEADER_KEYS = ['default', 'description', 'stages', 'outputs', 'exit', 'ticket', 'inputs', 'router', 'routes', 'choose', 'fallback', 'next'] as const;
 
 function headerOf(p: Pipeline): PipelineHeader {
   const h: Record<string, unknown> = {};

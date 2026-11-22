@@ -793,6 +793,10 @@
                   "description": "Router only: the pipeline used when nothing else picked one; default the profile's default pipeline, or feature when that is a router.",
                   "type": "string"
                 },
+                "next": {
+                  "description": "Issue exit only: the pipeline each opened issue starts a linked run of; default none (the issues just stay open).",
+                  "type": "string"
+                },
                 "bindings": {
                   "description": "What runs each of the pipeline's stages; after all layers merge, every stage must be bound.",
                   "type": "object",

@@ -345,6 +345,10 @@ export const PipelineSchema = z.strictObject({
     .string()
     .optional()
     .describe("Router only: the pipeline used when nothing else picked one; default the profile's default pipeline, or feature when that is a router."),
+  next: z
+    .string()
+    .optional()
+    .describe('Issue exit only: the pipeline each opened issue starts a linked run of; default none (the issues just stay open).'),
   bindings: z
     .record(z.string(), BindingSchema.describe('The node that runs this stage, or a list of nodes run in order.'))
     .optional()

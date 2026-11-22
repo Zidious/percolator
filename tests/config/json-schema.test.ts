@@ -118,6 +118,7 @@ test('descriptions state the defaults the code uses', () => {
     ['$.profiles.*.rules.allowed_agents', /^Agents that agent nodes may use; default any agent\.$/],
     ['$.profiles.*.pipelines.*.choose.confirm', /default unsure/],
     ['$.profiles.*.pipelines.*.fallback', /default the profile's default pipeline, or feature/],
+    ['$.profiles.*.pipelines.*.next', /^Issue exit only/],
   ];
   for (const [p, re] of expected) assert.match(desc(p), re, p);
   assert.ok(
