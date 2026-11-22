@@ -7,6 +7,12 @@ import type { Runtime } from '../engine/runtime.ts';
 import { mappingKeys, mappingsFingerprint } from '../grounds/mappings.ts';
 import { HerdrRuntime, sweepTerminals } from '../runtime/herdr-runtime.ts';
 import type { Attention } from '../runtime/herdr-runtime.ts';
+import { githubComment } from '../tracker/exits/comment.ts';
+import { githubOpenIssues } from '../tracker/exits/issues.ts';
+import { githubPrivateForkPr } from '../tracker/exits/private-fork.ts';
+import { githubRelease } from '../tracker/exits/release.ts';
+import { percolatorReport } from '../tracker/exits/report.ts';
+import { githubPrReview } from '../tracker/exits/review.ts';
 import { githubGate } from '../tracker/gate.ts';
 import { githubIntake } from '../tracker/intake.ts';
 import { githubOpenPr } from '../tracker/pr.ts';
@@ -76,7 +82,7 @@ export async function checkResumable(
   const lock = await otherLiveLock(dir, liveness(deps));
   if (lock !== undefined) throw new Error(drivenByProcess(runId, lock));
 
-  const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile });
+  const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile, pipeline: meta.pipeline });
   if (state.graphFingerprint !== undefined && state.graphFingerprint !== graphFingerprint(v.graph)) {
     throw new Error(`run ${runId} was started with a different graph (config changed since); start a new run`);
   }
@@ -138,11 +144,14 @@ async function driveHeld(
     const body = `${JSON.stringify({ ...a, at: now().toISOString() }, null, 2)}\n`;
     attentionWrite = attentionWrite.then(() => writeFileAtomic(attentionFile, body)).catch(() => {});
   };
-  const ticket = parseTicket(meta.ticket);
+  const ticket = meta.ticket === undefined ? undefined : parseTicket(meta.ticket);
   const runtime = new HerdrRuntime({
     hc: deps.hc,
     runId,
-    ticket: meta.ticket,
+    // a ticketless run names its terminals after its pipeline
+    ticket: meta.ticket ?? meta.pipeline,
+    pipeline: meta.pipeline,
+    inputs: meta.inputs,
     runDir: dir,
     worktree: meta.worktree,
     branch: meta.branch,
@@ -156,10 +165,43 @@ async function driveHeld(
       'github.intake': githubIntake({
         gh: deps.gh,
         runDir: dir,
-        ticket,
+        ...(ticket !== undefined ? { ticket } : {}),
+        pipeline: meta.pipeline,
+        runId,
+        inputs: meta.inputs,
         ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
       }),
-      'github.open_pr': githubOpenPr({ gh: deps.gh, runDir: dir, worktree: meta.worktree, branch: meta.branch, base: meta.base }),
+      'github.open_pr': githubOpenPr({
+        gh: deps.gh,
+        runDir: dir,
+        worktree: meta.worktree,
+        branch: meta.branch,
+        base: meta.base,
+        repo: meta.repo,
+        pipeline: meta.pipeline,
+        runId,
+      }),
+      'github.comment': githubComment({ gh: deps.gh, runDir: dir, runId }),
+      'percolator.report': percolatorReport(),
+      'github.open_issues': githubOpenIssues({ gh: deps.gh, runDir: dir, runId, repo: meta.repo }),
+      'github.release': githubRelease({
+        gh: deps.gh,
+        runDir: dir,
+        worktree: meta.worktree,
+        branch: meta.branch,
+        repo: meta.repo,
+        inputs: meta.inputs,
+      }),
+      'github.pr_review': githubPrReview({ gh: deps.gh, runDir: dir, runId, inputs: meta.inputs, repo: meta.repo }),
+      'github.private_fork_pr': githubPrivateForkPr({
+        gh: deps.gh,
+        runDir: dir,
+        worktree: meta.worktree,
+        branch: meta.branch,
+        base: meta.base,
+        repo: meta.repo,
+        inputs: meta.inputs,
+      }),
     },
     gate: githubGate({
       gh: deps.gh,
@@ -168,7 +210,8 @@ async function driveHeld(
       ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
       ...(sleep !== undefined ? { sleep } : {}),
       now: nowMs,
-      onWaiting: (stepId, url) => deps.out(`${stepId}: waiting for approval: ${url}`),
+      onWaiting: (stepId, url) =>
+        deps.out(`${stepId}: waiting for approval: ${url ?? `perc approve ${runId} | perc reject ${runId} <feedback>`}`),
     }),
     onAttention,
     ...(sleep !== undefined ? { sleep } : {}),

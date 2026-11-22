@@ -145,6 +145,11 @@ export const NodeDefSchema = z
       .positive()
       .optional()
       .describe('Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.'),
+    when_output: z
+      .string()
+      .regex(/^[a-z][a-z0-9_]*$/, 'expected an output key like issues')
+      .optional()
+      .describe('Gate nodes only: stop only when an earlier step wrote this output (like issues); otherwise pass at once. Default always stop.'),
     escalation: z.boolean().optional().describe('Accepted but not used yet; has no effect.'),
     required: z
       .boolean()
@@ -166,6 +171,13 @@ export const NodeDefSchema = z
     }
     // Agent-only fields on another kind would satisfy allowed_*/require_skills without ever running an agent.
     const kind = effectiveKind(n);
+    if (n.when_output !== undefined && kind !== 'gate') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['when_output'],
+        message: `"when_output" only applies to gate nodes (this node is kind "${kind}")`,
+      });
+    }
     if (kind === 'agent') {
       if (n.agent === undefined) {
         ctx.addIssue({ code: 'custom', message: 'agent nodes need "agent" (which agent runs this node)' });

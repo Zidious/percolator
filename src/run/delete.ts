@@ -77,7 +77,7 @@ export async function planDelete(runId: string, deps: DriverDeps): Promise<Delet
   const ticket =
     run.status !== 'unreadable'
       ? { ref: run.ticket.ref, ...(run.ticket.title !== undefined ? { title: run.ticket.title } : {}) }
-      : meta !== undefined
+      : meta?.ticket !== undefined
         ? { ref: meta.ticket }
         : undefined;
   return {

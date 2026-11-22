@@ -169,6 +169,16 @@ test('a script node may not set agent, model, effort, skill or skills', async ()
   );
 });
 
+test('only a gate node may set when_output', async () => {
+  await withYaml('nodes:\n  a:\n    command: [x]\n    when_output: issues\n    after: plan\n  g:\n    kind: gate\n    when_output: issues\n    after: plan\n', async (file) => {
+    const err = await loadFragment(file).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.deepEqual(err.message.split('\n'), [
+      `${file}:4: nodes.a.when_output: "when_output" only applies to gate nodes (this node is kind "script")`,
+    ]);
+  });
+});
+
 test('inferred builtin and explicit gate nodes may not set model or skills', async () => {
   await withYaml('nodes:\n  a:\n    builtin: b\n    model: m\n    after: plan\n  g:\n    kind: gate\n    skills: [s]\n    after: plan\n', async (file) => {
     const err = await loadFragment(file).catch((e) => e);

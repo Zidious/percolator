@@ -203,6 +203,11 @@
                       "type": "number",
                       "exclusiveMinimum": 0
                     },
+                    "when_output": {
+                      "description": "Gate nodes only: stop only when an earlier step wrote this output (like issues); otherwise pass at once. Default always stop.",
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    },
                     "escalation": {
                       "description": "Accepted but not used yet; has no effect.",
                       "type": "boolean"
@@ -340,6 +345,11 @@
                         "description": "Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.",
                         "type": "number",
                         "exclusiveMinimum": 0
+                      },
+                      "when_output": {
+                        "description": "Gate nodes only: stop only when an earlier step wrote this output (like issues); otherwise pass at once. Default always stop.",
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]*$"
                       },
                       "escalation": {
                         "description": "Accepted but not used yet; has no effect.",
@@ -487,6 +497,11 @@
                   "description": "Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.",
                   "type": "number",
                   "exclusiveMinimum": 0
+                },
+                "when_output": {
+                  "description": "Gate nodes only: stop only when an earlier step wrote this output (like issues); otherwise pass at once. Default always stop.",
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
                 },
                 "escalation": {
                   "description": "Accepted but not used yet; has no effect.",
@@ -1098,6 +1113,11 @@
                             "type": "number",
                             "exclusiveMinimum": 0
                           },
+                          "when_output": {
+                            "description": "Gate nodes only: stop only when an earlier step wrote this output (like issues); otherwise pass at once. Default always stop.",
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_]*$"
+                          },
                           "escalation": {
                             "description": "Accepted but not used yet; has no effect.",
                             "type": "boolean"
@@ -1235,6 +1255,11 @@
                               "description": "Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.",
                               "type": "number",
                               "exclusiveMinimum": 0
+                            },
+                            "when_output": {
+                              "description": "Gate nodes only: stop only when an earlier step wrote this output (like issues); otherwise pass at once. Default always stop.",
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9_]*$"
                             },
                             "escalation": {
                               "description": "Accepted but not used yet; has no effect.",
@@ -1382,6 +1407,11 @@
                         "description": "Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.",
                         "type": "number",
                         "exclusiveMinimum": 0
+                      },
+                      "when_output": {
+                        "description": "Gate nodes only: stop only when an earlier step wrote this output (like issues); otherwise pass at once. Default always stop.",
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]*$"
                       },
                       "escalation": {
                         "description": "Accepted but not used yet; has no effect.",

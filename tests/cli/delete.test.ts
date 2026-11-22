@@ -21,6 +21,8 @@ type Env = RunEnv & {
 async function setup(): Promise<Env> {
   const base = await setupRunEnv();
   let clock = NOW.getTime();
+  // one ticket per run: a ticket has at most one live run
+  let issue = 4;
   const dir = (m: RunMeta) => path.join(base.home, '.percolator', 'runs', m.runId);
   return {
     ...base,
@@ -29,7 +31,7 @@ async function setup(): Promise<Env> {
       // distinct createdAt (and run ids), so listRuns order is the order of creation, newest first
       clock += 1000;
       base.deps.now = () => new Date(clock);
-      const m = await prepareRun({ ticket: '#5', repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps);
+      const m = await prepareRun({ ticket: `#${++issue}`, repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps);
       await fs.writeFile(path.join(dir(m), 'issue.json'), JSON.stringify({ title: o.title ?? 'Fix the thing' }));
       if (o.status !== undefined) {
         const s = await loadState(dir(m));

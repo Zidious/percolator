@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { ConfigError } from '../../src/config/load.ts';
 import { RuleViolationError } from '../../src/graph/rules.ts';
+import { EXIT_KINDS, EXITS } from '../../src/tracker/index.ts';
 import { groundVersion, validate, validateAll } from '../../src/validate.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
 import { FakeGit } from '../helpers/fake-git.ts';
@@ -613,7 +614,7 @@ test('validateAll throws the first pipeline error', async () => {
     (abs) => pipelinesConfig(abs, '      broken:\n        stages: [intake, fix, deliver]\n'),
     async (cfg) => {
       await assert.rejects(validateAll({ ...opts(), configFile: cfg, profile: 'default' }), {
-        message: `${cfg}:22: profiles.default.pipelines.broken: pipeline "broken" has no exit: bind its last stage "deliver" to one of github.open_pr or set exit:`,
+        message: `${cfg}:22: profiles.default.pipelines.broken: pipeline "broken" has no exit: bind its last stage "deliver" to one of ${EXIT_KINDS.map((k) => EXITS[k].builtin).join(', ')} or set exit:`,
       });
     },
   );

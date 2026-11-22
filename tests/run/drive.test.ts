@@ -8,6 +8,7 @@ import { checkResumable, drive } from '../../src/run/drive.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
+import { writeDecision } from '../../src/tracker/gate.ts';
 import { GATE_MARKER } from '../../src/tracker/intake.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { FakeHc } from '../helpers/fake-hc.ts';
@@ -26,7 +27,7 @@ const BINDINGS = [
   '      deliver: { builtin: github.open_pr }',
 ];
 const TRACKER = '    tracker: { kind: github, approvers: [alice] }';
-const SCRIPT_OUTPUT: Record<string, string> = { plan: 'plan', implement: 'summary', review: 'findings' };
+const SCRIPT_OUTPUT: Record<string, string> = { plan: 'plan', implement: 'summary', review: 'findings', triage: 'triage' };
 
 type Env = RunEnv & {
   out: string[];
@@ -99,7 +100,7 @@ async function setup(extra = TRACKER): Promise<Env> {
 const exists = (p: string) => fs.lstat(p).then(() => true, () => false);
 const gateComments = (e: Env) => e.deps.gh.issues.get(`${REPO}#5`)!.comments.filter((c) => c.body.includes(GATE_MARKER));
 const calls = (e: Env, method: string) => e.deps.gh.calls.filter((c) => c.method === method);
-const name = (meta: RunMeta, step: string, attempt = 1) => terminalName(meta.runId, meta.ticket, step, attempt);
+const name = (meta: RunMeta, step: string, attempt = 1) => terminalName(meta.runId, meta.ticket ?? meta.pipeline, step, attempt);
 const runs = (e: Env, step: string) => e.deps.hc.calls.filter((c) => c[0] === 'run' && (c[1] as { labels: Record<string, string> }).labels['percolator.step'] === step);
 
 test('drive runs a ticket to a PR', async () => {
@@ -486,6 +487,195 @@ test('an unapproved groomed ticket from an earlier run is given to groom to refi
     const task = await fs.readFile(path.join(e.runDir(meta), 'steps', 'groom', '1', 'task.md'), 'utf8');
     const prev = path.join(e.runDir(meta), 'steps', 'intake', '1', 'outputs', 'previous_groom.md');
     assert.ok(task.includes(`previous_groom (from intake): ${prev}`), task);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+const DD_ALERT = [
+  TRACKER,
+  '    pipelines:',
+  '      dd-alert:',
+  '        stages: [intake, triage, deliver]',
+  '        exit: pr',
+  '        ticket: none',
+  '        inputs:',
+  '          alert_url: { required: true }',
+  '        bindings:',
+  "          triage: { command: [triage-script, '{outputs_dir}'] }",
+].join('\n');
+
+test('a ticketless run drives to its PR', async () => {
+  const e = await setup(DD_ALERT);
+  try {
+    const meta = await prepareRun(
+      { pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x' }, repoDir: e.root, configFile: e.configFile, profile: 'work' },
+      e.deps,
+    );
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    assert.deepEqual(state.history.map((h) => h.stepId), ['intake', 'triage', 'deliver']);
+    const ticket = await fs.readFile(path.join(e.runDir(meta), state.history[0]!.outputs['ticket']!), 'utf8');
+    assert.equal(ticket, `# dd-alert run ${meta.runId}\n\n## Inputs\n\n- alert_url: https://dd/x\n`);
+    const pr = e.deps.gh.prs[0]!;
+    assert.deepEqual({ repo: pr.repo, title: pr.title, head: pr.head }, { repo: REPO, title: `dd-alert: ${meta.runId}`, head: meta.branch });
+    assert.doesNotMatch(pr.body, /Closes/);
+    assert.deepEqual(calls(e, 'issue'), []);
+    assert.equal(e.out.at(-1), `run ${meta.runId} completed: ${pr.url}`);
+    // the triage terminal is named after the pipeline, as the run has no ticket
+    assert.equal(runs(e, 'triage').length, 1);
+    assert.equal((runs(e, 'triage')[0]![1] as { name: string }).name, name(meta, 'triage'));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a gate on a ticketless run waits locally and says how to answer it', async () => {
+  const e = await setup(DD_ALERT.replace("          triage: { command: [triage-script, '{outputs_dir}'] }", "          triage: { command: [triage-script, '{outputs_dir}'] }\n        nodes:\n          sign-off: { kind: gate, after: triage }"));
+  try {
+    const meta = await prepareRun(
+      { pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x' }, repoDir: e.root, configFile: e.configFile, profile: 'work' },
+      e.deps,
+    );
+    e.onSleep.fn = async () => {
+      if (await exists(path.join(e.runDir(meta), 'waiting.json'))) await writeDecision(e.runDir(meta), { decision: 'approve', by: 'bob' });
+    };
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    assert.ok(e.out.includes(`sign-off: waiting for approval: perc approve ${meta.runId} | perc reject ${meta.runId} <feedback>`), e.out.join('\n'));
+    assert.deepEqual(calls(e, 'comment'), []);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+/**
+ * Profile `work` with pipeline `x`: intake, a `draft` script that writes `files` to its outputs, then the
+ * exit stage `ship` bound by `exit: <kind>`. `header` adds lines to the pipeline (ticket, inputs).
+ */
+async function exitRun(kind: string, header: string[], files: Record<string, string>, request: { ticket?: string; inputs?: Record<string, string> }) {
+  const e = await setup(
+    [
+      TRACKER,
+      '    pipelines:',
+      '      x:',
+      '        stages: [intake, draft, ship]',
+      `        exit: ${kind}`,
+      ...header.map((l) => `        ${l}`),
+      '        bindings:',
+      "          draft: { command: [draft-script, '{outputs_dir}'] }",
+    ].join('\n'),
+  );
+  e.onWait.fn = async (t) => {
+    if (t.labels['percolator.step'] !== 'draft') return false;
+    for (const [f, text] of Object.entries(files)) await fs.writeFile(path.join(t.argv.at(-1)!, f), text);
+    t.state = 'finished';
+    t.exitCode = 0;
+    return true;
+  };
+  const meta = await prepareRun({ ...request, pipeline: 'x', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+  return { e, meta };
+}
+
+/** The output `key` the exit step `ship` recorded, as text. */
+async function shipOutput(e: Env, meta: RunMeta, state: Awaited<ReturnType<typeof drive>>, key: string): Promise<string> {
+  const rel = state.history.findLast((h) => h.stepId === 'ship')!.outputs[key]!;
+  return (await fs.readFile(path.join(e.runDir(meta), rel), 'utf8')).trim();
+}
+
+test('a pipeline with exit comment runs github.comment', async () => {
+  const { e, meta } = await exitRun('comment', ['ticket: required'], { 'comment.md': 'Looks fine.\n' }, { ticket: '#5' });
+  try {
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    const posted = e.deps.gh.issues.get(`${REPO}#5`)!.comments.at(-1)!;
+    assert.equal(posted.body, `Looks fine.\n\n<!-- percolator:exit run=${meta.runId} step=ship -->\n`);
+    assert.equal(await shipOutput(e, meta, state, 'comment_url'), posted.url);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a pipeline with exit issue runs github.open_issues', async () => {
+  const { e, meta } = await exitRun('issue', ['ticket: none'], { 'issues.md': '## First\n\nOne.\n\n## Second\n\nTwo.\n' }, {});
+  try {
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    assert.deepEqual(calls(e, 'createIssue').map((c) => (c.args[1] as { title: string }).title), ['First', 'Second']);
+    assert.equal((await shipOutput(e, meta, state, 'issue_urls')).split('\n').length, 2);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a pipeline with exit none runs percolator.report', async () => {
+  const { e, meta } = await exitRun('none', ['ticket: none'], { 'report.md': 'All quiet.\n' }, {});
+  try {
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    assert.deepEqual(state.history.at(-1), { ...state.history.at(-1)!, stepId: 'ship', status: 'pass', outputs: {} });
+    assert.deepEqual(e.deps.gh.calls, []);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a pipeline with exit release runs github.release', async () => {
+  const { e, meta } = await exitRun(
+    'release',
+    ['ticket: none', 'inputs:', '  tag: { required: true }'],
+    { 'release_notes.md': 'Notes.\n' },
+    { inputs: { tag: 'v1.2.3' } },
+  );
+  try {
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    const head = await git(meta.worktree, 'rev-parse', 'HEAD');
+    assert.deepEqual(e.deps.gh.releases.map((r) => [r.repo, r.tag, r.target, r.notes]), [[REPO, 'v1.2.3', head, 'Notes.\n']]);
+    assert.equal(await git(e.bare, 'rev-parse', `refs/heads/${meta.branch}`), head);
+    assert.equal(await shipOutput(e, meta, state, 'release_url'), `https://${REPO}/releases/tag/v1.2.3`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a pipeline with exit pr_review runs github.pr_review', async () => {
+  const { e, meta } = await exitRun(
+    'pr_review',
+    ['ticket: none', 'inputs:', '  pr: { required: true }'],
+    { 'review.md': 'Nice change.\n' },
+    { inputs: { pr: '#3' } },
+  );
+  try {
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    assert.deepEqual(e.deps.gh.reviews.map((r) => [r.repo, r.number, r.body]), [
+      [REPO, 3, `Nice change.\n\n<!-- percolator:review run=${meta.runId} -->\n`],
+    ]);
+    assert.equal(await shipOutput(e, meta, state, 'review_url'), e.deps.gh.reviews[0]!.url);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a pipeline with exit private_fork_pr runs github.private_fork_pr', async () => {
+  const ghsa = 'GHSA-2345-6789-cfgh';
+  const { e, meta } = await exitRun(
+    'private_fork_pr',
+    ['ticket: none', 'inputs:', '  advisory: { required: true }'],
+    { 'pr_body.md': 'Fixes the hole.\n' },
+    { inputs: { advisory: ghsa } },
+  );
+  try {
+    // the fork's clone url pushes to the local bare repo, so no network is touched
+    const forkUrl = `https://github.com/o/r-${ghsa.toLowerCase()}.git`;
+    await git(e.root, 'config', `url.${e.bare}.pushInsteadOf`, forkUrl);
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    assert.deepEqual(e.deps.gh.forks.map((f) => [f.repo, f.ghsa]), [[REPO, ghsa]]);
+    const pr = e.deps.gh.prs[0]!;
+    assert.deepEqual([pr.repo, pr.title, pr.body, pr.head], [`github.com/o/r-${ghsa.toLowerCase()}`, `Fix for ${ghsa}`, 'Fixes the hole.\n', meta.branch]);
+    assert.equal(await shipOutput(e, meta, state, 'pr_url'), pr.url);
   } finally {
     await e.cleanup();
   }

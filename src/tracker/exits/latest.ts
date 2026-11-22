@@ -16,3 +16,5 @@ export async function latestOutput(ctx: RunContext, runDir: string, key: string)
     throw err;
   }
 }
+
+export const errText = (err: unknown): string => (err instanceof Error ? err.message : String(err));

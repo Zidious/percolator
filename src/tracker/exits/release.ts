@@ -6,7 +6,7 @@ import type { StepHandler } from '../../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../../runtime/outcome.ts';
 import { writeFileAtomic } from '../../util/fs.ts';
 import type { Gh } from '../gh.ts';
-import { errText, latestOutput } from './latest-output.ts';
+import { errText, latestOutput } from './latest.ts';
 
 const TAG = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 

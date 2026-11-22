@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { test } from 'node:test';
-import { loadState } from '../../src/engine/state.ts';
+import { loadState, saveState } from '../../src/engine/state.ts';
 import { readRunMeta } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { readRunGraph, toRunGraph } from '../../src/run/graph-file.ts';
@@ -35,8 +35,10 @@ test('prepareRun creates worktree, space, run.json and state', async () => {
     const worktree = path.join(e.root, '.worktrees', meta.runId);
     const dir = path.join(e.home, '.percolator', 'runs', meta.runId);
     const expected: RunMeta = {
-      version: 1,
+      version: 2,
       runId: meta.runId,
+      pipeline: 'feature',
+      inputs: {},
       ticket: 'github.com/o/r#5',
       repo: 'github.com/o/r',
       issue: 5,
@@ -222,8 +224,10 @@ test('space failure names the fix', async () => {
 });
 
 const meta =(o: Partial<RunMeta> = {}): RunMeta => ({
-  version: 1,
+  version: 2,
   runId: 't5-20260304-050607-ab12',
+  pipeline: 'feature',
+  inputs: {},
   ticket: 'github.com/o/r#5',
   repo: 'github.com/o/r',
   issue: 5,
@@ -314,6 +318,114 @@ test('prepare writes graph.json matching the run\'s graph', async () => {
     const dir = path.join(e.home, '.percolator', 'runs', meta.runId);
     const v = await validate({ configFile: e.configFile, cwd: e.root, home: e.home, profile: 'work' });
     assert.deepEqual(await readRunGraph(dir), toRunGraph(v.graph));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+const PIPELINES = [
+  '    pipelines:',
+  '      dd-alert:',
+  '        stages: [intake, triage, deliver]',
+  '        exit: pr',
+  '        ticket: none',
+  '        inputs:',
+  '          alert_url: { required: true }',
+  '        bindings:',
+  '          triage: { command: [echo, triage] }',
+  '      hotfix:',
+  '        stages: [intake, implement, deliver]',
+  '        exit: pr',
+  '        ticket: optional',
+  '        bindings:',
+  '          implement: { command: [echo, implement] }',
+].join('\n');
+
+test('a ticketless run is prepared from inputs', async () => {
+  const e = await setup();
+  try {
+    await e.writeConfig(PIPELINES);
+    const meta = await prepareRun(
+      { pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x?a=b' }, repoDir: e.root, configFile: e.configFile, profile: 'work' },
+      e.deps,
+    );
+    assert.match(meta.runId, /^dd-alert-20260304-050607-[0-9a-f]{4}$/);
+    assert.equal(meta.branch, `percolator/${meta.runId}`);
+    assert.equal('ticket' in meta, false);
+    assert.equal('issue' in meta, false);
+    assert.equal(meta.pipeline, 'dd-alert');
+    assert.deepEqual(meta.inputs, { alert_url: 'https://dd/x?a=b' });
+    assert.equal(meta.repo, 'github.com/o/r');
+    const dir = path.join(e.home, '.percolator', 'runs', meta.runId);
+    assert.deepEqual(await readRunMeta(dir), meta);
+    assert.deepEqual(e.deps.app.calls, [[`r dd-alert · ${meta.runId.slice(-4)}`, meta.worktree]]);
+    assert.equal(await git(meta.worktree, 'rev-parse', '--abbrev-ref', 'HEAD'), meta.branch);
+    assert.equal((await loadState(dir)).ticket, undefined);
+    // nothing on GitHub is read for a run without a ticket
+    assert.deepEqual(e.deps.gh.calls, []);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a ticket on a profile with several pipelines picks the pipeline its label names', async () => {
+  const e = await setup();
+  try {
+    await e.writeConfig(PIPELINES);
+    e.deps.gh.addIssue('github.com/o/r', 5, { labels: ['pipeline:hotfix'] });
+    const meta = await prepareRun({ ticket: '#5', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+    assert.equal(meta.pipeline, 'hotfix');
+    assert.match(meta.runId, /^t5-hotfix-20260304-050607-[0-9a-f]{4}$/);
+    assert.deepEqual(e.deps.gh.calls.filter((c) => c.method === 'issue').map((c) => c.args), [['github.com/o/r', 5]]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a second live run on a ticket is refused', async () => {
+  const e = await setup();
+  try {
+    const first = await prepareRun({ ticket: '#5', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+    const before = await git(e.root, 'worktree', 'list', '--porcelain');
+    await assert.rejects(prepareRun({ ticket: 'o/r#5', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps), {
+      message: `ticket github.com/o/r#5 already has a live run ${first.runId} (pipeline feature, running); finish or delete it first (perc delete ${first.runId})`,
+    });
+    assert.equal(await git(e.root, 'worktree', 'list', '--porcelain'), before);
+    assert.equal(e.deps.app.calls.length, 1);
+    assert.deepEqual(await fs.readdir(path.join(e.home, '.percolator', 'runs')), [first.runId]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a run on a ticket whose only run completed is allowed', async () => {
+  const e = await setup();
+  try {
+    const first = await prepareRun({ ticket: '#5', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+    const dir = path.join(e.home, '.percolator', 'runs', first.runId);
+    await saveState(dir, { ...(await loadState(dir)), status: 'completed' });
+    const second = await prepareRun({ ticket: '#5', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+    assert.notEqual(second.runId, first.runId);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a linked child run is exempt from its parent and siblings, and keeps a given run id', async () => {
+  const e = await setup();
+  try {
+    const parent = await prepareRun({ ticket: '#5', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+    const child = await prepareRun(
+      { ticket: '#5', runId: `${parent.runId}-s1`, parent: parent.runId, repoDir: e.root, configFile: e.configFile, profile: 'work' },
+      e.deps,
+    );
+    assert.equal(child.runId, `${parent.runId}-s1`);
+    assert.equal(child.parent, parent.runId);
+    const sibling = await prepareRun(
+      { ticket: '#5', runId: `${parent.runId}-s2`, parent: parent.runId, repoDir: e.root, configFile: e.configFile, profile: 'work' },
+      e.deps,
+    );
+    assert.equal(sibling.parent, parent.runId);
   } finally {
     await e.cleanup();
   }
