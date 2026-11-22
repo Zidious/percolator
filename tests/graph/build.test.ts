@@ -496,7 +496,7 @@ test('a named pipeline lists its unbound stages', () => {
 test('a pipeline without an exit is refused', () => {
   throwsAt(
     () => buildGraph(hotfixWithout('exit')),
-    'c.yaml: profiles.default.pipelines.hotfix: pipeline "hotfix" has no exit: bind its last stage "deliver" to one of github.open_pr or set exit:',
+    'c.yaml: profiles.default.pipelines.hotfix: pipeline "hotfix" has no exit: bind its last stage "deliver" to one of github.open_pr, github.comment, github.open_issues, percolator.report, github.release, github.pr_review, github.private_fork_pr or set exit:',
     'profiles.default.pipelines.hotfix',
   );
 });
@@ -511,6 +511,57 @@ test('exit and binding must agree', () => {
     'c.yaml:9: profiles.default.pipelines.hotfix.bindings.deliver: exit pr runs github.open_pr, but stage "deliver" is bound to a command; bind it to { builtin: github.open_pr } or change exit',
     'profiles.default.pipelines.hotfix.bindings.deliver',
   );
+});
+
+test('an exit kind implies its builtin on an unbound exit stage', () => {
+  assert.deepEqual(buildGraph(hotfix({ exit: 'none' })).steps.at(-1)!.def, { builtin: 'percolator.report' });
+  assert.deepEqual(buildGraph(hotfix({ exit: 'comment' })).steps.at(-1)!.def, { builtin: 'github.comment' });
+  assert.equal(buildGraph(hotfixWithout('exit', { deliver: { builtin: 'github.comment' } })).exit, 'comment');
+});
+
+test('exit comment needs a ticket', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ exit: 'comment', ticket: 'none' })),
+    "c.yaml: profiles.default.pipelines.hotfix: exit comment posts on the run's issue, but pipeline \"hotfix\" has ticket: none; set ticket: required or pick another exit",
+    'profiles.default.pipelines.hotfix',
+  );
+});
+
+test('exit pr_review needs input pr', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ exit: 'pr_review' })),
+    'c.yaml: profiles.default.pipelines.hotfix: exit pr_review needs input "pr" (the pull request to review); declare it under pipelines.hotfix.inputs',
+    'profiles.default.pipelines.hotfix',
+  );
+  assert.equal(buildGraph(hotfix({ exit: 'pr_review', inputs: { pr: { required: true } } })).exit, 'pr_review');
+});
+
+test('exit private_fork_pr needs input advisory', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ exit: 'private_fork_pr' })),
+    'c.yaml: profiles.default.pipelines.hotfix: exit private_fork_pr needs input "advisory" (the GHSA id); declare it under pipelines.hotfix.inputs',
+    'profiles.default.pipelines.hotfix',
+  );
+  assert.equal(buildGraph(hotfix({ exit: 'private_fork_pr', inputs: { advisory: { required: true } } })).exit, 'private_fork_pr');
+});
+
+test('exit release needs a tag', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ exit: 'release', outputs: { deliver: ['tag'] } })),
+    'c.yaml: profiles.default.pipelines.hotfix: exit release needs a tag: declare input "tag" or list "tag" under outputs of an earlier stage',
+    'profiles.default.pipelines.hotfix',
+  );
+  assert.equal(buildGraph(hotfix({ exit: 'release', outputs: { fix: ['tag'] } })).exit, 'release');
+});
+
+test('contracts for a release exit stage include release_url', () => {
+  const g = buildGraph(hotfix({ exit: 'release', inputs: { tag: { required: true } } }));
+  assert.deepEqual(g.contracts.deliver, ['release_url']);
+});
+
+test('exits that may write nothing add no contract to the exit stage', () => {
+  assert.deepEqual(buildGraph(hotfix({ exit: 'none' })).contracts.deliver, []);
+  assert.deepEqual(buildGraph(hotfix({ exit: 'issue' })).contracts.deliver, []);
 });
 
 test('the exit stage of any pipeline cannot be an agent node', () => {
