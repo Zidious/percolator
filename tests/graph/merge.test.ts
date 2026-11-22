@@ -301,6 +301,12 @@ test('triggers are part of the pipeline header', () => {
   assert.deepEqual(r.p!.header.value.triggers, [{ label: 'x' }]);
 });
 
+test('fan_out is part of the pipeline header', () => {
+  const fan_out = { stage: 'implement', slices: { from: 'plan', output: 'slices' } };
+  const r = mergePipelines([L('a', { pipelines: { p: { stages: ['intake', 'deliver'], fan_out } } })]);
+  assert.deepEqual(r.p!.header.value.fan_out, fan_out);
+});
+
 test('next is part of the pipeline header', () => {
   const r = mergePipelines([L('a', { pipelines: { split: { stages: ['intake', 'deliver'], exit: 'issue', next: 'hotfix' } } })]);
   assert.equal(r.split!.header.value.next, 'hotfix');

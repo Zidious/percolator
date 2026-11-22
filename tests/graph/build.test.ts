@@ -741,3 +741,98 @@ test('a router may run stages of its own before route', () => {
   assert.deepEqual(g.steps.map((s) => s.id), ['intake', 'look', 'route.0', 'route.1', 'pick-pipeline', 'route.3']);
   assert.deepEqual(g.contracts, { intake: ['ticket'], look: [], route: ['route'] });
 });
+
+const EPIC: Pipeline = {
+  stages: ['intake', 'plan', 'implement', 'review', 'deliver'],
+  outputs: { plan: ['plan'] },
+  bindings: { plan: { agent: 'claude' }, implement: { agent: 'claude' }, review: { agent: 'claude' } },
+  nodes: { test: { kind: 'script', command: ['t'], after: 'implement', on_fail: { back_to: 'implement', max_rounds: 2 } } },
+  exit: 'pr',
+  fan_out: { stage: 'implement', slices: { from: 'plan', output: 'slices' } },
+};
+/** The epic pipeline (fans implement out over plan's slices), merged from one profile layer at c.yaml. */
+function epic(over: Partial<Pipeline> = {}, lines: Record<string, number> = {}) {
+  return mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: { pipelines: { epic: { ...EPIC, ...over } } },
+      locator: { file: 'c.yaml', lines, prefix: 'profiles.default' },
+    },
+  ]).epic!;
+}
+const CHILD = { part: { sliceFrom: 'implement' } } as const;
+
+test('fan-out parent graph ends at the fan-out step', () => {
+  const g = buildGraph(epic());
+  assert.deepEqual(g.steps.map((s) => s.id), ['intake', 'plan', 'implement']);
+  const last = g.steps.at(-1)!;
+  assert.deepEqual([last.stage, last.name, last.role, last.slotLast, last.def], ['implement', 'implement', 'slot', true, { builtin: 'percolator.fan_out' }]);
+  assert.deepEqual(g.stages, ['intake', 'plan', 'implement']);
+  assert.deepEqual(g.regionStart, { intake: 0, plan: 1, implement: 2 });
+  assert.deepEqual(g.backEdges, {});
+  assert.deepEqual(g.failRoutes, {});
+  assert.deepEqual(g.loopStages, []);
+  assert.deepEqual(g.contracts, { intake: ['ticket'], plan: ['plan', 'slices'], implement: ['slices_done'] });
+  assert.equal(g.exit, 'pr');
+  assert.deepEqual(buildGraph(epic(), undefined, { part: 'parent' }), g);
+});
+
+test('fan-out child graph starts with seed and then the fanned stage', () => {
+  const g = buildGraph(epic(), undefined, CHILD);
+  assert.deepEqual(g.steps.map((s) => s.id), ['intake', 'implement', 'test', 'review', 'deliver']);
+  const seed = g.steps[0]!;
+  assert.deepEqual([seed.stage, seed.role, seed.slotLast, seed.source, seed.def], ['intake', 'slot', true, 'core', { builtin: 'percolator.seed' }]);
+  assert.deepEqual(g.stages, ['intake', 'implement', 'review', 'deliver']);
+  assert.deepEqual(g.regionStart, { intake: 0, implement: 1, review: 3, deliver: 4 });
+  assert.deepEqual(g.contracts, { intake: ['ticket', 'slice'], implement: ['summary'], review: ['findings'], deliver: ['pr_url'] });
+  assert.deepEqual(g.loopStages, ['review']);
+  assert.equal(g.exit, 'pr');
+});
+
+test('child loops rebase onto the sliced steps', () => {
+  const g = buildGraph(epic(), undefined, CHILD);
+  assert.deepEqual(g.backEdges.test, { id: 'test', fromStepId: 'test', toStepIndex: 1, jumpAfterIndex: 2, maxRounds: 2, onCap: 'escalate' });
+  assert.deepEqual(g.backEdges.review, { id: 'review', fromStepId: 'review', toStepIndex: 1, jumpAfterIndex: 3, maxRounds: 3, onCap: 'continue' });
+  assert.deepEqual(g.failRoutes, { test: 'test', review: 'review' });
+});
+
+test('a child back_to before the fan-out is refused, for the parent too', () => {
+  const nodes = { test: { kind: 'script' as const, command: ['t'], after: 'implement', on_fail: { back_to: 'plan', max_rounds: 2 } } };
+  const lines = { 'profiles.default.pipelines.epic.nodes.test.on_fail.back_to': 14 };
+  const message =
+    'c.yaml:14: profiles.default.pipelines.epic.nodes.test.on_fail.back_to: test loops back to plan, which runs before the fan-out at implement; loop back to implement or later';
+  throwsAt(() => buildGraph(epic({ nodes }, lines), undefined, CHILD), message, 'profiles.default.pipelines.epic.nodes.test.on_fail.back_to');
+  throwsAt(() => buildGraph(epic({ nodes }, lines)), message, 'profiles.default.pipelines.epic.nodes.test.on_fail.back_to');
+});
+
+test('fan_out.stage must be a stage of the pipeline', () => {
+  throwsAt(
+    () => buildGraph(epic({ fan_out: { stage: 'build', slices: { from: 'plan', output: 'slices' } } }, { 'profiles.default.pipelines.epic.fan_out.stage': 11 })),
+    'c.yaml:11: profiles.default.pipelines.epic.fan_out.stage: fan_out.stage "build" is not a stage of pipeline "epic"; use one of intake, plan, implement, review, deliver',
+    'profiles.default.pipelines.epic.fan_out.stage',
+  );
+});
+
+test('fan_out.slices.from must be a stage before the fanned stage', () => {
+  for (const from of ['review', 'implement', 'nope']) {
+    throwsAt(
+      () => buildGraph(epic({ fan_out: { stage: 'implement', slices: { from, output: 'slices' } } })),
+      'c.yaml: profiles.default.pipelines.epic.fan_out.slices.from: fan_out.slices.from must be a stage before implement',
+      'profiles.default.pipelines.epic.fan_out.slices.from',
+    );
+  }
+});
+
+test('fan_out.stage cannot be intake or the exit stage', () => {
+  for (const stage of ['intake', 'deliver']) {
+    throwsAt(
+      () => buildGraph(epic({ fan_out: { stage, slices: { from: 'intake', output: 'slices' } } })),
+      'c.yaml: profiles.default.pipelines.epic.fan_out.stage: fan_out.stage cannot be intake or the exit stage',
+      'profiles.default.pipelines.epic.fan_out.stage',
+    );
+  }
+});
+
+test('a pipeline without fan_out builds whole for part parent', () => {
+  assert.deepEqual(buildGraph(full(), undefined, { part: 'parent' }), buildGraph(full()));
+});

@@ -389,6 +389,19 @@ export const PipelineSchema = z.strictObject({
     .array(TriggerSchema)
     .optional()
     .describe('What starts runs of this pipeline while perc watch runs: schedule, label, pr_opened, dependabot or check_failed.'),
+  fan_out: z
+    .strictObject({
+      stage: StageNameSchema.describe('Stage run once per slice, each in its own linked run; neither intake nor the exit stage.'),
+      slices: z
+        .strictObject({
+          from: StageNameSchema.describe('Earlier stage that writes the slices.'),
+          output: z.string().describe('Output key of that stage holding the slices: one "## <title>" section per slice.'),
+        })
+        .describe('Where the slices come from.'),
+      max_parallel: z.number().int().min(1).optional().describe('Most slices running at once; default 3.'),
+    })
+    .optional()
+    .describe('Run one stage, and every stage after it, once per slice in parallel linked runs; the run waits for them all.'),
   next: z
     .string()
     .optional()

@@ -112,6 +112,11 @@ function describeNode(d: NodeDef): string {
 export type BuildOptions = {
   /** pipeline name → description, for the choose agent's default prompt of a router */
   descriptions?: Readonly<Record<string, string | undefined>>;
+  /**
+   * Which part of a fan-out pipeline to build: `parent` (the default when fan_out is set) runs up to the
+   * fanned stage and ends in its fan-out step; `{ sliceFrom }` is one slice's run, from that stage on.
+   */
+  part?: 'parent' | { sliceFrom: string };
 };
 
 /** The default task of a router's choose agent. */
@@ -128,6 +133,20 @@ export function buildGraph(
   home?: { profile: string; locator: Locator },
   o: BuildOptions = {},
 ): Graph {
+  const { graph, fanStage } = buildWhole(merged, home, o);
+  if (typeof o.part === 'object') return sliceChild(graph, o.part.sliceFrom);
+  if (fanStage === undefined) return graph;
+  // a slice's loops are checked whichever part is built, so validate refuses them before any run starts
+  sliceChild(graph, fanStage);
+  return sliceParent(graph, fanStage);
+}
+
+/** The whole pipeline's graph, and the stage it fans out at (if any). */
+function buildWhole(
+  merged: Readonly<Merged | MergedPipeline>,
+  home: { profile: string; locator: Locator } | undefined,
+  o: BuildOptions,
+): { graph: Graph; fanStage?: string } {
   const named = 'header' in merged ? (merged as MergedPipeline) : undefined;
   const name = named?.name ?? 'feature';
   const isFeature = name === 'feature';
@@ -151,6 +170,22 @@ export function buildGraph(
     }
   });
   const exitStage = stages.at(-1)!;
+  const fan = header.fan_out;
+  if (fan !== undefined) {
+    if (!stages.includes(fan.stage)) {
+      throw new GraphError(
+        `fan_out.stage "${fan.stage}" is not a stage of pipeline "${name}"; use one of ${stages.join(', ')}`,
+        at('.fan_out.stage'),
+      );
+    }
+    if (fan.stage === 'intake' || fan.stage === exitStage) {
+      throw new GraphError('fan_out.stage cannot be intake or the exit stage', at('.fan_out.stage'));
+    }
+    const from = stages.indexOf(fan.slices.from);
+    if (from < 0 || from >= stages.indexOf(fan.stage)) {
+      throw new GraphError(`fan_out.slices.from must be a stage before ${fan.stage}`, at('.fan_out.slices.from'));
+    }
+  }
   const router = header.router === true;
   if (router) {
     if (exitStage !== 'route') {
@@ -417,15 +452,96 @@ export function buildGraph(
   }
   for (const id of Object.keys(backEdges)) failRoutes[id] = id;
 
-  return {
+  const contracts = contractsFor({ ...header, stages, ...(exit !== undefined ? { exit } : {}) }, name);
+  if (fan !== undefined) contracts[fan.slices.from] = [...new Set([...contracts[fan.slices.from]!, fan.slices.output])];
+  const graph: Graph = {
     pipeline: name,
     stages,
-    contracts: contractsFor({ ...header, stages, ...(exit !== undefined ? { exit } : {}) }, name),
+    contracts,
     exit: router ? 'route' : (exit ?? 'pr'),
     loopStages,
     steps,
     regionStart,
     backEdges,
     failRoutes,
+  };
+  return fan === undefined ? { graph } : { graph, fanStage: fan.stage };
+}
+
+/** A built-in step standing in for a stage's slot. */
+function builtStep(id: string, stage: string, builtin: string): Step {
+  return { id, name: id, stage, role: 'slot', def: { builtin }, slotLast: true, source: 'core', locked: false };
+}
+
+function refuseClash(steps: readonly Step[], id: string): void {
+  const clash = steps.find((s) => s.id === id);
+  if (clash !== undefined) {
+    throw new GraphError(`node "${id}" clashes with a core step id; rename it`, locate(clash.locator, 'config', stepKey(clash)));
+  }
+}
+
+/** Keeps the edges (and the fail routes to them) the kept steps use, with step indexes moved by `shift`. */
+function keepEdges(g: Graph, keep: (e: BackEdge) => boolean, ids: Set<string>, shift: number) {
+  const backEdges: Record<string, BackEdge> = {};
+  for (const [id, e] of Object.entries(g.backEdges)) {
+    if (keep(e)) backEdges[id] = { ...e, toStepIndex: e.toStepIndex - shift, jumpAfterIndex: e.jumpAfterIndex - shift };
+  }
+  const failRoutes = Object.fromEntries(Object.entries(g.failRoutes).filter(([step, edge]) => ids.has(step) && edge in backEdges));
+  return { backEdges, failRoutes };
+}
+
+/** A fan-out run: every step before the fanned stage, then the fan-out step that starts and waits for the slices. */
+function sliceParent(g: Graph, fanStage: string): Graph {
+  const cut = g.regionStart[fanStage]!;
+  const before = g.steps.slice(0, cut);
+  refuseClash(before, fanStage);
+  const steps = [...before, builtStep(fanStage, fanStage, 'percolator.fan_out')];
+  const stages = g.stages.slice(0, g.stages.indexOf(fanStage) + 1);
+  const earlier = stages.slice(0, -1);
+  return {
+    ...g,
+    stages,
+    contracts: { ...Object.fromEntries(earlier.map((s) => [s, g.contracts[s]!])), [fanStage]: ['slices_done'] },
+    loopStages: g.loopStages.filter((s) => earlier.includes(s)),
+    steps,
+    regionStart: Object.fromEntries(stages.map((s) => [s, g.regionStart[s]!])),
+    ...keepEdges(g, (e) => e.jumpAfterIndex < cut, new Set(steps.map((s) => s.id)), 0),
+  };
+}
+
+/**
+ * One slice's run: a seed step as its intake (the parent's outputs plus the slice), then every step from
+ * `sliceFrom` on, with loop indexes moved onto the shorter step list. A loop back before `sliceFrom` is refused.
+ */
+function sliceChild(g: Graph, sliceFrom: string): Graph {
+  if (!g.stages.includes(sliceFrom) || sliceFrom === 'intake') {
+    throw new GraphError(
+      `stage "${sliceFrom}" of pipeline "${g.pipeline}" cannot start a fan-out slice; set fan_out.stage to a stage after intake`,
+    );
+  }
+  const cut = g.regionStart[sliceFrom]!;
+  for (const e of Object.values(g.backEdges)) {
+    if (e.jumpAfterIndex < cut || e.toStepIndex >= cut) continue;
+    const step = g.steps.find((s) => s.id === e.fromStepId)!;
+    const target = g.stages.find((s) => g.regionStart[s] === e.toStepIndex)!;
+    const key = step.def.on_fail !== undefined ? `${stepKey(step)}.on_fail.back_to` : stepKey(step);
+    throw new GraphError(
+      `${step.id} loops back to ${target}, which runs before the fan-out at ${sliceFrom}; loop back to ${sliceFrom} or later`,
+      locate(step.locator, 'config', key),
+    );
+  }
+  const after = g.steps.slice(cut);
+  refuseClash(after, 'intake');
+  const steps = [builtStep('intake', 'intake', 'percolator.seed'), ...after];
+  const stages = ['intake', ...g.stages.slice(g.stages.indexOf(sliceFrom))];
+  const shift = cut - 1;
+  return {
+    ...g,
+    stages,
+    contracts: { intake: ['ticket', 'slice'], ...Object.fromEntries(stages.slice(1).map((s) => [s, g.contracts[s]!])) },
+    loopStages: g.loopStages.filter((s) => stages.includes(s)),
+    steps,
+    regionStart: { intake: 0, ...Object.fromEntries(stages.slice(1).map((s) => [s, g.regionStart[s]! - shift])) },
+    ...keepEdges(g, (e) => e.jumpAfterIndex >= cut, new Set(steps.map((s) => s.id)), shift),
   };
 }

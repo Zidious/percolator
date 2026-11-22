@@ -119,6 +119,7 @@ test('descriptions state the defaults the code uses', () => {
     ['$.profiles.*.pipelines.*.choose.confirm', /default unsure/],
     ['$.profiles.*.pipelines.*.fallback', /default the profile's default pipeline, or feature/],
     ['$.profiles.*.pipelines.*.next', /^Issue exit only/],
+    ['$.profiles.*.pipelines.*.fan_out.max_parallel', /default 3/],
   ];
   for (const [p, re] of expected) assert.match(desc(p), re, p);
   assert.ok(

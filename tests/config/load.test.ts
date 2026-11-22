@@ -344,6 +344,30 @@ test('a malformed trigger is reported at its key', async () => {
   );
 });
 
+test('a fan_out loads', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      epic:\n        fan_out: { stage: implement, slices: { from: plan, output: slices }, max_parallel: 2 }\n',
+    async (file) => {
+      assert.deepEqual((await loadUserConfig(file)).profiles.default!.pipelines!.epic!.fan_out, {
+        stage: 'implement',
+        slices: { from: 'plan', output: 'slices' },
+        max_parallel: 2,
+      });
+    },
+  );
+});
+
+test('fan_out.max_parallel is at least 1', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      epic:\n        fan_out: { stage: implement, slices: { from: plan, output: slices }, max_parallel: 0 }\n',
+    async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.epic.fan_out.max_parallel');
+    },
+  );
+});
+
 test('choose.confirm is unsure or always', async () => {
   await withYaml(
     'version: 1\nprofiles:\n  default:\n    pipelines:\n      triage:\n        choose: { agent: claude, from: [a], confirm: never }\n',

@@ -148,7 +148,7 @@
                       ]
                     },
                     "builtin": {
-                      "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route (builtin nodes).",
+                      "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                       "type": "string"
                     },
                     "command": {
@@ -286,7 +286,7 @@
                         ]
                       },
                       "builtin": {
-                        "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route (builtin nodes).",
+                        "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                         "type": "string"
                       },
                       "command": {
@@ -433,7 +433,7 @@
                   ]
                 },
                 "builtin": {
-                  "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route (builtin nodes).",
+                  "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                   "type": "string"
                 },
                 "command": {
@@ -919,6 +919,48 @@
                     ]
                   }
                 },
+                "fan_out": {
+                  "description": "Run one stage, and every stage after it, once per slice in parallel linked runs; the run waits for them all.",
+                  "type": "object",
+                  "properties": {
+                    "stage": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+                      "description": "Stage run once per slice, each in its own linked run; neither intake nor the exit stage."
+                    },
+                    "slices": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+                          "description": "Earlier stage that writes the slices."
+                        },
+                        "output": {
+                          "type": "string",
+                          "description": "Output key of that stage holding the slices: one \"## <title>\" section per slice."
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "output"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Where the slices come from."
+                    },
+                    "max_parallel": {
+                      "description": "Most slices running at once; default 3.",
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "stage",
+                    "slices"
+                  ],
+                  "additionalProperties": false
+                },
                 "next": {
                   "description": "Issue exit only: the pipeline each opened issue starts a linked run of; default none (the issues just stay open).",
                   "type": "string"
@@ -1001,7 +1043,7 @@
                             ]
                           },
                           "builtin": {
-                            "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route (builtin nodes).",
+                            "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                             "type": "string"
                           },
                           "command": {
@@ -1139,7 +1181,7 @@
                               ]
                             },
                             "builtin": {
-                              "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route (builtin nodes).",
+                              "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                               "type": "string"
                             },
                             "command": {
@@ -1286,7 +1328,7 @@
                         ]
                       },
                       "builtin": {
-                        "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route (builtin nodes).",
+                        "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr or percolator.route_rules or percolator.route or percolator.fan_out or percolator.seed (builtin nodes).",
                         "type": "string"
                       },
                       "command": {
