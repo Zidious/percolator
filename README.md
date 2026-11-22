@@ -9,7 +9,7 @@
 
 <p align="center"><b>Tickets in. Pull requests out.</b></p>
 
-Percolator is a deterministic software factory. Point `perc` at a GitHub issue and it takes the ticket through six fixed stages: intake, groom, plan, implement, review and deliver. You choose the agent or builtin for each stage. The run stops for your approval after groom and saves every step, so it can stop and pick up where it left off.
+Percolator is a deterministic software factory. Point `perc` at a GitHub issue and it takes the ticket through a **pipeline** of fixed stages. The built-in `feature` pipeline runs intake, groom, plan, implement, review and deliver, and ends with a pull request; you can add pipelines of your own, each with its own stages, inputs and exit. You choose the agent or builtin for each stage. A feature run stops for your approval after groom, and every run saves every step, so it can stop and pick up where it left off.
 
 ## What you need
 
@@ -31,8 +31,8 @@ Percolator isn't on npm yet: install it from a checkout as in [Local development
 | | Command | What it does |
 |---|---|---|
 | 1 | `perc init` | Writes an example config to `~/.percolator/config.yaml`. Edit it freely. |
-| 2 | `perc validate` | Loads the config, resolves and pins grounds, and prints the graph a run would walk. |
-| 3 | `perc run owner/repo#42` | Starts a run. It stops once, after groom, for you to approve the ticket. |
+| 2 | `perc validate` | Loads the config, resolves and pins grounds, and prints the graph each pipeline's run would walk. |
+| 3 | `perc run owner/repo#42` | Starts a run of the default pipeline, `feature`. It stops once, after groom, for you to approve the ticket. |
 
 `perc run` starts the run's driver in a terminal of its own. With Herdr, the driver stays out of the run's space, and the panel's **Driver pane ↗** peeks at it; closing the peek leaves the run going. Add `--foreground` to drive it in yours. `perc status` lists runs and `perc status <id>` shows one. `perc delete <id>…` removes the runs you name, and `perc delete --finished` every completed or failed one; both keep the branch. Delete also ends any terminal still open in the run's worktree, such as the shell its Herdr space starts, since that would hold the folder. Run `perc --help` for every command and its options.
 
@@ -41,11 +41,11 @@ Percolator isn't on npm yet: install it from a checkout as in [Local development
 
 ## A run, stop by stop
 
-Every run follows the same six stages in the same order. You choose what runs at each stage, but you cannot skip or reorder them. One gate is built in: after groom, the run waits for you.
+A run walks the stages of its pipeline in order. You choose what runs at each stage, but a run cannot skip or reorder them. This section follows the `feature` pipeline, the one `perc init` sets up; [Pipelines](#pipelines) shows how to add others. One gate is built into `feature`: after groom, the run waits for you.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagram-run-dark.svg">
-  <img alt="The run train: intake, groom, the approve-groom gate, plan, implement, an optional hook, review looping back to implement up to three times, the pr-description hook, then deliver opens a pull request." src="assets/diagram-run-light.svg" width="100%">
+  <img alt="The feature pipeline's run train (other pipelines run their own stages, from intake to an exit): intake, groom, the approve-groom gate, plan, implement, an optional hook, review looping back to implement up to three times, the pr-description hook, then deliver opens a pull request." src="assets/diagram-run-light.svg" width="100%">
 </picture>
 
 The diagram shows the example config mid-run: intake and groom are done, and the run waits at the `approve-groom` gate. Rejecting with feedback re-runs groom. Review can send work back to implement for up to 3 rounds; after the third, it delivers anyway. Hooks, like the one after implement, are optional nodes you add `before` or `after` any stage, or `all`. The `pr-description` hook before deliver writes the pull request text.
@@ -54,7 +54,7 @@ The diagram shows the example config mid-run: intake and groom are done, and the
 |---|---|---|
 | **intake** | builtin `github.intake` | The issue is read and the run has a ticket. |
 | **groom … review** | an `agent`, `script` or `builtin` node, or a list of them | The step wrote `done.json` and its `outputs/<key>.md`. |
-| **approve-groom** | `gate`, built in and locked, always after groom | You approve, locally or with a `/percolator approve` comment on the issue. The gate keeps one comment on the issue and edits it each round; rejected rounds stay in a collapsed history, and approval adds "Approved by @you". A rejection re-runs groom, 3 times at most. |
+| **approve-groom** | `gate`, built in and locked, always after groom (in `feature` only) | You approve, locally or with a `/percolator approve` comment on the issue. The gate keeps one comment on the issue and edits it each round; rejected rounds stay in a collapsed history, and approval adds "Approved by @you". A rejection re-runs groom, 3 times at most. |
 | **deliver** | builtin `github.open_pr` | The branch is pushed and the PR is open. Its body is `Closes #N`, followed by the `pr_body` output if a step wrote one. |
 
 ## The engine
@@ -66,7 +66,7 @@ Nothing in Percolator is improvised at run time. The config is merged into a gra
   <img alt="Engine: four config layers merge into a run graph, which the engine walks through a runtime that starts agent terminals with hc; state goes to the run directory, code to a worktree, and GitHub is reached through gh." src="assets/diagram-engine-light.svg" width="100%">
 </picture>
 
-The layers merge into one graph: the core stages, your hooks and bounded back-edges (loops back to an earlier stage, with a round cap). `runGraph` hands each step to the runtime and saves state after it. A step counts as done only when it has written `done.json` and its outputs. The terminal's status is used only to notice an agent that needs you.
+The layers merge into one graph per pipeline: its stages, your hooks and bounded back-edges (loops back to an earlier stage, with a round cap). `runGraph` hands each step to the runtime and saves state after it. A step counts as done only when it has written `done.json` and its outputs. The terminal's status is used only to notice an agent that needs you.
 
 Each run works in its own git worktree at `<repo>/.worktrees/<run-id>`, on a branch named `percolator/<run-id>`. The worktree is inside the repo, so the repo's agent trust covers it, and Percolator lists `.worktrees/` in `.git/info/exclude` so it never shows up in `git status`.
 
@@ -107,7 +107,7 @@ For the full steps, keys and checks, see [`herdr/RECIPE.md`](herdr/RECIPE.md).
 
 ## Configuration
 
-The config is `~/.percolator/config.yaml`, or the file you pass with `--config`. It holds **profiles**: each binds the stages, adds hook nodes, sets rules and pulls shared files from **grounds**. Every key is in `schema/percolator.schema.json`; point your editor at it for completion.
+The config is `~/.percolator/config.yaml`, or the file you pass with `--config`. It holds **profiles**: each defines its **pipelines** (binds their stages and adds hook nodes), sets rules and pulls shared files from **grounds**. Every key is in `schema/percolator.schema.json`; point your editor at it for completion.
 
 ### Example config
 
@@ -118,42 +118,60 @@ version: 1
 profiles:
   default:
     match: { remote: "github.com/*/*" }     # which repos: globs host/owner/repo (or match.path)
-    bindings:
-      intake: { builtin: github.intake }      # builtins are handled by Percolator itself
-      groom:
-        agent: claude                         # claude, codex or command
-        model: opus
-        skill: superpowers:brainstorming      # loaded as a plugin for claude; SKILL.md in the task otherwise
-        prompt: |
-          Let's brainstorm this ticket to make sure it matches expectations before we move on to planning or implementing it.
-          Write the agreed ticket (goal, acceptance criteria, out of scope, open questions) as the groomed ticket, then stop: no plan and no code.
-      plan:
-        agent: claude
-        model: opus
-        skill: superpowers:writing-plans
-      implement:
-        agent: claude
-        model: opus
-        skills: [superpowers:executing-plans, superpowers:test-driven-development]
-      review:
-        agent: claude
-        model: opus
-        effort: medium                        # low … max, claude only
-        skill: deep-dive-review
-        max_rounds: 3                         # caps the review loop
-      deliver: { builtin: github.open_pr }
-    nodes:
-      pr-description:                         # writes outputs/pr_body.md; deliver puts it under "Closes #N"
-        agent: claude
-        model: opus
-        before: deliver
-        prompt: |
-          Write the pull request description for this run to {{outputs_dir}}/pr_body.md, in Markdown.
-          Cover what changed and why, from the implement summary in the inputs and the diff (git diff {{base}}...HEAD in {{worktree}}).
-          Say in one line how self-review ended (the latest review findings are in the inputs), but do not copy the findings.
-          List the grounds the run was built under, from groundVersions in {{run_dir}}/state.json.
-          Do not write "Closes #…": Percolator adds it. Do not push, open the PR or comment on the issue; Percolator opens the PR with this text.
-          Finish with status pass, even if you could not write a description; Percolator then opens the PR with only "Closes #…".
+    pipelines:
+      feature:                              # tickets in, pull requests out
+        default: true                       # what perc run uses without --pipeline
+        bindings:
+          intake: { builtin: github.intake }  # builtins are handled by Percolator itself
+          groom:
+            agent: claude                   # claude, codex or command
+            model: opus
+            skill: superpowers:brainstorming  # loaded as a plugin for claude; SKILL.md in the task otherwise
+            prompt: |
+              Let's brainstorm this ticket to make sure it matches expectations before we move on to planning or implementing it.
+              Write the agreed ticket (goal, acceptance criteria, out of scope, open questions) as the groomed ticket, then stop: no plan and no code.
+          plan:
+            agent: claude
+            model: opus
+            skill: superpowers:writing-plans
+          implement:
+            agent: claude
+            model: opus
+            skills: [superpowers:executing-plans, superpowers:test-driven-development]
+          review:
+            agent: claude
+            model: opus
+            effort: medium                  # low … max, claude only
+            skill: deep-dive-review
+            max_rounds: 3                   # caps the review loop
+          deliver: { builtin: github.open_pr }
+        nodes:
+          pr-description:                   # writes outputs/pr_body.md; deliver puts it under "Closes #N"
+            agent: claude
+            model: opus
+            before: deliver
+            prompt: |
+              Write the pull request description for this run to {{outputs_dir}}/pr_body.md, in Markdown.
+              Cover what changed and why, from the implement summary in the inputs and the diff (git diff {{base}}...HEAD in {{worktree}}).
+              Say in one line how self-review ended (the latest review findings are in the inputs), but do not copy the findings.
+              List the grounds the run was built under, from groundVersions in {{run_dir}}/state.json.
+              Do not write "Closes #…": Percolator adds it. Do not push, open the PR or comment on the issue; Percolator opens the PR with this text.
+              Finish with status pass, even if you could not write a description; Percolator then opens the PR with only "Closes #…".
+
+      # A second pipeline, commented out: stages you name, ending in an exit (see Pipelines).
+      # dd-alert:
+      #   description: Diagnose a Datadog alert and write a report
+      #   ticket: none                 # runs without an issue
+      #   inputs:
+      #     alert_url: { required: true, description: Link to the alert }   # perc run --input alert_url=<url>
+      #   stages: [intake, gather, diagnose, report]   # intake first; the last stage is the exit
+      #   outputs:
+      #     gather: [evidence]         # each stage must write outputs/<key>.md
+      #     diagnose: [diagnosis]
+      #   exit: none                   # the outputs stay in the run dir; nothing is posted
+      #   bindings:
+      #     gather: { agent: claude, model: sonnet, prompt: … }
+      #     diagnose: { agent: claude, model: opus, prompt: … }
 ```
 
 ### Profiles
@@ -171,7 +189,7 @@ profiles:
     bindings: { … }                                    # as in the example config
 ```
 
-Profiles are checked in order; the first whose `match.remote` or `match.path` fits the repo wins, and `--profile <name>` picks one by hand. Each profile must bind all six stages, itself, through a `graph` ground or through the profile it extends.
+Profiles are checked in order; the first whose `match.remote` or `match.path` fits the repo wins, and `--profile <name>` picks one by hand. Each profile must bind every stage of each of its pipelines (for `feature`, all six), itself, through a `graph` ground or through the profile it extends. Bindings and nodes written at the top of a profile, as in the `personal` and `acme` examples, belong to `feature`; when one profile sets the same stage or node in both places, `pipelines.feature` wins.
 
 ```yaml
 profiles:
@@ -186,7 +204,7 @@ profiles:
     bindings: { … }
 ```
 
-`extends` starts a profile from another one: that profile's bindings, nodes, rules and `use` come first as their own layer, so this profile replaces a stage's binding or a node by name (as a whole: restate any key it should keep) and adds mappings, and a `required: true` there still locks. `tracker` and `runtime` are inherited unless this profile sets them, each as a whole block. `match` and `trust_repo_config` are never inherited. One level only: a profile cannot extend one that extends another.
+`extends` starts a profile from another one: that profile's pipelines, bindings, nodes, rules and `use` come first as their own layer, so this profile replaces a stage's binding or a node by name (as a whole: restate any key it should keep) and adds mappings, and a `required: true` there still locks. `tracker` and `runtime` are inherited unless this profile sets them, each as a whole block. `match` and `trust_repo_config` are never inherited. One level only: a profile cannot extend one that extends another.
 
 `tracker.approvers` lists the GitHub logins whose `/percolator approve` or `/percolator reject` comments count at a gate. Without it, only the GitHub user running `perc` counts. Local `perc approve`/`reject` record your `gh` login (the OS user if gh is not logged in).
 
@@ -207,11 +225,11 @@ profiles:
 | `kind` | all | `agent`, `builtin`, `script` or `gate`. Inferred from `agent`, `builtin` or `command` when left out. |
 | `agent` `model` `effort` `skill` `skills` | agent | Which agent runs the step, and with what. Rejected on any other kind. |
 | `prompt` | agent | Inline text, or `{ from: <ground>, file: … }`. |
-| `builtin` | builtin | `github.intake` or `github.open_pr`. |
+| `builtin` | builtin | `github.intake`, or on the exit stage the builtin of an exit, such as `github.open_pr` (see [Exits](#exits)). |
 | `command` | script | An argv array, never a shell string. `{run_dir}`, `{outputs_dir}` and `{worktree}` are filled in. |
 | `before` / `after` | nodes | Hook point: a stage, or `all`. At most one of the two. |
 | `on_fail` | nodes | `{ back_to: <earlier stage>, max_rounds: n }`: a bounded back-edge. `n` counts failed rounds, the first run included, so `1` escalates on the first fail. |
-| `max_rounds` | review | Round cap for the review loop (default 3). |
+| `max_rounds` | a stage's binding | Round cap for the review loop (default 3). On another stage's binding it makes that stage loop back to the one before it. |
 | `once` | hooks | Skip the hook once it has passed in this run, so a loop does not re-run it. |
 | `timeout_s` | agent, script | Escalate to you if the step is not done after n seconds. Builtins and gates ignore it. |
 | `required` | all | Locks the node: later layers may only restate it unchanged. |
@@ -234,7 +252,64 @@ profiles:
 - `audit` runs after implement. If it fails, the run goes back to implement once; if it fails again (two failed rounds), the run pauses and escalates to you.
 - `sign-off` adds a second human gate after plan, which you answer the same way as `approve-groom`.
 - `back_to` must point to an earlier stage. A `before: all` hook cannot loop.
+- `before`/`after` must name a stage of the node's own pipeline, or `all`.
 - Any step that writes a `pr_body` output sets the PR description; the last one in run order wins.
+
+### Pipelines
+
+A pipeline is a named list of stages, what runs each one, the inputs a run takes and how it ends. `feature` is built in; every other pipeline lists its own stages under `pipelines:`.
+
+```yaml
+profiles:
+  default:
+    pipelines:
+      feature: { default: true, bindings: { … }, nodes: { … } }    # as in the example config
+      hotfix:
+        description: Small fix, no grooming                       # shown by perc pipelines
+        inputs:
+          severity: { required: true, description: sev1 … sev3 }
+        stages: [intake, implement, review, deliver]
+        exit: pr
+        bindings:
+          implement: { agent: claude, model: opus, prompt: "Fix the issue. Severity: {{input_severity}}." }
+          review: { agent: claude, model: sonnet, max_rounds: 2 }
+```
+
+| Key | What it does |
+|---|---|
+| `stages` | The stages in order. `intake` comes first and the last one is the exit stage. Required for every pipeline but `feature`, whose stages are fixed. |
+| `bindings` / `nodes` | What runs each stage, and the pipeline's hooks and gates, as for `feature`. `intake` left unbound runs `github.intake`; the exit stage left unbound runs the builtin of `exit`. The exit stage is never an agent. |
+| `outputs` | Per stage, the output keys it must write (`outputs/<key>.md`). A stage left out needs none; `feature`'s stages keep their fixed outputs, and the exit stage writes its exit's output. |
+| `exit` | How the run ends: `pr`, `comment`, `issue`, `none`, `release`, `pr_review` or `private_fork_pr` (see [Exits](#exits)). Optional when the last stage is bound to an exit builtin; when both are set they must agree. |
+| `inputs` | Named values a run takes with `--input <name>=<value>`; `required: true` refuses a run without it, `description` is the hint. Prompts read them as `{{input_<name>}}`. |
+| `ticket` | `required` (default), `optional` or `none`. |
+| `default` | `true` on the pipeline `perc run` uses without `--pipeline`; at most one per profile. Without one, `feature` is the default. |
+| `description` | One line on what the pipeline is for. |
+| `rules` / `use` | Rules and mappings for this pipeline only. |
+| `required` | Locks the pipeline's own keys (all but `bindings`, `nodes`, `rules` and `use`): later layers may only restate them. |
+
+Pipeline names are lower-case letters, digits and `-` (at most 24 characters); input names are lower-case letters, digits and `_`.
+
+- **Loops.** A stage named `review` loops back to the stage before it, 3 rounds unless its binding sets `max_rounds`; any other stage loops the same way when its binding sets `max_rounds`.
+- **Gates.** `approve-groom` belongs to `feature`. Another pipeline has no built-in gate; add one as a node with `kind: gate` where you want to decide.
+- **Outputs.** Each step's outputs reach the steps after it as inputs, so a stage reads what the stages before it wrote.
+- **Tickets.** A pipeline with `ticket: none` refuses a ticket, and this version of `perc` cannot start it yet (`perc run` says so); `perc validate` still checks it.
+
+`perc validate` checks every pipeline of the profile and prints one block per pipeline; `perc validate --pipeline hotfix` checks just one. `perc pipelines` lists the pipelines a repo can use, one line each (`--json` for integrations):
+
+```text
+feature (default)  ticket required  exit pr  inputs -
+hotfix  ticket required  exit pr  inputs severity
+```
+
+### Starting a run
+
+```sh
+perc run owner/repo#42                                        # the default pipeline
+perc run owner/repo#42 --pipeline hotfix --input severity=sev2
+```
+
+`--pipeline <name>` picks the pipeline; without it the run uses the profile's default. `--input key=value` gives one input; repeat it for each. The value is everything after the first `=`, so it may hold `=`, spaces or a path. Before creating anything, `perc run` refuses an input the pipeline does not declare, a missing required input, and a ticket on a `ticket: none` pipeline (usage errors, exit code 2), and a pipeline the profile does not have.
 
 ### Grounds: shared policy from git
 
@@ -267,7 +342,7 @@ rules:
     - { name: audit, after: implement }
 ```
 
-Rules check the merged graph, so a team ground can set what every profile must do: which agents and models are allowed, which skills a stage must load, and which nodes must exist.
+Rules check the merged graph, so a team ground can set what every profile must do: which agents and models are allowed, which skills a stage must load, and which nodes must exist. Top-level `rules` apply to every pipeline; `pipelines.<name>.rules` to that pipeline only.
 
 Layers merge in order: core, then grounds, then your profile, then the repo. A later layer replaces a stage's binding or a node by name, and rules from every layer all apply. A target marked `required: true` is locked: later layers may only restate it unchanged.
 

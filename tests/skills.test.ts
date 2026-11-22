@@ -33,3 +33,10 @@ test('percolator-config skill keeps the rules agents needed most', async () => {
     'skill must make the agent ask before adding a git ground the user did not name',
   );
 });
+
+test('the config skill covers pipelines and inputs', async () => {
+  const text = await fs.readFile(path.join(ROOT, 'skills', 'percolator-config', 'SKILL.md'), 'utf8');
+  assert.ok(text.includes('pipelines:'), 'skill must show where pipelines go');
+  assert.ok(text.includes('ticket: none'), 'skill must explain ticket: none');
+  assert.ok(text.includes('--input'), 'skill must say how a run gets its inputs');
+});

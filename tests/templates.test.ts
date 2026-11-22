@@ -30,6 +30,19 @@ test('template validates through the full pipeline', async () => {
   });
 });
 
+test("the template's feature pipeline validates as the default", async () => {
+  await withTemplate(async (tmp, configFile) => {
+    const config = await loadUserConfig(configFile);
+    const feature = config.profiles['default']!.pipelines?.['feature'];
+    assert.ok(feature, 'profiles.default.pipelines has feature');
+    assert.equal(feature.default, true);
+    assert.equal(config.profiles['default']!.bindings, undefined, 'the bindings live inside pipelines.feature');
+    const r = await validate({ configFile, cwd: tmp, profile: 'default', home: tmp });
+    assert.equal(r.pipeline.name, 'feature');
+    assert.equal(r.pipeline.default, true);
+  });
+});
+
 test("template's default profile matches GitHub remotes", async () => {
   await withTemplate(async (tmp, configFile) => {
     const config = await loadUserConfig(configFile);
@@ -42,7 +55,7 @@ test("template's default profile matches GitHub remotes", async () => {
 test('template binds agent stages to claude on opus, each with a skill', async () => {
   await withTemplate(async (_tmp, configFile) => {
     const config = await loadUserConfig(configFile);
-    const b = config.profiles['default']!.bindings!;
+    const b = config.profiles['default']!.pipelines!['feature']!.bindings!;
     type Agent = { agent: string; model: string; effort?: string; skill?: string; skills?: string[]; prompt?: unknown; max_rounds?: number };
     const agent = (s: string) => (b as Record<string, unknown>)[s] as Agent;
     for (const s of ['groom', 'plan', 'implement', 'review']) {
@@ -60,8 +73,8 @@ test('template binds agent stages to claude on opus, each with a skill', async (
 test('template adds a pr-description agent hook before deliver', async () => {
   await withTemplate(async (tmp, configFile) => {
     const config = await loadUserConfig(configFile);
-    const node = (config.profiles['default']!.nodes as Record<string, { agent: string; model: string; before: string; prompt: string }> | undefined)?.['pr-description'];
-    assert.ok(node, 'profiles.default.nodes has pr-description');
+    const node = (config.profiles['default']!.pipelines!['feature']!.nodes as Record<string, { agent: string; model: string; before: string; prompt: string }> | undefined)?.['pr-description'];
+    assert.ok(node, 'profiles.default.pipelines.feature.nodes has pr-description');
     assert.equal(node.agent, 'claude');
     assert.equal(node.model, 'opus');
     assert.equal(node.before, 'deliver');
@@ -78,8 +91,8 @@ test('template adds a pr-description agent hook before deliver', async () => {
 test('the pr-description prompt uses only known template variables', async () => {
   await withTemplate(async (_tmp, configFile) => {
     const config = await loadUserConfig(configFile);
-    const node = (config.profiles['default']!.nodes as Record<string, { prompt: string }> | undefined)?.['pr-description'];
-    assert.ok(node, 'profiles.default.nodes has pr-description');
+    const node = (config.profiles['default']!.pipelines!['feature']!.nodes as Record<string, { prompt: string }> | undefined)?.['pr-description'];
+    assert.ok(node, 'profiles.default.pipelines.feature.nodes has pr-description');
     const known = new Set(['run_id', 'ticket', 'step', 'stage', 'round', 'max_rounds', 'worktree', 'branch', 'base', 'run_dir', 'outputs_dir']);
     const names = [...node.prompt.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g)].map((m) => m[1]!);
     assert.ok(names.length > 0);
@@ -90,8 +103,8 @@ test('the pr-description prompt uses only known template variables', async () =>
 test('the pr-description prompt does not point at review rounds and always finishes with pass', async () => {
   await withTemplate(async (_tmp, configFile) => {
     const config = await loadUserConfig(configFile);
-    const node = (config.profiles['default']!.nodes as Record<string, { prompt: string }> | undefined)?.['pr-description'];
-    assert.ok(node, 'profiles.default.nodes has pr-description');
+    const node = (config.profiles['default']!.pipelines!['feature']!.nodes as Record<string, { prompt: string }> | undefined)?.['pr-description'];
+    assert.ok(node, 'profiles.default.pipelines.feature.nodes has pr-description');
     assert.doesNotMatch(node.prompt, /\brounds\b/);
     assert.match(node.prompt, /Finish with status pass/);
   });
