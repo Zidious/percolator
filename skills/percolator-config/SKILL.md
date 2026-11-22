@@ -1,6 +1,6 @@
 ---
 name: percolator-config
-description: Use when the user wants to create or modify a Percolator config (perc): agents, models and effort per stage, prompts, pipelines and their inputs and exits, triage routers, triggers that start runs (perc watch), which repos a profile matches, approvers, extra steps or commands before/after a stage, test or audit loops, gates, grounds and policies, rules, or the review round cap; also when they ask to make runs cheaper or to turn off the approval.
+description: Use when the user wants to create or modify a Percolator config (perc): agents, models and effort per stage, prompts, pipelines and their inputs and exits, triage routers, triggers that start runs (perc watch), fan-out of a stage over slices, which repos a profile matches, approvers, extra steps or commands before/after a stage, test or audit loops, gates, grounds and policies, rules, or the review round cap; also when they ask to make runs cheaper or to turn off the approval.
 ---
 
 # Configuring Percolator
@@ -34,6 +34,7 @@ Ask one question at a time and wait for the answer; skip what the request alread
 - another pipeline: a run with its own stages, inputs and exit (see "Pipelines")
 - a triage router that hands each ticket to the pipeline that fits (see "Routers")
 - triggers that start runs on a schedule, a label, a pull request or a failed check (see "Triggers")
+- running a stage once per slice of a plan, each slice in its own PR (see "Fan-out")
 
 Stop asking when the user has nothing more to change.
 
@@ -58,7 +59,7 @@ profiles:                       # checked in order: the FIRST whose match fits w
         default: true                                # what perc run uses without --pipeline
         bindings: { intake: …, groom: …, plan: …, implement: …, review: …, deliver: … }
         nodes: { <name>: { …, before|after: <stage>|all } }
-      <other>: { stages: [intake, …, <exit stage>], ticket: …, inputs: …, outputs: …, exit: …, next: …, triggers: […], bindings: …, nodes: …, rules: … }
+      <other>: { stages: [intake, …, <exit stage>], ticket: …, inputs: …, outputs: …, exit: …, next: …, triggers: […], fan_out: { stage: …, slices: { from: …, output: … }, max_parallel: 3 }, bindings: …, nodes: …, rules: … }
       <router>: { router: true, stages: [intake, route], routes: […], choose: { … }, fallback: …, triggers: […] }
     bindings: { … }                                  # top-level bindings and nodes also belong to feature
     nodes: { … }
@@ -249,6 +250,33 @@ pipelines:                # only the keys triggers need; stages, bindings and ex
 What `perc validate` requires: `schedule` needs `ticket: none` or `optional`, a cron of five numeric fields (no names) and a known IANA `timezone` (default: the watching machine's), and its `inputs` must cover the pipeline's required inputs. `label` needs a pipeline that takes a ticket. `pr_opened` and `dependabot` pass input `pr`, and `check_failed` passes inputs `branch` and `run_url`, so the pipeline must declare them.
 
 Then tell the user to start the watcher: `perc watch --repo <dir>` (repeat `--repo` per repo; default the current directory; `--interval <s>`, default 60, at least 15) starts it in its own terminal, and `perc watch stop` ends it. Each firing starts exactly one run, even across watcher restarts.
+
+## Fan-out
+
+`fan_out:` runs one stage, and every stage after it, once per slice of an earlier stage's output, each slice in its own linked run with its own branch and exit (for `exit: pr`, one PR per slice).
+
+```yaml
+pipelines:
+  epic:
+    stages: [intake, plan, implement, review, deliver]
+    exit: pr
+    outputs: { plan: [plan] }
+    fan_out:
+      stage: implement                       # neither intake nor the exit stage
+      slices: { from: plan, output: slices } # from: a stage before stage; output: the key it writes (slices.md)
+      max_parallel: 3                        # optional: slices running at once, default 3
+    bindings:
+      plan: { agent: claude, model: opus, prompt: "… Split the work into slices.md, one \"## <title>\" section per slice." }
+      implement: { … }
+      review: { … }
+```
+
+- Each `## ` section of the slices output is one slice; tell the `from` stage's prompt to write them. The slices key need not be listed under `outputs:`: fan-out makes it a required output of the `from` stage.
+- The run (the parent) stops at the fanned stage and starts slice runs `<parent>-s<i>` (1, 2, …), each on branch `percolator/<parent>-s<i>` from the parent's base. A slice run starts with a seed step (the parent's outputs plus `slice.md`, its own section), then runs the fanned stage through the exit. The parent waits for every slice, then completes with `slices_done`, one line per slice with its PR.
+- The split is saved in the parent's run dir as `fanout.json`; a resume reuses it and never splits again.
+- A loop (`on_fail.back_to`, `max_rounds`) in a slice may only go back to the fanned stage or later; `perc validate` refuses one that goes back before it.
+- A failed slice pauses the parent once every slice has finished. A failed run cannot be resumed, so the user runs `perc delete <slice-id>` (the branch stays) and then `perc resume <parent-id>`, which starts that slice again on its branch. If the `from` stage wrote no `## ` sections, the parent pauses at the fan-out step; fix the output, then `perc resume <parent-id>`.
+- `perc delete <parent-id>` leaves the slice runs alone.
 
 ## Agents, models and skills
 

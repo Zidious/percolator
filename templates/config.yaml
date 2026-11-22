@@ -89,3 +89,24 @@ profiles:
       #   fallback: feature            # used when nothing picked a pipeline
       #   triggers:
       #     - { label: triage }        # while perc watch runs, each issue labelled triage starts a triage run
+
+      # A pipeline that plans once, then implements, reviews and delivers each slice of the plan in its own
+      # linked run and PR, three at a time. Uncomment it, then: perc validate --pipeline epic
+      # epic:
+      #   description: Plan a big ticket, then build each slice in its own PR
+      #   stages: [intake, plan, implement, review, deliver]
+      #   exit: pr
+      #   outputs:
+      #     plan: [plan]
+      #   fan_out:
+      #     stage: implement           # implement and every stage after it run once per slice
+      #     slices: { from: plan, output: slices }   # plan writes slices.md: one "## <title>" section per slice
+      #     max_parallel: 3            # slices running at once (default 3)
+      #   bindings:
+      #     plan:
+      #       agent: claude
+      #       model: opus
+      #       skill: superpowers:writing-plans
+      #       prompt: Write the plan to plan.md, and split the work into independent slices in slices.md, one "## <title>" section each.
+      #     implement: { agent: claude, model: opus, skills: [superpowers:executing-plans, superpowers:test-driven-development] }
+      #     review: { agent: claude, model: opus, skill: deep-dive-review, max_rounds: 3 }
