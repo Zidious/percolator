@@ -119,11 +119,24 @@ test('the commented example pipelines validate once uncommented', async () => {
   await withTemplate(async (tmp, configFile) => {
     await fs.writeFile(configFile, uncommentExamples(await fs.readFile(TEMPLATE, 'utf8')));
     const rs = await validateAll({ configFile, cwd: tmp, profile: 'default', home: tmp });
-    assert.deepEqual(rs.map((r) => r.pipeline.name), ['feature', 'dd-alert', 'hotfix', 'triage']);
+    assert.deepEqual(rs.map((r) => r.pipeline.name), ['feature', 'dd-alert', 'hotfix', 'triage', 'epic']);
     const triage = rs.find((r) => r.pipeline.name === 'triage')!;
     assert.equal(triage.pipeline.router, true);
     assert.deepEqual(triage.pipeline.choose?.from, ['feature', 'hotfix']);
     assert.deepEqual(triage.pipeline.triggers, [{ label: 'triage' }]);
     assert.deepEqual(triage.graph.steps.map((s) => s.id).slice(-4), ['route.0', 'route.1', 'pick-pipeline', 'route.3']);
+  });
+});
+
+test('the commented fan-out example validates as a parent and as a slice', async () => {
+  await withTemplate(async (tmp, configFile) => {
+    await fs.writeFile(configFile, uncommentExamples(await fs.readFile(TEMPLATE, 'utf8')));
+    const parent = await validate({ configFile, cwd: tmp, profile: 'default', home: tmp, pipeline: 'epic' });
+    assert.deepEqual(parent.pipeline.fan_out, { stage: 'implement', slices: { from: 'plan', output: 'slices' }, max_parallel: 3 });
+    const last = parent.graph.steps.at(-1)!;
+    assert.deepEqual([last.id, last.def], ['implement', { builtin: 'percolator.fan_out' }]);
+    const slice = await validate({ configFile, cwd: tmp, profile: 'default', home: tmp, pipeline: 'epic', sliceFrom: 'implement' });
+    assert.deepEqual(slice.graph.steps[0]!.def, { builtin: 'percolator.seed' });
+    assert.equal(slice.graph.steps.at(-1)!.stage, 'deliver');
   });
 });

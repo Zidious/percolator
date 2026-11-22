@@ -42,7 +42,7 @@ test('the config skill covers pipelines and inputs', async () => {
   assert.ok(text.includes('--input'), 'skill must say how a run gets its inputs');
 });
 
-test('the config skill covers routers and triggers', async () => {
+test('the config skill covers routers, triggers and fan-out', async () => {
   const text = await fs.readFile(path.join(ROOT, 'skills', 'percolator-config', 'SKILL.md'), 'utf8');
   const routers = text.split('## Routers')[1]?.split('\n## ')[0];
   assert.ok(routers !== undefined, 'skill must have a "Routers" section');
@@ -53,6 +53,11 @@ test('the config skill covers routers and triggers', async () => {
   assert.ok(triggers !== undefined, 'skill must have a "Triggers" section');
   for (const key of ['triggers:', 'schedule:', 'timezone:', 'label:', 'pr_opened:', 'dependabot:', 'check_failed:', 'perc watch']) {
     assert.ok(triggers.includes(key), `the Triggers section must cover ${key}`);
+  }
+  const fanOut = text.split('## Fan-out')[1]?.split('\n## ')[0];
+  assert.ok(fanOut !== undefined, 'skill must have a "Fan-out" section');
+  for (const key of ['fan_out:', 'stage:', 'slices:', 'from:', 'output:', 'max_parallel:', '## ', '-s<i>', 'fanout.json']) {
+    assert.ok(fanOut.includes(key), `the Fan-out section must cover ${key}`);
   }
   assert.ok(!text.includes('cannot start it yet'), 'ticket: none pipelines can be started now');
 });
