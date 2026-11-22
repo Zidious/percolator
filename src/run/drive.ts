@@ -7,6 +7,12 @@ import type { Runtime } from '../engine/runtime.ts';
 import { mappingKeys, mappingsFingerprint } from '../grounds/mappings.ts';
 import { HerdrRuntime, sweepTerminals } from '../runtime/herdr-runtime.ts';
 import type { Attention } from '../runtime/herdr-runtime.ts';
+import { githubComment } from '../tracker/exits/comment.ts';
+import { githubOpenIssues } from '../tracker/exits/issues.ts';
+import { githubPrivateForkPr } from '../tracker/exits/private-fork.ts';
+import { githubRelease } from '../tracker/exits/release.ts';
+import { percolatorReport } from '../tracker/exits/report.ts';
+import { githubPrReview } from '../tracker/exits/review.ts';
 import { githubGate } from '../tracker/gate.ts';
 import { githubIntake } from '../tracker/intake.ts';
 import { githubOpenPr } from '../tracker/pr.ts';
@@ -174,6 +180,27 @@ async function driveHeld(
         repo: meta.repo,
         pipeline: meta.pipeline,
         runId,
+      }),
+      'github.comment': githubComment({ gh: deps.gh, runDir: dir, runId }),
+      'percolator.report': percolatorReport(),
+      'github.open_issues': githubOpenIssues({ gh: deps.gh, runDir: dir, runId, repo: meta.repo }),
+      'github.release': githubRelease({
+        gh: deps.gh,
+        runDir: dir,
+        worktree: meta.worktree,
+        branch: meta.branch,
+        repo: meta.repo,
+        inputs: meta.inputs,
+      }),
+      'github.pr_review': githubPrReview({ gh: deps.gh, runDir: dir, runId, inputs: meta.inputs, repo: meta.repo }),
+      'github.private_fork_pr': githubPrivateForkPr({
+        gh: deps.gh,
+        runDir: dir,
+        worktree: meta.worktree,
+        branch: meta.branch,
+        base: meta.base,
+        repo: meta.repo,
+        inputs: meta.inputs,
       }),
     },
     gate: githubGate({

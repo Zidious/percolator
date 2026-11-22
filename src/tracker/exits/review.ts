@@ -6,7 +6,7 @@ import { collectOutputs } from '../../runtime/outcome.ts';
 import { writeFileAtomic } from '../../util/fs.ts';
 import type { Gh } from '../gh.ts';
 import { parsePr } from '../ticket.ts';
-import { errText, latestOutput } from './latest-output.ts';
+import { errText, latestOutput } from './latest.ts';
 
 const escalate = (reason: string): NodeOutcome => ({ status: 'escalate', outputs: {}, reason: `github.pr_review: ${reason}` });
 

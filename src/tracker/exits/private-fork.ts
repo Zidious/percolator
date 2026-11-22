@@ -7,7 +7,8 @@ import { collectOutputs } from '../../runtime/outcome.ts';
 import { writeFileAtomic } from '../../util/fs.ts';
 import { checkGhsa } from '../gh.ts';
 import type { AdvisoryFork, Gh } from '../gh.ts';
-import { errText, latestOutput } from './latest-output.ts';
+import { prBody } from '../pr.ts';
+import { errText, latestOutput } from './latest.ts';
 
 /** `<stepDir>/fork.json`: the temporary private fork this step created for the advisory. */
 type SavedFork = AdvisoryFork & { advisory: string };
@@ -86,9 +87,8 @@ export function githubPrivateForkPr(o: {
         const issue = await readOptional(path.join(o.runDir, 'issue.json'));
         const title = issue === undefined ? `Fix for ${advisory}` : String((JSON.parse(issue) as { title?: unknown }).title);
         // no "Closes #n": a PR in the advisory fork must not close (or point at) the public issue
-        const text = (await latestOutput(ctx, o.runDir, 'pr_body'))?.trim();
         const bodyFile = path.join(io.stepDir, 'pr-body.md');
-        await writeFileAtomic(bodyFile, text ? `${text}\n` : '');
+        await writeFileAtomic(bodyFile, prBody(undefined, await latestOutput(ctx, o.runDir, 'pr_body')));
         url = await o.gh.createPr(forkRepo, { base: o.base.replace(/^origin\//, ''), head: o.branch, title, bodyFile });
       }
       await fs.mkdir(io.outputsDir, { recursive: true });
