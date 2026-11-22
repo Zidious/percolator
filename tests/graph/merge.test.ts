@@ -282,7 +282,21 @@ test('pipeline headers merge with their sources', () => {
   assert.deepEqual(r.feature!.header.value.stages, [...CORE_STAGES]);
 });
 
-const LOCKED_HOTFIX = { required: true, stages: ['intake', 'fix', 'deliver'], exit: 'pr' as const };
+test('router keys are part of the pipeline header', () => {
+  const r = mergePipelines([
+    L('a', { pipelines: { triage: { router: true, stages: ['intake', 'route'], routes: [{ label: 'bug', to: 'hotfix' }] } } }),
+    L('b', { pipelines: { triage: { choose: { agent: 'claude', from: ['hotfix'] }, fallback: 'hotfix' } } }),
+  ]);
+  assert.deepEqual(r.triage!.header.value, {
+    router: true,
+    stages: ['intake', 'route'],
+    routes: [{ label: 'bug', to: 'hotfix' }],
+    choose: { agent: 'claude', from: ['hotfix'] },
+    fallback: 'hotfix',
+  });
+});
+
+const LOCKED_HOTFIX ={ required: true, stages: ['intake', 'fix', 'deliver'], exit: 'pr' as const };
 const groundLayer: Layer = {
   source: 'ground:co/p.yaml',
   fragment: { pipelines: { hotfix: LOCKED_HOTFIX } },

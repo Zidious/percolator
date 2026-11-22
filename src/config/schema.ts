@@ -298,6 +298,53 @@ export const PipelineSchema = z.strictObject({
   )
     .optional()
     .describe('Named values a run takes (perc run --input key=value), available to prompts as {{input_<name>}}.'),
+  router: z
+    .boolean()
+    .optional()
+    .describe('This pipeline is a triage router: its last stage, route, hands the ticket to another pipeline; default false.'),
+  routes: z
+    .array(
+      z
+        .strictObject({
+          label: z.string().describe('Issue label that picks the pipeline.'),
+          to: z.string().describe('Pipeline the ticket goes to when the issue has the label.'),
+        })
+        .describe('One rule: an issue with this label goes to this pipeline.'),
+    )
+    .optional()
+    .describe('Router only: label rules tried in order before the choose agent; the first match wins.'),
+  choose: z
+    .strictObject({
+      agent: z.string().describe('Which agent picks the pipeline.'),
+      model: z.string().optional().describe("Model the agent uses; default the agent's own."),
+      effort: z
+        .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+        .optional()
+        .describe("Reasoning effort for the agent (claude only); default the agent's own."),
+      skill: z.string().optional().describe('One skill the agent loads.'),
+      skills: z.array(z.string()).optional().describe('Skills the agent loads.'),
+      prompt: z
+        .union([
+          z.string(),
+          z.strictObject({
+            from: z.string().describe('Name of the ground the prompt file comes from.'),
+            file: z.string().describe('Prompt file inside the ground.'),
+          }),
+        ])
+        .optional()
+        .describe('Task prompt for the agent; default: pick one of from and write pick.md (pipeline and whether it is unsure).'),
+      from: z.array(z.string()).min(1).describe('Pipelines the agent may pick from.'),
+      confirm: z
+        .enum(['unsure', 'always'])
+        .optional()
+        .describe('When the pick-pipeline gate asks you to confirm the pick: unsure (only when the agent is unsure) or always; default unsure.'),
+    })
+    .optional()
+    .describe('Router only: the agent that picks a pipeline when no label rule matched; without it the fallback applies.'),
+  fallback: z
+    .string()
+    .optional()
+    .describe("Router only: the pipeline used when nothing else picked one; default the profile's default pipeline, or feature when that is a router."),
   bindings: z
     .record(z.string(), BindingSchema.describe('The node that runs this stage, or a list of nodes run in order.'))
     .optional()
@@ -311,7 +358,7 @@ export const PipelineSchema = z.strictObject({
   required: z
     .boolean()
     .optional()
-    .describe("Locks the pipeline's settings (stages, outputs, exit, ticket, inputs): later layers may only restate them; default false."),
+    .describe("Locks the pipeline's settings (every key but bindings, nodes, rules and use): later layers may only restate them; default false."),
 });
 export type Pipeline = z.infer<typeof PipelineSchema>;
 

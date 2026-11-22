@@ -636,3 +636,108 @@ test('a custom loop stage refuses on_fail on its last node', () => {
 test('the feature graph keeps its loop stages', () => {
   assert.deepEqual(buildGraph(full()).loopStages, ['review']);
 });
+
+const TRIAGE: Pipeline = {
+  router: true,
+  stages: ['intake', 'route'],
+  routes: [{ label: 'bug', to: 'hotfix' }],
+  choose: { agent: 'claude', model: 'opus', from: ['hotfix', 'feature'] },
+  fallback: 'feature',
+};
+/** The triage router, merged from one profile layer at c.yaml (prefix profiles.default). */
+function triage(over: Partial<Pipeline> = {}, lines: Record<string, number> = {}) {
+  const p: Pipeline = { ...TRIAGE, ...over };
+  for (const k of Object.keys(p) as (keyof Pipeline)[]) if (p[k] === undefined) delete p[k];
+  return mergePipelines([
+    { source: 'profile:default', fragment: { pipelines: { triage: p } }, locator: { file: 'c.yaml', lines, prefix: 'profiles.default' } },
+  ]).triage!;
+}
+const PICK_PROMPT =
+  'Pick the pipeline for this ticket from: hotfix: fix a bug fast; feature. Write pick.md: first line "pipeline: <name>", second line "unsure: true" or "unsure: false", then your reasons. Feedback from an earlier pick, if any, is in the inputs.';
+
+test('a router builds rules, choose, pick-pipeline and route steps', () => {
+  const g = buildGraph(triage(), undefined, { descriptions: { hotfix: 'fix a bug fast' } });
+  assert.deepEqual(g.steps.map((s) => s.id), ['intake', 'route.0', 'route.1', 'pick-pipeline', 'route.3']);
+  assert.deepEqual(g.steps.map((s) => s.def), [
+    { builtin: 'github.intake' },
+    { builtin: 'percolator.route_rules' },
+    { agent: 'claude', model: 'opus', prompt: PICK_PROMPT },
+    { kind: 'gate', on_fail: { back_to: 'route', max_rounds: 3 } },
+    { builtin: 'percolator.route' },
+  ]);
+  assert.deepEqual(g.steps.slice(1).map((s) => [s.stage, s.name, s.slotLast]), [
+    ['route', 'route', false],
+    ['route', 'route', false],
+    ['route', 'pick-pipeline', false],
+    ['route', 'route', true],
+  ]);
+  assert.equal(g.exit, 'route');
+  assert.deepEqual(g.contracts, { intake: ['ticket'], route: ['route'] });
+  assert.deepEqual(g.loopStages, []);
+});
+
+test("a router's pick-pipeline gate loops back to its own route stage", () => {
+  const g = buildGraph(triage());
+  assert.deepEqual(g.backEdges['pick-pipeline'], {
+    id: 'pick-pipeline',
+    fromStepId: 'pick-pipeline',
+    toStepIndex: g.regionStart.route,
+    jumpAfterIndex: 3,
+    maxRounds: 3,
+    onCap: 'escalate',
+  });
+  assert.equal(g.failRoutes['pick-pipeline'], 'pick-pipeline');
+  assert.equal(g.failRoutes['route.1'], undefined);
+});
+
+test('the choose prompt and agent settings pass through; names without a description stand alone', () => {
+  const g = buildGraph(triage({ choose: { agent: 'codex', effort: 'high', skills: ['triage'], prompt: 'pick one', from: ['hotfix'] } }));
+  assert.deepEqual(g.steps[2]!.def, { agent: 'codex', effort: 'high', skills: ['triage'], prompt: 'pick one' });
+  const plain = buildGraph(triage());
+  assert.match(String(plain.steps[2]!.def.prompt), /^Pick the pipeline for this ticket from: hotfix; feature\. Write pick\.md/);
+});
+
+test('max_rounds_ceiling clamps the pick-pipeline cap', () => {
+  const merged = triage();
+  merged.rules.push({ value: { max_rounds_ceiling: 2 }, source: 'r', locked: false });
+  assert.equal(buildGraph(merged).backEdges['pick-pipeline']!.maxRounds, 2);
+});
+
+test('a router without choose builds rules and route only', () => {
+  const g = buildGraph(triage({ choose: undefined }));
+  assert.deepEqual(g.steps.map((s) => s.id), ['intake', 'route.0', 'route.3']);
+  assert.deepEqual(g.backEdges, {});
+});
+
+test('a router cannot set exit', () => {
+  throwsAt(
+    () => buildGraph(triage({ exit: 'pr' }, { 'profiles.default.pipelines.triage.exit': 7 })),
+    'c.yaml:7: profiles.default.pipelines.triage.exit: router pipeline "triage" cannot set exit: its route stage hands the ticket to another pipeline; remove exit',
+    'profiles.default.pipelines.triage.exit',
+  );
+});
+
+test('binding route on a router is refused', () => {
+  throwsAt(
+    () =>
+      buildGraph(
+        triage({ bindings: { route: { builtin: 'percolator.route' } } }, { 'profiles.default.pipelines.triage.bindings.route': 9 }),
+      ),
+    'c.yaml:9: profiles.default.pipelines.triage.bindings.route: stage "route" of a router is built in; configure it with routes, choose and fallback',
+    'profiles.default.pipelines.triage.bindings.route',
+  );
+});
+
+test('a router must end with its route stage', () => {
+  throwsAt(
+    () => buildGraph(triage({ stages: ['intake', 'route', 'deliver'] })),
+    'c.yaml: profiles.default.pipelines.triage.stages: router pipeline "triage" must end with stage route; make route its last stage',
+    'profiles.default.pipelines.triage.stages',
+  );
+});
+
+test('a router may run stages of its own before route', () => {
+  const g = buildGraph(triage({ stages: ['intake', 'look', 'route'], bindings: { look: { agent: 'claude' } } }));
+  assert.deepEqual(g.steps.map((s) => s.id), ['intake', 'look', 'route.0', 'route.1', 'pick-pipeline', 'route.3']);
+  assert.deepEqual(g.contracts, { intake: ['ticket'], look: [], route: ['route'] });
+});

@@ -85,6 +85,7 @@ export function contractsFor(header: PipelineHeader, name: string): Record<strin
     }
     const own = header.outputs?.[stage];
     if (stage === 'intake') out[stage] = [...new Set(['ticket', ...(own ?? [])])];
+    else if (i === stages.length - 1 && header.router === true) out[stage] = [...new Set(['route', ...(own ?? [])])];
     else if (i === stages.length - 1 && header.exit !== undefined) out[stage] = [...new Set([...exitOutputs(header.exit), ...(own ?? [])])];
     else out[stage] = [...(own ?? core ?? [])];
   });
@@ -108,7 +109,25 @@ function describeNode(d: NodeDef): string {
  * `home` is the selected profile and where it is written: unbound stages are reported there, because
  * that is where a binding is added.
  */
-export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { profile: string; locator: Locator }): Graph {
+export type BuildOptions = {
+  /** pipeline name → description, for the choose agent's default prompt of a router */
+  descriptions?: Readonly<Record<string, string | undefined>>;
+};
+
+/** The default task of a router's choose agent. */
+function pickPrompt(from: readonly string[], descriptions: BuildOptions['descriptions']): string {
+  const list = from.map((p) => (descriptions?.[p] !== undefined ? `${p}: ${descriptions[p]}` : p)).join('; ');
+  return `Pick the pipeline for this ticket from: ${list}. Write pick.md: first line "pipeline: <name>", second line "unsure: true" or "unsure: false", then your reasons. Feedback from an earlier pick, if any, is in the inputs.`;
+}
+
+/** The step id of a router's pick gate; perc status shows it by this name. */
+const PICK_GATE = 'pick-pipeline';
+
+export function buildGraph(
+  merged: Readonly<Merged | MergedPipeline>,
+  home?: { profile: string; locator: Locator },
+  o: BuildOptions = {},
+): Graph {
   const named = 'header' in merged ? (merged as MergedPipeline) : undefined;
   const name = named?.name ?? 'feature';
   const isFeature = name === 'feature';
@@ -132,6 +151,25 @@ export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { p
     }
   });
   const exitStage = stages.at(-1)!;
+  const router = header.router === true;
+  if (router) {
+    if (exitStage !== 'route') {
+      throw new GraphError(`router pipeline "${name}" must end with stage route; make route its last stage`, at('.stages'));
+    }
+    if (header.exit !== undefined) {
+      throw new GraphError(
+        `router pipeline "${name}" cannot set exit: its route stage hands the ticket to another pipeline; remove exit`,
+        at('.exit'),
+      );
+    }
+    const bound = merged.bindings.route;
+    if (bound !== undefined) {
+      throw new GraphError(
+        'stage "route" of a router is built in; configure it with routes, choose and fallback',
+        locate(bound.locator, 'config', 'bindings.route'),
+      );
+    }
+  }
 
   // what runs each stage: the merged bindings, plus the defaults a named pipeline gets
   const bindings: Record<string, Sourced<NodeDef[]>> = { ...merged.bindings };
@@ -144,7 +182,7 @@ export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { p
     }
   }
 
-  const unbound = stages.filter((s) => bindings[s] === undefined);
+  const unbound = stages.filter((s) => bindings[s] === undefined && !(router && s === exitStage));
   if (!isFeature && unbound.includes(exitStage) && exit === undefined) {
     throw new GraphError(
       `pipeline "${name}" has no exit: bind its last stage "${exitStage}" to one of ${EXIT_KINDS.map((k) => EXITS[k].builtin).join(', ')} or set exit:`,
@@ -164,48 +202,50 @@ export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { p
   }
 
   // the exit stage: never an agent; on a named pipeline its binding and exit: agree
-  const exitBinding = bindings[exitStage]!;
-  const exitAt = () => locate(exitBinding.locator, 'config', `bindings.${exitStage}`);
-  if (exitBinding.value.some((d) => d.kind === 'agent' || d.agent !== undefined)) {
-    const kind = exit ?? 'pr';
-    throw new GraphError(
-      `${exitStage} cannot be an agent node: Percolator ${EXITS[kind].verb} itself (use { builtin: ${EXITS[kind].builtin} })`,
-      exitAt(),
-    );
-  }
-  if (!isFeature) {
-    const only = exitBinding.value.length === 1 ? exitBinding.value[0]! : undefined;
-    if (exit === undefined) {
-      exit = EXIT_KINDS.find((k) => only?.builtin === EXITS[k].builtin);
-      if (exit === undefined) {
-        throw new GraphError(
-          `pipeline "${name}" has no exit: bind its last stage "${exitStage}" to one of ${EXIT_KINDS.map((k) => EXITS[k].builtin).join(', ')} or set exit:`,
-          at(''),
-        );
-      }
-    } else if (only?.builtin !== EXITS[exit].builtin) {
-      const wrong = exitBinding.value.find((d) => d.builtin !== EXITS[exit!].builtin) ?? exitBinding.value[0]!;
+  if (!router) {
+    const exitBinding = bindings[exitStage]!;
+    const exitAt = () => locate(exitBinding.locator, 'config', `bindings.${exitStage}`);
+    if (exitBinding.value.some((d) => d.kind === 'agent' || d.agent !== undefined)) {
+      const kind = exit ?? 'pr';
       throw new GraphError(
-        `exit ${exit} runs ${EXITS[exit].builtin}, but stage "${exitStage}" is bound to ${describeNode(wrong)}; bind it to { builtin: ${EXITS[exit].builtin} } or change exit`,
+        `${exitStage} cannot be an agent node: Percolator ${EXITS[kind].verb} itself (use { builtin: ${EXITS[kind].builtin} })`,
         exitAt(),
       );
     }
-    // what the exit needs from the pipeline: a ticket, an input, or (release) a tag
-    const needs = EXITS[exit].needs;
-    if (needs?.ticket && header.ticket === 'none') {
-      throw new GraphError(
-        `exit ${exit} posts on the run's issue, but pipeline "${name}" has ticket: none; set ticket: required or pick another exit`,
-        at(''),
-      );
-    }
-    if (needs?.input !== undefined && header.inputs?.[needs.input] === undefined) {
-      throw new GraphError(
-        `exit ${exit} needs input "${needs.input}" (${NEEDED_INPUT[needs.input]}); declare it under pipelines.${name}.inputs`,
-        at(''),
-      );
-    }
-    if (exit === 'release' && header.inputs?.tag === undefined && !stages.slice(0, -1).some((s) => header.outputs?.[s]?.includes('tag'))) {
-      throw new GraphError('exit release needs a tag: declare input "tag" or list "tag" under outputs of an earlier stage', at(''));
+    if (!isFeature) {
+      const only = exitBinding.value.length === 1 ? exitBinding.value[0]! : undefined;
+      if (exit === undefined) {
+        exit = EXIT_KINDS.find((k) => only?.builtin === EXITS[k].builtin);
+        if (exit === undefined) {
+          throw new GraphError(
+            `pipeline "${name}" has no exit: bind its last stage "${exitStage}" to one of ${EXIT_KINDS.map((k) => EXITS[k].builtin).join(', ')} or set exit:`,
+            at(''),
+          );
+        }
+      } else if (only?.builtin !== EXITS[exit].builtin) {
+        const wrong = exitBinding.value.find((d) => d.builtin !== EXITS[exit!].builtin) ?? exitBinding.value[0]!;
+        throw new GraphError(
+          `exit ${exit} runs ${EXITS[exit].builtin}, but stage "${exitStage}" is bound to ${describeNode(wrong)}; bind it to { builtin: ${EXITS[exit].builtin} } or change exit`,
+          exitAt(),
+        );
+      }
+      // what the exit needs from the pipeline: a ticket, an input, or (release) a tag
+      const needs = EXITS[exit].needs;
+      if (needs?.ticket && header.ticket === 'none') {
+        throw new GraphError(
+          `exit ${exit} posts on the run's issue, but pipeline "${name}" has ticket: none; set ticket: required or pick another exit`,
+          at(''),
+        );
+      }
+      if (needs?.input !== undefined && header.inputs?.[needs.input] === undefined) {
+        throw new GraphError(
+          `exit ${exit} needs input "${needs.input}" (${NEEDED_INPUT[needs.input]}); declare it under pipelines.${name}.inputs`,
+          at(''),
+        );
+      }
+      if (exit === 'release' && header.inputs?.tag === undefined && !stages.slice(0, -1).some((s) => header.outputs?.[s]?.includes('tag'))) {
+        throw new GraphError('exit release needs a tag: declare input "tag" or list "tag" under outputs of an earlier stage', at(''));
+      }
     }
   }
 
@@ -239,6 +279,11 @@ export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { p
     const before = hooks.filter((h) => h.def.before === stage);
     regionStart[stage] = steps.length;
     for (const h of before) pushHook(h, stage);
+    if (router && stage === exitStage) {
+      steps.push(...routeSlot());
+      for (const h of hooks.filter((h) => h.def.after === stage)) pushHook(h, stage);
+      continue;
+    }
     const binding = bindings[stage]!;
     const slot = binding.value;
     slot.forEach((def, i) => {
@@ -258,6 +303,30 @@ export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { p
     for (const h of hooks.filter((h) => h.def.after === stage)) pushHook(h, stage);
   }
   for (const h of hooks.filter((h) => h.def.after === 'all')) pushHook(h, 'after-all');
+
+  /** A router's route stage: label rules, the choose agent and its pick gate (when choose is set), then the handoff. */
+  function routeSlot(): Step[] {
+    const { choose } = header;
+    const where = { source: headerSourced.source, locked: headerSourced.locked, ...(headerSourced.locator ? { locator: headerSourced.locator } : {}) };
+    // ids keep their place whether or not choose is set, so route.3 is always the handoff
+    const defs: { id: string; def: NodeDef; key: string }[] = [{ id: 'route.0', def: { builtin: 'percolator.route_rules' }, key: 'router' }];
+    if (choose !== undefined) {
+      const { from, confirm: _c, prompt, ...agent } = choose;
+      defs.push({ id: 'route.1', def: { ...agent, prompt: prompt ?? pickPrompt(from, o.descriptions) }, key: 'choose' });
+      defs.push({ id: PICK_GATE, def: { kind: 'gate', on_fail: { back_to: 'route', max_rounds: 3 } }, key: 'choose' });
+    }
+    defs.push({ id: 'route.3', def: { builtin: 'percolator.route' }, key: 'router' });
+    return defs.map((d, i) => ({
+      id: d.id,
+      name: d.id === PICK_GATE ? PICK_GATE : 'route',
+      stage: 'route',
+      role: 'slot' as const,
+      def: d.def,
+      slotLast: i === defs.length - 1,
+      ...where,
+      key: `pipelines.${name}.${d.key}`,
+    }));
+  }
 
   const seen = new Set<string>();
   for (const s of steps) {
@@ -281,6 +350,9 @@ export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { p
   }
   const loopLast = new Map(loopStages.map((stage) => [lastSlotOf(stage), stage]));
 
+  // the user cannot change these gates' caps, so the rules' ceiling clamps them here
+  const builtInGate = (step: Step) =>
+    (step.role === 'hook' && step.id === CORE_GROOM_GATE.name) || (router && step.role === 'slot' && step.id === PICK_GATE);
   const ceiling = Math.min(...merged.rules.map((r) => r.value.max_rounds_ceiling ?? Infinity));
   const backEdges: Record<string, BackEdge> = {};
   for (const step of steps) {
@@ -322,7 +394,7 @@ export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { p
       toStepIndex: regionStart[onFail.back_to]!,
       jumpAfterIndex: steps.indexOf(step),
       // rule checks exempt the core gate, so its cap is clamped to the ceiling here
-      maxRounds: step.role === 'hook' && step.id === CORE_GROOM_GATE.name ? Math.min(onFail.max_rounds, ceiling) : onFail.max_rounds,
+      maxRounds: builtInGate(step) ? Math.min(onFail.max_rounds, ceiling) : onFail.max_rounds,
       onCap: 'escalate',
     };
   }
@@ -349,7 +421,7 @@ export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { p
     pipeline: name,
     stages,
     contracts: contractsFor({ ...header, stages, ...(exit !== undefined ? { exit } : {}) }, name),
-    exit: exit ?? 'pr',
+    exit: router ? 'route' : (exit ?? 'pr'),
     loopStages,
     steps,
     regionStart,
