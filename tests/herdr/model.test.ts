@@ -914,6 +914,14 @@ test('agentCard links the active stop to its agent terminal', () => {
   assert.equal(agentCard(byId('t17'), [], [], now)!.name, 't17_implement-1_a1_0641');
 });
 
+test('agentCard and agentAddress fall back to the attention terminal when the step lists none', () => {
+  const t13 = readable('t13'); // agent blocked in groom; attention.terminal names its terminal
+  const r = { ...t13, terminals: { driver: t13.terminals.driver } } as RunStatusJson;
+  const live = [{ address: 'w1:9', name: 't13_groom_a1_cc4e' }];
+  assert.equal(agentCard(r, live, [], Date.parse('2026-11-21T04:30:00.000Z'))!.name, 't13_groom_a1_cc4e');
+  assert.equal(agentAddress(r, live), 'w1:9');
+});
+
 test('hookNote says where a hook runs, the gate decision and its time', () => {
   const now = Date.parse('2026-11-21T03:54:45.575Z');
   const t8 = pipelineRows(byId('t8'), WIDE);

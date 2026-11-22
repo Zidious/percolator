@@ -524,10 +524,13 @@ export function activeBox(run) {
   return run.status === 'running' && run.terminals?.[run.currentStep] ? 'agent' : null;
 }
 
+/** The current step's agent terminal: the one perc lists for the step, else the one its attention names. */
+const agentTerminal = (run) => run?.terminals?.[run.currentStep] ?? run?.attention?.terminal;
+
 /** The agent terminal of the run's current step, linked to the live terminal and agent Herdr shows; null when the
  *  step has no terminal. */
 export function agentCard(run, live, agents, now) {
-  const name = run?.terminals?.[run.currentStep];
+  const name = agentTerminal(run);
   if (!name) return null;
   const address = agentAddress(run, live);
   const agent = agents.find((a) => a.address === address);
@@ -549,7 +552,7 @@ export function agentTone(status) {
 /** The live address of the current step's agent terminal (Open terminal ↗ focuses it), or null: then it is off. */
 export function agentAddress(run, live) {
   if (!run || run.status === 'unreadable') return null;
-  return terminalAddress(live, run.terminals?.[run.currentStep]);
+  return terminalAddress(live, agentTerminal(run));
 }
 
 /** The attention's buttons; open-pane is left to Open terminal ↗. */
