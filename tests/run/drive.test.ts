@@ -680,3 +680,92 @@ test('a pipeline with exit private_fork_pr runs github.private_fork_pr', async (
     await e.cleanup();
   }
 });
+
+/** Pipeline `audit` (ticketless) drafts two issues and files them; `next: fix` starts a fix run on each. */
+async function nextRun() {
+  const e = await setup(
+    [
+      TRACKER,
+      '    pipelines:',
+      '      fix:',
+      '        stages: [intake, implement, deliver]',
+      '        exit: pr',
+      '        bindings:',
+      '          implement: { command: [echo, implement] }',
+      '      audit:',
+      '        stages: [intake, draft, file]',
+      '        exit: issue',
+      '        ticket: none',
+      '        next: fix',
+      '        bindings:',
+      "          draft: { command: [draft-script, '{outputs_dir}'] }",
+    ].join('\n'),
+  );
+  e.onWait.fn = async (t) => {
+    if (t.labels['percolator.step'] !== 'draft') return false;
+    await fs.writeFile(path.join(t.argv.at(-1)!, 'issues.md'), '## First\n\nOne.\n\n## Second\n\nTwo.\n');
+    t.state = 'finished';
+    t.exitCode = 0;
+    return true;
+  };
+  const meta = await prepareRun({ pipeline: 'audit', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+  const drivers = () =>
+    e.deps.hc.calls
+      .filter((c) => c[0] === 'run' && (c[1] as { labels: Record<string, string> }).labels['percolator.role'] === 'driver')
+      .map((c) => (c[1] as { argv: string[] }).argv.at(-1)!)
+      .sort();
+  return { e, meta, drivers };
+}
+
+/** `<pipeline> <run id>` of each run linked to `parent`, by ticket. */
+async function linkedRuns(e: Env, parent: RunMeta): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const id of await fs.readdir(path.join(e.home, '.percolator', 'runs'))) {
+    const m = JSON.parse(await fs.readFile(path.join(e.home, '.percolator', 'runs', id, 'run.json'), 'utf8')) as RunMeta;
+    if (m.parent === parent.runId) out[m.ticket!] = `${m.pipeline} ${m.runId}`;
+  }
+  return out;
+}
+
+const linkedIds = (linked: Record<string, string>) => Object.values(linked).map((v) => v.split(' ')[1]!).sort();
+
+test('issue exit with next starts a linked run per new issue', async () => {
+  const { e, meta, drivers } = await nextRun();
+  try {
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    const linked = await linkedRuns(e, meta);
+    assert.deepEqual(Object.keys(linked).sort(), [`${REPO}#6`, `${REPO}#7`]);
+    for (const v of Object.values(linked)) assert.match(v, /^fix t[67]-fix-\d{8}-\d{6}-[0-9a-f]{4}$/);
+    assert.deepEqual(drivers(), linkedIds(linked));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('issue exit with next starts only the missing runs after a crash', async () => {
+  const { e, meta, drivers } = await nextRun();
+  try {
+    // the first fix run's driver starts, then this run's driver dies before it records the step
+    const run = e.deps.hc.run.bind(e.deps.hc);
+    let crash = true;
+    e.deps.hc.run = async (o) => {
+      const r = await run(o);
+      if (crash && o.labels?.['percolator.role'] === 'driver') {
+        crash = false;
+        throw new Error('driver killed');
+      }
+      return r;
+    };
+    assert.equal((await drive(meta.runId, e.deps)).status, 'paused');
+    assert.equal(drivers().length, 1);
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    assert.equal(calls(e, 'createIssue').length, 2);
+    const linked = await linkedRuns(e, meta);
+    assert.deepEqual(Object.keys(linked).sort(), [`${REPO}#6`, `${REPO}#7`]);
+    assert.deepEqual(drivers(), linkedIds(linked));
+  } finally {
+    await e.cleanup();
+  }
+});

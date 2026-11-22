@@ -24,7 +24,8 @@ import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
 import { ensureWorktree } from '../workspace/worktree.ts';
 import { acquireDriverLock, drivenByProcess, otherLiveLock } from './lock.ts';
 import type { Liveness } from './lock.ts';
-import { readRunMeta } from './meta.ts';
+import { startLinkedRun } from './child.ts';
+import { newRunId, readRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 import { reusePriorGroom } from './reuse-groom.ts';
@@ -146,6 +147,16 @@ async function driveHeld(
     attentionWrite = attentionWrite.then(() => writeFileAtomic(attentionFile, body)).catch(() => {});
   };
   const ticket = meta.ticket === undefined ? undefined : parseTicket(meta.ticket);
+  // an issue exit's `next`: one linked run of that pipeline per issue it opened
+  const nextRuns = (next: string | undefined) =>
+    next === undefined
+      ? {}
+      : {
+          next: {
+            newId: (url: string) => newRunId({ issue: parseTicket(url).number, pipeline: next }, now()),
+            start: (url: string, child: string) => startLinkedRun({ parent: meta, pipeline: next, ticket: url, runId: child }, deps),
+          },
+        };
   const runtime = new HerdrRuntime({
     hc: deps.hc,
     runId,
@@ -184,7 +195,7 @@ async function driveHeld(
       }),
       'github.comment': githubComment({ gh: deps.gh, runDir: dir, runId }),
       'percolator.report': percolatorReport(),
-      'github.open_issues': githubOpenIssues({ gh: deps.gh, runDir: dir, runId, repo: meta.repo }),
+      'github.open_issues': githubOpenIssues({ gh: deps.gh, runDir: dir, runId, repo: meta.repo, ...nextRuns(v.pipeline.next) }),
       'github.release': githubRelease({
         gh: deps.gh,
         runDir: dir,

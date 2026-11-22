@@ -23,9 +23,10 @@ export function openedIssues(text: string): { ref: string; url: string }[] {
   return out;
 }
 
-type Created = Record<string, string>;
+/** `created.json`: per draft n, the issue opened and the linked run started on it (`next`). */
+type Created = Record<string, { url: string; child?: string }>;
 
-/** Every `created.json` of this step's attempts, earliest first, merged. */
+/** Every `created.json` of this step's attempts, earliest first, merged; a bare url is the shape before `next`. */
 async function readCreated(stepRoot: string): Promise<Created> {
   let names: string[];
   try {
@@ -37,7 +38,8 @@ async function readCreated(stepRoot: string): Promise<Created> {
   const merged: Created = {};
   for (const a of names.filter((n) => /^\d+$/.test(n)).sort((x, y) => Number(x) - Number(y))) {
     try {
-      Object.assign(merged, JSON.parse(await fs.readFile(path.join(stepRoot, a, 'created.json'), 'utf8')) as Created);
+      const raw = JSON.parse(await fs.readFile(path.join(stepRoot, a, 'created.json'), 'utf8')) as Record<string, string | Created[string]>;
+      for (const [n, v] of Object.entries(raw)) merged[n] = typeof v === 'string' ? { url: v } : v;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
@@ -48,8 +50,16 @@ async function readCreated(stepRoot: string): Promise<Created> {
 /**
  * The `issue` exit: opens one issue per `## ` section of the latest `issues` output; with no drafts it passes
  * and opens nothing. Each issue carries a marker and is recorded in `created.json`, so a resume reuses it.
+ * With `next` (the pipeline's `next`), each issue then gets a linked run: its id is recorded before `start`,
+ * and `start` must be resume-safe (startLinkedRun), so a resume starts only the runs still missing.
  */
-export function githubOpenIssues(o: { gh: Gh; runDir: string; runId: string; repo: string }): StepHandler {
+export function githubOpenIssues(o: {
+  gh: Gh;
+  runDir: string;
+  runId: string;
+  repo: string;
+  next?: { newId: (url: string) => string; start: (url: string, child: string) => Promise<unknown> };
+}): StepHandler {
   return async (_step, ctx, io) => {
     try {
       const text = await latestOutput(ctx, o.runDir, 'issues');
@@ -62,7 +72,7 @@ export function githubOpenIssues(o: { gh: Gh; runDir: string; runId: string; rep
       const urls: string[] = [];
       for (const [k, item] of items.entries()) {
         const n = String(k + 1);
-        let url: string | undefined = created[n];
+        let url: string | undefined = created[n]?.url;
         if (!url) {
           // a crash between create and record leaves the issue unrecorded: find it by its marker first
           const search = `percolator:issue run=${o.runId} n=${n}`;
@@ -74,8 +84,10 @@ export function githubOpenIssues(o: { gh: Gh; runDir: string; runId: string; rep
             url = await o.gh.createIssue(o.repo, { title: item.title, bodyFile });
           }
         }
-        created[n] = url;
+        const child = o.next !== undefined ? (created[n]?.child ?? o.next.newId(url)) : created[n]?.child;
+        created[n] = { url, ...(child !== undefined ? { child } : {}) };
         await writeFileAtomic(createdFile, `${JSON.stringify(created, null, 2)}\n`);
+        if (o.next !== undefined) await o.next.start(url, child!);
         urls.push(url);
       }
       await writeFileAtomic(path.join(io.outputsDir, 'issue_urls.md'), `${urls.join('\n')}\n`);
