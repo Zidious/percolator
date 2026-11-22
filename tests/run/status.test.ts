@@ -1073,6 +1073,50 @@ test('children list linked runs', async () => {
   }
 });
 
+test('status orders slices by index with their titles', async () => {
+  const e = await setup();
+  try {
+    const parent = await e.prepare();
+    e.clock.t += 1000;
+    const a = await rewriteMeta(e, await e.prepare('#6'), { parent: parent.runId });
+    e.clock.t += 1000;
+    const b = await rewriteMeta(e, await e.prepare('#7'), { parent: parent.runId });
+    const pending = `${parent.runId}-s3`;
+    const fanout = {
+      children: [
+        { index: 2, id: a.runId, title: 'Panel rows' },
+        { index: 3, id: pending, title: 'Docs' },
+        { index: 1, id: b.runId, title: 'Status field' },
+      ],
+    };
+    await fs.writeFile(path.join(e.dir(parent), 'fanout.json'), JSON.stringify(fanout));
+    const j = await statusJson(e.deps);
+    const of = (id: string) => j.runs.find((r) => r.id === id) as Readable;
+    // a slice not started yet has no run dir: it is listed as pending, on the parent's pipeline
+    assert.deepEqual(of(parent.runId).children, [
+      { id: b.runId, pipeline: 'feature', status: 'running', slice: { index: 1, title: 'Status field' } },
+      { id: a.runId, pipeline: 'feature', status: 'running', slice: { index: 2, title: 'Panel rows' } },
+      { id: pending, pipeline: 'feature', status: 'pending', slice: { index: 3, title: 'Docs' } },
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a broken fanout.json leaves the parent readable with its listed children', async () => {
+  const e = await setup();
+  try {
+    const parent = await e.prepare();
+    e.clock.t += 1000;
+    const c = await rewriteMeta(e, await e.prepare('#6'), { parent: parent.runId });
+    await fs.writeFile(path.join(e.dir(parent), 'fanout.json'), '{ not json');
+    const r = (await e.status(parent)) as Readable;
+    assert.deepEqual(r.children, [{ id: c.runId, pipeline: 'feature', status: 'running' }]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 const driverOf = (r: RunStatusJson) => (r as Extract<RunStatusJson, { driver: unknown }>).driver;
 
 test('driver.shown is true when the owned driver carries the run\'s space', async () => {

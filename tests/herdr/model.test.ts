@@ -95,6 +95,8 @@ import {
   guessRepo,
   knownRepos,
   linkedLine,
+  sliceRows,
+  fanOutRow,
   watcherState,
   pipelinesFixture,
   previewRun,
@@ -195,7 +197,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t22', 'dd', 't12', 't2', 't11', 't9', 't4', 't21', 't17', 't16', 't14', 't13', 't8', 't21', 't15', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t22', 'dd', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -203,7 +205,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -284,7 +286,7 @@ test('actionArgv refuses a reject without feedback', () => {
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
   assert.equal(needsCount(runs()), 7);
-  assert.equal(runningCount(runs()), 6);
+  assert.equal(runningCount(runs()), 8);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
 });
@@ -423,8 +425,8 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
   assert.equal(moveRow([], 'gone', 1), null);
 });
 
-test('the fixture has timelines for t8, t3, t2, t4, t16, t17, dd-alert, t21 (hotfix and triage) and t22, and none for the rest (an older perc)', () => {
-  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17', 'dd', 't21', 't21', 't22']);
+test('the fixture has timelines for t8, t3, t2, t4, t16, t17, dd-alert, t21 (hotfix and triage), t22 and t23 (epic and two slices), and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17', 'dd', 't21', 't21', 't22', 't23', 't23', 't23']);
 });
 
 test('roundView defaults to the latest round and marks it running', () => {
@@ -654,7 +656,7 @@ test('deleteCommand carries the confirmed ids, and deleteCommandIds reads them b
 test('isFinished is true for completed and failed runs only', () => {
   assert.deepEqual(
     runs().filter(isFinished).map((r) => r.id.split('-')[0]),
-    ['t3', 't9', 't15', 't21'],
+    ['t3', 't9', 't15', 't21', 't23'],
   );
 });
 
@@ -682,10 +684,11 @@ test('deleteConfirm names the run, says what is lost and kept, and that an activ
 test('deleteFinishedConfirm lists the finished runs, or is null when there are none', () => {
   const [a, b, c] = ['t3', 't9', 't15'].map((id) => byId(id).id);
   const d = 't21-triage-20261121-065800-9e3a';
+  const s = 't23-epic-20261121-090000-7c2a-s1';
   assert.deepEqual(deleteFinishedConfirm(runs()), {
-    title: 'Delete 4 finished run(s)?',
-    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15), ${d} (#21): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
-    ids: [a, b, c, d],
+    title: 'Delete 5 finished run(s)?',
+    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15), ${d} (#21), ${s} (#23): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    ids: [a, b, c, d, s],
   });
   assert.equal(deleteFinishedConfirm(runs().filter((r) => !isFinished(r))), null);
 });
@@ -1417,6 +1420,43 @@ test('linkedLine names a parent on another ticket by its number, a ticketless on
   assert.deepEqual(linkedLine(child, [child]), { text: '↳ from p1', run: null });
   const two = parent({ children: [{ id: 'c1', pipeline: 'hotfix', status: 'running' }, { id: 'c2', pipeline: 'hotfix', status: 'completed' }] });
   assert.deepEqual(linkedLine(two, [two]), { text: '→ 2 runs', run: 'c1' });
+});
+
+const EPIC = 't23-epic-20261121-090000-7c2a';
+
+test("sliceRows shows each slice's step and PR", () => {
+  const rs = runs();
+  const of = (id: string) => rs.find((r) => r.id === id)!;
+  assert.deepEqual(sliceRows(of(EPIC), rs), [
+    { index: 1, title: 'Status field', id: `${EPIC}-s1`, status: 'completed', stepLabel: 'done', prUrl: 'https://github.com/Zidious/percolator/pull/31' },
+    { index: 2, title: 'Panel rows', id: `${EPIC}-s2`, status: 'running', stepLabel: 'review' },
+    { index: 3, title: 'Docs', id: `${EPIC}-s3`, status: 'pending', stepLabel: 'not started' },
+  ]);
+  // a linked run that is not a slice, a run with no children and an unreadable one have none
+  assert.deepEqual(sliceRows(of(TRIAGE), rs), []);
+  assert.deepEqual(sliceRows(readable('t8'), rs), []);
+  assert.deepEqual(sliceRows(byId('t5'), rs), []);
+});
+
+test('sliceRows reads a slice no longer listed from its child entry', () => {
+  const parent = {
+    ...readable('t3'),
+    children: [
+      { id: 'p-s1', pipeline: 'feature', status: 'completed', slice: { index: 1, title: 'A' } },
+      { id: 'p-s2', pipeline: 'feature', status: 'failed', slice: { index: 2, title: 'B' } },
+    ],
+  } as Readable;
+  assert.deepEqual(sliceRows(parent, [parent]), [
+    { index: 1, title: 'A', id: 'p-s1', status: 'completed', stepLabel: 'done' },
+    { index: 2, title: 'B', id: 'p-s2', status: 'failed', stepLabel: 'failed' },
+  ]);
+});
+
+test('fanOutRow is the row of the last stage, where the fan-out step sits; -1 without one', () => {
+  const epic = runs().find((r) => r.id === EPIC)!;
+  const rows = pipelineRows(epic, { narrow: false, unfolded: [] });
+  assert.equal(rows[fanOutRow(rows)]!.step.id, 'implement');
+  assert.equal(fanOutRow([]), -1);
 });
 
 test('watcherState labels and argv', () => {
