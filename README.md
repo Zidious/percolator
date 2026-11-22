@@ -16,7 +16,7 @@ Percolator is a deterministic software factory. Point `perc` at a GitHub issue a
 **Required**
 
 - **Node 24** or later, and **git**. Windows, Linux and macOS all work.
-- **[`gh`](https://cli.github.com)**, logged in (`gh auth login`). Intake reads the issue, the gate posts to it and deliver opens the PR through it.
+- **[`gh`](https://cli.github.com)**, logged in (`gh auth login`). Intake reads the issue, the gate posts to it and the exit acts through it: it opens the PR, or posts the comment, opens the issues, publishes the release, posts the review or opens the PR in an advisory's private fork (see [Exits](#exits)).
 - **`hc`**, Herdr's terminal CLI. Every step runs in a terminal it starts.
 - **The agent CLIs your config names:** `claude` for the example config, `codex`, or any command.
 
@@ -74,11 +74,11 @@ Each run works in its own git worktree at `<repo>/.worktrees/<run-id>`, on a bra
 
 - The graph is built and validated before the first step.
 - Grounds are pinned to a commit in `percolator.lock`.
-- Run ids, terminal names and posted comments are stable, so a resume finds them instead of duplicating them.
+- Run ids, terminal names, posted comments and what an exit creates are stable or marked, so a resume finds them instead of duplicating them.
 
 **Bounded**
 
-- Every loop has a round cap. Review delivers at its cap; any other back-edge pauses the run and escalates to you.
+- Every loop has a round cap. Review delivers at its cap, and a stage that loops through `max_rounds` on its binding moves on at its cap; an `on_fail` back-edge pauses the run and escalates to you.
 - `perc resume` on a run paused at a cap grants exactly one more round.
 
 ## Integrations
@@ -302,6 +302,26 @@ feature (default)  ticket required  exit pr  inputs -
 hotfix  ticket required  exit pr  inputs severity
 ```
 
+### Exits
+
+The last stage of a pipeline is its exit: a builtin that Percolator runs itself, never an agent. It reads what earlier stages wrote, acts on GitHub through `gh`, and writes one output. Each one marks what it creates, so a resume after a crash finds it instead of creating it twice.
+
+| `exit` | Builtin | What it does | What it needs | Writes | Found again on resume by |
+|---|---|---|---|---|---|
+| `pr` | `github.open_pr` | Pushes the run branch and opens a PR against the base: `Closes #N`, then the `pr_body` output if a step wrote one. | Nothing | `pr_url` | The open PR for the run branch |
+| `comment` | `github.comment` | Posts the `comment` output on the run's issue. | A ticket (`ticket: none` is refused); a stage before it writes `comment.md`, else the step escalates | `comment_url` | `<!-- percolator:exit run=<id> step=<step> -->` in the comment, which it then edits |
+| `issue` | `github.open_issues` | Opens one issue per `## <title>` section of the `issues` output, in the run's repo. With no `issues` output, or no sections, it opens nothing and the run ends done. | Nothing | `issue_urls` (one URL per line) | `<!-- percolator:issue run=<id> n=<i> -->` in each issue, and `created.json` in the step dir |
+| `none` | `percolator.report` | Nothing: the run ends, and its outputs stay in the run dir until `perc delete` removes them. | Nothing | Nothing | Nothing to find |
+| `release` | `github.release` | Pushes the run branch and publishes a GitHub release of its head commit. The tag is the `tag` output, else input `tag`; the notes are the `release_notes` output. | Input `tag`, or `tag` under `outputs` of an earlier stage | `release_url` | The release with that tag |
+| `pr_review` | `github.pr_review` | Posts the `review` output on the pull request in input `pr`, as a comment review: never approve or request changes. | Input `pr` (`#123`, `owner/repo#123` or a pull request URL); a stage before it writes `review.md` | `review_url` | `<!-- percolator:review run=<id> -->` in the review |
+| `private_fork_pr` | `github.private_fork_pr` | Creates the temporary private fork of the security advisory in input `advisory`, pushes the run branch there and opens the PR in it, with the `pr_body` output and no `Closes #N`, so the fix stays private until the advisory is published. | Input `advisory`, a GHSA id (`GHSA-xxxx-xxxx-xxxx`) | `pr_url` | `fork.json` in the step dir, then the open PR for the run branch in the fork |
+
+`perc validate` refuses an exit whose needs the pipeline does not declare, for example:
+
+```text
+exit pr_review needs input "pr" (the pull request to review); declare it under pipelines.<name>.inputs
+```
+
 ### Starting a run
 
 ```sh
@@ -366,7 +386,7 @@ Anything that needs you shows up in `perc status`, and in any [integration](#int
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagram-lifecycle-dark.svg">
-  <img alt="Run status: perc run starts a run; it waits at gates until approved or rejected, pauses at a cap, timeout or escalation until perc resume, and ends completed when deliver opens the PR or failed when a step fails with no loop." src="assets/diagram-lifecycle-light.svg" width="100%">
+  <img alt="Run status: perc run starts a run; it waits at gates until approved or rejected, pauses at a cap, timeout or escalation until perc resume, and ends completed when the exit stage passes (a PR, a comment, issues, a release, a review or nothing) or failed when a step fails with no loop." src="assets/diagram-lifecycle-light.svg" width="100%">
 </picture>
 
 | You see | Why | Answer |

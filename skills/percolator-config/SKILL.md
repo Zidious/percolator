@@ -136,7 +136,7 @@ pipelines:
     outputs:
       gather: [evidence]             # the stage must write outputs/evidence.md
       diagnose: [diagnosis]
-    exit: none                       # how the run ends (see "Exits")
+    exit: none                       # how the run ends: pr, comment, issue, none, release, pr_review, private_fork_pr (see "Exits")
     bindings:
       gather: { agent: claude, model: sonnet, prompt: "Collect what {{input_alert_url}} points at into evidence.md." }
       diagnose: { agent: claude, model: opus }
@@ -152,6 +152,22 @@ pipelines:
 - The `approve-groom` gate is built into `feature` only. Another pipeline gets no gate unless you add one as a node with `kind: gate`.
 
 Start one with `perc run <ticket> --pipeline <name> [--input key=value]…`. `perc pipelines` lists the pipelines a repo can use, with their ticket mode, exit and inputs. Validate each pipeline you touched: `perc validate --config <file> --profile <name> --pipeline <pipeline>` (without `--pipeline` it checks all of them).
+
+## Exits
+
+The last stage of every pipeline is its exit: a builtin Percolator runs itself, never an agent. Set `exit:` and leave the stage unbound (Percolator binds the builtin), or bind the stage to the builtin; if you do both, they must agree. Each exit reads an output an earlier stage writes, so put that key under `outputs:` of the stage before it, and tell that stage's agent to write it.
+
+| `exit` | Builtin | Reads | Needs | Writes |
+|---|---|---|---|---|
+| `pr` | `github.open_pr` | `pr_body` (optional) | | `pr_url` |
+| `comment` | `github.comment` | `comment` (required) | a ticket: not with `ticket: none` | `comment_url` |
+| `issue` | `github.open_issues` | `issues`: one `## <title>` section per issue; none means no issues | | `issue_urls` |
+| `none` | `percolator.report` | | | nothing; outputs stay in the run dir |
+| `release` | `github.release` | `tag`, `release_notes` | input `tag`, or `tag` under `outputs` of an earlier stage | `release_url` |
+| `pr_review` | `github.pr_review` | `review` (required) | input `pr` | `review_url` |
+| `private_fork_pr` | `github.private_fork_pr` | `pr_body` (optional) | input `advisory` (a GHSA id) | `pr_url` |
+
+`perc validate` refuses an exit whose needs are missing and says what to declare. `pr_review` posts a comment review only; it never approves or requests changes. `private_fork_pr` opens the PR in the advisory's temporary private fork, without `Closes #N`.
 
 ## Agents, models and skills
 
