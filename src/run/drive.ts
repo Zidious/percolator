@@ -28,6 +28,7 @@ import { readRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 import { reusePriorGroom } from './reuse-groom.ts';
+import { routeHandoff, routeRules, skipDecidedRoute } from './route.ts';
 
 /** The PR url the deliver step recorded, if any. */
 export async function prUrl(dir: string, state: RunState): Promise<string | undefined> {
@@ -193,6 +194,15 @@ async function driveHeld(
         inputs: meta.inputs,
       }),
       'github.pr_review': githubPrReview({ gh: deps.gh, runDir: dir, runId, inputs: meta.inputs, repo: meta.repo }),
+      'percolator.route_rules': routeRules({
+        gh: deps.gh,
+        runDir: dir,
+        spec: v.pipeline,
+        specs: v.pipelines,
+        profile: v.profile,
+        ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
+      }),
+      'percolator.route': routeHandoff({ deps, meta, spec: v.pipeline, specs: v.pipelines }),
       'github.private_fork_pr': githubPrivateForkPr({
         gh: deps.gh,
         runDir: dir,
@@ -228,7 +238,8 @@ async function driveHeld(
   };
   await save(state);
   // one line per step start and end, so the driver's terminal shows where the run is
-  const reusing = reusePriorGroom(runtime, dir);
+  // each wrapper answers only its own steps (groom; the router's choose agent and pick gate) and passes the rest on
+  const reusing = reusePriorGroom(skipDecidedRoute(runtime, dir, v.pipeline), dir);
   const logged: Runtime = {
     executeStep: async (step, ctx) => {
       deps.out(`${step.id}: started`);

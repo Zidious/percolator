@@ -648,6 +648,74 @@ test('reject takes the feedback after -- as one value, even when it starts with 
   }
 });
 
+const TRIAGE = [
+  TRACKER,
+  '    pipelines:',
+  '      hotfix:',
+  '        stages: [intake, implement, deliver]',
+  '        exit: pr',
+  '        bindings:',
+  '          implement: { command: [echo, implement] }',
+  '      triage:',
+  '        router: true',
+  '        stages: [intake, route]',
+  '        choose: { agent: claude, from: [hotfix, feature] }',
+].join(NL);
+
+/** A triage run waiting at its pick-pipeline gate. */
+async function waitingPick(e: Env): Promise<{ meta: RunMeta; stepDir: string }> {
+  await e.writeConfig(TRIAGE, BINDINGS);
+  const meta = await prepareRun({ ticket: '#5', pipeline: 'triage', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+  const stepDir = path.join(e.dir(meta.runId), 'steps', 'pick-pipeline', '1');
+  await fs.mkdir(stepDir, { recursive: true });
+  await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'pick-pipeline', stepDir, since: NOW.toISOString(), commentUrl: 'u' });
+  return { meta, stepDir };
+}
+
+test('approve --pipeline records the pipeline a pick-pipeline gate goes with', async () => {
+  const e = await setup();
+  try {
+    const { meta, stepDir } = await waitingPick(e);
+    const r = await e.perc(['approve', meta.runId, '--pipeline', 'hotfix']);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(r.out, `approved pick-pipeline of run ${meta.runId}\n`);
+    const d = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
+    assert.deepEqual(d, { decision: 'approve', pipeline: 'hotfix', by: 'perc-bot', via: 'local' });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('approve --pipeline refuses a pipeline the router may not pick', async () => {
+  const e = await setup();
+  try {
+    const { meta, stepDir } = await waitingPick(e);
+    const r = await e.perc(['approve', meta.runId, '--pipeline', 'triage']);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, 'pipeline "triage" is not one triage may pick (from: hotfix, feature)\n');
+    assert.equal(await exists(path.join(stepDir, 'decision.json')), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('approve --pipeline refuses a gate other than pick-pipeline', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const stepDir = path.join(e.dir(meta.runId), 'steps', 'approve-groom', '1');
+    await fs.mkdir(stepDir, { recursive: true });
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir, since: NOW.toISOString(), commentUrl: 'u' });
+    const r = await e.perc(['approve', meta.runId, '--pipeline', 'hotfix']);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, `--pipeline only answers a pick-pipeline gate; run ${meta.runId} is waiting at approve-groom\n`);
+    assert.equal(await exists(path.join(stepDir, 'decision.json')), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('approve when not waiting', async () => {
   const e = await setup();
   try {

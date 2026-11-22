@@ -55,8 +55,8 @@ commands:
       continue a paused or interrupted run (grants one more round at a cap)
   status [<run-id>] [--json]
       list runs, or show one (--json: the stable JSON contract)
-  approve <run-id> | reject <run-id> <feedback>
-      answer the approval gate a run is waiting at
+  approve <run-id> [--pipeline <name>] | reject <run-id> <feedback>
+      answer the approval gate a run is waiting at (--pipeline: the pipeline a pick-pipeline gate goes with)
   clean <run-id> [--force]
       remove a finished run's terminals and worktree (keeps the branch and the run record; perc delete removes it all)
   delete <run-id>... [--yes] | delete --finished [--yes]
@@ -337,7 +337,7 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
 }
 
 async function runDecide(decision: 'approve' | 'reject', args: string[], deps: DriverDeps): Promise<number> {
-  const { positionals } = parseWith(args, {});
+  const { values, positionals } = parseWith(args, decision === 'approve' ? { pipeline: { type: 'string' } } : {});
   let runId: string;
   let feedback: string | undefined;
   if (decision === 'approve') {
@@ -348,10 +348,24 @@ async function runDecide(decision: 'approve' | 'reject', args: string[], deps: D
     runId = runIdArg(positionals[0]!);
   }
   const dir = runDir(deps.home, runId);
-  await readRunMeta(dir);
+  const meta = await readRunMeta(dir);
+  const pipeline = values.pipeline as string | undefined;
+  if (pipeline !== undefined) {
+    const waiting = await readWaiting(dir);
+    if (waiting === undefined) throw new Error('run is not waiting at a gate');
+    if (waiting.stepId !== 'pick-pipeline') {
+      throw new Error(`--pipeline only answers a pick-pipeline gate; run ${runId} is waiting at ${waiting.stepId}`);
+    }
+    const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile, pipeline: meta.pipeline });
+    const from = v.pipeline.choose?.from ?? [];
+    if (!from.includes(pipeline)) {
+      throw new Error(`pipeline "${pipeline}" is not one ${meta.pipeline} may pick (from: ${from.join(', ')})`);
+    }
+  }
   const w = await writeDecision(dir, {
     decision,
     ...(feedback !== undefined ? { feedback } : {}),
+    ...(pipeline !== undefined ? { pipeline } : {}),
     by: await deciderLogin(deps.gh),
   });
   deps.out(`${decision === 'approve' ? 'approved' : 'rejected'} ${w.stepId} of run ${runId}`);
