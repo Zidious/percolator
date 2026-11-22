@@ -170,10 +170,18 @@ describe('resolveGrounds', () => {
   test('missing path ground is reported against the config file, not the lock file', async () => {
     const configFile = path.join(tmp, 'config.yaml');
     const home = path.join(tmp, 'home');
-    const err = await resolveGrounds({ mine: { path: '~/x' } }, { ...opts(), home, configFile }).catch((e) => e);
+    const err = await resolveGrounds(
+      { mine: { path: '~/x' } },
+      { ...opts(), home, configFile, lines: { 'grounds.mine.path': 7 } },
+    ).catch((e) => e);
     assert.ok(err instanceof ConfigError);
     assert.equal(err.file, configFile);
-    assert.equal(err.message, `${configFile}: ground "mine": path ~/x does not exist`);
+    assert.equal(err.line, 7);
+    assert.equal(err.path, 'grounds.mine.path');
+    assert.equal(
+      err.message,
+      `${configFile}:7: grounds.mine.path: ground "mine": path ~/x does not exist; create it or fix the path`,
+    );
   });
 
   test('failed checkout leaves no final dir and no tmp dir behind', async () => {

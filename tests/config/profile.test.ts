@@ -141,3 +141,34 @@ test('path match is case-insensitive on darwin', () => {
   assert.equal(selectProfile(c, { cwd: '/users/me/dev/x', platform: 'darwin' }).name, 'p');
   assert.throws(() => selectProfile(c, { cwd: '/users/me/dev/x', platform: 'linux' }), /no profile matches this repository/);
 });
+
+test('unknown --profile names the profiles line and says what to pass', () => {
+  const err = (() => {
+    try {
+      selectProfile(cfg, { cwd: '/r', override: 'nope', lines: { profiles: 2 } });
+    } catch (e) {
+      return e as ConfigError;
+    }
+  })()!;
+  assert.equal(err.message, 'config:2: profiles: unknown profile "nope" (profiles: personal, work); pass one of those to --profile');
+  assert.equal(err.file, 'config');
+  assert.equal(err.line, 2);
+  assert.equal(err.path, 'profiles');
+});
+
+test('no matching profile names the profiles line and says how to match', () => {
+  const err = (() => {
+    try {
+      selectProfile(cfg, { cwd: '/nowhere', configFile: 'my.yaml', lines: { profiles: 2 } });
+    } catch (e) {
+      return e as ConfigError;
+    }
+  })()!;
+  assert.equal(
+    err.message,
+    'my.yaml:2: profiles: no profile matches this repository (profiles: personal, work); add a match (remote or path) to one of them, or pass --profile',
+  );
+  assert.equal(err.file, 'my.yaml');
+  assert.equal(err.line, 2);
+  assert.equal(err.path, 'profiles');
+});

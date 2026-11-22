@@ -30,7 +30,6 @@ test('profile cannot override locked binding; error names the ground', () => {
       ]),
     (err: unknown) => {
       assert.ok(err instanceof LockViolation);
-      assert.match(String((err as Error).message), /bindings\.review is locked by ground:company-sdlc; profile:work/);
       assert.equal(err.target, 'bindings.review');
       assert.equal(err.lockedBy, 'ground:company-sdlc');
       assert.equal(err.attemptedBy, 'profile:work');
@@ -38,7 +37,7 @@ test('profile cannot override locked binding; error names the ground', () => {
       assert.equal(err.path, 'bindings.review');
       assert.equal(
         err.message,
-        'bindings.review is locked by ground:company-sdlc; profile:work cannot change it',
+        'profile:work: bindings.review: locked by ground:company-sdlc (required: true); remove this binding or restate it exactly',
       );
       return true;
     },
@@ -52,7 +51,9 @@ test('locked node cannot be replaced; unlocked node can', () => {
         L('ground:co', { nodes: { sec: { kind: 'gate', after: 'review', required: true } } }),
         L('profile:work', { nodes: { sec: { kind: 'gate', after: 'plan' } } }),
       ]),
-    /nodes\.sec is locked by ground:co; profile:work cannot change it/,
+    {
+      message: 'profile:work: nodes.sec: locked by ground:co (required: true); remove this node or restate it exactly',
+    },
   );
   const m = mergeLayers([
     L('ground:co', { nodes: { lint: { kind: 'script', after: 'implement', command: ['a'] } } }),
@@ -110,7 +111,10 @@ test('redefining a locked node with a deep-equal value is a no-op', () => {
 test('redefining the core gate differently is a LockViolation naming core', () => {
   assert.throws(
     () => mergeLayers([L('profile:work', { nodes: { 'approve-groom': { kind: 'gate', after: 'groom' } } })]),
-    /nodes\.approve-groom is locked by core; profile:work cannot change it/,
+    {
+      message:
+        'profile:work: nodes.approve-groom: locked by Percolator core (required: true); remove this node: approve-groom is built in',
+    },
   );
 });
 
@@ -161,7 +165,7 @@ const LOCKED = { agent: 'claude', skill: 'co:review', required: true };
 test('an empty layer does not disturb a locked binding, and a later empty-binding is rejected', () => {
   assert.throws(
     () => mergeLayers([L('ground:co', { bindings: { review: LOCKED } }), L('profile:work', { bindings: { review: [] } })]),
-    /bindings\.review is locked by ground:co; profile:work cannot change it/,
+    { message: 'profile:work: bindings.review: locked by ground:co (required: true); remove this binding or restate it exactly' },
   );
 });
 
@@ -172,7 +176,7 @@ test('restating a locked binding with a different value plus required: true is r
         L('ground:co', { bindings: { review: LOCKED } }),
         L('profile:work', { bindings: { review: { agent: 'codex', required: true } } }),
       ]),
-    /bindings\.review is locked by ground:co; profile:work cannot change it/,
+    { message: 'profile:work: bindings.review: locked by ground:co (required: true); remove this binding or restate it exactly' },
   );
 });
 
@@ -184,6 +188,44 @@ test('a no-op restatement does not transfer the lock; a later change still names
         L('profile:work', { bindings: { review: { ...LOCKED } } }),
         L('repo', { bindings: { review: { agent: 'codex' } } }),
       ]),
-    /bindings\.review is locked by ground:co; repo cannot change it/,
+    { message: 'repo: bindings.review: locked by ground:co (required: true); remove this binding or restate it exactly' },
   );
+});
+
+test('lock violation names both files and lines', () => {
+  const ground: Layer = {
+    source: 'ground:co',
+    fragment: { bindings: { review: { ...LOCKED } } },
+    locator: { file: 'g.yaml', lines: { 'bindings.review': 2 } },
+  };
+  const profile: Layer = {
+    source: 'profile:w',
+    fragment: { bindings: { review: { agent: 'codex' } } },
+    locator: { file: 'c.yaml', lines: { 'profiles.w.bindings.review': 9 }, prefix: 'profiles.w' },
+  };
+  assert.throws(
+    () => mergeLayers([ground, profile]),
+    (err: unknown) => {
+      assert.ok(err instanceof LockViolation);
+      assert.equal(
+        err.message,
+        'c.yaml:9: profiles.w.bindings.review: locked by g.yaml:2 (required: true); remove this binding or restate it exactly',
+      );
+      assert.equal(err.file, 'c.yaml');
+      assert.equal(err.line, 9);
+      assert.equal(err.path, 'profiles.w.bindings.review');
+      assert.equal(err.lockedBy, 'ground:co');
+      assert.equal(err.attemptedBy, 'profile:w');
+      return true;
+    },
+  );
+});
+
+test('an identical restatement from another file still passes', () => {
+  const m = mergeLayers([
+    { source: 'ground:co', fragment: { bindings: { review: { ...LOCKED } } }, locator: { file: 'g.yaml', lines: { 'bindings.review': 2 } } },
+    { source: 'repo', fragment: { bindings: { review: { ...LOCKED } } }, locator: { file: 'r.yaml', lines: { 'bindings.review': 5 } } },
+  ]);
+  assert.equal(m.bindings.review!.source, 'ground:co');
+  assert.deepEqual(m.bindings.review!.value, [LOCKED]);
 });

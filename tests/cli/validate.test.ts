@@ -39,11 +39,32 @@ test('e2e fixture validates and lists steps (relative ground paths resolve again
 });
 
 test('profile overriding locked review fails with locking ground named', async () => {
-  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/config-override.yaml') }), /locked by ground:company/);
+  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/config-override.yaml') }), {
+    message: `${fx('e2e/config-override.yaml')}:13: profiles.work.bindings.review: locked by ${fx('e2e/grounds/company/percolator.yaml')}:2 (required: true); remove this binding or restate it exactly`,
+  });
+});
+
+test('a repo layer changing a locked binding names the repo file', async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    await fs.mkdir(path.dirname(repoFile));
+    await fs.writeFile(repoFile, 'bindings:\n  review: { agent: codex }\n');
+    await assert.rejects(validate({ ...trusted(), cwd }), {
+      message: `${repoFile}:2: bindings.review: locked by ${fx('e2e/grounds/company/percolator.yaml')}:2 (required: true); remove this binding or restate it exactly`,
+    });
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
+  }
 });
 
 test('unbound stages propagate as an error', async () => {
-  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/unbound.yaml') }), /unbound/i);
+  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/unbound.yaml') }), {
+    name: 'GraphError',
+    file: fx('e2e/unbound.yaml'),
+    line: 4,
+    message: `${fx('e2e/unbound.yaml')}:4: profile "work" leaves stages unbound: groom, plan, implement, review, deliver; bind each under bindings:`,
+  });
 });
 
 test('a trusted repo layer is merged as the last layer', async () => {
@@ -70,9 +91,10 @@ test('an untrusted repo layer is refused', async () => {
     const err = await validate({ ...opts(), cwd }).catch((e) => e);
     assert.ok(err instanceof ConfigError);
     assert.equal(err.file, fx('e2e/config.yaml'));
+    assert.equal(err.line, 6);
     assert.equal(
       err.message,
-      `${fx('e2e/config.yaml')}: ${repoFile} exists, but profile "work" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
+      `${fx('e2e/config.yaml')}:6: profiles.work: ${repoFile} exists, but profile "work" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
     );
   } finally {
     await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
@@ -144,11 +166,13 @@ test('rule violations are thrown as one RuleViolationError against the config fi
       err.violations.map((v) => v.target),
       ['bindings.groom', 'bindings.plan', 'bindings.implement', 'bindings.review'],
     );
+    assert.equal(err.line, 12);
+    const fix = `allowed_agents (from ${cfg}:21) allows: codex; use one of those`;
     assert.deepEqual(err.message.split('\n'), [
-      'bindings.groom uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.plan uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.implement uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.review uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      `${cfg}:12: profiles.work.bindings.groom: uses agent "claude", but ${fix}`,
+      `${cfg}:13: profiles.work.bindings.plan: uses agent "claude", but ${fix}`,
+      `${cfg}:14: profiles.work.bindings.implement: uses agent "claude", but ${fix}`,
+      `${fx('e2e/grounds/company/percolator.yaml')}:2: bindings.review: uses agent "claude", but ${fix}`,
     ]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
@@ -199,10 +223,10 @@ test('every node prompt file is resolved inside its ground before start, all pro
       assert.ok(err instanceof ConfigError);
       assert.equal(err.file, cfg);
       assert.deepEqual(err.message.split('\n'), [
-        `${cfg}: bindings.plan.prompt: ground "company": prompts/missing.md does not exist`,
-        `${cfg}: bindings.implement.0.prompt: ground "nope": unknown ground (prompt x.md)`,
-        `${cfg}: bindings.implement.1.prompt: ground "company": ../team/policies/sdlc.md is outside the ground`,
-        `${cfg}: nodes.lint.prompt: ground "team": C:x must not contain ":"`,
+        `${cfg}:13: profiles.work.bindings.plan.prompt.file: ground "company": prompts/missing.md does not exist; fix the path or add it to the ground`,
+        `${cfg}:14: profiles.work.bindings.implement.0.prompt.from: ground "nope" is not declared; add it under grounds:`,
+        `${cfg}:14: profiles.work.bindings.implement.1.prompt.file: ground "company": ../team/policies/sdlc.md is outside the ground; use a path inside the ground`,
+        `${cfg}:17: profiles.work.nodes.lint.prompt.file: ground "team": C:x must not contain ":"; remove the ":"`,
       ]);
     },
   );
@@ -225,8 +249,8 @@ test('mapping applies_to entries must name a stage, a node or "*"', async () => 
       const err = await validate({ ...opts(), configFile: cfg }).catch((e) => e);
       assert.ok(err instanceof ConfigError);
       assert.deepEqual(err.message.split('\n'), [
-        `${cfg}: mapping team:policies/sdlc.md applies_to "reveiw": no such stage or node`,
-        `${cfg}: mapping team:policies/sdlc.md applies_to "nope": no such stage or node`,
+        `${cfg}:9: profiles.work.use.1.applies_to.4: "reveiw" names no stage or node; use "*", a stage or a node name`,
+        `${cfg}:9: profiles.work.use.1.applies_to.5: "nope" names no stage or node; use "*", a stage or a node name`,
       ]);
     },
   );
@@ -244,12 +268,25 @@ test('validate rejects an unknown agent before any agent starts', async () => {
         .replace('      - { from: company, file: percolator.yaml, as: graph }\n', '')
         .replace('      deliver:', '      review: { agent: gemini }\n      deliver:'),
     async (cfg) => {
-      await assert.rejects(
-        validate({ ...opts(), configFile: cfg }),
-        /bindings\.review: unknown agent "gemini" \(known: claude, codex, command\)/,
-      );
+      await assert.rejects(validate({ ...opts(), configFile: cfg }), {
+        message: `${cfg}:14: profiles.work.bindings.review.agent: unknown agent "gemini" (known: claude, codex, command); use one of those`,
+      });
     },
   );
+});
+
+test('an agent problem in the repo layer names the repo file and line', async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    await fs.mkdir(path.dirname(repoFile));
+    await fs.writeFile(repoFile, 'nodes:\n  rc:\n    agent: nope\n    after: plan\n');
+    await assert.rejects(validate({ ...trusted(), cwd }), {
+      message: `${repoFile}:3: nodes.rc.agent: unknown agent "nope" (known: claude, codex, command); use one of those`,
+    });
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
+  }
 });
 
 test('validate walks fragment use', async () => {

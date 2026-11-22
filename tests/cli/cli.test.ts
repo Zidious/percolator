@@ -53,13 +53,14 @@ test('validate prints rule violations and exits 1', async () => {
   const r = await run(['validate', '--config', cfg, '--profile', 'work']);
   assert.equal(r.code, 1);
   assert.equal(r.out, '');
+  const fix = `allowed_agents (from ${cfg}:21) allows: codex; use one of those`;
   assert.equal(
     r.err,
     [
-      'bindings.groom uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.plan uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.implement uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.review uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      `${cfg}:12: profiles.work.bindings.groom: uses agent "claude", but ${fix}`,
+      `${cfg}:13: profiles.work.bindings.plan: uses agent "claude", but ${fix}`,
+      `${cfg}:14: profiles.work.bindings.implement: uses agent "claude", but ${fix}`,
+      `${fx('e2e/grounds/company/percolator.yaml')}:2: bindings.review: uses agent "claude", but ${fix}`,
       '',
     ].join('\n'),
   );

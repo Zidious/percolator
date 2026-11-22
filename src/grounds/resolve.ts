@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ConfigError } from '../config/load.ts';
+import { locate } from '../config/locate.ts';
+import type { LineIndex } from '../config/locate.ts';
 import type { GroundSpec } from '../config/schema.ts';
 import { sweepLeftovers } from '../util/fs.ts';
 import { expandHome, toPosix } from '../util/paths.ts';
@@ -24,6 +26,8 @@ export type ResolveOptions = {
   home?: string;
   /** the config file that declares the grounds; problems with path grounds are reported against it */
   configFile?: string;
+  /** the config file's line index, so a missing path ground gives its line */
+  lines?: LineIndex;
 };
 
 async function exists(p: string): Promise<boolean> {
@@ -49,7 +53,9 @@ export async function resolveGrounds(
     if ('path' in spec) {
       const dir = expandHome(spec.path, opts.home);
       if (!(await exists(dir))) {
-        throw new ConfigError(`ground "${name}": path ${spec.path} does not exist`, opts.configFile ?? 'config');
+        const file = opts.configFile ?? 'config';
+        const w = locate(opts.lines ? { file, lines: opts.lines } : undefined, file, `grounds.${name}.path`);
+        throw new ConfigError(`ground "${name}": path ${spec.path} does not exist; create it or fix the path`, w.file, w.line, w.path);
       }
       out[name] = { name, dir, commit: 'local', source: spec };
       continue;
