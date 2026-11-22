@@ -65,3 +65,27 @@ profiles:
       #       agent: claude
       #       model: opus
       #       prompt: From the evidence in the inputs, find the likely cause and write it to diagnosis.md.
+
+      # A short pipeline for small fixes, and a triage router that sends each ticket to feature or hotfix.
+      # Uncomment both, then: perc validate --pipeline triage
+      # hotfix:
+      #   description: Small fix, no grooming
+      #   stages: [intake, implement, review, deliver]
+      #   exit: pr
+      #   bindings:
+      #     implement: { agent: claude, model: opus, skill: superpowers:test-driven-development }
+      #     review: { agent: claude, model: sonnet, skill: deep-dive-review, max_rounds: 2 }
+      # triage:
+      #   description: Read the ticket and hand it to the pipeline that fits
+      #   router: true                 # the last stage, route, starts a linked run of the pipeline it picks
+      #   stages: [intake, route]
+      #   routes:
+      #     - { label: bug, to: hotfix }   # label rules are tried first, in order
+      #   choose:                      # then this agent picks, writing pick.md
+      #     agent: claude
+      #     model: sonnet
+      #     from: [feature, hotfix]
+      #     confirm: unsure            # stop at the pick-pipeline gate only when the agent is unsure (or: always)
+      #   fallback: feature            # used when nothing picked a pipeline
+      #   triggers:
+      #     - { label: triage }        # while perc watch runs, each issue labelled triage starts a triage run

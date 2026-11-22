@@ -46,6 +46,16 @@ const SCENARIOS: Scenario[] = [
       "For my side projects in ~/src/ (any repo there, whatever the remote), use the same setup as usual but put every agent step on sonnet to save money, and don't create a Herdr space for those runs.",
     files: { 'src/.keep': '' },
   },
+  {
+    id: 'K',
+    request:
+      'Add a quick hotfix pipeline (no grooming: implement, review, PR), and a triage step that sends issues labelled bug to hotfix and lets an agent decide the rest between feature and hotfix. I want to confirm every pick myself.',
+  },
+  {
+    id: 'L',
+    request:
+      'Every weekday at 7am London time, run a pipeline without a ticket that checks our dependencies for known vulnerabilities and opens an issue for each one it finds, but only after I approve the drafts.',
+  },
 ];
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
