@@ -213,11 +213,21 @@ function attentionBox(p, t, r, kind, narrow, fill) {
     .gap(8)
     .items_center()
     .children(
-      acts.map((x) =>
-        button(t, `act-${x}`, LABELS[x]?.[0] ?? x, LABELS[x]?.[1] ?? '', (_e, cx) => p.act(x, cx), {
-          busy: p.busy === x,
-          disabled: Boolean(p.busy) && p.busy !== x,
-        }),
+      // pick is one button per pipeline the gate may pick
+      acts.flatMap((x) =>
+        x === 'pick'
+          ? (a.choices ?? []).map((name) =>
+              button(t, `pick-${name}`, `Run ${name}`, 'ok', (_e, cx) => p.act('pick', cx, name), {
+                busy: p.busy === 'pick',
+                disabled: Boolean(p.busy),
+              }),
+            )
+          : [
+              button(t, `act-${x}`, LABELS[x]?.[0] ?? x, LABELS[x]?.[1] ?? '', (_e, cx) => p.act(x, cx), {
+                busy: p.busy === x,
+                disabled: Boolean(p.busy) && p.busy !== x,
+              }),
+            ],
       ),
     )
     .when(Boolean(a.commentUrl), (el) => el.child(button(t, 'github', 'GitHub ↗', '', (_e, cx) => cx.open_url(a.commentUrl))))

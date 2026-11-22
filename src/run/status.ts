@@ -10,14 +10,16 @@ import type { Waiting } from '../tracker/gate.ts';
 import { liveness, prUrl } from './drive.ts';
 import { readRunGraph } from './graph-file.ts';
 import type { RunGraphLoop, RunGraphStep } from './graph-file.ts';
-import { lockIsLive, readDriverLock } from './lock.ts';
+import { lockIsLive, pidAlive, readDriverLock } from './lock.ts';
 import type { DriverLock } from './lock.ts';
 import { listRuns } from './meta.ts';
 import type { RunListing, RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
+import { parsePick } from './route.ts';
+import { watcherStatus } from '../watch/watch.ts';
 
 export type AttentionKind = 'gate' | 'cap' | 'paused' | 'failed' | 'stalled' | 'agent';
-export type Action = 'approve' | 'reject' | 'grant' | 'resume' | 'clean' | 'open-pane';
+export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'clean' | 'open-pane';
 export type ReviewItem = { step: string; key: string; path: string };
 export type AttentionJson = {
   kind: AttentionKind;
@@ -30,6 +32,8 @@ export type AttentionJson = {
   commands?: string[];
   terminal?: string;
   agentState?: string;
+  /** a pick-pipeline gate only: the pipelines `pick` may name (`perc approve <id> --pipeline <name>`) */
+  choices?: string[];
 };
 export type StepJson = RunGraphStep & {
   status: 'pending' | 'running' | 'waiting' | StepRecord['status'];
@@ -90,7 +94,9 @@ export type RunStatusJson =
       graph: 'full' | 'history';
     }
   | { id: string; status: 'unreadable'; error: string };
-export type StatusJson = { schema: 2; runs: RunStatusJson[] };
+/** Whether `perc watch` runs (same host, live pid, fresh heartbeat), since when, and the repos it watches. */
+export type WatcherJson = { alive: boolean; since?: string; repos: string[] };
+export type StatusJson = { schema: 2; runs: RunStatusJson[]; watcher: WatcherJson };
 
 /** How the driver was judged: its hc terminal, its `driver.json` lock, or neither (`hcError` when hc failed). */
 export type DriverLiveness = { alive: boolean | null; lock?: DriverLock; hcError?: string };
@@ -300,6 +306,16 @@ export function attentionNext(
   return yourTurn({ kind: a.kind, runId: run.id, step: '', ...again }).next;
 }
 
+const PICK_GATE = 'pick-pipeline';
+
+/** The choose agent's latest valid pick among `choices`, if it made one (sure or not). */
+async function suggestion(dir: string, state: RunState, choices: string[]): Promise<string | undefined> {
+  const rel = latest(state, 'route.1')?.outputs['pick'];
+  if (rel === undefined) return undefined;
+  const text = await fs.readFile(path.join(dir, rel), 'utf8').catch(() => '');
+  return parsePick(text, choices).pipeline;
+}
+
 async function attentionOf(o: {
   dir: string;
   meta: RunMeta;
@@ -321,6 +337,19 @@ async function attentionOf(o: {
     if (alive === false && (await exists(path.join(waiting.stepDir, 'decision.json')))) {
       const d = await readDecision(waiting.stepDir);
       return { kind: 'stalled', since: waiting.since, ...turn('stalled', waiting.stepId, d !== undefined ? { decision: d } : {}), actions: ['resume'] };
+    }
+    const choices = o.steps.find((s) => s.id === waiting.stepId && s.id === PICK_GATE)?.choices;
+    if (choices !== undefined) {
+      const suggests = await suggestion(dir, state, choices);
+      return {
+        kind: 'gate',
+        since: waiting.since,
+        message: suggests === undefined ? 'pick the pipeline for this ticket' : `pick the pipeline for this ticket (the agent suggests ${suggests})`,
+        ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
+        review: gateReview(dir, waiting.stepId, o.steps, state),
+        actions: ['pick', 'reject'],
+        choices,
+      };
     }
     return {
       kind: 'gate',
@@ -552,5 +581,6 @@ export async function statusJson(deps: DriverDeps): Promise<StatusJson> {
     }
   };
   await Promise.all(Array.from({ length: Math.min(READ_AT_ONCE, listed.length) }, worker));
-  return { schema: 2, runs };
+  const now = (deps.now ?? (() => new Date()))();
+  return { schema: 2, runs, watcher: await watcherStatus(deps.home, now, deps.pidAlive ?? pidAlive) };
 }

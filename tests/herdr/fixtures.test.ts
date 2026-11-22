@@ -62,7 +62,20 @@ test('the fixture has a ticketless run and a hotfix run', () => {
   assert.deepEqual(hotfix.steps.filter((s: any) => s.role === 'core').map((s: any) => s.id), ['intake', 'reproduce', 'fix', 'review', 'deliver']);
 });
 
-test('the empty fixture has no runs', () => assert.deepEqual(readFixture('empty.json'), { schema: 2, runs: [] }));
+test('the empty fixture has no runs and no watcher', () =>
+  assert.deepEqual(readFixture('empty.json'), { schema: 2, runs: [], watcher: { alive: false, repos: [] } }));
+
+test('the fixture has a watcher on its repo, a triage parent with a hotfix child, and a triage run waiting at its pick', () => {
+  const j = readFixture('status.json');
+  assert.deepEqual(j.watcher, { alive: true, since: '2026-11-21T05:00:00.000Z', repos: ['/home/me/src/percolator'] });
+  const parent = j.runs.find((r: any) => r.pipeline === 'triage' && r.status === 'completed');
+  const child = j.runs.find((r: any) => r.pipeline === 'hotfix');
+  assert.equal(child.parent, parent.id);
+  assert.deepEqual(parent.children, [{ id: child.id, pipeline: 'hotfix', status: child.status }]);
+  const pick = j.runs.find((r: any) => r.pipeline === 'triage' && r.status === 'waiting');
+  assert.deepEqual([pick.currentStep, pick.attention.actions, pick.attention.choices], ['pick-pipeline', ['pick', 'reject'], ['hotfix', 'feature']]);
+  assert.equal(pick.attention.message, 'pick the pipeline for this ticket (the agent suggests hotfix)');
+});
 
 test('the pipelines fixture is what perc pipelines --json writes: feature (default), hotfix, dd-alert and spike', () => {
   const read = readPipelines(fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'pipelines.json'), 'utf8'));

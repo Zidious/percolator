@@ -879,6 +879,7 @@ test('status json keeps going past a broken run', async () => {
         { id: badState.runId, status: 'unreadable', error: `Run state ${badStateFile} is not valid JSON` },
         { id: 't9-broken', status: 'unreadable', error: `Run metadata ${path.join(broken, 'run.json')} is missing or invalid: file not found` },
       ],
+      watcher: { alive: false, repos: [] },
     });
   } finally {
     await e.cleanup();
@@ -919,7 +920,7 @@ test('status json never loads config', async () => {
   try {
     const m = await e.prepare();
     await fs.rm(e.configFile);
-    assert.deepEqual(await statusJson(e.deps), { schema: 2, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(m) })] });
+    assert.deepEqual(await statusJson(e.deps), { schema: 2, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(m) })], watcher: { alive: false, repos: [] } });
   } finally {
     await e.cleanup();
   }
@@ -1278,4 +1279,97 @@ test('yourTurn agent', () => {
     detail: "Attend the agent's terminal.",
     next: [],
   });
+});
+
+/** A prepared run turned into a triage router waiting at pick-pipeline, after a choose agent that wrote `pick`. */
+async function waitAtPick(e: Env, pick: string): Promise<RunMeta> {
+  const m = await rewriteMeta(e, await e.prepare(), { pipeline: 'triage' });
+  await writeJson(path.join(e.dir(m), 'graph.json'), {
+    version: 1,
+    steps: [
+      { id: 'intake', stage: 'intake', role: 'core', kind: 'builtin' },
+      { id: 'route.0', stage: 'route', role: 'core', kind: 'builtin' },
+      { id: 'route.1', stage: 'route', role: 'core', kind: 'agent' },
+      { id: 'pick-pipeline', stage: 'route', role: 'core', kind: 'gate', choices: ['hotfix', 'feature'] },
+      { id: 'route.3', stage: 'route', role: 'core', kind: 'builtin' },
+    ],
+    loops: [{ id: 'pick-pipeline', from: 'pick-pipeline', to: 'route.0', max: 3, atCap: 'escalate' }],
+  });
+  const pickRel = rel('route.1', 1, 'pick');
+  await fs.mkdir(path.dirname(path.join(e.dir(m), pickRel)), { recursive: true });
+  await fs.writeFile(path.join(e.dir(m), pickRel), pick);
+  await e.edit(m, (s) => {
+    s.currentStep = 'pick-pipeline';
+    s.history.push(rec('intake', 1, 'pass'), rec('route.0', 1, 'pass'), rec('route.1', 1, 'pass', { pick: pickRel }));
+  });
+  await writeJson(path.join(e.dir(m), 'waiting.json'), {
+    stepId: 'pick-pipeline',
+    stepDir: path.join(e.dir(m), 'steps', 'pick-pipeline', '1'),
+    since: NOW.toISOString(),
+    commentUrl: URL,
+  });
+  e.liveDriver(m);
+  return m;
+}
+
+test("a pick-pipeline gate asks you to pick from the router's pipelines, naming the agent's suggestion", async () => {
+  const e = await setup();
+  try {
+    const m = await waitAtPick(e, 'pipeline: hotfix\nunsure: true\nlooks like a bug\n');
+    const r = (await e.status(m)) as Readable;
+    assert.deepEqual(r.attention, {
+      kind: 'gate',
+      since: NOW.toISOString(),
+      message: 'pick the pipeline for this ticket (the agent suggests hotfix)',
+      commentUrl: URL,
+      review: [{ step: 'route.1', key: 'pick', path: path.join(e.dir(m), rel('route.1', 1, 'pick')) }],
+      actions: ['pick', 'reject'],
+      choices: ['hotfix', 'feature'],
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a pick-pipeline gate without a valid suggestion only asks you to pick', async () => {
+  const e = await setup();
+  try {
+    const m = await waitAtPick(e, 'pipeline: spike\nunsure: false\n');
+    const a = ((await e.status(m)) as Readable).attention!;
+    assert.equal(a.message, 'pick the pipeline for this ticket');
+    assert.deepEqual([a.actions, a.choices], [['pick', 'reject'], ['hotfix', 'feature']]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+/** Writes `~/.percolator/watch/watch.json` as perc watch does. */
+async function writeWatch(e: Env, over: Record<string, unknown> = {}): Promise<void> {
+  await writeJson(path.join(e.home, '.percolator', 'watch', 'watch.json'), {
+    pid: 4242,
+    host: os.hostname(),
+    terminal: 'w1',
+    startedAt: T1,
+    heartbeatAt: new Date(e.clock.t - 30_000).toISOString(),
+    repos: ['/r/a', '/r/b'],
+    intervalS: 60,
+    ...over,
+  });
+}
+
+test('watcher alive from a fresh heartbeat; dead from a stale one', async () => {
+  const e = await setup();
+  try {
+    assert.deepEqual((await statusJson(e.deps)).watcher, { alive: false, repos: [] });
+    e.deps.pidAlive = (pid) => pid === 4242;
+    await writeWatch(e);
+    assert.deepEqual((await statusJson(e.deps)).watcher, { alive: true, since: T1, repos: ['/r/a', '/r/b'] });
+    await writeWatch(e, { heartbeatAt: new Date(e.clock.t - 181_000).toISOString() });
+    assert.deepEqual((await statusJson(e.deps)).watcher, { alive: false, repos: ['/r/a', '/r/b'] });
+    await writeWatch(e);
+    e.deps.pidAlive = () => false;
+    assert.deepEqual((await statusJson(e.deps)).watcher, { alive: false, repos: ['/r/a', '/r/b'] });
+  } finally {
+    await e.cleanup();
+  }
 });

@@ -76,11 +76,15 @@ export function newlyNeeding(prev, next) {
   return next.filter((r) => needsYou(r) && !had.has(r.id));
 }
 
-/** The `perc` argv for an action, or null when it needs no perc call (open-pane). Feedback stays one element. */
+/** The `perc` argv for an action, or null when it needs no perc call (open-pane). Feedback stays one element; `pick`
+ *  takes the picked pipeline in its place. */
 export function actionArgv(action, run, feedback) {
   switch (action) {
     case 'approve':
       return ['approve', run.id];
+    case 'pick':
+      if (typeof feedback !== 'string' || feedback.trim() === '') throw new Error('Pick a pipeline');
+      return ['approve', run.id, '--pipeline', feedback.trim()];
     case 'reject':
       if (typeof feedback !== 'string' || feedback.trim() === '') throw new Error('Say what to change');
       return ['reject', run.id, '--', feedback];
@@ -696,6 +700,35 @@ export function runLabel(run) {
 /** The pipeline chip a run shows: its pipeline, or null on `feature` (the default line, so boards look as before). */
 export function pipelineChip(run) {
   return typeof run.pipeline === 'string' && run.pipeline !== 'feature' ? run.pipeline : null;
+}
+
+/** The line under a linked run's title, and the run clicking it selects (null when that run is not listed): a child
+ *  says where it came from (the parent's ticket, or its pipeline when the ticket is the child's own or it has none), a
+ *  parent how many runs it started. Null for a run with neither. */
+export function linkedLine(run, runs) {
+  if (run.status === 'unreadable') return null;
+  if (run.parent) {
+    const p = runs.find((r) => r.id === run.parent && r.status !== 'unreadable');
+    if (!p) return { text: `↳ from ${run.parent}`, run: null };
+    const own = p.ticket && run.ticket && p.ticket.ref === run.ticket.ref;
+    return { text: `↳ from ${p.ticket && !own ? `#${p.ticket.number}` : p.pipeline}`, run: p.id };
+  }
+  const n = (run.children ?? []).length;
+  return n === 0 ? null : { text: `→ ${n} run${n === 1 ? '' : 's'}`, run: run.children[0].id };
+}
+
+// ── the watcher (`perc watch`) ──
+
+/** The header's watcher indicator and its one button: Stop while it watches, else Start over every repo earlier runs
+ *  ran in (`argv` null, no button, when there is none). A perc that sends no `watcher` reads as not watching. */
+export function watcherState(status) {
+  const w = status.watcher;
+  if (w?.alive) {
+    const n = w.repos.length;
+    return { alive: true, label: `watching ${n} repo${n === 1 ? '' : 's'}`, argv: ['watch', 'stop'] };
+  }
+  const repos = knownRepos(status.runs ?? []);
+  return { alive: false, label: 'not watching', argv: repos.length === 0 ? null : ['watch', ...repos.flatMap((r) => ['--repo', r])] };
 }
 
 // ── delete ──

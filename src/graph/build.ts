@@ -24,6 +24,8 @@ export type Step = {
   locator?: Locator;
   /** key path of this step's node in its layer (`bindings.review.0`, `nodes.audit`); see stepKey */
   key?: string;
+  /** a router's pick-pipeline gate: the pipelines it may pick (not fingerprinted) */
+  choices?: string[];
 };
 
 /** Key path of the step's node, for errors: its recorded key, else `bindings.<id>` / `nodes.<id>`. */
@@ -360,6 +362,7 @@ function buildWhole(
       slotLast: i === defs.length - 1,
       ...where,
       key: `pipelines.${name}.${d.key}`,
+      ...(d.id === PICK_GATE && choose !== undefined ? { choices: [...choose.from] } : {}),
     }));
   }
 

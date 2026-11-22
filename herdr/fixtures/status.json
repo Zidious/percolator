@@ -2091,7 +2091,7 @@
         "title": "status crashes on an empty run dir",
         "url": "https://github.com/Zidious/percolator/issues/21"
       },
-      "parent": null,
+      "parent": "t21-triage-20261121-065800-9e3a",
       "children": [],
       "opened": [],
       "repo": "/home/me/src/percolator",
@@ -2202,9 +2202,321 @@
       "graph": "full"
     },
     {
+      "id": "t21-triage-20261121-065800-9e3a",
+      "pipeline": "triage",
+      "inputs": {},
+      "ticket": {
+        "ref": "github.com/zidious/percolator#21",
+        "number": 21,
+        "title": "status crashes on an empty run dir",
+        "url": "https://github.com/Zidious/percolator/issues/21"
+      },
+      "parent": null,
+      "children": [
+        {
+          "id": "t21-hotfix-20261121-070000-4b5c",
+          "pipeline": "hotfix",
+          "status": "running"
+        }
+      ],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t21-triage-20261121-065800-9e3a",
+      "worktree": "/home/me/src/percolator/.worktrees/t21-triage-20261121-065800-9e3a",
+      "createdAt": "2026-11-21T06:58:00.000Z",
+      "status": "completed",
+      "driver": {
+        "alive": false,
+        "terminal": "t21_driver_a0_478b",
+        "space": "w1:s12",
+        "shown": false
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T06:58:01.000Z",
+          "endedAt": "2026-11-21T06:58:02.000Z"
+        },
+        {
+          "id": "route.0",
+          "stage": "route",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T06:58:02.000Z",
+          "endedAt": "2026-11-21T06:58:03.000Z"
+        },
+        {
+          "id": "route.1",
+          "stage": "route",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {
+            "pick": "samples/findings.md"
+          },
+          "startedAt": "2026-11-21T06:58:03.000Z",
+          "endedAt": "2026-11-21T06:59:40.000Z"
+        },
+        {
+          "id": "pick-pipeline",
+          "stage": "route",
+          "role": "core",
+          "kind": "gate",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {},
+          "choices": [
+            "hotfix",
+            "feature"
+          ]
+        },
+        {
+          "id": "route.3",
+          "stage": "route",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T06:59:40.000Z",
+          "endedAt": "2026-11-21T06:59:59.000Z"
+        }
+      ],
+      "loops": [
+        {
+          "id": "pick-pipeline",
+          "from": "pick-pipeline",
+          "to": "route.0",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        }
+      ],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T06:58:01.000Z",
+          "endedAt": "2026-11-21T06:58:02.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "route.0",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T06:58:02.000Z",
+          "endedAt": "2026-11-21T06:58:03.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "route.1",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T06:58:03.000Z",
+          "endedAt": "2026-11-21T06:59:40.000Z",
+          "outputs": {
+            "pick": "samples/findings.md"
+          }
+        },
+        {
+          "kind": "attempt",
+          "step": "route.3",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T06:59:40.000Z",
+          "endedAt": "2026-11-21T06:59:59.000Z",
+          "outputs": {}
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t22-triage-20261121-080000-5f1d",
+      "pipeline": "triage",
+      "inputs": {},
+      "ticket": {
+        "ref": "github.com/zidious/percolator#22",
+        "number": 22,
+        "title": "panel flickers when a run is deleted",
+        "url": "https://github.com/Zidious/percolator/issues/22"
+      },
+      "parent": null,
+      "children": [],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t22-triage-20261121-080000-5f1d",
+      "worktree": "/home/me/src/percolator/.worktrees/t22-triage-20261121-080000-5f1d",
+      "createdAt": "2026-11-21T08:00:00.000Z",
+      "status": "waiting",
+      "currentStep": "pick-pipeline",
+      "driver": {
+        "alive": true,
+        "terminal": "t22_driver_a0_9a55",
+        "space": "w1:s13",
+        "shown": false
+      },
+      "attention": {
+        "kind": "gate",
+        "since": "2026-11-21T08:01:30.000Z",
+        "message": "pick the pipeline for this ticket (the agent suggests hotfix)",
+        "commentUrl": "https://github.com/Zidious/percolator/issues/22#issuecomment-9001",
+        "review": [
+          {
+            "step": "route.1",
+            "key": "pick",
+            "path": "samples/findings.md"
+          }
+        ],
+        "actions": [
+          "pick",
+          "reject"
+        ],
+        "choices": [
+          "hotfix",
+          "feature"
+        ]
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T08:00:01.000Z",
+          "endedAt": "2026-11-21T08:00:02.000Z"
+        },
+        {
+          "id": "route.0",
+          "stage": "route",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T08:00:02.000Z",
+          "endedAt": "2026-11-21T08:00:03.000Z"
+        },
+        {
+          "id": "route.1",
+          "stage": "route",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {
+            "pick": "samples/findings.md"
+          },
+          "startedAt": "2026-11-21T08:00:03.000Z",
+          "endedAt": "2026-11-21T08:01:30.000Z"
+        },
+        {
+          "id": "pick-pipeline",
+          "stage": "route",
+          "role": "core",
+          "kind": "gate",
+          "status": "waiting",
+          "attempts": 0,
+          "outputs": {},
+          "choices": [
+            "hotfix",
+            "feature"
+          ]
+        },
+        {
+          "id": "route.3",
+          "stage": "route",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "pick-pipeline",
+          "from": "pick-pipeline",
+          "to": "route.0",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        }
+      ],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T08:00:01.000Z",
+          "endedAt": "2026-11-21T08:00:02.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "route.0",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T08:00:02.000Z",
+          "endedAt": "2026-11-21T08:00:03.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "route.1",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T08:00:03.000Z",
+          "endedAt": "2026-11-21T08:01:30.000Z",
+          "outputs": {
+            "pick": "samples/findings.md"
+          }
+        },
+        {
+          "kind": "attempt",
+          "step": "pick-pipeline",
+          "attempt": 1,
+          "status": "waiting",
+          "startedAt": "2026-11-21T08:01:30.000Z",
+          "outputs": {}
+        }
+      ],
+      "terminals": {
+        "driver": "t22_driver_a0_9a55"
+      },
+      "pr": null,
+      "graph": "full"
+    },
+    {
       "id": "t5-20261119-120000-dead",
       "status": "unreadable",
       "error": "state.json: Unexpected end of JSON input"
     }
-  ]
+  ],
+  "watcher": {
+    "alive": true,
+    "since": "2026-11-21T05:00:00.000Z",
+    "repos": [
+      "/home/me/src/percolator"
+    ]
+  }
 }

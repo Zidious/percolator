@@ -11,6 +11,8 @@ export type RunGraphStep = {
   stage: Stage | 'before-all' | 'after-all';
   role: 'core' | 'node';
   kind: 'agent' | 'builtin' | 'script' | 'gate';
+  /** a router's pick-pipeline gate only: the pipelines `perc approve --pipeline` may name */
+  choices?: string[];
 };
 export type RunGraphLoop = { id: string; from: string; to: string; max: number; atCap: 'continue' | 'escalate' };
 export type RunGraph = { version: 1; steps: RunGraphStep[]; loops: RunGraphLoop[] };
@@ -23,6 +25,7 @@ const RunGraphSchema = z.strictObject({
       stage: z.string(),
       role: z.enum(['core', 'node']),
       kind: z.enum(['agent', 'builtin', 'script', 'gate']),
+      choices: z.array(z.string()).optional(),
     }),
   ),
   loops: z.array(
@@ -44,6 +47,7 @@ export function toRunGraph(g: Graph): RunGraph {
       stage: s.stage,
       role: s.role === 'slot' ? 'core' : 'node',
       kind: effectiveKind(s.def),
+      ...(s.choices !== undefined ? { choices: s.choices } : {}),
     })),
     loops: Object.values(g.backEdges).map((e) => ({
       id: e.id,
