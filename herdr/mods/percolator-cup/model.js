@@ -246,14 +246,89 @@ export function loopLabelAlign(a, b) {
   return (a + b) / 2 > 50 ? 'end' : 'start';
 }
 
+// a hook may name its stage as `before:<stage>` / `after:<stage>`; its side comes from where it sits, not the prefix
+const stageKey = (s) => s.stage.replace(/^(?:before|after):/, '');
+const ALL = new Set(['before-all', 'after-all']);
+const SIDE = { 'before-all': 'before', before: 'before', after: 'after', 'after-all': 'after' };
+
+function pipeState(run, step) {
+  if (step.id === run.currentStep && run.status !== 'completed') return 'active';
+  if (step.status === 'fail') return 'failed';
+  return step.status === 'pending' ? 'future' : 'past';
+}
+
+/**
+ * The vertical pipeline, top to bottom: `before-all` hooks, then each stage where its first core step (else its first
+ * node) appears in the run, its steps in run order, then `after-all` hooks. A stage's nodes before its first core step
+ * are `before`, the rest `after`; a stage with no core step lists its nodes as `before`. When `narrow`, or a side has
+ * more than 3 passed hooks, that side's passed hooks fold into the stage's first core row (`before-all` counts as
+ * intake's before, `after-all` as deliver's after), unless the stage is in `unfolded`. The active row never folds.
+ */
+export function pipelineRows(run, o) {
+  const steps = run.steps ?? [];
+  const base = (step) => ({ step, gate: step.kind === 'gate', state: pipeState(run, step) });
+  const hook = (step, where) => ({ type: 'hook', ...base(step), where });
+  const allHooks = (where) => steps.filter((s) => s.stage === where).map((s) => hook(s, where));
+
+  const groups = new Map(); // stage → { stage, steps, at: index of its first core step, else of its first node }
+  steps.forEach((s, i) => {
+    if (ALL.has(s.stage)) return;
+    const key = stageKey(s);
+    const g = groups.get(key) ?? { stage: key, steps: [], at: i, core: false };
+    if (s.role === 'core' && !g.core) Object.assign(g, { at: i, core: true });
+    g.steps.push(s);
+    groups.set(key, g);
+  });
+  const ordered = [...groups.values()].sort((a, b) => a.at - b.at);
+  const blocks = ordered.map((g) => {
+    const firstCore = g.steps.findIndex((s) => s.role === 'core');
+    const rows = g.steps.map((s, i) =>
+      s.role === 'core'
+        ? { type: 'stage', ...base(s), round: roundPill(run, s.id), folded: [] }
+        : hook(s, firstCore < 0 || i < firstCore ? 'before' : 'after'),
+    );
+    return { stage: g.stage, rows };
+  });
+  const block = (stage) => blocks.find((b) => b.stage === stage);
+  const before = allHooks('before-all');
+  const after = allHooks('after-all');
+  if (block('intake')) block('intake').rows.unshift(...before);
+  else blocks.unshift({ stage: null, rows: before });
+  if (block('deliver')) block('deliver').rows.push(...after);
+  else blocks.push({ stage: null, rows: after });
+
+  return blocks.flatMap(({ stage, rows }) => {
+    const head = rows.find((r) => r.type === 'stage');
+    if (!head || o.unfolded.includes(stage)) return rows;
+    const fold = new Set();
+    for (const side of ['before', 'after']) {
+      const passed = rows.filter((r) => r.type === 'hook' && SIDE[r.where] === side && r.step.status === 'pass' && r.state !== 'active');
+      if (o.narrow || passed.length > 3) for (const r of passed) fold.add(r);
+    }
+    head.folded = rows.filter((r) => fold.has(r)).map((r) => r.step);
+    return rows.filter((r) => !fold.has(r));
+  });
+}
+
+/** Each loop as the row indexes of its `from` and `to` stage rows; a loop with either end missing is left out. */
+export function pipelineSpans(rows, run) {
+  const at = (id) => rows.findIndex((r) => r.type === 'stage' && r.step.id === id);
+  return loopSpans(run).flatMap((l) => {
+    const from = at(l.from);
+    const to = at(l.to);
+    return from < 0 || to < 0 ? [] : [{ from, to, tone: l.tone }];
+  });
+}
+
 /** Whether a stop can be selected: one that has not started has nothing to show. */
 export function canPick(step) {
   return step.status !== 'pending';
 }
 
-/** The started step one stop left (-1) or right (1) of the selected stop, else of the current (or last) step; null if none. */
+/** The started step one pipeline row up (-1) or down (1) from the selected stop, else from the current (or last)
+ *  step, over the wide rows (folded hooks are skipped); null if none. */
 export function moveStop(run, selected, dir) {
-  const order = trainLayout(run, false).flatMap((z) => z.shown.filter(canPick).map((s) => s.id));
+  const order = pipelineRows(run, { narrow: false, unfolded: [] }).flatMap((r) => (canPick(r.step) ? [r.step.id] : []));
   if (order.length === 0) return null;
   let at = order.indexOf(selected);
   if (at < 0) at = order.indexOf(run.currentStep);

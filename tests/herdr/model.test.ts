@@ -45,6 +45,8 @@ import {
   moveRow,
   canPick,
   moveStop,
+  pipelineRows,
+  pipelineSpans,
   needsCount,
   needsYou,
   newlyNeeding,
@@ -71,7 +73,7 @@ import {
   xOf,
 } from '../../herdr/mods/percolator/model.js';
 import type { RunStatusJson, StatusJson } from '../../src/run/status.ts';
-import type { Loop } from '../../herdr/mods/percolator/model.d.ts';
+import type { Loop, PipeRow } from '../../herdr/mods/percolator/model.d.ts';
 import { driverName } from '../../src/run/meta.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
 
@@ -872,4 +874,145 @@ test('an agent-blocked run is a running run to the panel', () => {
   assert.deepEqual(rowState(t13), { tone: 'working', text: 'groom' });
   assert.equal(newlyNeeding([], [t13]).length, 0);
   assert.equal(sortRuns([byId('t3'), t13])[0]!.id, t13.id); // running ranks above completed
+});
+
+const WIDE = { narrow: false, unfolded: [] as string[] };
+const rowIds = (rows: PipeRow[]) => rows.map((r) => r.step.id);
+const row = (rows: PipeRow[], id: string) => rows.find((r) => r.step.id === id)!;
+const whereOf = (r: PipeRow) => (r.type === 'hook' ? r.where : r.type);
+const foldedOf = (r: PipeRow) => (r.type === 'stage' ? r.folded.map((s) => s.id) : null);
+
+test('pipelineRows puts before-all hooks first, then each stage in run order, then after-all hooks', () => {
+  const rows = pipelineRows(byId('t8'), WIDE);
+  // the fixture runs lint-plan before implement and security-scan after it
+  assert.deepEqual(rowIds(rows), ['setup', 'intake', 'groom', 'approve-groom', 'plan', 'lint-plan', 'implement', 'security-scan', 'review', 'deliver', 'notify']);
+  assert.deepEqual(rows.map(whereOf), ['before-all', 'stage', 'stage', 'after', 'stage', 'before', 'stage', 'after', 'stage', 'stage', 'after-all']);
+});
+
+test('pipelineRows gives each row its state, gate and the round pill on stage rows', () => {
+  const rows = pipelineRows(byId('t8'), WIDE);
+  assert.deepEqual(
+    rows.map((r) => r.state),
+    ['past', 'past', 'past', 'past', 'past', 'past', 'past', 'past', 'active', 'future', 'future'],
+  );
+  assert.deepEqual(rows.filter((r) => r.gate).map((r) => r.step.id), ['approve-groom']);
+  const review = row(rows, 'review');
+  assert.equal(review.type === 'stage' && review.round?.text, 'round 3/3');
+  const plan = row(rows, 'plan');
+  assert.equal(plan.type === 'stage' && plan.round, null);
+  assert.deepEqual(foldedOf(plan), []);
+});
+
+test('pipelineRows folds a side with more than 3 passed hooks into the stage row, unless the stage is unfolded', () => {
+  const rows = pipelineRows(byId('t16'), WIDE);
+  assert.deepEqual(foldedOf(row(rows, 'implement')), ['lint-baseline', 'deps-audit', 'license-check', 'format-check']);
+  assert.deepEqual(rowIds(rows), ['intake', 'groom', 'plan', 'implement', 'typecheck', 'coverage', 'review', 'deliver']);
+  assert.deepEqual([row(rows, 'typecheck').type, row(rows, 'typecheck').state], ['hook', 'future']);
+  assert.deepEqual([row(rows, 'coverage').type, row(rows, 'coverage').state], ['hook', 'failed']);
+
+  const open = pipelineRows(byId('t16'), { narrow: false, unfolded: ['implement'] });
+  assert.deepEqual(rowIds(open), ['intake', 'groom', 'plan', 'lint-baseline', 'deps-audit', 'license-check', 'format-check', 'implement', 'typecheck', 'coverage', 'review', 'deliver']);
+  assert.deepEqual(open.slice(3, 9).map(whereOf), ['before', 'before', 'before', 'before', 'stage', 'after']);
+  assert.deepEqual(foldedOf(row(open, 'implement')), []);
+});
+
+test('pipelineRows narrow folds every passed hook, before-all into intake and after-all into deliver', () => {
+  const t8 = readable('t8');
+  const done = { ...t8, status: 'completed', steps: t8.steps.map((s) => ({ ...s, status: 'pass' })) } as RunStatusJson;
+  const rows = pipelineRows(done, { narrow: true, unfolded: [] });
+  assert.deepEqual(rowIds(rows), ['intake', 'groom', 'plan', 'implement', 'review', 'deliver']);
+  assert.deepEqual(rows.map(foldedOf), [['setup'], ['approve-groom'], [], ['lint-plan', 'security-scan'], [], ['notify']]);
+  assert.deepEqual(rowIds(pipelineRows(done, { narrow: true, unfolded: ['intake', 'deliver'] })), ['setup', 'intake', 'groom', 'plan', 'implement', 'review', 'deliver', 'notify']);
+});
+
+test('pipelineRows narrow keeps the active gate as a row', () => {
+  const rows = pipelineRows(byId('t2'), { narrow: true, unfolded: [] });
+  const gate = row(rows, 'approve-groom');
+  assert.deepEqual([gate.type, whereOf(gate), gate.state, gate.gate], ['hook', 'after', 'active', true]);
+  assert.deepEqual(foldedOf(row(rows, 'groom')), []);
+});
+
+test('pipelineRows never folds the active step, even when it passed', () => {
+  const t2 = readable('t2');
+  const r = { ...t2, steps: t2.steps.map((s) => (s.id === 'approve-groom' ? { ...s, status: 'pass' } : s)) } as RunStatusJson;
+  const gate = row(pipelineRows(r, { narrow: true, unfolded: [] }), 'approve-groom');
+  assert.deepEqual([gate.type, gate.state], ['hook', 'active']);
+});
+
+test('pipelineRows makes each core step of a multi-step stage a stage row; folded hooks go on the first', () => {
+  const rows = pipelineRows(byId('t17'), WIDE);
+  assert.deepEqual(rowIds(rows), ['intake', 'groom', 'plan', 'prep', 'implement.0', 'implement.1', 'post', 'review', 'deliver']);
+  assert.deepEqual(rows.slice(3, 7).map(whereOf), ['before', 'stage', 'stage', 'after']);
+  // the fixture's currentStep is the stage name, which matches no step id, so no row is active
+  assert.deepEqual([row(rows, 'implement.0').state, row(rows, 'implement.1').state], ['past', 'past']);
+  const live = pipelineRows({ ...readable('t17'), currentStep: 'implement.1' } as RunStatusJson, WIDE);
+  assert.deepEqual([row(live, 'implement.0').state, row(live, 'implement.1').state], ['past', 'active']);
+
+  const narrow = pipelineRows(byId('t17'), { narrow: true, unfolded: [] });
+  assert.deepEqual(rowIds(narrow), ['intake', 'groom', 'plan', 'implement.0', 'implement.1', 'post', 'review', 'deliver']);
+  assert.deepEqual(foldedOf(row(narrow, 'implement.0')), ['prep']);
+  assert.deepEqual(foldedOf(row(narrow, 'implement.1')), []);
+});
+
+test('pipelineRows lists the nodes of a stage with no core step as before, where its first node appears, unfolded', () => {
+  const t3 = readable('t3');
+  const sketch = { ...t3.steps[0]!, id: 'sketch', stage: 'plan', role: 'node', kind: 'script', status: 'pass' } as Readable['steps'][number];
+  const steps = [...t3.steps.filter((s) => s.stage !== 'plan'), sketch];
+  const rows = pipelineRows({ ...t3, steps } as RunStatusJson, { narrow: true, unfolded: [] });
+  assert.deepEqual(rowIds(rows), ['intake', 'groom', 'implement', 'review', 'deliver', 'sketch']);
+  assert.equal(whereOf(row(rows, 'sketch')), 'before');
+  assert.deepEqual(foldedOf(row(rows, 'groom')), ['approve-groom']);
+});
+
+test('pipelineRows orders stages by where their first core step appears in the run', () => {
+  const t3 = readable('t3');
+  const steps = [...t3.steps.filter((s) => s.stage !== 'plan'), ...t3.steps.filter((s) => s.stage === 'plan')];
+  assert.deepEqual(rowIds(pipelineRows({ ...t3, steps } as RunStatusJson, WIDE)), ['intake', 'groom', 'approve-groom', 'implement', 'review', 'deliver', 'plan']);
+});
+
+test('pipelineRows places a stage at its first core step, not at a node listed earlier', () => {
+  const t8 = readable('t8');
+  const lint = t8.steps.find((s) => s.id === 'lint-plan')!;
+  const steps = t8.steps.filter((s) => s !== lint);
+  steps.splice(steps.findIndex((s) => s.id === 'plan'), 0, lint); // an implement node listed before plan
+  assert.deepEqual(rowIds(pipelineRows({ ...t8, steps } as RunStatusJson, WIDE)).slice(4, 8), ['plan', 'lint-plan', 'implement', 'security-scan']);
+});
+
+test('pipelineRows of the t4 run carries the capped round on review', () => {
+  const review = row(pipelineRows(byId('t4'), WIDE), 'review');
+  assert.deepEqual(review.type === 'stage' && review.round, { text: 'round 3/3 · cap', tone: 'blocked' });
+  assert.equal(review.state, 'active');
+});
+
+test('pipelineRows has no active row for a completed run or a current step that is not listed', () => {
+  assert.deepEqual(pipelineRows(byId('t3'), WIDE).filter((r) => r.state === 'active'), []);
+  const lost = { ...readable('t8'), currentStep: 'nope' } as RunStatusJson;
+  assert.deepEqual(pipelineRows(lost, WIDE).filter((r) => r.state === 'active'), []);
+});
+
+test('pipelineRows is empty for an unreadable run and a run with no steps', () => {
+  assert.deepEqual(pipelineRows(byId('t5'), WIDE), []);
+  assert.deepEqual(pipelineRows({ ...readable('t3'), steps: [] } as RunStatusJson, WIDE), []);
+});
+
+test('pipelineSpans gives a loop as the indexes of its from and to stage rows', () => {
+  const r = byId('t4');
+  assert.deepEqual(pipelineSpans(pipelineRows(r, WIDE), r), [{ from: 5, to: 4, tone: 'blocked' }]);
+});
+
+test('pipelineSpans drops a loop whose end is not a stage row', () => {
+  const r = readable('t4');
+  const noTo = { ...r, steps: r.steps.filter((s) => s.id !== 'implement') } as RunStatusJson;
+  assert.deepEqual(pipelineSpans(pipelineRows(noTo, WIDE), noTo), []);
+  const noFrom = { ...r, loops: [{ ...r.loops[0]!, from: 'nope' }] } as RunStatusJson;
+  assert.deepEqual(pipelineSpans(pipelineRows(noFrom, WIDE), noFrom), []);
+  assert.deepEqual(pipelineSpans([], byId('t5')), []);
+});
+
+test('moveStop walks the pipeline rows that have started', () => {
+  assert.equal(moveStop(byId('t8'), 'groom', 1), 'approve-groom');
+  assert.equal(moveStop(byId('t8'), 'lint-plan', 1), 'implement');
+  // t16: the passed before:implement hooks fold away; typecheck has not started, coverage failed
+  assert.equal(moveStop(byId('t16'), 'implement', 1), 'coverage');
+  assert.equal(moveStop(byId('t16'), 'coverage', 1), 'review');
 });

@@ -40,6 +40,12 @@ export declare function loopSpans(run: RunStatusJson): { id: string; from: strin
 export declare function loopLabelAlign(a: number, b: number): 'start' | 'end';
 export declare function loopLabel(loop: Loop, narrow: boolean): string;
 export declare function canPick(step: { status: string }): boolean;
+export type RowState = 'past' | 'active' | 'future' | 'failed';
+export type PipeRow =
+  | { type: 'stage'; step: Step; gate: boolean; state: RowState; round: { text: string; tone: string } | null; folded: Step[] }
+  | { type: 'hook'; step: Step; where: 'before-all' | 'before' | 'after' | 'after-all'; gate: boolean; state: RowState };
+export declare function pipelineRows(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }): PipeRow[];
+export declare function pipelineSpans(rows: PipeRow[], run: RunStatusJson): { from: number; to: number; tone: string }[];
 export declare function moveStop(run: RunStatusJson, selected: string | null, dir: number): string | null;
 export declare function moveRow(rows: RunStatusJson[], selId: string | null, dir: number): string | null;
 export type RoundView = {
