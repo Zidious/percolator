@@ -43,6 +43,10 @@ export function link(t, id, label, onClick) {
   );
 }
 
+/** A run's pipeline (pipelineChip), after its title: the board's rows and the run's header. */
+export const chip = (t, name) =>
+  div().flex_none().px(6).rounded(4).bg(t.raised).border(1).border_color(t.border).text_size(10.5).text_color(t.muted).child(name);
+
 /** A button: kind "ok" (solid), "no" (blocked outline) or "" (plain); `busy` spins, `disabled` greys it out. */
 export function button(t, id, label, kind, onClick, { busy = false, disabled = false } = {}) {
   const solid = kind === 'ok' && !disabled;

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { readPipelines } from '../../herdr/mods/percolator/model.js';
+import { readPipelines, runNextChoices } from '../../herdr/mods/percolator/model.js';
 
 function readFixture(name: string): any {
   return JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', name), 'utf8'));
@@ -92,4 +92,19 @@ test('the pipelines fixture is what perc pipelines --json writes: feature (defau
   assert.equal(dd.exit, 'none');
   assert.deepEqual(dd.inputs, [{ name: 'alert_url', required: true, description: 'Datadog alert URL' }]);
   assert.deepEqual(ps[0].loops.map((l: any) => [l.from, l.to]), [['review', 'implement']]);
+});
+
+test('the fixture has a finished run that offers run next and one hidden by a live run on its ticket', () => {
+  const runs = readFixture('status.json').runs;
+  const pipelines = readFixture('pipelines.json').pipelines;
+  const of = (prefix: string) => runs.find((r: any) => r.id.startsWith(`${prefix}-`));
+  assert.deepEqual(runNextChoices(of('t3'), pipelines, runs), {
+    tickets: ['github.com/zidious/percolator#3'],
+    pipelines: ['feature', 'hotfix', 'spike'],
+  });
+  assert.equal(runNextChoices(of('t21-triage'), pipelines, runs), null, 'the hotfix child is live on #21');
+  // a ticketless run whose issue exit opened two issues offers them (the picker's ticket is a select)
+  const audit = of('audit');
+  assert.equal(audit.ticket, null);
+  assert.deepEqual(runNextChoices(audit, pipelines, runs)?.tickets, ['github.com/zidious/percolator#31', 'github.com/zidious/percolator#32']);
 });

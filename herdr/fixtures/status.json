@@ -2507,6 +2507,108 @@
       "graph": "full"
     },
     {
+      "id": "audit-20261120-180000-2d7c",
+      "pipeline": "audit",
+      "inputs": {
+        "scope": "src/run"
+      },
+      "ticket": null,
+      "parent": null,
+      "children": [],
+      "opened": [
+        {
+          "ref": "github.com/zidious/percolator#31",
+          "url": "https://github.com/Zidious/percolator/issues/31"
+        },
+        {
+          "ref": "github.com/zidious/percolator#32",
+          "url": "https://github.com/Zidious/percolator/issues/32"
+        }
+      ],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/audit-20261120-180000-2d7c",
+      "worktree": "/home/me/src/percolator/.worktrees/audit-20261120-180000-2d7c",
+      "createdAt": "2026-11-20T18:00:00.000Z",
+      "status": "completed",
+      "driver": {
+        "alive": false,
+        "terminal": "audit_driver_a0_2f11",
+        "space": "w1:s13",
+        "shown": false
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-20T18:00:01.000Z",
+          "endedAt": "2026-11-20T18:00:02.000Z"
+        },
+        {
+          "id": "scan",
+          "stage": "scan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {
+            "issues": "samples/findings.md"
+          },
+          "startedAt": "2026-11-20T18:00:03.000Z",
+          "endedAt": "2026-11-20T18:09:40.000Z"
+        },
+        {
+          "id": "file-issues",
+          "stage": "file-issues",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-20T18:09:41.000Z",
+          "endedAt": "2026-11-20T18:09:46.000Z"
+        }
+      ],
+      "loops": [],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-20T18:00:01.000Z",
+          "endedAt": "2026-11-20T18:00:02.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "scan",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-20T18:00:03.000Z",
+          "endedAt": "2026-11-20T18:09:40.000Z",
+          "outputs": {
+            "issues": "samples/findings.md"
+          }
+        },
+        {
+          "kind": "attempt",
+          "step": "file-issues",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-20T18:09:41.000Z",
+          "endedAt": "2026-11-20T18:09:46.000Z",
+          "outputs": {}
+        }
+      ],
+      "terminals": {},
+      "graph": "full"
+    },
+    {
       "id": "t5-20261119-120000-dead",
       "status": "unreadable",
       "error": "state.json: Unexpected end of JSON input"

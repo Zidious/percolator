@@ -446,13 +446,14 @@ export function readRatio(stored) {
   return stored != null && n > 0 && n < 1 ? n : BOARD_RATIO;
 }
 
-/** How the title bar fits `width` design px with `needs` runs needing you: ⧉ and ✕ always stay; the "N need you" chip
- *  shortens to "N" first, then the Active/All tabs move to a row of their own. */
+/** How the title bar fits `width` design px with `needs` runs needing you: ⧉ and ✕ always stay; + New run is an icon
+ *  under 800px; the "N need you" chip shortens to "N" first, then the Active/All tabs move to a row of their own. */
 export function titleLayout(width, needs) {
-  if (needs === 0) return { tabs: width >= 300 ? 'inline' : 'below', chip: 'long' };
-  if (width >= 370) return { tabs: 'inline', chip: 'long' };
-  if (width >= 320) return { tabs: 'inline', chip: 'short' };
-  return { tabs: 'below', chip: width >= 270 ? 'long' : 'short' };
+  const newRun = width >= 800 ? 'text' : 'icon';
+  if (needs === 0) return { tabs: width >= 330 ? 'inline' : 'below', chip: 'long', newRun };
+  if (width >= 400) return { tabs: 'inline', chip: 'long', newRun };
+  if (width >= 350) return { tabs: 'inline', chip: 'short', newRun };
+  return { tabs: 'below', chip: width >= 270 ? 'long' : 'short', newRun };
 }
 
 // ── the cup (mods/percolator-cup carries a copy of this file) ──
@@ -895,6 +896,30 @@ export function canStart(o) {
   if (o.pipeline.ticket === 'required' && blank(o.ticket)) return { ok: false, why: 'Enter a ticket' };
   const missing = o.pipeline.inputs.find((i) => i.required && blank(o.inputs[i.name]));
   return missing ? { ok: false, why: `Enter ${missing.name}` } : { ok: true };
+}
+
+/** The pipeline the picker shows picked: `want` while it is listed (among `names`, when given) and not broken, else
+ *  the default, else the first one that can be picked; null when none can. */
+export function startPick(pipelines, want, names = null) {
+  const ok = pipelines.filter((p) => !p.error && (names === null || names.includes(p.name)));
+  return (ok.find((p) => p.name === want) ?? ok.find((p) => p.default) ?? ok[0])?.name ?? null;
+}
+
+/** A pipeline's row in the picker: its name, its tags (default, how it takes a ticket) and the line under it. */
+export function pipelineOption(p) {
+  if (p.error) return { name: p.name, tags: [], note: p.error, error: true };
+  const ticket = p.ticket === 'none' ? ['no ticket'] : p.ticket === 'optional' ? ['ticket optional'] : [];
+  return { name: p.name, tags: [...(p.default ? ['default'] : []), ...ticket], note: p.description ?? `ends with ${p.exit}`, error: false };
+}
+
+/** The run id `perc run` prints (`run <id> started`), so the panel can select the new run; else null. */
+export function startedRun(stdout) {
+  return /^run (\S+) started$/m.exec(String(stdout ?? ''))?.[1] ?? null;
+}
+
+/** What Start says in fixtures mode instead of running perc. */
+export function wouldStart(argv) {
+  return `fixture: would run ${commandLine(argv)}`;
 }
 
 /** What "Run next…" offers on a finished run: its ticket and the issues its exit opened, and the pipelines that take a

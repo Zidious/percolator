@@ -4,8 +4,8 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { ago, canPick, driverPeek, hookNote, nowTone, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, slotOpensAgent, ticketTitle, took } from './model.js';
-import { inlineReader, link, own } from './ui.js';
+import { ago, canPick, driverPeek, hookNote, nowTone, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, slotOpensAgent, ticketTitle, took } from './model.js';
+import { chip, inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
 const SPINE = 24;
@@ -36,7 +36,8 @@ export function header(p, t, r, narrow) {
         .gap(8)
         .items_center()
         .child(div().flex_none().text_size(15).font_semibold().child(r.ticket ? `#${r.ticket.number}` : ''))
-        .child(div().min_w(0).text_size(15).truncate().child(ticketTitle(r))),
+        .child(div().min_w(0).text_size(15).truncate().child(ticketTitle(r)))
+        .when(Boolean(pipelineChip(r)), (el) => el.child(chip(t, pipelineChip(r)))),
     )
     .child(
       h_flex()
@@ -45,6 +46,8 @@ export function header(p, t, r, narrow) {
         .when(Boolean(r.ticket?.url), (el) => el.child(link(t, 'issue', 'Issue ↗', (_e, cx) => cx.open_url(r.ticket.url))))
         .when(Boolean(r.pr?.url), (el) => el.child(link(t, 'pr', 'PR ↗', (_e, cx) => cx.open_url(r.pr.url))))
         .when(Boolean(drv), (el) => el.child(link(t, 'driver', drv.label, () => p.peekDriver())))
+        // which pipelines it offers is asked of the repo when it opens: here only whether it can be offered at all
+        .when(runNextChoices(r, [], p.runs) !== null, (el) => el.child(link(t, 'run-next', '▸ Run next…', (_e, cx) => p.openRunNext(cx))))
         .child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx)))
         .child(
           div()

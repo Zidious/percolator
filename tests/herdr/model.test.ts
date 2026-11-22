@@ -95,7 +95,11 @@ import {
   guessRepo,
   knownRepos,
   linkedLine,
+  pipelineOption,
+  startedRun,
+  startPick,
   watcherState,
+  wouldStart,
   pipelinesFixture,
   previewRun,
   previewSide,
@@ -195,7 +199,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t22', 'dd', 't12', 't2', 't11', 't9', 't4', 't21', 't17', 't16', 't14', 't13', 't8', 't21', 't15', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t22', 'dd', 't12', 't2', 't11', 't9', 't4', 't21', 't17', 't16', 't14', 't13', 't8', 't21', 't15', 'audit', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -423,8 +427,8 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
   assert.equal(moveRow([], 'gone', 1), null);
 });
 
-test('the fixture has timelines for t8, t3, t2, t4, t16, t17, dd-alert, t21 (hotfix and triage) and t22, and none for the rest (an older perc)', () => {
-  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17', 'dd', 't21', 't21', 't22']);
+test('the fixture has timelines for t8, t3, t2, t4, t16, t17, dd-alert, t21 (hotfix and triage), t22 and audit, and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17', 'dd', 't21', 't21', 't22', 'audit']);
 });
 
 test('roundView defaults to the latest round and marks it running', () => {
@@ -549,13 +553,16 @@ test('readRatio: a stored ratio between 0 and 1, else the default', () => {
 });
 
 test('titleLayout: the buttons always fit; the needs chip shortens, then the tabs move to a second row', () => {
-  assert.deepEqual(titleLayout(380, 2), { tabs: 'inline', chip: 'long' }, 'the default 380px panel');
-  assert.deepEqual(titleLayout(370, 2), { tabs: 'inline', chip: 'long' });
-  assert.deepEqual(titleLayout(340, 2), { tabs: 'inline', chip: 'short' });
-  assert.deepEqual(titleLayout(300, 2), { tabs: 'below', chip: 'long' });
-  assert.deepEqual(titleLayout(260, 2), { tabs: 'below', chip: 'short' });
-  assert.deepEqual(titleLayout(300, 0), { tabs: 'inline', chip: 'long' }, 'no chip: the tabs fit inline longer');
-  assert.deepEqual(titleLayout(280, 0), { tabs: 'below', chip: 'long' });
+  // + New run is an icon under 800px (text from there): it takes ~30px, so the chip shortens and the tabs move sooner
+  assert.deepEqual(titleLayout(400, 2), { tabs: 'inline', chip: 'long', newRun: 'icon' });
+  assert.deepEqual(titleLayout(380, 2), { tabs: 'inline', chip: 'short', newRun: 'icon' }, 'the default 380px panel');
+  assert.deepEqual(titleLayout(350, 2), { tabs: 'inline', chip: 'short', newRun: 'icon' });
+  assert.deepEqual(titleLayout(340, 2), { tabs: 'below', chip: 'long', newRun: 'icon' });
+  assert.deepEqual(titleLayout(260, 2), { tabs: 'below', chip: 'short', newRun: 'icon' });
+  assert.deepEqual(titleLayout(330, 0), { tabs: 'inline', chip: 'long', newRun: 'icon' }, 'no chip: the tabs fit inline longer');
+  assert.deepEqual(titleLayout(320, 0), { tabs: 'below', chip: 'long', newRun: 'icon' });
+  assert.deepEqual(titleLayout(720, 2).newRun, 'icon');
+  assert.deepEqual(titleLayout(800, 2), { tabs: 'inline', chip: 'long', newRun: 'text' }, 'the window');
 });
 
 const hhmm = (iso: string) => {
@@ -654,7 +661,7 @@ test('deleteCommand carries the confirmed ids, and deleteCommandIds reads them b
 test('isFinished is true for completed and failed runs only', () => {
   assert.deepEqual(
     runs().filter(isFinished).map((r) => r.id.split('-')[0]),
-    ['t3', 't9', 't15', 't21'],
+    ['t3', 't9', 't15', 't21', 'audit'],
   );
 });
 
@@ -682,10 +689,11 @@ test('deleteConfirm names the run, says what is lost and kept, and that an activ
 test('deleteFinishedConfirm lists the finished runs, or is null when there are none', () => {
   const [a, b, c] = ['t3', 't9', 't15'].map((id) => byId(id).id);
   const d = 't21-triage-20261121-065800-9e3a';
+  const e = 'audit-20261120-180000-2d7c';
   assert.deepEqual(deleteFinishedConfirm(runs()), {
-    title: 'Delete 4 finished run(s)?',
-    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15), ${d} (#21): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
-    ids: [a, b, c, d],
+    title: 'Delete 5 finished run(s)?',
+    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15), ${d} (#21), ${e} (audit): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    ids: [a, b, c, d, e],
   });
   assert.equal(deleteFinishedConfirm(runs().filter((r) => !isFinished(r))), null);
 });
@@ -1324,6 +1332,53 @@ test('canStart says what is missing: the repo, then the ticket, then the first e
   assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: 'o/r#3', inputs: {}, repo: '/r' }), { ok: true });
   assert.deepEqual(canStart({ pipeline: pipe('spike'), inputs: {}, repo: '/r' }), { ok: true });
 });
+
+test('startPick keeps the wanted pipeline while it is listed and pickable, else the default, else the first pickable', () => {
+  const all = ALL_PIPES_START();
+  assert.equal(startPick(all, 'hotfix'), 'hotfix');
+  assert.equal(startPick(all, 'gone'), 'feature', 'a pipeline the repo no longer has falls back to the default');
+  assert.equal(startPick(all, 'broken'), 'feature', 'a broken pipeline cannot be picked');
+  assert.equal(startPick(all, null), 'feature');
+  const noDefault = all.map((p) => ('error' in p ? p : { ...p, default: false }));
+  assert.equal(startPick(noDefault.slice(1), null), 'hotfix');
+  assert.equal(startPick([{ name: 'broken', error: 'x' }], null), null);
+  // run next: only the names it offers
+  assert.equal(startPick(all, null, ['hotfix', 'spike']), 'hotfix');
+  assert.equal(startPick(all, 'spike', ['hotfix', 'spike']), 'spike');
+  assert.equal(startPick(all, 'dd-alert', ['hotfix', 'spike']), 'hotfix');
+});
+
+test('pipelineOption gives a picker row its tags and its note: the description, else the exit, else the error', () => {
+  assert.deepEqual(pipelineOption(pipe('feature')), {
+    name: 'feature',
+    tags: ['default'],
+    note: 'Groom, plan, implement and review a ticket, then open a PR',
+    error: false,
+  });
+  assert.deepEqual(pipelineOption(pipe('dd-alert')).tags, ['no ticket']);
+  assert.deepEqual(pipelineOption(pipe('spike')), { name: 'spike', tags: ['ticket optional'], note: 'ends with none', error: false });
+  assert.deepEqual(pipelineOption({ name: 'broken', error: 'pipelines.broken: no exit' }), {
+    name: 'broken',
+    tags: [],
+    note: 'pipelines.broken: no exit',
+    error: true,
+  });
+});
+
+test('startedRun reads the run id perc run prints, else null', () => {
+  assert.equal(startedRun('run t3-hotfix-20261122-101500-ab12 started\n  terminal t3_driver\n'),'t3-hotfix-20261122-101500-ab12');
+  assert.equal(startedRun('something else'), null);
+  assert.equal(startedRun(''), null);
+});
+
+test('wouldStart says what a fixture-mode Start would run', () => {
+  assert.equal(
+    wouldStart(['run', '--repo', '/r', '--pipeline', 'dd-alert', '--input', 'alert_url=a b']),
+    'fixture: would run perc run --repo /r --pipeline dd-alert --input "alert_url=a b"',
+  );
+});
+
+const ALL_PIPES_START = () => [...(JSON.parse(PIPES_RAW).pipelines as Pipeline[]), { name: 'broken', error: 'pipelines.broken: no exit' }];
 
 // ── run next and the pipeline preview ──
 

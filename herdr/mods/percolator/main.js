@@ -3,7 +3,7 @@
 // Data: `perc status --json`, run as perc.json says (`perc herdr link` writes it); `"fixtures"` reads a file instead.
 
 import { View, div } from 'gpui-kit';
-import { v_flex, h_flex, ScrollHandle, Scrollbar, TextareaState } from 'gpui-base';
+import { v_flex, h_flex, InputState, ScrollHandle, Scrollbar, TextareaState } from 'gpui-base';
 import {
   checking,
   closeOverlay,
@@ -11,6 +11,7 @@ import {
   layout,
   nextCommand,
   openOverlay,
+  pickFolder,
   props,
   readTextFile,
   run as command,
@@ -23,6 +24,14 @@ import {
 import {
   BOARD_RATIO,
   actionArgv,
+  canStart,
+  guessRepo,
+  knownRepos,
+  runNextChoices,
+  startArgv,
+  startPick,
+  startedRun,
+  wouldStart,
   activeBox,
   openAgentAt,
   boardHeight,
@@ -63,7 +72,8 @@ import { board } from './board.js';
 import { header, pipeline } from './pipeline.js';
 import { activeSlot, turn } from './turn.js';
 import { addressOf, link, own } from './ui.js';
-import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
+import { connectSource, fetchPipelines, fetchStatus, firstLine, watchRuns } from './source.js';
+import { startDialog } from './start.js';
 
 const LEFT = 330; // the left column of two: the board and the pipeline
 const BLOCK = 'percolator-panel';
@@ -129,6 +139,13 @@ export default class Percolator extends View {
     this.feedback.on('submit', (e, cx) => {
       if (e.secondary) this.sendReject(cx);
     });
+    // the start picker (+ New run, ▸ Run next…): { mode, run, repo, pick, tickets, ticket, error, said } while open
+    this.start = null;
+    this.pipes = {}; // repo → readPipelines's result, or 'loading'
+    this.inputs = {}; // `<pipeline>/<input>` → its InputState, made when the pipelines arrive
+    this.startedId = null; // the run Start started: selected once a refresh lists it
+    this.ticketInput = this.textState({ placeholder: 'owner/repo#12' });
+    this.ticketInput.on('change', (_e, cx) => this.ticketChanged(cx));
     this.handle = cx.focus_handle();
     this.handle.focus();
 
@@ -201,7 +218,12 @@ export default class Percolator extends View {
         const pick = selectAfterRefresh(this.runs, this.rows(), this.sel, this.deleting);
         // a fetch started after the delete finished has seen all of it
         if (this.deleting?.doneAt !== undefined && seq > this.deleting.doneAt) this.deleting = null;
-        if (!this.current()) this.select(pick, cx);
+        if (this.startedId && this.runs.some((r) => r.id === this.startedId)) {
+          if (!this.rows().some((r) => r.id === this.startedId)) this.filter = 'all';
+          this.select(this.startedId, cx);
+          this.startedId = null;
+          this.revealRow();
+        } else if (!this.current()) this.select(pick, cx);
         else this.syncReader(cx); // the run moved on: new review files, or none
       } else {
         this.error = got.error; // keep the last good runs
@@ -434,7 +456,197 @@ export default class Percolator extends View {
     });
   }
 
-  /** The header's Start watcher / Stop: `perc watch …` or `perc watch stop`; what it says goes beside the tabs. */
+  // ── the start picker ────────────────────────────────────────────────
+
+  /** A one-line text state that marks the panel as typing while it has the keyboard; Enter starts the run. */
+  textState(options) {
+    const s = InputState.new(options);
+    s.on('focus', (_e, cx) => {
+      this.typing = true;
+      cx.notify();
+    });
+    s.on('blur', (_e, cx) => {
+      this.typing = false;
+      cx.notify();
+    });
+    s.on('change', (_e, cx) => {
+      if (this.start) this.start.error = this.start.said = null;
+      cx.notify();
+    });
+    s.on('submit', (_e, cx) => this.startRun(cx));
+    return s;
+  }
+
+  /** The input's state: made with the pipelines (startPipelines), so render only reads it. */
+  inputState(pipeline, input) {
+    return this.inputs[`${pipeline}/${input.name}`] ?? null;
+  }
+
+  /** "+ New run": the picker over any pipeline, on the repo of the latest run; `pick` names the pipeline to show. */
+  openStart(cx, pick = null) {
+    if (this.start?.mode === 'new' && pick === null) return this.closeStart(cx);
+    this.ticketInput.set_value('');
+    this.start = { mode: 'new', run: null, repo: knownRepos(this.runs)[0] ?? null, pick, tickets: [], ticket: '', error: null, said: null };
+    this.loadPipelines(cx);
+  }
+
+  /** "▸ Run next…" on the selected finished run: its ticket (or the issues it opened) and repo, fixed. Again closes. */
+  openRunNext(cx) {
+    const r = this.current();
+    if (!r || this.start?.run === r.id) return this.closeStart(cx);
+    this.start = { mode: 'next', run: r.id, repo: r.repo, pick: null, tickets: [], ticket: '', error: null, said: null };
+    this.loadPipelines(cx);
+  }
+
+  closeStart(cx) {
+    this.start = null;
+    this.typing = false;
+    this.handle.focus();
+    cx?.notify();
+  }
+
+  /** Lists the picked repo's pipelines once (a failed listing is asked again), then settles the pick and tickets. */
+  loadPipelines(cx) {
+    const s = this.start;
+    if (!s?.repo) return this.settleStart();
+    const repo = s.repo;
+    const have = this.pipes[repo];
+    if (have && (have === 'loading' || have.ok)) return this.settleStart();
+    this.pipes[repo] = 'loading';
+    cx.spawn(async (cx) => {
+      const got = await fetchPipelines(this, repo).catch((e) => ({ ok: false, error: String(e?.message ?? e) }));
+      this.pipes[repo] = got;
+      if (got.ok) {
+        for (const pl of got.data.pipelines) {
+          for (const i of pl.inputs ?? []) {
+            const key = `${pl.name}/${i.name}`;
+            this.inputs[key] ??= this.textState({ placeholder: i.description ?? '' });
+          }
+        }
+      }
+      this.settleStart();
+      cx.notify();
+    });
+  }
+
+  /** The picked pipeline (kept while the repo has it), and for run next the tickets it offers. */
+  settleStart() {
+    const s = this.start;
+    if (!s) return;
+    const all = this.repoPipelines();
+    if (s.mode === 'next') {
+      const r = this.runs.find((x) => x.id === s.run);
+      const c = r ? runNextChoices(r, all, this.runs) : null;
+      s.tickets = c?.tickets ?? [];
+      if (!s.tickets.includes(s.ticket)) s.ticket = s.tickets[0] ?? '';
+      s.names = c?.pipelines ?? [];
+      s.pick = startPick(all, s.pick, s.names);
+    } else s.pick = startPick(all, s.pick);
+  }
+
+  repoPipelines() {
+    const got = this.start?.repo ? this.pipes[this.start.repo] : null;
+    return got && got !== 'loading' && got.ok ? got.data.pipelines : [];
+  }
+
+  /** The pipelines the picker lists: all of the repo's, or for run next only those that take a ticket. */
+  startList() {
+    const all = this.repoPipelines();
+    return this.start?.mode === 'next' ? all.filter((p) => (this.start.names ?? []).includes(p.name)) : all;
+  }
+
+  startPipeline() {
+    return this.repoPipelines().find((p) => p.name === this.start?.pick && !p.error) ?? null;
+  }
+
+  startChoice(pl) {
+    const s = this.start;
+    const inputs = Object.fromEntries(pl.inputs.map((i) => [i.name, this.inputState(pl.name, i)?.value() ?? '']));
+    const ticket = s.mode === 'next' ? s.ticket : this.ticketInput.value();
+    return { pipeline: pl, ...(pl.ticket === 'none' ? {} : { ticket }), inputs, repo: s.repo };
+  }
+
+  canStartNow(choice) {
+    return canStart(choice);
+  }
+
+  startArgvNow(choice) {
+    return startArgv(choice);
+  }
+
+  pickPipeline(name, cx) {
+    this.start.pick = name;
+    this.start.error = this.start.said = null;
+    cx.notify();
+  }
+
+  pickTicket(ref, cx) {
+    this.start.ticket = ref;
+    cx.notify();
+  }
+
+  pickRepo(repo, cx) {
+    if (this.start.repo === repo) return;
+    this.start.repo = repo;
+    this.start.error = this.start.said = null;
+    this.loadPipelines(cx);
+    cx.notify();
+  }
+
+  chooseFolder(cx) {
+    cx.spawn(async (cx) => {
+      const dir = await pickFolder({ prompt: 'Repo for this run' }).catch(() => null);
+      if (dir && this.start) this.pickRepo(dir, cx);
+    });
+  }
+
+  /** A typed ticket preselects the repo the latest run on its GitHub repo ran in. */
+  ticketChanged(cx) {
+    const s = this.start;
+    if (s?.mode !== 'new') return;
+    const repo = guessRepo(this.ticketInput.value(), this.runs);
+    if (repo && repo !== s.repo) this.pickRepo(repo, cx);
+  }
+
+  /** Start: `perc run …` (argv only, never a shell); fixtures mode says what it would run instead. */
+  startRun(cx) {
+    const s = this.start;
+    const pl = this.startPipeline();
+    if (!s || !pl || this.busy) return;
+    const choice = this.startChoice(pl);
+    const can = canStart(choice);
+    if (!can.ok) {
+      s.error = can.why;
+      cx.notify();
+      return;
+    }
+    const argv = startArgv(choice);
+    s.error = null;
+    if (this.conn === 'fixtures') {
+      s.said = wouldStart(argv);
+      cx.notify();
+      return;
+    }
+    this.busy = 'start';
+    cx.spawn(async (cx) => {
+      const res = await exec(this.perc.node, [this.perc.cli, ...argv], { timeout: 120000 }).catch((e) => ({
+        code: -1,
+        stdout: '',
+        stderr: String(e?.message ?? e),
+      }));
+      this.busy = null;
+      if (res.code === 0) {
+        this.startedId = startedRun(res.stdout);
+        this.closeStart();
+        this.refresh(cx);
+      } else if (this.start) {
+        this.start.error = firstLine(res.stderr) || `perc run exited ${res.code}`;
+      }
+      cx.notify();
+    });
+  }
+
+  /** The header's Start watcher / Stop:`perc watch …` or `perc watch stop`; what it says goes beside the tabs. */
   toggleWatcher(cx) {
     const argv = this.watcher?.argv;
     if (!argv || this.busy) return;
@@ -529,7 +741,8 @@ export default class Percolator extends View {
     else if (key === 'g' && acts.includes('resume')) this.act('resume', cx);
     else if (key === 'enter' && r && activeBox(r) === 'agent') this.openAgent();
     else if (key === 'escape') {
-      if (this.rejecting) this.closeReject();
+      if (this.start) this.closeStart();
+      else if (this.rejecting) this.closeReject();
       else if (this.stopSel) this.pickStop(null, cx);
       else this.hide();
     } else return false;
@@ -542,6 +755,9 @@ export default class Percolator extends View {
       if (r) this.perform('clean', actionArgv('clean', r), cx);
     } else if (deleteCommandIds(c)) this.deleteRuns(deleteCommandIds(c), cx);
     else if (c.startsWith('key/')) this.key(c.slice(4), cx);
+    else if (c === 'new' || c.startsWith('new/')) this.openStart(cx, c.startsWith('new/') ? c.slice(4) : null);
+    else if (c === 'next') this.openRunNext(cx);
+    else if (c === 'start') this.startRun(cx);
     else if (c === 'focus') this.handle.focus();
     else if (c === 'place' && this.inWindow()) this.dockBack();
     else if (c === 'place') this.popOut();
@@ -689,13 +905,16 @@ export default class Percolator extends View {
     const window = this.inWindow();
     // ⧉ and ✕ never leave: the title truncates, the chip shortens to "N", then the tabs take a row of their own.
     const fit = titleLayout(this.width / zoom(), needs);
+    // inline, the tabs give way before ⧉ and ✕ do (a long notice, Delete finished runs ↗ beside a busy watcher)
     const tabs = h_flex()
-      .flex_none()
+      .flex_shrink_1()
+      .min_w(0)
+      .overflow_hidden()
       .gap(8)
       .items_center()
       .child(tab('active', 'Active'))
       .child(tab('all', 'All'))
-      .when(this.filter === 'all', (el) => el.child(link(t, 'delete-finished', 'Delete finished runs ↗', (_e, cx) => this.deleteFinished(cx))))
+      .when(this.filter === 'all', (el) => el.child(link(t, 'delete-finished', 'Delete finished runs ↗', (_e, cx) => this.deleteFinished(cx)).flex_shrink_1().min_w(0).truncate()))
       .when(Boolean(this.notice), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(this.notice)));
     const bar = h_flex()
       .h(38)
@@ -711,6 +930,13 @@ export default class Percolator extends View {
       .when(running > 0 && !narrow, (el) => el.child(chip(`${running} running`, t.working)))
       .when(fit.tabs === 'inline', (el) => el.child(div().flex_none().w(4)).child(tabs))
       .child(div().flex_1())
+      .when(this.conn !== 'missing', (el) =>
+        el.child(
+          fit.newRun === 'icon'
+            ? icon('new-run', '+', 'New run', (_e, cx) => this.openStart(cx)).when(Boolean(this.start), (el) => el.text_color(t.accent))
+            : link(t, 'new-run', '+ New run', (_e, cx) => this.openStart(cx)),
+        ),
+      )
       .when(Boolean(this.watcher), (el) => el.child(this.watcherChip(t, narrow || fit.tabs === 'below')))
       .when(this.conn === 'fixtures' && !narrow, (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child('fixtures')))
       .child(
@@ -780,9 +1006,11 @@ export default class Percolator extends View {
           .child(pipeline(this, t, r, fold, narrow, parts.under))
           .when(!two, (el) => el.child(turn(this, t, r, narrow, parts.side))),
       );
+    const starting = ready && Boolean(this.start);
     const leftColumn = v_flex()
       .id('left')
       .min_h(0)
+      .when(starting, (el) => el.hidden()) // kept, so its frames stay measured
       .when(two, (el) => el.w(LEFT).flex_none().h_full())
       .when(!two, (el) => el.flex_1().min_w(0))
       .child(
@@ -816,6 +1044,7 @@ export default class Percolator extends View {
         .h_full()
         .border_l(1)
         .border_color(t.border)
+        .when(starting, (el) => el.hidden())
         .when(!ready, (el) => el.child(this.placeholder(t)))
         .when(Boolean(r), (el) =>
           el.child(div().flex_none().child(header(this, t, r, false))).child(turn(this, t, r, false, parts.side, true)),
@@ -829,7 +1058,21 @@ export default class Percolator extends View {
       .min_h(0)
       .on_size_change((size, cx) => this.measured('area', size, cx))
       .child(leftColumn)
-      .when(two, (el) => el.child(rightColumn()));
+      .when(two, (el) => el.child(rightColumn()))
+      .when(starting, (el) => el.child(this.startFrame(t, { narrow, cols, fold })));
+  }
+
+  /** The start picker in place of the board and the run, scrolling on its own. */
+  startFrame(t, at) {
+    const dialog = startDialog(this, t, at, this.width / zoom(), knownRepos(this.runs));
+    return div()
+      .id('start-frame')
+      .flex_1()
+      .min_w(0)
+      .min_h(0)
+      .relative()
+      .child(v_flex().id('start').absolute().inset_0().overflow_y_scroll().child(dialog))
+      .child(Scrollbar.vertical('start').absolute().inset_0());
   }
 
   render(cx) {
@@ -865,7 +1108,8 @@ export default class Percolator extends View {
       .on_key_down((e, cx) => {
         if (this.typing) {
           if (e.key === 'escape') {
-            this.closeReject();
+            if (this.start) this.closeStart();
+            else this.closeReject();
             cx.notify();
             cx.stop_propagation();
           }

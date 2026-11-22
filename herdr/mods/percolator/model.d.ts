@@ -90,7 +90,7 @@ export declare const BOARD_RATIO: number;
 export declare function boardHeight(ratio: number, area: number, min: number): number;
 export declare function dragBoard(startPx: number, dy: number, area: number, min: number): number;
 export declare function readRatio(stored: unknown): number;
-export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short' };
+export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short'; newRun: 'icon' | 'text' };
 export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
 export declare function terminalAddress(live: { address: string; name?: string | null }[], term: string | null | undefined): string | null;
 export declare function activeBox(run: RunStatusJson): 'agent' | 'gate' | 'cap' | 'paused' | 'failed' | 'stalled' | null;
@@ -179,6 +179,10 @@ export declare function guessRepo(ticketText: string, runs: RunStatusJson[]): st
 export declare function startArgv(o: StartChoice & { repo: string }): string[];
 export declare function commandLine(argv: string[]): string;
 export declare function canStart(o: StartChoice): { ok: true } | { ok: false; why: string };
+export declare function startPick(pipelines: (Pipeline | BrokenPipeline)[], want: string | null, names?: string[] | null): string | null;
+export declare function pipelineOption(p: Pipeline | BrokenPipeline): { name: string; tags: string[]; note: string; error: boolean };
+export declare function startedRun(stdout: string): string | null;
+export declare function wouldStart(argv: string[]): string;
 export declare function runNextChoices(
   run: RunStatusJson,
   pipelines: (Pipeline | BrokenPipeline)[],
