@@ -193,7 +193,7 @@ test('a failed slice escalates with its id', async () => {
     assert.deepEqual(await run(fx), {
       status: 'escalate',
       outputs: {},
-      reason: `percolator.fan_out: slice(s) ${sid(fx, 2)} failed; fix and perc resume each, then perc resume ${fx.parent.runId}`,
+      reason: `percolator.fan_out: slice(s) ${sid(fx, 2)} failed; perc delete each (its branch stays), then perc resume ${fx.parent.runId} to run it again`,
     });
   } finally {
     await fx.e.cleanup();
@@ -232,6 +232,27 @@ test('a resume continues only the unfinished slices', async () => {
     assert.equal((await run(fx)).status, 'pass');
     assert.deepEqual(fx.drivers(), [sid(fx, 2), sid(fx, 3)]);
     assert.equal((await readFanOut(fx.dir))!.children.length, 3);
+  } finally {
+    await fx.e.cleanup();
+  }
+});
+
+test('a failed slice whose run was deleted starts again on a resume', async () => {
+  const fx = await setup('## One\n\na\n\n## Two\n\nb\n');
+  try {
+    fx.sleeps.push(async () => {
+      await fx.setStatus(sid(fx, 1), 'completed');
+      await fx.setStatus(sid(fx, 2), 'failed');
+    });
+    assert.equal((await run(fx)).status, 'escalate');
+    // what `perc delete <slice-id>` leaves: no run dir for the slice
+    await fs.rm(runDir(fx.e.home, sid(fx, 2)), { recursive: true, force: true });
+    for (const t of fx.e.deps.hc.terminals.values()) t.state = 'finished';
+    fx.sleeps.push(async () => {
+      await fx.setStatus(sid(fx, 2), 'completed');
+    });
+    assert.equal((await run(fx)).status, 'pass');
+    assert.equal(fx.drivers().filter((id) => id === sid(fx, 2)).length, 2, 'slice 2 is driven again');
   } finally {
     await fx.e.cleanup();
   }
