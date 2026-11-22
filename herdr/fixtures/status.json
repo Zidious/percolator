@@ -1,14 +1,18 @@
 {
-  "schema": 1,
+  "schema": 2,
   "runs": [
     {
       "id": "t8-20261121-091502-a41c",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#8",
         "number": 8,
         "title": "add a security scan after implement",
         "url": "https://github.com/Zidious/percolator/issues/8"
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t8-20261121-091502-a41c",
       "worktree": "/home/me/src/percolator/.worktrees/t8-20261121-091502-a41c",
@@ -296,12 +300,16 @@
     },
     {
       "id": "t3-20261120-142211-e012",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#3",
         "number": 3,
         "title": "perc init and the percolator-config skill",
         "url": "https://github.com/Zidious/percolator/issues/3"
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t3-20261120-142211-e012",
       "worktree": "/home/me/src/percolator/.worktrees/t3-20261120-142211-e012",
@@ -465,12 +473,16 @@
     },
     {
       "id": "t2-20261121-005347-f0ab",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#2",
         "number": 2,
         "title": "refactor(cli): replace node:util parseArgs with meow",
         "url": "https://github.com/Zidious/percolator/issues/2"
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t2-20261121-005347-f0ab",
       "worktree": "/home/me/src/percolator/.worktrees/t2-20261121-005347-f0ab",
@@ -618,12 +630,16 @@
     },
     {
       "id": "t4-20261121-061230-77ab",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#4",
         "number": 4,
         "title": "retry flaky gh calls with backoff",
         "url": "https://github.com/Zidious/percolator/issues/4"
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t4-20261121-061230-77ab",
       "worktree": "/home/me/src/percolator/.worktrees/t4-20261121-061230-77ab",
@@ -845,12 +861,16 @@
     },
     {
       "id": "t12-20261121-020000-9b1d",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#12",
         "number": 12,
         "title": "split the run state into smaller files",
         "url": "https://github.com/Zidious/percolator/issues/12"
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t12-20261121-020000-9b1d",
       "worktree": "/home/me/src/percolator/.worktrees/t12-20261121-020000-9b1d",
@@ -953,12 +973,16 @@
     },
     {
       "id": "t9-20261120-215502-c3d9",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#9",
         "number": 9,
         "title": "stream hc output into the driver pane",
         "url": "https://github.com/Zidious/percolator/issues/9"
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t9-20261120-215502-c3d9",
       "worktree": "/home/me/src/percolator/.worktrees/t9-20261120-215502-c3d9",
@@ -1075,12 +1099,16 @@
     },
     {
       "id": "t11-20261121-001500-5e7f",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#11",
         "number": 11,
         "title": "document the config layers",
         "url": "https://github.com/Zidious/percolator/issues/11"
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t11-20261121-001500-5e7f",
       "worktree": "/home/me/src/percolator/.worktrees/t11-20261121-001500-5e7f",
@@ -1183,12 +1211,16 @@
     },
     {
       "id": "t13-20261121-030000-0c2e",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#13",
         "number": 13,
         "title": "trust prompt on a fresh machine",
         "url": "https://github.com/Zidious/percolator/issues/13"
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t13-20261121-030000-0c2e",
       "worktree": "/home/me/src/percolator/.worktrees/t13-20261121-030000-0c2e",
@@ -1296,10 +1328,14 @@
     },
     {
       "id": "t14-20261121-032000-6a1f",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#14",
         "number": 14
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t14-20261121-032000-6a1f",
       "worktree": "/home/me/src/percolator/.worktrees/t14-20261121-032000-6a1f",
@@ -1332,10 +1368,14 @@
     },
     {
       "id": "t15-20261121-013000-d2c4",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#15",
         "number": 15
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t15-20261121-013000-d2c4",
       "worktree": "/home/me/src/percolator/.worktrees/t15-20261121-013000-d2c4",
@@ -1439,12 +1479,16 @@
     },
     {
       "id": "t16-20261121-040000-1a2b",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#16",
         "number": 16,
         "title": "tighten pre-implement checks",
         "url": "https://github.com/Zidious/percolator/issues/16"
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t16-20261121-040000-1a2b",
       "worktree": "/home/me/src/percolator/.worktrees/t16-20261121-040000-1a2b",
@@ -1707,12 +1751,16 @@
     },
     {
       "id": "t17-20261121-050000-3c4d",
+      "pipeline": "feature",
+      "inputs": {},
       "ticket": {
         "ref": "github.com/zidious/percolator#17",
         "number": 17,
         "title": "split implement into two passes",
         "url": "https://github.com/Zidious/percolator/issues/17"
       },
+      "parent": null,
+      "children": [],
       "repo": "/home/me/src/percolator",
       "branch": "percolator/t17-20261121-050000-3c4d",
       "worktree": "/home/me/src/percolator/.worktrees/t17-20261121-050000-3c4d",
@@ -1878,6 +1926,263 @@
       "terminals": {
         "driver": "t17_driver_a0_9e27",
         "implement.1": "t17_implement-1_a1_0641"
+      },
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "dd-alert-20261121-060000-7e3a",
+      "pipeline": "dd-alert",
+      "inputs": {
+        "alert_url": "https://app.datadoghq.com/monitors/12345678?group=service%3Aapi"
+      },
+      "ticket": null,
+      "parent": null,
+      "children": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/dd-alert-20261121-060000-7e3a",
+      "worktree": "/home/me/src/percolator/.worktrees/dd-alert-20261121-060000-7e3a",
+      "createdAt": "2026-11-21T06:00:00.000Z",
+      "status": "waiting",
+      "currentStep": "sign-off",
+      "driver": {
+        "alive": true,
+        "terminal": "dd-alert_driver_a0_6e1b",
+        "space": "w1:s10",
+        "shown": false
+      },
+      "attention": {
+        "kind": "gate",
+        "since": "2026-11-21T06:04:10.000Z",
+        "message": "approve or reject here (no issue to comment on)",
+        "review": [
+          {
+            "step": "diagnose",
+            "key": "diagnosis",
+            "path": "samples/findings.md"
+          }
+        ],
+        "actions": [
+          "approve",
+          "reject"
+        ]
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T06:00:01.000Z",
+          "endedAt": "2026-11-21T06:00:02.000Z"
+        },
+        {
+          "id": "gather",
+          "stage": "gather",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T06:00:03.000Z",
+          "endedAt": "2026-11-21T06:02:00.000Z"
+        },
+        {
+          "id": "diagnose",
+          "stage": "diagnose",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {
+            "diagnosis": "samples/findings.md"
+          },
+          "startedAt": "2026-11-21T06:02:01.000Z",
+          "endedAt": "2026-11-21T06:04:05.000Z"
+        },
+        {
+          "id": "sign-off",
+          "stage": "diagnose",
+          "role": "node",
+          "kind": "gate",
+          "status": "waiting",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "report",
+          "stage": "report",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T06:00:01.000Z",
+          "endedAt": "2026-11-21T06:00:02.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "gather",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T06:00:03.000Z",
+          "endedAt": "2026-11-21T06:02:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "diagnose",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T06:02:01.000Z",
+          "endedAt": "2026-11-21T06:04:05.000Z",
+          "outputs": {
+            "diagnosis": "samples/findings.md"
+          }
+        },
+        {
+          "kind": "attempt",
+          "step": "sign-off",
+          "attempt": 1,
+          "status": "waiting",
+          "startedAt": "2026-11-21T06:04:10.000Z",
+          "outputs": {}
+        }
+      ],
+      "terminals": {
+        "driver": "dd-alert_driver_a0_6e1b"
+      },
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t21-hotfix-20261121-070000-4b5c",
+      "pipeline": "hotfix",
+      "inputs": {},
+      "ticket": {
+        "ref": "github.com/zidious/percolator#21",
+        "number": 21,
+        "title": "status crashes on an empty run dir",
+        "url": "https://github.com/Zidious/percolator/issues/21"
+      },
+      "parent": null,
+      "children": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t21-hotfix-20261121-070000-4b5c",
+      "worktree": "/home/me/src/percolator/.worktrees/t21-hotfix-20261121-070000-4b5c",
+      "createdAt": "2026-11-21T07:00:00.000Z",
+      "status": "running",
+      "currentStep": "fix",
+      "driver": {
+        "alive": true,
+        "terminal": "t21_driver_a0_43f3",
+        "space": "w1:s11",
+        "shown": false
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T07:00:01.000Z",
+          "endedAt": "2026-11-21T07:00:02.000Z"
+        },
+        {
+          "id": "reproduce",
+          "stage": "reproduce",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T07:00:03.000Z",
+          "endedAt": "2026-11-21T07:03:00.000Z"
+        },
+        {
+          "id": "fix",
+          "stage": "fix",
+          "role": "core",
+          "kind": "agent",
+          "status": "running",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "fix",
+          "max": 3,
+          "atCap": "continue",
+          "round": 0
+        }
+      ],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T07:00:01.000Z",
+          "endedAt": "2026-11-21T07:00:02.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "reproduce",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T07:00:03.000Z",
+          "endedAt": "2026-11-21T07:03:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "fix",
+          "attempt": 1,
+          "status": "running",
+          "startedAt": "2026-11-21T07:03:00.000Z",
+          "outputs": {}
+        }
+      ],
+      "terminals": {
+        "driver": "t21_driver_a0_43f3"
       },
       "pr": null,
       "graph": "full"

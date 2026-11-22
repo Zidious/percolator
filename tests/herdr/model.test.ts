@@ -78,6 +78,8 @@ import {
   historyLabel,
   readFullShown,
   ticketTitle,
+  pipelineChip,
+  runLabel,
   sortRuns,
   stepTone,
   took,
@@ -122,7 +124,7 @@ test('the fixture covers every attention kind, a running run, a completed run an
 
 test('the fixture has a run before intake wrote its title and url, one read from history, and a cleaned failed run', () => {
   const rs = runs().filter((r): r is Readable => r.status !== 'unreadable');
-  assert.ok(rs.some((r) => r.ticket.title === undefined && r.ticket.url === undefined));
+  assert.ok(rs.some((r) => r.ticket !== null && r.ticket.title === undefined && r.ticket.url === undefined));
   assert.ok(rs.some((r) => r.graph === 'history'));
   assert.ok(rs.some((r) => r.status === 'failed' && r.attention === undefined));
 });
@@ -130,13 +132,15 @@ test('the fixture has a run before intake wrote its title and url, one read from
 test("the fixture's terminals are named as perc names them (names, not Herdr addresses)", () => {
   for (const r of runs()) {
     if (r.status === 'unreadable') continue;
-    assert.equal(r.driver.terminal, driverName(r.id, r.ticket.ref), r.id);
+    // a ticketless run's terminals are named after its pipeline
+    const ticket = r.ticket?.ref ?? r.pipeline;
+    assert.equal(r.driver.terminal, driverName(r.id, ticket), r.id);
     for (const [step, name] of Object.entries(r.terminals)) {
       const st = r.steps.find((s) => s.id === step);
       // without a timeline, `attempts` counts finished records, so a live step runs attempt `attempts + 1`
       const live = !Array.isArray(r.timeline) && (st?.status === 'running' || st?.status === 'waiting');
       const attempts: number = (st?.attempts ?? 0) + (live ? 1 : 0);
-      assert.equal(name, step === 'driver' ? driverName(r.id, r.ticket.ref) : terminalName(r.id, r.ticket.ref, step, attempts), `${r.id} ${step}`);
+      assert.equal(name, step === 'driver' ? driverName(r.id, ticket) : terminalName(r.id, ticket, step, attempts), `${r.id} ${step}`);
     }
     if (r.attention?.terminal !== undefined) assert.equal(r.attention.terminal, r.terminals[r.currentStep!], r.id);
   }
@@ -189,7 +193,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t12', 't2', 't11', 't9', 't4', 't17', 't16', 't14', 't13', 't8', 't15', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['dd', 't12', 't2', 't11', 't9', 't4', 't21', 't17', 't16', 't14', 't13', 't8', 't15', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -197,7 +201,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -277,21 +281,63 @@ test('actionArgv refuses a reject without feedback', () => {
 });
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
-  assert.equal(needsCount(runs()), 5);
-  assert.equal(runningCount(runs()), 5);
+  assert.equal(needsCount(runs()), 6);
+  assert.equal(runningCount(runs()), 6);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
 });
 
-test('readStatus accepts schema 1', () => {
+test('readStatus accepts schema 2', () => {
   assert.deepEqual(readStatus(RAW), { ok: true, data: load() });
 });
 
-test('readStatus refuses another schema and says to update the panel', () => {
-  assert.deepEqual(readStatus('{"schema":2,"runs":[]}'), {
+test('readStatus refuses schema 1', () => {
+  assert.deepEqual(readStatus('{"schema":1,"runs":[]}'), {
     ok: false,
-    error: 'perc status --json returned schema 2; update the Percolator panel',
+    error: 'perc status --json returned schema 1; update the Percolator panel',
   });
+});
+
+test('readStatus refuses another schema and says to update the panel', () => {
+  assert.deepEqual(readStatus('{"schema":3,"runs":[]}'), {
+    ok: false,
+    error: 'perc status --json returned schema 3; update the Percolator panel',
+  });
+});
+
+test('status and model functions handle ticket: null', () => {
+  const dd = readable('dd-alert');
+  assert.equal(dd.ticket, null);
+  assert.deepEqual(rowState(dd), { tone: 'blocked', text: 'your turn · sign-off' });
+  assert.equal(ticketTitle(dd), 'dd-alert · https://app.datadoghq.com/monitors/1234…');
+  assert.equal(ticketTitle(dd).length, 'dd-alert · '.length + 40);
+  assert.deepEqual(notice(dd), {
+    title: 'dd-alert needs you',
+    body: 'approve or reject here (no issue to comment on)',
+    level: 'warning',
+    action: { name: `percolator-cup.open/${dd.id}` },
+  });
+  assert.deepEqual(cupLabel([dd]), { text: '1 needs you', tone: 'blocked' });
+  assert.equal(runLabel(dd), 'dd-alert');
+  assert.equal(runLabel(readable('t2')), '#2');
+  assert.deepEqual(deleteConfirm(dd), {
+    title: 'Delete dd-alert?',
+    detail: `Deletes run ${dd.id}: its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${dd.branch} is kept. The run is stopped first.`,
+  });
+  assert.equal(deleteFinishedConfirm([{ ...dd, status: 'completed' }])!.detail.startsWith(`Deletes ${dd.id} (dd-alert): `), true);
+  assert.equal(guessRepo('github.com/zidious/percolator#99', [dd]), null);
+  assert.equal(runNextChoices({ ...dd, status: 'completed' }, [], [dd]), null);
+});
+
+test('ticketTitle of a ticketless run without inputs is its pipeline', () => {
+  assert.equal(ticketTitle({ ...readable('dd-alert'), inputs: {} }), 'dd-alert');
+  assert.equal(ticketTitle({ ...readable('dd-alert'), inputs: { alert_url: 'short' } }), 'dd-alert · short');
+});
+
+test('pipelineChip is null on feature and the name otherwise', () => {
+  assert.equal(pipelineChip(readable('t2')), null);
+  assert.equal(pipelineChip(readable('t21')), 'hotfix');
+  assert.equal(pipelineChip(readable('dd-alert')), 'dd-alert');
 });
 
 test('readStatus passes on parseStatus errors', () => {
@@ -375,8 +421,8 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
   assert.equal(moveRow([], 'gone', 1), null);
 });
 
-test('the fixture has timelines for t8, t3, t2, t4, t16 and t17, and none for the rest (an older perc)', () => {
-  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17']);
+test('the fixture has timelines for t8, t3, t2, t4, t16, t17, dd-alert and t21, and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17', 'dd', 't21']);
 });
 
 test('roundView defaults to the latest round and marks it running', () => {
@@ -422,7 +468,7 @@ test('stepAttempts is one step attempts in order', () => {
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
-  assert.deepEqual(cupLabel(runs()), { text: '5 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel(runs()), { text: '6 need you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
   assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
@@ -614,13 +660,13 @@ test('deleteConfirm names the run, says what is lost and kept, and that an activ
   const done = readable('t3');
   assert.deepEqual(deleteConfirm(done), {
     title: 'Delete #3?',
-    detail: `Deletes run ${done.id} (${done.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${done.branch} is kept.`,
+    detail: `Deletes run ${done.id} (${done.ticket!.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${done.branch} is kept.`,
   });
   for (const id of ['t8', 't2', 't4']) {
     const r = readable(id);
     assert.equal(
       deleteConfirm(r).detail,
-      `Deletes run ${r.id} (${r.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${r.branch} is kept. The run is stopped first.`,
+      `Deletes run ${r.id} (${r.ticket!.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${r.branch} is kept. The run is stopped first.`,
       id,
     );
   }
