@@ -786,3 +786,96 @@ test('a v1 run resumes against the same feature graph', async () => {
     await e.cleanup();
   }
 });
+
+const EPIC = [
+  TRACKER,
+  '    pipelines:',
+  '      epic:',
+  '        stages: [intake, plan, implement, deliver]',
+  '        exit: pr',
+  '        bindings:',
+  "          plan: { command: [plan-script, '{outputs_dir}'] }",
+  "          implement: { command: [implement-script, '{outputs_dir}'] }",
+  '        fan_out: { stage: implement, slices: { from: plan, output: slices }, max_parallel: 1 }',
+].join('\n');
+
+/** An epic run whose plan writes two slices; `onPoll` runs on each of the fan-out's polls. */
+async function epicRun() {
+  const e = await setup(EPIC);
+  e.onWait.fn = async (t) => {
+    if (t.labels['percolator.step'] !== 'plan') return false;
+    await fs.writeFile(path.join(t.argv.at(-1)!, 'plan.md'), 'The plan.\n');
+    await fs.writeFile(path.join(t.argv.at(-1)!, 'slices.md'), '## Parser\n\nParse it.\n\n## Printer\n\nPrint it.\n');
+    t.state = 'finished';
+    t.exitCode = 0;
+    return true;
+  };
+  const meta = await prepareRun({ ticket: '#5', pipeline: 'epic', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+  const sliceDir = (i: number) => path.join(e.home, '.percolator', 'runs', `${meta.runId}-s${i}`);
+  /** the started, unfinished slices */
+  const unfinished = async () => {
+    const out: number[] = [];
+    for (const i of [1, 2]) {
+      if (!(await exists(path.join(sliceDir(i), 'state.json')))) continue;
+      const s = (await loadState(sliceDir(i))).status;
+      if (s !== 'completed' && s !== 'failed') out.push(i);
+    }
+    return out;
+  };
+  return { e, meta, sliceDir, unfinished };
+}
+
+const driverRuns = (e: Env) =>
+  e.deps.hc.calls
+    .filter((c) => c[0] === 'run' && (c[1] as { labels: Record<string, string> }).labels['percolator.role'] === 'driver')
+    .map((c) => (c[1] as { argv: string[] }).argv.at(-1));
+
+test('a fan-out pipeline runs percolator.fan_out: it starts each slice and completes when they do', async () => {
+  const { e, meta, sliceDir, unfinished } = await epicRun();
+  try {
+    e.onSleep.fn = async () => {
+      for (const i of await unfinished()) await saveState(sliceDir(i), { ...(await loadState(sliceDir(i))), status: 'completed' });
+    };
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    assert.deepEqual(state.history.map((h) => h.stepId), ['intake', 'plan', 'implement']);
+    const done = state.history.at(-1)!.outputs['slices_done']!;
+    assert.equal(await fs.readFile(path.join(e.runDir(meta), done), 'utf8'), '1. Parser → completed\n2. Printer → completed\n');
+    assert.deepEqual(driverRuns(e), [`${meta.runId}-s1`, `${meta.runId}-s2`]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a fan-out slice runs percolator.seed, then its stages to a PR on its own branch', async () => {
+  const { e, meta, sliceDir, unfinished } = await epicRun();
+  try {
+    // each started slice is driven here, in place of its driver terminal (its own sleeps pass through)
+    let busy = false;
+    e.onSleep.fn = async () => {
+      if (busy) return;
+      busy = true;
+      for (const i of await unfinished()) {
+        const child = JSON.parse(await fs.readFile(path.join(sliceDir(i), 'run.json'), 'utf8')) as RunMeta;
+        e.deps.hc.terminals.get(child.driver)!.state = 'finished';
+        const end = await drive(child.runId, e.deps);
+        assert.equal(end.status, 'completed', JSON.stringify(end.history));
+        assert.deepEqual(end.history.map((h) => h.stepId), ['intake', 'implement', 'deliver']);
+      }
+      busy = false;
+    };
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', e.out.join('\n'));
+    const slice = (await loadState(sliceDir(2))).history[0]!.outputs['slice']!;
+    assert.equal(await fs.readFile(path.join(sliceDir(2), slice), 'utf8'), '# Printer\n\nPrint it.\n');
+    assert.deepEqual(e.deps.gh.prs.map((p) => p.head), [`percolator/${meta.runId}-s1`, `percolator/${meta.runId}-s2`]);
+    for (const pr of e.deps.gh.prs) assert.match(pr.body, /^Closes #5$/m);
+    const done = state.history.at(-1)!.outputs['slices_done']!;
+    assert.equal(
+      await fs.readFile(path.join(e.runDir(meta), done), 'utf8'),
+      `1. Parser → ${e.deps.gh.prs[0]!.url}\n2. Printer → ${e.deps.gh.prs[1]!.url}\n`,
+    );
+  } finally {
+    await e.cleanup();
+  }
+});

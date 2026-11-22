@@ -25,6 +25,7 @@ import { ensureWorktree } from '../workspace/worktree.ts';
 import { acquireDriverLock, drivenByProcess, otherLiveLock } from './lock.ts';
 import type { Liveness } from './lock.ts';
 import { startLinkedRun } from './child.ts';
+import { fanOut, percolatorSeed } from './fan-out.ts';
 import { newRunId, readRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
@@ -222,6 +223,10 @@ async function driveHeld(
         ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
       }),
       'percolator.route': routeHandoff({ deps, meta, spec: v.pipeline, specs: v.pipelines }),
+      'percolator.fan_out': fanOut({ deps, meta, spec: v.pipeline }),
+      ...(v.pipeline.fan_out !== undefined
+        ? { 'percolator.seed': percolatorSeed({ runDir: dir, meta, home: deps.home, output: v.pipeline.fan_out.slices.output }) }
+        : {}),
       'github.private_fork_pr': githubPrivateForkPr({
         gh: deps.gh,
         runDir: dir,
