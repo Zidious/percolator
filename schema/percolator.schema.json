@@ -148,7 +148,7 @@
                       ]
                     },
                     "builtin": {
-                      "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
+                      "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
                       "type": "string"
                     },
                     "command": {
@@ -286,7 +286,7 @@
                         ]
                       },
                       "builtin": {
-                        "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
+                        "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
                         "type": "string"
                       },
                       "command": {
@@ -433,7 +433,7 @@
                   ]
                 },
                 "builtin": {
-                  "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
+                  "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
                   "type": "string"
                 },
                 "command": {
@@ -635,10 +635,16 @@
                   }
                 },
                 "exit": {
-                  "description": "How the pipeline ends: pr; runs the matching builtin on the last stage when it is unbound.",
+                  "description": "How the pipeline ends: pr, comment, issue, none, release, pr_review, private_fork_pr; runs the matching builtin on the last stage when it is unbound.",
                   "type": "string",
                   "enum": [
-                    "pr"
+                    "pr",
+                    "comment",
+                    "issue",
+                    "none",
+                    "release",
+                    "pr_review",
+                    "private_fork_pr"
                   ]
                 },
                 "ticket": {
@@ -751,7 +757,7 @@
                             ]
                           },
                           "builtin": {
-                            "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
+                            "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
                             "type": "string"
                           },
                           "command": {
@@ -889,7 +895,7 @@
                               ]
                             },
                             "builtin": {
-                              "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
+                              "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
                               "type": "string"
                             },
                             "command": {
@@ -1036,7 +1042,7 @@
                         ]
                       },
                       "builtin": {
-                        "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
+                        "description": "Builtin to run: github.intake or github.open_pr or github.comment or github.open_issues or percolator.report or github.release or github.pr_review or github.private_fork_pr (builtin nodes).",
                         "type": "string"
                       },
                       "command": {

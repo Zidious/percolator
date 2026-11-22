@@ -2,7 +2,7 @@ import { ConfigError } from '../config/load.ts';
 import { locate, slotKey } from '../config/locate.ts';
 import type { Locator, Where } from '../config/locate.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
-import { EXIT_BUILTIN, EXIT_KINDS } from '../tracker/index.ts';
+import { EXITS, EXIT_KINDS } from '../tracker/index.ts';
 import type { ExitKind } from '../tracker/index.ts';
 import { CORE_GROOM_GATE, FEATURE, STAGE_CONTRACTS } from './core.ts';
 import type { PipelineHeader } from './core.ts';
@@ -66,7 +66,8 @@ export class GraphError extends ConfigError {
   }
 }
 
-const EXIT_VERB: Record<ExitKind, string> = { pr: 'opens the PR' };
+/** What each input an exit needs is, for the error that asks for it. */
+const NEEDED_INPUT: Record<string, string> = { pr: 'the pull request to review', advisory: 'the GHSA id' };
 
 /**
  * Output keys each stage of a pipeline must write. feature keeps the core contracts; other pipelines
@@ -75,7 +76,6 @@ const EXIT_VERB: Record<ExitKind, string> = { pr: 'opens the PR' };
  */
 export function contractsFor(header: PipelineHeader, name: string): Record<string, string[]> {
   const stages = header.stages ?? [];
-  const exitOutputs: Record<ExitKind, string[]> = { pr: ['pr_url'] };
   const out: Record<string, string[]> = {};
   stages.forEach((stage, i) => {
     const core = (STAGE_CONTRACTS as Record<string, { requiredOutputs: readonly string[] }>)[stage]?.requiredOutputs;
@@ -85,10 +85,15 @@ export function contractsFor(header: PipelineHeader, name: string): Record<strin
     }
     const own = header.outputs?.[stage];
     if (stage === 'intake') out[stage] = [...new Set(['ticket', ...(own ?? [])])];
-    else if (i === stages.length - 1 && header.exit !== undefined) out[stage] = [...new Set([...exitOutputs[header.exit], ...(own ?? [])])];
+    else if (i === stages.length - 1 && header.exit !== undefined) out[stage] = [...new Set([...exitOutputs(header.exit), ...(own ?? [])])];
     else out[stage] = [...(own ?? core ?? [])];
   });
   return out;
+}
+
+function exitOutputs(kind: ExitKind): string[] {
+  const output = EXITS[kind].output;
+  return output === undefined ? [] : [output];
 }
 
 function describeNode(d: NodeDef): string {
@@ -135,14 +140,14 @@ export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { p
     bindings.intake ??= { value: [{ builtin: 'github.intake' }], source: 'core', locked: false };
     const bound = bindings[exitStage];
     if (bound === undefined && exit !== undefined) {
-      bindings[exitStage] = { value: [{ builtin: EXIT_BUILTIN[exit] }], source: 'core', locked: false };
+      bindings[exitStage] = { value: [{ builtin: EXITS[exit].builtin }], source: 'core', locked: false };
     }
   }
 
   const unbound = stages.filter((s) => bindings[s] === undefined);
   if (!isFeature && unbound.includes(exitStage) && exit === undefined) {
     throw new GraphError(
-      `pipeline "${name}" has no exit: bind its last stage "${exitStage}" to one of ${EXIT_KINDS.map((k) => EXIT_BUILTIN[k]).join(', ')} or set exit:`,
+      `pipeline "${name}" has no exit: bind its last stage "${exitStage}" to one of ${EXIT_KINDS.map((k) => EXITS[k].builtin).join(', ')} or set exit:`,
       at(''),
     );
   }
@@ -164,26 +169,43 @@ export function buildGraph(merged: Readonly<Merged | MergedPipeline>, home?: { p
   if (exitBinding.value.some((d) => d.kind === 'agent' || d.agent !== undefined)) {
     const kind = exit ?? 'pr';
     throw new GraphError(
-      `${exitStage} cannot be an agent node: Percolator ${EXIT_VERB[kind]} itself (use { builtin: ${EXIT_BUILTIN[kind]} })`,
+      `${exitStage} cannot be an agent node: Percolator ${EXITS[kind].verb} itself (use { builtin: ${EXITS[kind].builtin} })`,
       exitAt(),
     );
   }
   if (!isFeature) {
     const only = exitBinding.value.length === 1 ? exitBinding.value[0]! : undefined;
     if (exit === undefined) {
-      exit = EXIT_KINDS.find((k) => only?.builtin === EXIT_BUILTIN[k]);
+      exit = EXIT_KINDS.find((k) => only?.builtin === EXITS[k].builtin);
       if (exit === undefined) {
         throw new GraphError(
-          `pipeline "${name}" has no exit: bind its last stage "${exitStage}" to one of ${EXIT_KINDS.map((k) => EXIT_BUILTIN[k]).join(', ')} or set exit:`,
+          `pipeline "${name}" has no exit: bind its last stage "${exitStage}" to one of ${EXIT_KINDS.map((k) => EXITS[k].builtin).join(', ')} or set exit:`,
           at(''),
         );
       }
-    } else if (only?.builtin !== EXIT_BUILTIN[exit]) {
-      const wrong = exitBinding.value.find((d) => d.builtin !== EXIT_BUILTIN[exit!]) ?? exitBinding.value[0]!;
+    } else if (only?.builtin !== EXITS[exit].builtin) {
+      const wrong = exitBinding.value.find((d) => d.builtin !== EXITS[exit!].builtin) ?? exitBinding.value[0]!;
       throw new GraphError(
-        `exit ${exit} runs ${EXIT_BUILTIN[exit]}, but stage "${exitStage}" is bound to ${describeNode(wrong)}; bind it to { builtin: ${EXIT_BUILTIN[exit]} } or change exit`,
+        `exit ${exit} runs ${EXITS[exit].builtin}, but stage "${exitStage}" is bound to ${describeNode(wrong)}; bind it to { builtin: ${EXITS[exit].builtin} } or change exit`,
         exitAt(),
       );
+    }
+    // what the exit needs from the pipeline: a ticket, an input, or (release) a tag
+    const needs = EXITS[exit].needs;
+    if (needs?.ticket && header.ticket === 'none') {
+      throw new GraphError(
+        `exit ${exit} posts on the run's issue, but pipeline "${name}" has ticket: none; set ticket: required or pick another exit`,
+        at(''),
+      );
+    }
+    if (needs?.input !== undefined && header.inputs?.[needs.input] === undefined) {
+      throw new GraphError(
+        `exit ${exit} needs input "${needs.input}" (${NEEDED_INPUT[needs.input]}); declare it under pipelines.${name}.inputs`,
+        at(''),
+      );
+    }
+    if (exit === 'release' && header.inputs?.tag === undefined && !stages.slice(0, -1).some((s) => header.outputs?.[s]?.includes('tag'))) {
+      throw new GraphError('exit release needs a tag: declare input "tag" or list "tag" under outputs of an earlier stage', at(''));
     }
   }
 
