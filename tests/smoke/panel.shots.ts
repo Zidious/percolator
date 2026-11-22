@@ -10,14 +10,20 @@
 // fixtures, and drives the panel with `herdr-app do`: layout.switch, layout.resize, percolator-cup.open/<id>,
 // percolator.key/<key>, percolator.place, app.theme, app.zoom_in/out. In `finally` it puts back the mods, settings.json, the
 // zoom, the panel's width and shown/hidden state and the layout, and prints whether every backed-up file hashes equal.
-// herdr-app: $HERDR_APP, else %LOCALAPPDATA%/Programs/herdr-app/herdr-app.exe on Windows, else `herdr-app` on PATH.
+// Ctrl-C (SIGINT, SIGTERM, SIGBREAK) after the backup stops the shots and runs the same restore; a second one during the
+// restore is ignored. Every herdr-app call times out after 30s (60s for shot), naming the command, and the restore follows.
+// Themes: with --light/--dark the theme goes back to settings.json's "theme"; when settings.json names none (Herdr's
+// default) the original is unknown to app.theme, so the summary says NOT restored and asks you to check the theme.
+// herdr-app: $HERDR_APP (a path, or a JSON argv such as ["node","stub.js"]), else
+// %LOCALAPPDATA%/Programs/herdr-app/herdr-app.exe on Windows, else `herdr-app` on PATH.
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { herdrAppHome } from '../../src/herdr/link.ts';
-import { nodeExec } from '../../src/util/exec.ts';
+import { setTimeout as wait } from 'node:timers/promises';
 
 const { values } = parseArgs({
   options: {
@@ -36,19 +42,54 @@ const appHome = herdrAppHome(process.env, os.homedir());
 const mods = ['percolator', 'percolator-cup'];
 const BLOCK = 'percolator-panel';
 const WIDTHS = [280, 380, 720];
-const app =
-  process.env['HERDR_APP'] ??
-  (process.platform === 'win32'
-    ? path.join(process.env['LOCALAPPDATA'] ?? path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'herdr-app', 'herdr-app.exe')
-    : 'herdr-app');
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+const appEnv = process.env['HERDR_APP'];
+const [appFile, ...appArgs]: string[] = appEnv?.startsWith('[')
+  ? (JSON.parse(appEnv) as string[])
+  : [
+      appEnv ??
+        (process.platform === 'win32'
+          ? path.join(process.env['LOCALAPPDATA'] ?? path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'herdr-app', 'herdr-app.exe')
+          : 'herdr-app'),
+    ];
+const TIMEOUT = 30_000;
+const SHOT_TIMEOUT = 60_000;
 
-async function herdr(args: string[]): Promise<string> {
-  const res = await nodeExec(app, args);
-  if (res.code !== 0 || /"error"/.test(res.stdout)) {
-    throw new Error(`herdr-app ${args.join(' ')} failed: ${(res.stdout + res.stderr).trim()}`);
+// Ctrl-C and friends abort the shots: the call in flight is killed, the next sleep or call throws, and `finally` restores.
+const stop = new AbortController();
+let restoring = false;
+const SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', ...(process.platform === 'win32' ? (['SIGBREAK'] as const) : [])];
+function onSignal(sig: NodeJS.Signals): void {
+  if (restoring) {
+    console.log(`${sig}: the restore is in progress; wait for it to finish`);
+    return;
   }
-  return res.stdout;
+  console.log(`${sig}: stopping the shots, then restoring`);
+  stop.abort(new Error(`interrupted (${sig})`));
+}
+const sleep = (ms: number): Promise<void> => wait(ms, undefined, { signal: stop.signal }).catch(() => {
+  throw stop.signal.reason as Error;
+});
+
+/** One herdr-app call, argv only, with a timeout; while shooting, an interrupt kills it. Never a shell. */
+function herdr(args: string[]): Promise<string> {
+  const what = `herdr-app ${args.slice(0, 2).join(' ')}`;
+  if (!restoring && stop.signal.aborted) return Promise.reject(stop.signal.reason as Error);
+  const timeout = args[0] === 'shot' ? SHOT_TIMEOUT : TIMEOUT;
+  return new Promise((resolve, reject) => {
+    execFile(
+      appFile!,
+      [...appArgs, ...args],
+      { windowsHide: true, timeout, maxBuffer: 16 * 1024 * 1024, ...(restoring ? {} : { signal: stop.signal }) },
+      (err, stdout, stderr) => {
+        if (err && !restoring && stop.signal.aborted) return reject(stop.signal.reason as Error);
+        const e = err as (NodeJS.ErrnoException & { killed?: boolean }) | null;
+        if (e?.killed) return reject(new Error(`${what} timed out after ${timeout / 1000}s; is Herdr open and responding?`));
+        if (e?.code === 'ENOENT') return reject(new Error(`${appFile} not found; set HERDR_APP`));
+        if (err || /"error"/.test(stdout)) return reject(new Error(`${what} failed: ${(stdout + stderr).trim() || err?.message}`));
+        resolve(stdout);
+      },
+    );
+  });
 }
 const run = (name: string, args?: object): Promise<string> =>
   herdr(args === undefined ? ['do', name] : ['do', name, JSON.stringify(args)]);
@@ -111,6 +152,7 @@ const layoutFile = path.join(appHome, 'layouts', 'percolator.json');
 for (const m of mods) await fs.cp(path.join(appHome, 'mods', m), path.join(backup, 'mods', m), { recursive: true });
 await fs.copyFile(settingsFile, path.join(backup, 'settings.json'));
 const before = await hashes(backup);
+const wasTheme: unknown = JSON.parse(await fs.readFile(settingsFile, 'utf8')).theme;
 const was = await status();
 const layoutText = await fs.readFile(layoutFile, 'utf8').catch(() => null);
 const block = layoutText ? findBlock(JSON.parse(layoutText)) : null;
@@ -128,6 +170,9 @@ function findBlock(node: { id?: string; children?: unknown[]; size?: { px?: numb
 }
 
 await fs.mkdir(out, { recursive: true });
+for (const sig of SIGNALS) process.on(sig, onSignal);
+let themeChanged = false;
+let failure: Error | null = null;
 try {
   const status0 = JSON.parse(await fs.readFile(path.join(fixtures, 'status.json'), 'utf8')) as { runs: { id: string }[] };
   const runs = values.runs ? values.runs.split(',') : status0.runs.map((r) => r.id);
@@ -139,7 +184,10 @@ try {
   await run('layout.switch', { name: 'percolator' });
 
   for (const theme of themes.length ? themes : ['current']) {
-    if (theme !== 'current') await run('app.theme', { name: theme });
+    if (theme !== 'current') {
+      themeChanged = true;
+      await run('app.theme', { name: theme });
+    }
     for (const id of runs) {
       for (const w of WIDTHS) {
         await resize(w);
@@ -195,8 +243,11 @@ try {
   await resize(380);
   await run('layout.show', { id: BLOCK });
   await shot('empty-active', 1500);
+} catch (e) {
+  failure = e as Error;
 } finally {
-  // ── restore ──
+  // ── restore ── (each step on its own, so one failure neither stops the others nor hides the first error)
+  restoring = true;
   const problems: string[] = [];
   const step = async (what: string, f: () => Promise<unknown>): Promise<void> => {
     try {
@@ -212,17 +263,26 @@ try {
   await step('panel width', () => resize(wasWidth));
   await step('panel shown', () => run(wasHidden ? 'layout.hide' : 'layout.show', { id: BLOCK }));
   await step('layout', () => run('layout.switch', { name: was.layout }));
+  await step('theme', async () => {
+    if (!themeChanged) return;
+    if (typeof wasTheme !== 'string') throw new Error('settings.json named no theme before, so app.theme cannot put it back; check the theme in Herdr');
+    await run('app.theme', { name: wasTheme });
+  });
   for (const m of mods) {
     await step(`mods/${m}`, async () => {
       await mirror(path.join(backup, 'mods', m), path.join(appHome, 'mods', m));
     });
   }
   await step('settings.json', () => fs.copyFile(path.join(backup, 'settings.json'), settingsFile));
-  const now = new Map<string, string>();
-  for (const m of mods) for (const [k, v] of await hashes(path.join(appHome, 'mods', m))) now.set(path.join('mods', m, k), v);
-  now.set('settings.json', sha(await fs.readFile(settingsFile)));
-  const differ = [...before].filter(([k, v]) => now.get(k) !== v).map(([k]) => k);
-  const extra = [...now.keys()].filter((k) => !before.has(k));
+  let differ: string[] = [];
+  let extra: string[] = [];
+  await step('hash check', async () => {
+    const now = new Map<string, string>();
+    for (const m of mods) for (const [k, v] of await hashes(path.join(appHome, 'mods', m))) now.set(path.join('mods', m, k), v);
+    now.set('settings.json', sha(await fs.readFile(settingsFile)));
+    differ = [...before].filter(([k, v]) => now.get(k) !== v).map(([k]) => k);
+    extra = [...now.keys()].filter((k) => !before.has(k));
+  });
   const ok = differ.length === 0 && extra.length === 0 && problems.length === 0;
   console.log(
     ok
@@ -232,5 +292,6 @@ try {
   const layoutNow = await fs.readFile(layoutFile, 'utf8').catch(() => null);
   console.log(`layouts/percolator.json ${layoutNow === layoutText ? 'unchanged' : 'differs from before (Herdr rewrote it)'}`);
   console.log(`${shots} shots in ${out}`);
-  if (!ok) process.exitCode = 1;
+  if (failure) console.log(`stopped: ${failure.message}`);
+  if (!ok || failure) process.exitCode = 1;
 }
