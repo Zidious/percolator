@@ -8,6 +8,7 @@ import { checkResumable, drive } from '../../src/run/drive.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
+import { writeDecision } from '../../src/tracker/gate.ts';
 import { GATE_MARKER } from '../../src/tracker/intake.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { FakeHc } from '../helpers/fake-hc.ts';
@@ -26,7 +27,7 @@ const BINDINGS = [
   '      deliver: { builtin: github.open_pr }',
 ];
 const TRACKER = '    tracker: { kind: github, approvers: [alice] }';
-const SCRIPT_OUTPUT: Record<string, string> = { plan: 'plan', implement: 'summary', review: 'findings' };
+const SCRIPT_OUTPUT: Record<string, string> = { plan: 'plan', implement: 'summary', review: 'findings', triage: 'triage' };
 
 type Env = RunEnv & {
   out: string[];
@@ -486,6 +487,63 @@ test('an unapproved groomed ticket from an earlier run is given to groom to refi
     const task = await fs.readFile(path.join(e.runDir(meta), 'steps', 'groom', '1', 'task.md'), 'utf8');
     const prev = path.join(e.runDir(meta), 'steps', 'intake', '1', 'outputs', 'previous_groom.md');
     assert.ok(task.includes(`previous_groom (from intake): ${prev}`), task);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+const DD_ALERT = [
+  TRACKER,
+  '    pipelines:',
+  '      dd-alert:',
+  '        stages: [intake, triage, deliver]',
+  '        exit: pr',
+  '        ticket: none',
+  '        inputs:',
+  '          alert_url: { required: true }',
+  '        bindings:',
+  "          triage: { command: [triage-script, '{outputs_dir}'] }",
+].join('\n');
+
+test('a ticketless run drives to its PR', async () => {
+  const e = await setup(DD_ALERT);
+  try {
+    const meta = await prepareRun(
+      { pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x' }, repoDir: e.root, configFile: e.configFile, profile: 'work' },
+      e.deps,
+    );
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    assert.deepEqual(state.history.map((h) => h.stepId), ['intake', 'triage', 'deliver']);
+    const ticket = await fs.readFile(path.join(e.runDir(meta), state.history[0]!.outputs['ticket']!), 'utf8');
+    assert.equal(ticket, `# dd-alert run ${meta.runId}\n\n## Inputs\n\n- alert_url: https://dd/x\n`);
+    const pr = e.deps.gh.prs[0]!;
+    assert.deepEqual({ repo: pr.repo, title: pr.title, head: pr.head }, { repo: REPO, title: `dd-alert: ${meta.runId}`, head: meta.branch });
+    assert.doesNotMatch(pr.body, /Closes/);
+    assert.deepEqual(calls(e, 'issue'), []);
+    assert.equal(e.out.at(-1), `run ${meta.runId} completed: ${pr.url}`);
+    // the triage terminal is named after the pipeline, as the run has no ticket
+    assert.equal(runs(e, 'triage').length, 1);
+    assert.equal((runs(e, 'triage')[0]![1] as { name: string }).name, name(meta, 'triage'));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a gate on a ticketless run waits locally and says how to answer it', async () => {
+  const e = await setup(DD_ALERT.replace("          triage: { command: [triage-script, '{outputs_dir}'] }", "          triage: { command: [triage-script, '{outputs_dir}'] }\n        nodes:\n          sign-off: { kind: gate, after: triage }"));
+  try {
+    const meta = await prepareRun(
+      { pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x' }, repoDir: e.root, configFile: e.configFile, profile: 'work' },
+      e.deps,
+    );
+    e.onSleep.fn = async () => {
+      if (await exists(path.join(e.runDir(meta), 'waiting.json'))) await writeDecision(e.runDir(meta), { decision: 'approve', by: 'bob' });
+    };
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state.history));
+    assert.ok(e.out.includes(`sign-off: waiting for approval: perc approve ${meta.runId} | perc reject ${meta.runId} <feedback>`), e.out.join('\n'));
+    assert.deepEqual(calls(e, 'comment'), []);
   } finally {
     await e.cleanup();
   }

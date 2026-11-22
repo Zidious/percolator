@@ -76,7 +76,7 @@ export async function checkResumable(
   const lock = await otherLiveLock(dir, liveness(deps));
   if (lock !== undefined) throw new Error(drivenByProcess(runId, lock));
 
-  const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile });
+  const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile, pipeline: meta.pipeline });
   if (state.graphFingerprint !== undefined && state.graphFingerprint !== graphFingerprint(v.graph)) {
     throw new Error(`run ${runId} was started with a different graph (config changed since); start a new run`);
   }
@@ -138,12 +138,14 @@ async function driveHeld(
     const body = `${JSON.stringify({ ...a, at: now().toISOString() }, null, 2)}\n`;
     attentionWrite = attentionWrite.then(() => writeFileAtomic(attentionFile, body)).catch(() => {});
   };
-  if (meta.ticket === undefined) throw new Error(`run ${runId} has no ticket, which this perc cannot drive yet`);
-  const ticket = parseTicket(meta.ticket);
+  const ticket = meta.ticket === undefined ? undefined : parseTicket(meta.ticket);
   const runtime = new HerdrRuntime({
     hc: deps.hc,
     runId,
-    ticket: meta.ticket,
+    // a ticketless run names its terminals after its pipeline
+    ticket: meta.ticket ?? meta.pipeline,
+    pipeline: meta.pipeline,
+    inputs: meta.inputs,
     runDir: dir,
     worktree: meta.worktree,
     branch: meta.branch,
@@ -157,10 +159,22 @@ async function driveHeld(
       'github.intake': githubIntake({
         gh: deps.gh,
         runDir: dir,
-        ticket,
+        ...(ticket !== undefined ? { ticket } : {}),
+        pipeline: meta.pipeline,
+        runId,
+        inputs: meta.inputs,
         ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
       }),
-      'github.open_pr': githubOpenPr({ gh: deps.gh, runDir: dir, worktree: meta.worktree, branch: meta.branch, base: meta.base }),
+      'github.open_pr': githubOpenPr({
+        gh: deps.gh,
+        runDir: dir,
+        worktree: meta.worktree,
+        branch: meta.branch,
+        base: meta.base,
+        repo: meta.repo,
+        pipeline: meta.pipeline,
+        runId,
+      }),
     },
     gate: githubGate({
       gh: deps.gh,
@@ -169,7 +183,8 @@ async function driveHeld(
       ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
       ...(sleep !== undefined ? { sleep } : {}),
       now: nowMs,
-      onWaiting: (stepId, url) => deps.out(`${stepId}: waiting for approval: ${url}`),
+      onWaiting: (stepId, url) =>
+        deps.out(`${stepId}: waiting for approval: ${url ?? `perc approve ${runId} | perc reject ${runId} <feedback>`}`),
     }),
     onAttention,
     ...(sleep !== undefined ? { sleep } : {}),

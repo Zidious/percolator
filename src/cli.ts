@@ -237,7 +237,9 @@ async function runResume(args: string[], deps: DriverDeps): Promise<number> {
 /** What a run is doing or waiting for, in one line; an hc failure is reported, never thrown. */
 async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: DriverDeps): Promise<string> {
   const waiting = await readWaiting(dir).catch(() => undefined);
-  const waitingText = waiting && `waiting for approval: ${waiting.commentUrl}`;
+  // a gate on a ticketless run posts nothing: it is answered only from here
+  const answer = waiting?.commentUrl ?? `perc approve ${meta.runId} | perc reject ${meta.runId} <feedback>`;
+  const waitingText = waiting && `waiting for approval: ${answer}`;
   if (state.status === 'running') {
     // a killed driver leaves waiting.json and attention.json behind, so liveness is always reported
     const a = await readAttention(dir);

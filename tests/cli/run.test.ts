@@ -354,6 +354,20 @@ test('status <id> of a run waiting at a gate whose driver died says so', async (
   }
 });
 
+test('status <id> of a gate that waits only locally says how to answer it', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'sign-off', stepDir: e.dir(meta.runId), since: NOW.toISOString() });
+    const r = await e.perc(['status', meta.runId]);
+    assert.equal(r.code, 0, r.err);
+    const id = meta.runId;
+    assert.equal(r.out.split('\n')[7], `  detail waiting for approval: perc approve ${id} | perc reject ${id} <feedback>; driver not running; perc resume ${id}`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('status during a foreground drive reports the driver pid, not a dead driver', async () => {
   const e = await setup();
   try {

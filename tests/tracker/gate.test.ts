@@ -687,3 +687,26 @@ test('a legacy comment url without an id records no decision in any comment', as
     await rm(e.runDir);
   }
 });
+
+test('a gate without an issue waits locally and posts nothing', async () => {
+  const e = await setup();
+  try {
+    await fsp.rm(path.join(e.runDir, 'issue.json'));
+    const waited: [string, string | undefined][] = [];
+    e.onSleep.fn = async (n) => {
+      if (n !== 1) return;
+      const w = await readWaiting(e.runDir);
+      assert.deepEqual(Object.keys(w!).sort(), ['since', 'stepDir', 'stepId']);
+      await writeDecision(e.runDir, { decision: 'approve', by: 'bob' });
+    };
+    const h = githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts, onWaiting: (s, u) => void waited.push([s, u]) });
+    const out = await h(e.step, e.ctx, e.io);
+    assert.equal(out.status, 'pass');
+    assert.deepEqual(waited, [['approve-groom', undefined]]);
+    assert.deepEqual(e.gh.calls.filter((c) => c.method !== 'user'), []);
+    assert.equal(await fsp.readFile(path.join(e.io.outputsDir, 'approval.md'), 'utf8'), 'Approved by @bob via perc approve.\n');
+    assert.equal(await readWaiting(e.runDir), undefined);
+  } finally {
+    await rm(e.runDir);
+  }
+});

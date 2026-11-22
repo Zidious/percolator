@@ -23,6 +23,7 @@ export type StepHandler = (step: Step, ctx: RunContext, io: StepIo) => Promise<N
 export type HerdrRuntimeOptions = {
   hc: Hc;
   runId: string;
+  /** the run's ticket, or its pipeline on a ticketless run (terminal names, {{ticket}}) */
   ticket: string;
   runDir: string;
   worktree: string;

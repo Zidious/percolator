@@ -6,11 +6,13 @@ import type { StepHandler } from '../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../runtime/outcome.ts';
 import { writeFileAtomic } from '../util/fs.ts';
 import type { Gh } from './gh.ts';
-import { readIssueMeta } from './intake.ts';
+import { issueMetaIfAny } from './intake.ts';
 
-export function prBody(issueNumber: number, description?: string): string {
+/** `Closes #<n>` (none without an issue), then the trimmed description. */
+export function prBody(issueNumber: number | undefined, description?: string): string {
   const text = description?.trim();
-  return text ? `Closes #${issueNumber}\n\n${text}\n` : `Closes #${issueNumber}\n`;
+  const parts = [...(issueNumber !== undefined ? [`Closes #${issueNumber}`] : []), ...(text ? [text] : [])];
+  return parts.length === 0 ? '' : `${parts.join('\n\n')}\n`;
 }
 
 const escalate = (reason: string): NodeOutcome => ({ status: 'escalate', outputs: {}, reason });
@@ -34,16 +36,26 @@ export function githubOpenPr(o: {
   worktree: string;
   branch: string;
   base: string;
+  /** for a run without an issue: the repo (`host/owner/repo`), and the pipeline and run id of its title */
+  repo?: string;
+  pipeline?: string;
+  runId?: string;
   push?: (worktree: string, branch: string) => Promise<void>;
 }): StepHandler {
   return async (_step, ctx, io) => {
     try {
-      const issue = await readIssueMeta(o.runDir);
-      const { graph } = ctx;
-      const lastBody = graph.steps.findLast((s) => ctx.previousOutputs[s.id]?.['pr_body']);
-      const bodyRel = lastBody ? ctx.previousOutputs[lastBody.id]?.['pr_body'] : undefined;
-      const description = bodyRel ? await readOptional(path.join(o.runDir, bodyRel)) : undefined;
-      const body = prBody(issue.number, description);
+      const issue = await issueMetaIfAny(o.runDir);
+      const repo = issue?.repo ?? o.repo;
+      if (repo === undefined) return escalate('github.open_pr: the run has no issue and no repository to open the PR in');
+      // the latest output `key` in graph order, as text
+      const latest = async (key: string): Promise<string | undefined> => {
+        const last = ctx.graph.steps.findLast((s) => ctx.previousOutputs[s.id]?.[key]);
+        const rel = last ? ctx.previousOutputs[last.id]?.[key] : undefined;
+        return rel ? readOptional(path.join(o.runDir, rel)) : undefined;
+      };
+      const description = await latest('pr_body');
+      const body = prBody(issue?.number, description);
+      const title = (await latest('pr_title'))?.trim() || (issue?.title ?? `${o.pipeline}: ${o.runId}`);
 
       await (o.push ?? defaultPush)(o.worktree, o.branch);
       await fs.mkdir(io.outputsDir, { recursive: true });
@@ -51,16 +63,16 @@ export function githubOpenPr(o: {
       await writeFileAtomic(bodyFile, body);
 
       // a crash after createPr leaves the PR but no saved pr_url: look it up first, then edit
-      const existing = await o.gh.findPr(issue.repo, o.branch);
+      const existing = await o.gh.findPr(repo, o.branch);
       let url: string;
       if (existing) {
-        await o.gh.editPr(issue.repo, existing.number, bodyFile);
+        await o.gh.editPr(repo, existing.number, bodyFile);
         url = existing.url;
       } else {
-        url = await o.gh.createPr(issue.repo, {
+        url = await o.gh.createPr(repo, {
           base: o.base.replace(/^origin\//, ''),
           head: o.branch,
-          title: issue.title,
+          title,
           bodyFile,
         });
       }
