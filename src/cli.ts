@@ -112,7 +112,14 @@ function runsWith(def: NodeDef): string {
 
 function describe(r: ValidateResult): string {
   const approvers = r.tracker?.approvers;
-  const lines = [`profile: ${r.profile}`, `approvers: ${approvers?.length ? approvers.join(', ') : 'the gh user running perc'}`];
+  // the gate falls back to the gh user only when the list is absent; an empty list lets no GitHub comment count
+  const who =
+    approvers === undefined
+      ? 'the gh user running perc'
+      : approvers.length === 0
+        ? 'none on GitHub (only local perc approve/reject)'
+        : approvers.join(', ');
+  const lines = [`profile: ${r.profile}`, `approvers: ${who}`];
   const runtime = Object.entries(r.runtime ?? {});
   if (runtime.length > 0) lines.push(`runtime: ${runtime.map(([k, v]) => `${k} ${String(v)}`).join(', ')}`);
   for (const [name, version] of Object.entries(r.groundVersions)) lines.push(`ground ${name} ${version}`);

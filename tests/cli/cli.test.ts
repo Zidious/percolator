@@ -100,6 +100,22 @@ test('validate shows the runtime settings the profile sets', async () => {
   assert.ok(!plain.out.includes('runtime:'), plain.out);
 });
 
+test('validate says an empty approvers list leaves only local decisions', async () => {
+  const cfg = path.join(tmp, 'no-approvers.yaml');
+  const base = await fs.readFile(fx('e2e/config.yaml'), 'utf8');
+  const abs = (n: string) => JSON.stringify(path.join(fx('e2e/grounds'), n));
+  await fs.writeFile(
+    cfg,
+    base
+      .replace('./grounds/company', abs('company'))
+      .replace('./grounds/team', abs('team'))
+      .replace('  work:\n', '  work:\n    tracker: { kind: github, approvers: [] }\n'),
+  );
+  const r = await run(['validate', '--config', cfg, '--profile', 'work']);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(r.out.split('\n').includes('approvers: none on GitHub (only local perc approve/reject)'), r.out);
+});
+
 test('validate names the default approver when the profile lists none', async () => {
   const r = await run(['validate', '--config', fx('e2e/config.yaml'), '--profile', 'work']);
   assert.equal(r.code, 0, r.err);
