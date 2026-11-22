@@ -70,9 +70,10 @@ test('an untrusted repo layer is refused', async () => {
     const err = await validate({ ...opts(), cwd }).catch((e) => e);
     assert.ok(err instanceof ConfigError);
     assert.equal(err.file, fx('e2e/config.yaml'));
+    assert.equal(err.line, 6);
     assert.equal(
       err.message,
-      `${fx('e2e/config.yaml')}: ${repoFile} exists, but profile "work" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
+      `${fx('e2e/config.yaml')}:6: profiles.work: ${repoFile} exists, but profile "work" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
     );
   } finally {
     await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });

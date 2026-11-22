@@ -1,7 +1,10 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { ConfigError, loadFragment, loadUserConfig } from './config/load.ts';
+import { ConfigError, loadLocated } from './config/load.ts';
+import type { Located } from './config/load.ts';
+import { locate } from './config/locate.ts';
+import { GraphFragmentSchema, UserConfigSchema } from './config/schema.ts';
 import type { GraphFragment, GroundSpec, Profile } from './config/schema.ts';
 import { selectProfile } from './config/profile.ts';
 import { buildGraph } from './graph/build.ts';
@@ -24,8 +27,8 @@ export type ValidateOptions = {
   update?: boolean;
   home?: string;
   git?: Git;
-  /** Test hook: loads the repo layer (default loadFragment). */
-  loadRepoLayer?: (file: string) => Promise<GraphFragment>;
+  /** Test hook: loads the repo layer (default loadLocated with the fragment schema). */
+  loadRepoLayer?: (file: string) => Promise<Located<GraphFragment>>;
   /** Test hook: stats the repo layer (default fs.lstat); only ENOENT means absent. */
   lstatRepoLayer?: (file: string) => Promise<unknown>;
 };
@@ -43,12 +46,13 @@ export type ValidateResult = {
 
 export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
   const git = opts.git ?? cliGit;
-  const config = await loadUserConfig(opts.configFile);
+  const { data: config, lines } = await loadLocated(opts.configFile, UserConfigSchema);
   const remoteUrl = opts.profile === undefined ? await git.remoteUrl(opts.cwd) : undefined;
   const { name, profile } = selectProfile(config, {
     cwd: opts.cwd,
     realCwd: await fs.realpath(opts.cwd).catch(() => opts.cwd),
     configFile: opts.configFile,
+    lines,
     ...(remoteUrl !== undefined ? { remoteUrl } : {}),
     ...(opts.profile !== undefined ? { override: opts.profile } : {}),
     ...(opts.home !== undefined ? { home: opts.home } : {}),
@@ -68,6 +72,7 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
     cacheDir: path.join(opts.home ?? os.homedir(), '.percolator', 'grounds'),
     git,
     configFile: opts.configFile,
+    lines,
     ...(opts.update !== undefined ? { update: opts.update } : {}),
     ...(opts.home !== undefined ? { home: opts.home } : {}),
   });
@@ -82,7 +87,7 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
   };
   const repoRoot = (await git.toplevel(opts.cwd)) ?? opts.cwd;
   const repoFile = path.join(repoRoot, '.percolator', 'percolator.yaml');
-  let repoLayer: GraphFragment | undefined;
+  let repoLayer: Located<GraphFragment> | undefined;
   const repoPresent = await (opts.lstatRepoLayer ?? fs.lstat)(repoFile).then(
     () => true,
     (err: NodeJS.ErrnoException) => {
@@ -92,18 +97,23 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
   );
   if (repoPresent) {
     if (profile.trust_repo_config !== true) {
+      const w = locate({ file: opts.configFile, lines }, opts.configFile, `profiles.${name}`);
       throw new ConfigError(
         `${repoFile} exists, but profile "${name}" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
-        opts.configFile,
+        w.file,
+        w.line,
+        w.path,
       );
     }
-    repoLayer = await (opts.loadRepoLayer ?? loadFragment)(repoFile).catch((err: NodeJS.ErrnoException) => {
+    repoLayer = await (opts.loadRepoLayer ?? ((f: string) => loadLocated(f, GraphFragmentSchema)))(repoFile).catch((err: NodeJS.ErrnoException) => {
       if (err.code === 'ENOENT') return undefined; // vanished since the check; any other failure is real
       throw err;
     });
   }
   const roots = [profileRoot];
-  if (repoLayer) roots.push({ source: 'repo:.percolator/percolator.yaml', use: repoLayer.use ?? [], fragment: repoLayer });
+  if (repoLayer) {
+    roots.push({ source: 'repo:.percolator/percolator.yaml', use: repoLayer.data.use ?? [], fragment: repoLayer.data });
+  }
   const { layers, mappings } = await collectLayers({ roots, grounds, configFile: opts.configFile });
 
   const merged = mergeLayers(layers);
