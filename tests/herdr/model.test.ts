@@ -157,7 +157,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t13', 't12', 't2', 't11', 't9', 't4', 't14', 't8', 't15', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t13', 't12', 't2', 't11', 't9', 't4', 't17', 't16', 't14', 't8', 't15', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -165,7 +165,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -327,7 +327,7 @@ test('actionArgv refuses a reject without feedback', () => {
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
   assert.equal(needsCount(runs()), 6);
-  assert.equal(runningCount(runs()), 2);
+  assert.equal(runningCount(runs()), 4);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
 });
