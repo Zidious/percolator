@@ -7,7 +7,7 @@ import type { Mapping } from '../../src/config/schema.ts';
 import { ConfigError } from '../../src/config/load.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
 import { buildGraph } from '../../src/graph/build.ts';
-import { mergeLayers } from '../../src/graph/merge.ts';
+import { mergeLayers, mergePipelines } from '../../src/graph/merge.ts';
 import { checkGraphReferences, resolveEach, resolveMappings } from '../../src/grounds/mappings.ts';
 
 let tmp: string;
@@ -206,6 +206,32 @@ describe('checkGraphReferences', () => {
     await assert.rejects(checkGraphReferences(graph, [located], grounds, 'config.yaml'), {
       message: 'c.yaml:6: use.0.applies_to.1: "nope" names no stage or node; use "*", a stage or a node name',
     });
+  });
+
+  test('applies_to may name a custom stage', async () => {
+    const hotfix = mergePipelines([
+      {
+        source: 'test',
+        fragment: {
+          pipelines: {
+            hotfix: {
+              stages: ['intake', 'reproduce', 'fix', 'review', 'deliver'],
+              bindings: { reproduce: { agent: 'claude' }, fix: { agent: 'claude' }, review: { agent: 'claude' } },
+              exit: 'pr',
+            },
+          },
+        },
+      },
+    ]).hotfix!;
+    const graph = buildGraph(hotfix);
+    const ok = await resolveMappings([{ ...mFile('policies/a.md'), applies_to: ['reproduce'] }], grounds);
+    await checkGraphReferences(graph, ok, grounds, 'config.yaml');
+    for (const entry of ['nope', 'plan']) {
+      const bad = await resolveMappings([{ ...mFile('policies/a.md'), applies_to: [entry] }], grounds);
+      await assert.rejects(checkGraphReferences(graph, bad, grounds, 'config.yaml'), {
+        message: `config.yaml: use.0.applies_to.0: "${entry}" names no stage or node; use "*", a stage or a node name`,
+      });
+    }
   });
 
   test('a prompt in a one-item list binding is located at its item', async () => {

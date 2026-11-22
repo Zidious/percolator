@@ -9,10 +9,13 @@ import type { PipelineHeader } from './core.ts';
 
 export type Sourced<T> = { value: T; source: string; locked: boolean; locator?: Locator };
 
+/** A rule set; `scope` says whether it came from the top level (applies to every pipeline) or from `pipelines.<p>.rules`. */
+export type RuleSet = Sourced<Rules> & { scope?: 'global' | 'pipeline' };
+
 export type Merged = {
   bindings: Record<Stage, Sourced<NodeDef[]>>;
   nodes: Record<string, Sourced<NodeDef>>;
-  rules: Sourced<Rules>[];
+  rules: RuleSet[];
 };
 
 /** A later layer tried to change a `required: true` target. Reported at the attempt; the message names the lock's place. */
@@ -78,11 +81,11 @@ export function mergePipelines(layers: Layer[]): Record<string, MergedPipeline> 
       header: { value: name === 'feature' ? (structuredClone(featureHeader) as PipelineHeader) : {}, source: 'core', locked: false },
     });
   pipeline('feature');
-  const globalRules: Sourced<Rules>[] = [];
+  const globalRules: RuleSet[] = [];
 
   for (const { source, fragment, locator } of layers) {
     mergeInto(pipeline('feature'), { bindings: fragment.bindings, nodes: fragment.nodes }, source, locator);
-    if (fragment.rules) globalRules.push({ value: structuredClone(fragment.rules), source, locked: false, ...(locator ? { locator } : {}) });
+    if (fragment.rules) globalRules.push({ value: structuredClone(fragment.rules), source, locked: false, scope: 'global', ...(locator ? { locator } : {}) });
     for (const [name, def] of Object.entries(fragment.pipelines ?? {})) {
       const target = pipeline(name);
       // errors about the pipeline as a whole point at the first layer that names it
@@ -112,7 +115,7 @@ export function mergePipelines(layers: Layer[]): Record<string, MergedPipeline> 
       }
       const inner = withPrefix(locator, name);
       mergeInto(target, { bindings: def.bindings, nodes: def.nodes }, source, inner);
-      if (def.rules) target.rules.push({ value: structuredClone(def.rules), source, locked: false, ...(inner ? { locator: inner } : {}) });
+      if (def.rules) target.rules.push({ value: structuredClone(def.rules), source, locked: false, scope: 'pipeline', ...(inner ? { locator: inner } : {}) });
     }
   }
   for (const p of Object.values(out)) p.rules.unshift(...structuredClone(globalRules));

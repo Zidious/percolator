@@ -4,7 +4,7 @@ import type { Locator, Where } from '../config/locate.ts';
 import { effectiveKind } from '../config/schema.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
 import { CORE_STAGES } from './core.ts';
-import type { Merged } from './merge.ts';
+import type { Merged, MergedPipeline } from './merge.ts';
 
 /** `message` is the body only; `where` is the offending key's file, line and path (see formatIssue). */
 export type Violation = { rule: string; source: string; target: string; message: string; where: Where };
@@ -14,9 +14,9 @@ const DEFAULT_REVIEW_ROUNDS = 3;
 type Entry = { target: string; node: NodeDef; stage?: Stage; core?: boolean; source: string; locator?: Locator };
 
 /** Every node in deterministic order: bindings in stage order, then extension nodes by name. */
-function entries(merged: Merged): Entry[] {
+function entries(merged: Merged, stages: readonly string[]): Entry[] {
   const out: Entry[] = [];
-  for (const stage of CORE_STAGES) {
+  for (const stage of stages) {
     const binding = merged.bindings[stage];
     const nodes = binding?.value ?? [];
     nodes.forEach((node, i) => {
@@ -49,18 +49,32 @@ const isAgent = (n: NodeDef) => effectiveKind(n) === 'agent';
  * Checks every rule set against the merged config. Pure. Violations come in layer order of the
  * rule set, then stage order, then node name. allowed_* and max_rounds_ceiling are enforced as an
  * intersection / minimum across rule sets; each offending node is reported once, against the first
- * rule set (in layer order) that excludes it.
+ * rule set (in layer order) that excludes it. `stages` are the pipeline's: require_skills naming a
+ * stage outside them is a violation for a pipeline's own rules and skipped for top-level ones.
  */
-export function checkRules(merged: Merged): Violation[] {
+export function checkRules(merged: Merged | MergedPipeline, stages: readonly string[] = CORE_STAGES): Violation[] {
   const out: Violation[] = [];
-  const all = entries(merged);
+  const all = entries(merged, stages);
   const sets = merged.rules;
+  const pipeline = 'name' in merged ? merged.name : 'feature';
 
-  sets.forEach(({ value: rules, source, locator: ruleLocator }, idx) => {
+  sets.forEach(({ value: rules, source, locator: ruleLocator, scope }, idx) => {
     // where the rule is written: `file:line`, or the layer source without a locator
     const from = (rule: string) => place(locate(ruleLocator, source, `rules.${rule}`));
     const at = (e: { source: string; locator?: Locator }, target: string) => locate(e.locator, e.source, target);
-    for (const req of rules.require_skills ?? []) {
+    for (const [k, req] of (rules.require_skills ?? []).entries()) {
+      if (req.stage !== '*' && !stages.includes(req.stage)) {
+        // a top-level rule applies to every pipeline, so one this pipeline lacks the stage for is not its concern
+        if (scope === 'global') continue;
+        out.push({
+          rule: 'require_skills',
+          source,
+          target: `rules.require_skills.${k}`,
+          message: `names stage "${req.stage}", which pipeline "${pipeline}" does not have (stages: ${stages.join(', ')}); use one of those or *`,
+          where: locate(ruleLocator, source, `rules.require_skills.${k}.stage`),
+        });
+        continue;
+      }
       if (req.stage !== '*') {
         const binding = merged.bindings[req.stage];
         if (binding !== undefined && !binding.value.some(isAgent)) {
