@@ -950,3 +950,28 @@ export function previewRun(pipeline) {
 export function previewSide(width) {
   return width < 720 ? 'below' : 'right';
 }
+
+// ── fan-out slices ──
+
+/** A fan-out parent's slices, by index, each with its child's status, the step it is at (`done` once completed, `not
+ *  started` before its run exists) and its PR. Read from the child's own run when it is listed, else from the parent's
+ *  child entry. Empty for a run without slices. */
+export function sliceRows(run, runs) {
+  if (run.status === 'unreadable') return [];
+  return (run.children ?? [])
+    .filter((c) => c.slice)
+    .sort((a, b) => a.slice.index - b.slice.index)
+    .map((c) => {
+      const r = runs.find((x) => x.id === c.id && x.status !== 'unreadable');
+      const status = r?.status ?? c.status;
+      const stepLabel = status === 'completed' ? 'done' : (r?.currentStep ?? (status === 'pending' ? 'not started' : status));
+      const prUrl = r?.pr?.url;
+      return { index: c.slice.index, title: c.slice.title, id: c.id, status, stepLabel, ...(prUrl ? { prUrl } : {}) };
+    });
+}
+
+/** The pipeline row a fan-out parent's slices hang under: its last stage row, where the fan-out step sits (-1 when
+ *  there is none). */
+export function fanOutRow(rows) {
+  return rows.findLastIndex((r) => r.type === 'stage');
+}

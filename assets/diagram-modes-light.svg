@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 380" width="1080" height="380" role="img" aria-label="Two setups side by side. On its own you drive perc from a terminal. With Herdr, the panel and cup read perc status --json and run perc approve, reject and resume for you; perc, hc and the agents are the same in both.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 380" width="1080" height="380" role="img" aria-label="Two setups side by side. On its own you drive perc from a terminal: perc run, status, approve or reject (with --pipeline at a router's pick-pipeline gate), resume, delete, pipelines and watch. With Herdr, the panel and cup read perc status --json and run perc approve (with --pipeline from a Run pipeline button), reject, resume and watch for you. In both, perc starts runs from perc run, from a router's route step or a fan-out as linked runs, and from triggers while perc watch runs; hc and the agents are the same in both.">
 <style>
 .ink{fill:#241914}.mut{fill:#6c5f56}.acc{fill:#c2661a}.wait{fill:#d94a33}.pass{fill:#3f74d8}.surf{fill:#faf7f4}
 .s-line{stroke:#d9d0c7}.s-mut{stroke:#6c5f56}.s-acc{stroke:#c2661a}.s-wait{stroke:#d94a33}.s-ink{stroke:#241914}.s-pass{stroke:#3f74d8}
@@ -15,19 +15,21 @@
 <line x1="540" y1="10" x2="540" y2="370" class="s-line" stroke-dasharray="3 5"/>
 <rect x="20" y="50" width="490" height="76" rx="8" class="box"/>
 <text x="36" y="76" class="t13 ink">you, in any terminal</text>
-<text x="36" y="98" class="tm mut">perc run · perc status · perc approve / reject</text>
-<text x="36" y="114" class="tm mut">perc resume · perc clean · perc delete</text>
+<text x="36" y="98" class="tm mut">perc run · perc status · perc approve [--pipeline] / reject</text>
+<text x="36" y="114" class="tm mut">perc resume · perc delete · perc pipelines · perc watch</text>
 <line x1="265" y1="130" x2="265" y2="170" class="s-mut" stroke-width="1.5" marker-end="url(#am)"/>
 <rect x="570" y="50" width="490" height="76" rx="8" class="box-acc" stroke-width="1.5"/>
 <text x="586" y="76" class="t13 ink">Herdr app · Percolator panel + status-bar cup</text>
 <text x="586" y="98" class="tm mut">board of runs · stage pipeline · Approve / Reject /</text>
-<text x="586" y="114" class="tm mut">Resume buttons · “#n needs you” notices</text>
+<text x="586" y="114" class="tm mut">Resume · Run &lt;pipeline&gt; · watcher · “#n needs you”</text>
 <line x1="740" y1="130" x2="740" y2="170" class="s-acc" stroke-width="1.5" marker-end="url(#aa)"/>
-<text x="732" y="155" class="tm acc" text-anchor="end">perc approve | reject | resume</text>
+<text x="732" y="147" class="tm acc" text-anchor="end">perc approve | reject</text>
+<text x="732" y="163" class="tm acc" text-anchor="end">resume | watch</text>
 <line x1="900" y1="170" x2="900" y2="130" class="s-acc" stroke-width="1.5" marker-end="url(#aa)"/>
 <text x="908" y="155" class="tm acc">perc status --json</text>
 <rect x="20" y="176" width="490" height="52" rx="8" class="box"/>
-<text x="36" y="207" class="t13 ink">perc · engine, run state, gate</text>
+<text x="36" y="198" class="t13 ink">perc · engine, run state, gates</text>
+<text x="36" y="218" class="tm mut">runs: perc run · linked (router, fan-out) · perc watch triggers</text>
 <line x1="265" y1="232" x2="265" y2="262" class="s-mut" stroke-width="1.5" marker-end="url(#am)"/>
 <rect x="20" y="268" width="490" height="40" rx="8" class="box"/>
 <text x="36" y="293" class="t13 ink">hc · starts and watches terminals</text>
@@ -35,7 +37,8 @@
 <rect x="20" y="334" width="490" height="36" rx="8" class="box"/>
 <text x="36" y="357" class="t13 ink">agents: claude · codex · command</text>
 <rect x="570" y="176" width="490" height="52" rx="8" class="box"/>
-<text x="586" y="207" class="t13 ink">perc · engine, run state, gate</text>
+<text x="586" y="198" class="t13 ink">perc · engine, run state, gates</text>
+<text x="586" y="218" class="tm mut">runs: perc run · linked (router, fan-out) · perc watch triggers</text>
 <line x1="815" y1="232" x2="815" y2="262" class="s-mut" stroke-width="1.5" marker-end="url(#am)"/>
 <rect x="570" y="268" width="490" height="40" rx="8" class="box"/>
 <text x="586" y="293" class="t13 ink">hc · starts and watches terminals</text>

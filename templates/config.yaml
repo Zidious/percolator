@@ -65,3 +65,48 @@ profiles:
       #       agent: claude
       #       model: opus
       #       prompt: From the evidence in the inputs, find the likely cause and write it to diagnosis.md.
+
+      # A short pipeline for small fixes, and a triage router that sends each ticket to feature or hotfix.
+      # Uncomment both, then: perc validate --pipeline triage
+      # hotfix:
+      #   description: Small fix, no grooming
+      #   stages: [intake, implement, review, deliver]
+      #   exit: pr
+      #   bindings:
+      #     implement: { agent: claude, model: opus, skill: superpowers:test-driven-development }
+      #     review: { agent: claude, model: sonnet, skill: deep-dive-review, max_rounds: 2 }
+      # triage:
+      #   description: Read the ticket and hand it to the pipeline that fits
+      #   router: true                 # the last stage, route, starts a linked run of the pipeline it picks
+      #   stages: [intake, route]
+      #   routes:
+      #     - { label: bug, to: hotfix }   # label rules are tried first, in order
+      #   choose:                      # then this agent picks, writing pick.md
+      #     agent: claude
+      #     model: sonnet
+      #     from: [feature, hotfix]
+      #     confirm: unsure            # stop at the pick-pipeline gate only when the agent is unsure (or: always)
+      #   fallback: feature            # used when nothing picked a pipeline
+      #   triggers:
+      #     - { label: triage }        # while perc watch runs, each issue labelled triage starts a triage run
+
+      # A pipeline that plans once, then implements, reviews and delivers each slice of the plan in its own
+      # linked run and PR, three at a time. Uncomment it, then: perc validate --pipeline epic
+      # epic:
+      #   description: Plan a big ticket, then build each slice in its own PR
+      #   stages: [intake, plan, implement, review, deliver]
+      #   exit: pr
+      #   outputs:
+      #     plan: [plan]
+      #   fan_out:
+      #     stage: implement           # implement and every stage after it run once per slice
+      #     slices: { from: plan, output: slices }   # plan writes slices.md: one "## <title>" section per slice
+      #     max_parallel: 3            # slices running at once (default 3)
+      #   bindings:
+      #     plan:
+      #       agent: claude
+      #       model: opus
+      #       skill: superpowers:writing-plans
+      #       prompt: Write the plan to plan.md, and split the work into independent slices in slices.md, one "## <title>" section each.
+      #     implement: { agent: claude, model: opus, skills: [superpowers:executing-plans, superpowers:test-driven-development] }
+      #     review: { agent: claude, model: opus, skill: deep-dive-review, max_rounds: 3 }

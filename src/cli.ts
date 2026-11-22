@@ -30,6 +30,7 @@ import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
 import { validate, validateAll } from './validate.ts';
 import { WATCH_TERMINAL, WATCHER_LABELS, watchFile, watchLoop } from './watch/watch.ts';
+import type { Graph } from './graph/build.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
 import { removeWorktree } from './workspace/worktree.ts';
@@ -137,17 +138,27 @@ function describe(r: ValidateResult): string {
     const scope = m.applies_to.includes('*') ? '' : ` (applies to ${m.applies_to.join(', ')})`;
     lines.push(`${m.as} ${m.absPath}${scope}`);
   }
-  lines.push('', 'steps:');
-  r.graph.steps.forEach((s, i) => {
+  lines.push('', ...graphLines(r.graph));
+  const fan = r.pipeline.fan_out;
+  if (fan !== undefined && r.slice !== undefined) {
+    lines.push('', `slice runs (fan-out of ${fan.stage}, at most ${fan.max_parallel ?? 3} at a time):`, ...graphLines(r.slice));
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/** A graph's numbered steps, then its back-edges. */
+function graphLines(g: Graph): string[] {
+  const lines = ['steps:'];
+  g.steps.forEach((s, i) => {
     const pos = s.role === 'hook' ? ` (${s.def.before !== undefined ? `before ${s.def.before}` : `after ${s.def.after}`})` : '';
     lines.push(`${i + 1}. ${s.id}${pos}: ${runsWith(s.def)}`);
   });
   lines.push('', 'back-edges:');
-  for (const e of Object.values(r.graph.backEdges)) {
-    const target = r.graph.steps[e.toStepIndex]!.stage;
+  for (const e of Object.values(g.backEdges)) {
+    const target = g.steps[e.toStepIndex]!.stage;
     lines.push(`${e.fromStepId} → ${target} (max ${e.maxRounds}, ${e.onCap})`);
   }
-  return `${lines.join('\n')}\n`;
+  return lines;
 }
 
 async function runInit(args: string[], io: Io): Promise<number> {

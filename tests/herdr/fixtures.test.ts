@@ -77,6 +77,29 @@ test('the fixture has a watcher on its repo, a triage parent with a hotfix child
   assert.equal(pick.attention.message, 'pick the pipeline for this ticket (the agent suggests hotfix)');
 });
 
+test('the fixture has a fanned-out run with a finished, a running and a pending slice', () => {
+  const runs = readFixture('status.json').runs;
+  const parent = runs.find((r: any) => r.children.some?.((c: any) => c.slice));
+  assert.equal(parent.status, 'running');
+  // the parent's graph ends at its fan-out step, which waits for the slices
+  assert.equal(parent.steps.at(-1).id, parent.currentStep);
+  assert.deepEqual(
+    parent.children.map((c: any) => [c.id, c.slice.index, c.status]),
+    [1, 2, 3].map((i) => [`${parent.id}-s${i}`, i, ['completed', 'running', 'pending'][i - 1]]),
+  );
+  for (const c of parent.children) {
+    const run = runs.find((r: any) => r.id === c.id);
+    if (c.status === 'pending') {
+      assert.equal(run, undefined, c.id);
+      continue;
+    }
+    assert.deepEqual([run.parent, run.pipeline, run.status, run.ticket.ref], [parent.id, parent.pipeline, c.status, parent.ticket.ref], c.id);
+    // a slice starts with its seed intake, then the fanned stage
+    assert.deepEqual(run.steps.slice(0, 2).map((s: any) => s.id), ['intake', parent.currentStep], c.id);
+  }
+  assert.ok(runs.find((r: any) => r.id === `${parent.id}-s1`).pr.url);
+});
+
 test('the pipelines fixture is what perc pipelines --json writes: feature (default), hotfix, dd-alert and spike', () => {
   const read = readPipelines(fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'pipelines.json'), 'utf8'));
   assert.ok(read.ok, 'readPipelines accepts it');

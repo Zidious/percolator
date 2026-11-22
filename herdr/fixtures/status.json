@@ -2507,6 +2507,366 @@
       "graph": "full"
     },
     {
+      "id": "t23-epic-20261121-090000-7c2a",
+      "pipeline": "epic",
+      "inputs": {},
+      "ticket": {
+        "ref": "github.com/zidious/percolator#23",
+        "number": 23,
+        "title": "show fan-out slices in the panel",
+        "url": "https://github.com/Zidious/percolator/issues/23"
+      },
+      "parent": null,
+      "children": [
+        {
+          "id": "t23-epic-20261121-090000-7c2a-s1",
+          "pipeline": "epic",
+          "status": "completed",
+          "slice": {
+            "index": 1,
+            "title": "Status field"
+          }
+        },
+        {
+          "id": "t23-epic-20261121-090000-7c2a-s2",
+          "pipeline": "epic",
+          "status": "running",
+          "slice": {
+            "index": 2,
+            "title": "Panel rows"
+          }
+        },
+        {
+          "id": "t23-epic-20261121-090000-7c2a-s3",
+          "pipeline": "epic",
+          "status": "pending",
+          "slice": {
+            "index": 3,
+            "title": "Docs"
+          }
+        }
+      ],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t23-epic-20261121-090000-7c2a",
+      "worktree": "/home/me/src/percolator/.worktrees/t23-epic-20261121-090000-7c2a",
+      "createdAt": "2026-11-21T09:00:00.000Z",
+      "status": "running",
+      "currentStep": "implement",
+      "driver": {
+        "alive": true,
+        "terminal": "t23_driver_a0_0878",
+        "space": "w1:s14",
+        "shown": false
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T09:00:00.000Z",
+          "endedAt": "2026-11-21T09:01:00.000Z"
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {
+            "slices": "samples/groomed_ticket.md"
+          },
+          "startedAt": "2026-11-21T09:01:00.000Z",
+          "endedAt": "2026-11-21T09:06:00.000Z"
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "builtin",
+          "status": "running",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T09:00:00.000Z",
+          "endedAt": "2026-11-21T09:01:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "plan",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T09:01:00.000Z",
+          "endedAt": "2026-11-21T09:06:00.000Z",
+          "outputs": {
+            "slices": "samples/groomed_ticket.md"
+          }
+        },
+        {
+          "kind": "attempt",
+          "step": "implement",
+          "attempt": 1,
+          "status": "running",
+          "startedAt": "2026-11-21T09:06:00.000Z",
+          "outputs": {}
+        }
+      ],
+      "terminals": {
+        "driver": "t23_driver_a0_0878"
+      },
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t23-epic-20261121-090000-7c2a-s1",
+      "pipeline": "epic",
+      "inputs": {},
+      "ticket": {
+        "ref": "github.com/zidious/percolator#23",
+        "number": 23,
+        "title": "show fan-out slices in the panel",
+        "url": "https://github.com/Zidious/percolator/issues/23"
+      },
+      "parent": "t23-epic-20261121-090000-7c2a",
+      "children": [],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t23-epic-20261121-090000-7c2a-s1",
+      "worktree": "/home/me/src/percolator/.worktrees/t23-epic-20261121-090000-7c2a-s1",
+      "createdAt": "2026-11-21T09:06:30.000Z",
+      "status": "completed",
+      "driver": {
+        "alive": false,
+        "terminal": "t23_driver_a0_a95e",
+        "space": "w1:s15",
+        "shown": false
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T09:07:00.000Z",
+          "endedAt": "2026-11-21T09:07:00.000Z"
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T09:07:00.000Z",
+          "endedAt": "2026-11-21T09:20:00.000Z"
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T09:20:00.000Z",
+          "endedAt": "2026-11-21T09:26:00.000Z"
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T09:26:00.000Z",
+          "endedAt": "2026-11-21T09:27:00.000Z"
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "continue",
+          "round": 1
+        }
+      ],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T09:07:00.000Z",
+          "endedAt": "2026-11-21T09:07:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "implement",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T09:07:00.000Z",
+          "endedAt": "2026-11-21T09:20:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "review",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T09:20:00.000Z",
+          "endedAt": "2026-11-21T09:26:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "deliver",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T09:26:00.000Z",
+          "endedAt": "2026-11-21T09:27:00.000Z",
+          "outputs": {}
+        }
+      ],
+      "terminals": {},
+      "pr": {
+        "url": "https://github.com/Zidious/percolator/pull/31"
+      },
+      "graph": "full"
+    },
+    {
+      "id": "t23-epic-20261121-090000-7c2a-s2",
+      "pipeline": "epic",
+      "inputs": {},
+      "ticket": {
+        "ref": "github.com/zidious/percolator#23",
+        "number": 23,
+        "title": "show fan-out slices in the panel",
+        "url": "https://github.com/Zidious/percolator/issues/23"
+      },
+      "parent": "t23-epic-20261121-090000-7c2a",
+      "children": [],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t23-epic-20261121-090000-7c2a-s2",
+      "worktree": "/home/me/src/percolator/.worktrees/t23-epic-20261121-090000-7c2a-s2",
+      "createdAt": "2026-11-21T09:06:40.000Z",
+      "status": "running",
+      "currentStep": "review",
+      "driver": {
+        "alive": true,
+        "terminal": "t23_driver_a0_61b1",
+        "space": "w1:s16",
+        "shown": false
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T09:07:00.000Z",
+          "endedAt": "2026-11-21T09:07:00.000Z"
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-21T09:07:00.000Z",
+          "endedAt": "2026-11-21T09:24:00.000Z"
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "running",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "continue",
+          "round": 0
+        }
+      ],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T09:07:00.000Z",
+          "endedAt": "2026-11-21T09:07:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "implement",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-21T09:07:00.000Z",
+          "endedAt": "2026-11-21T09:24:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "review",
+          "attempt": 1,
+          "status": "running",
+          "startedAt": "2026-11-21T09:24:00.000Z",
+          "outputs": {}
+        }
+      ],
+      "terminals": {
+        "driver": "t23_driver_a0_61b1"
+      },
+      "pr": null,
+      "graph": "full"
+    },
+    {
       "id": "audit-20261120-180000-2d7c",
       "pipeline": "audit",
       "inputs": {

@@ -4,7 +4,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { ago, canPick, driverPeek, hookNote, nowTone, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, slotOpensAgent, ticketTitle, took } from './model.js';
+import { ago, canPick, driverPeek, fanOutRow, hookNote, nowTone, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, ticketTitle, took } from './model.js';
 import { chip, inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
@@ -247,6 +247,8 @@ export function pipeline(p, t, r, fold, narrow, under = true) {
   const spans = pipelineSpans(rows, r);
   const n = rows.length;
   const { active, reached: last, stripAt } = pipelineMarks(rows, p.stopSel);
+  const slices = sliceRows(r, p.runs ?? []);
+  const fanAt = slices.length > 0 ? fanOutRow(rows) : -1;
 
   const below = (i, el) =>
     h_flex()
@@ -281,10 +283,54 @@ export function pipeline(p, t, r, fold, narrow, under = true) {
             .child(stage ? stageLabel(t, r, row) : hookLabel(p, t, r, row)),
         );
         const out = [line];
+        // a fan-out parent's slices, one sub-row each, under its fan-out step in either layout
+        if (i === fanAt) out.push(below(i, sliceList(p, t, slices)));
         if (!under) return out;
         if (i === active) out.push(below(i, p.activeSlot ? p.activeSlot(t, r, narrow) : div()));
         if (i === stripAt) out.push(below(i, stopStrip(p, t, r)));
         return out;
+      }),
+    );
+}
+
+const sliceColor = (t, status) =>
+  status === 'completed' ? t.accent : status === 'failed' ? t.blocked : status === 'running' || status === 'waiting' ? t.working : t.dim;
+
+/** One sub-row per slice: its number and title, the step its run is at and its PR; clicking a started slice selects
+ *  its run (on All when the Active tab hides it). A slice not started yet is not clickable. */
+function sliceList(p, t, slices) {
+  return v_flex()
+    .flex_none()
+    .mb(6)
+    .gap(1)
+    .children(
+      slices.map((s) => {
+        const listed = (p.runs ?? []).some((x) => x.id === s.id);
+        const row = h_flex()
+          .id(`slice-${s.index}`)
+          .min_w(0)
+          .py(2)
+          .gap(6)
+          .items_center()
+          .text_size(11)
+          .child(div().flex_none().size(8).rounded(4).bg(sliceColor(t, s.status)))
+          .child(div().flex_none().text_color(t.dim).child(`${s.index}.`))
+          .child(div().min_w(0).truncate().text_color(t.foreground).child(s.title))
+          .child(div().flex_none().text_color(sliceColor(t, s.status)).child(s.stepLabel))
+          .child(div().flex_1())
+          .when(Boolean(s.prUrl), (el) => el.child(link(t, `slice-pr-${s.index}`, 'PR ↗', (_e, cx) => cx.open_url(s.prUrl))));
+        if (!listed) return row;
+        return own(
+          row
+            .cursor_pointer()
+            .tooltip(s.id)
+            .hover((st) => st.bg(t.raised))
+            .on_click((_e, cx) => {
+              if (!p.rows().some((x) => x.id === s.id)) p.filter = 'all';
+              p.select(s.id, cx);
+              cx.notify();
+            }),
+        );
       }),
     );
 }

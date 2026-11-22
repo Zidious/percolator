@@ -199,6 +199,34 @@ test('perc validate --pipeline prints that pipeline only', async () => {
   assert.equal(r.code, 0, r.err);
   assert.ok(r.out.startsWith('pipeline: hotfix\nprofile: default\n'), r.out);
   assert.ok(!r.out.includes('pipeline: feature'), r.out);
+  assert.ok(!r.out.includes('slice runs'), r.out);
+});
+
+test('perc validate of a fan-out pipeline prints its slice runs after the parent graph', async () => {
+  const template = await fs.readFile(path.resolve(import.meta.dirname, '..', '..', 'templates', 'config.yaml'), 'utf8');
+  const cfg = path.join(tmp, 'epic.yaml');
+  // the template's commented example pipelines, uncommented (as in tests/templates.test.ts)
+  await fs.writeFile(cfg, template.replace(/^(\s*)# ((?:[a-z][a-z0-9_-]*:|  ).*)$/gm, '$1$2'));
+  const r = await run(['validate', '--config', cfg, '--profile', 'default', '--pipeline', 'epic']);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(r.out.includes('\n3. implement: builtin percolator.fan_out\n\nback-edges:\n'), r.out);
+  assert.equal(
+    r.out.slice(r.out.indexOf('\n\nslice runs')),
+    [
+      '',
+      '',
+      'slice runs (fan-out of implement, at most 3 at a time):',
+      'steps:',
+      '1. intake: builtin percolator.seed',
+      '2. implement: claude, model opus, skills superpowers:executing-plans, superpowers:test-driven-development',
+      '3. review: claude, model opus, skills deep-dive-review',
+      '4. deliver: builtin github.open_pr',
+      '',
+      'back-edges:',
+      'review → implement (max 3, continue)',
+      '',
+    ].join('\n'),
+  );
 });
 
 test('perc validate --pipeline nope names the pipelines at the profile\'s pipelines line', async () => {
