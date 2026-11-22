@@ -4,6 +4,9 @@ import type { MergedPipeline } from '../graph/merge.ts';
 import type { Violation } from '../graph/rules.ts';
 import { EXITS, EXIT_KINDS } from '../tracker/index.ts';
 import type { ExitKind } from '../tracker/index.ts';
+import { checkRequest } from '../run/request.ts';
+import { knownTimeZone, parseCron } from '../util/cron.ts';
+import type { Trigger } from './schema.ts';
 import { ConfigError } from './load.ts';
 import { locate } from './locate.ts';
 import type { Where } from './locate.ts';
@@ -102,6 +105,39 @@ function exitKind(spec: PipelineSpec, merged: MergedPipeline): ExitKind | undefi
   return nodes.length === 1 ? EXIT_KINDS.find((k) => EXITS[k].builtin === nodes[0]!.builtin) : undefined;
 }
 
+/** One trigger fits its pipeline: a schedule parses and runs ticketless, the others get the ticket or inputs they pass. */
+function checkTrigger(spec: PipelineSpec, t: Trigger, at: (key: string) => Where): void {
+  const p = spec.name;
+  const has = (k: string): boolean => Object.hasOwn(spec.inputs, k);
+  if ('schedule' in t) {
+    try {
+      parseCron(t.schedule);
+    } catch (err) {
+      throw fail((err as Error).message, at('.schedule'));
+    }
+    if (t.timezone !== undefined && !knownTimeZone(t.timezone)) {
+      throw fail(`timezone "${t.timezone}" is not known; use an IANA name like Europe/London`, at('.timezone'));
+    }
+    if (spec.ticket === 'required') {
+      throw fail(`a schedule trigger starts runs without a ticket, but pipeline "${p}" needs one; set ticket: none or optional`, at(''));
+    }
+    try {
+      checkRequest(spec, undefined, t.inputs ?? {});
+    } catch (err) {
+      throw fail(`schedule trigger: ${(err as Error).message}`, at('.inputs'));
+    }
+  } else if ('label' in t) {
+    if (spec.ticket === 'none') {
+      throw fail(`a label trigger starts runs on issues, but pipeline "${p}" has ticket: none; set ticket: required or optional`, at(''));
+    }
+  } else if ('pr_opened' in t || 'dependabot' in t) {
+    const kind = 'pr_opened' in t ? 'pr_opened' : 'dependabot';
+    if (!has('pr')) throw fail(`trigger ${kind} passes input pr; declare it under pipelines.${p}.inputs`, at(''));
+  } else if (!has('branch') || !has('run_url')) {
+    throw fail(`trigger check_failed passes inputs branch and run_url; declare them under pipelines.${p}.inputs`, at(''));
+  }
+}
+
 /**
  * Checks that span pipelines: where a router may hand its ticket. Every routes `to`, choose `from` entry
  * and fallback must name a pipeline of the profile that is not a router and takes a ticket. Throws the
@@ -129,6 +165,7 @@ export function checkPipelines(merged: Record<string, MergedPipeline>, specs: Re
       if (exitKind(spec, merged[p]!) !== 'issue') throw fail('next only applies to an issue exit; remove it or set exit: issue', at('.next'));
       target(spec.next, at('.next'));
     }
+    (spec.triggers ?? []).forEach((t, i) => checkTrigger(spec, t, (key) => at(`.triggers.${i}${key}`)));
     if (spec.router !== true) continue;
     if (spec.ticket !== 'required') {
       throw fail(`router "${p}" hands its ticket to another pipeline, so it needs one; set ticket: required or remove ticket`, at('.ticket'));

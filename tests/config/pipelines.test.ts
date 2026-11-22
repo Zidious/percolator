@@ -139,6 +139,12 @@ const lines: Record<string, number> = {
   'profiles.work.pipelines.triage.fallback': 10,
   'profiles.work.pipelines.split': 11,
   'profiles.work.pipelines.split.next': 12,
+  'profiles.work.pipelines.nightly': 13,
+  'profiles.work.pipelines.nightly.triggers.0': 14,
+  'profiles.work.pipelines.nightly.triggers.1': 15,
+  'profiles.work.pipelines.nightly.triggers.1.schedule': 16,
+  'profiles.work.pipelines.nightly.triggers.1.timezone': 17,
+  'profiles.work.pipelines.nightly.triggers.1.inputs': 18,
 };
 const layer = (pipelines: Record<string, unknown>, withFeature = true) =>
   mergePipelines([
@@ -269,5 +275,78 @@ test('next must name a pipeline that takes a ticket', () => {
   assert.throws(() => check(profileWith(split({ exit: 'issue', next: 'alert' }))), {
     message:
       'c.yaml:12: profiles.work.pipelines.split.next: pipeline "split" routes tickets, but pipeline "alert" has ticket: none; route to a pipeline that takes a ticket',
+  });
+});
+
+// triggers: pipeline nightly, its second trigger (index 1) is the one under test
+const nightly = (trigger: Record<string, unknown>, over: Record<string, unknown> = {}) => ({
+  nightly: {
+    stages: ['intake', 'deliver'],
+    exit: 'none',
+    ticket: 'none',
+    inputs: { pr: {}, branch: {}, run_url: {}, scope: { required: true } },
+    triggers: [{ schedule: '0 3 * * *', inputs: { scope: 'all' } }, trigger],
+    ...over,
+  },
+});
+const N = 'profiles.work.pipelines.nightly.triggers.1';
+
+test('a valid trigger list passes the checks', () => {
+  assert.doesNotThrow(() =>
+    check(profileWith(nightly({ schedule: '30 6 * * 1-5', timezone: 'Europe/London', inputs: { scope: 'deps' } }))),
+  );
+  for (const t of [{ pr_opened: true }, { pr_opened: { not_author: ['bot'] } }, { dependabot: true }, { check_failed: { branch: 'main' } }]) {
+    assert.doesNotThrow(() => check(profileWith(nightly(t))));
+  }
+  assert.doesNotThrow(() => check(profileWith(nightly({ label: 'nightly' }, { ticket: 'optional' }))));
+});
+
+test('a schedule trigger needs a cron that parses', () => {
+  assert.throws(() => check(profileWith(nightly({ schedule: '0 3 * *', inputs: { scope: 'all' } }))), {
+    name: 'ConfigError',
+    message: `c.yaml:16: ${N}.schedule: cron "0 3 * *": needs 5 fields, got 4; use five fields: minute hour day-of-month month day-of-week`,
+  });
+});
+
+test('a schedule trigger needs a known time zone', () => {
+  assert.throws(() => check(profileWith(nightly({ schedule: '0 3 * * *', timezone: 'Mars/Olympus', inputs: { scope: 'all' } }))), {
+    message: `c.yaml:17: ${N}.timezone: timezone "Mars/Olympus" is not known; use an IANA name like Europe/London`,
+  });
+});
+
+test('a schedule trigger needs a pipeline that runs without a ticket', () => {
+  assert.throws(() => check(profileWith(nightly({ schedule: '0 3 * * *', inputs: { scope: 'all' } }, { ticket: 'required', triggers: [{ label: 'x' }, { schedule: '0 3 * * *', inputs: { scope: 'all' } }] }))), {
+    message: `c.yaml:15: ${N}: a schedule trigger starts runs without a ticket, but pipeline "nightly" needs one; set ticket: none or optional`,
+  });
+});
+
+test("a schedule trigger's inputs must fit the pipeline", () => {
+  assert.throws(() => check(profileWith(nightly({ schedule: '0 3 * * *' }))), {
+    message: `c.yaml:18: ${N}.inputs: schedule trigger: pipeline "nightly" needs input scope; pass --input scope=<value>`,
+  });
+  assert.throws(() => check(profileWith(nightly({ schedule: '0 3 * * *', inputs: { scope: 'a', nope: 'b' } }))), {
+    message: `c.yaml:18: ${N}.inputs: schedule trigger: pipeline "nightly" has no input "nope" (inputs: pr, branch, run_url, scope); drop it or declare it under pipelines.nightly.inputs`,
+  });
+});
+
+test('a label trigger needs a pipeline that takes a ticket', () => {
+  assert.throws(() => check(profileWith(nightly({ label: 'nightly' }))), {
+    message: `c.yaml:15: ${N}: a label trigger starts runs on issues, but pipeline "nightly" has ticket: none; set ticket: required or optional`,
+  });
+});
+
+test('pr_opened and dependabot triggers need input pr', () => {
+  const inputs = { branch: {}, run_url: {}, scope: { required: true } };
+  assert.throws(() => check(profileWith(nightly({ pr_opened: true }, { inputs }))), {
+    message: `c.yaml:15: ${N}: trigger pr_opened passes input pr; declare it under pipelines.nightly.inputs`,
+  });
+  assert.throws(() => check(profileWith(nightly({ dependabot: true }, { inputs }))), {
+    message: `c.yaml:15: ${N}: trigger dependabot passes input pr; declare it under pipelines.nightly.inputs`,
+  });
+});
+
+test('a check_failed trigger needs inputs branch and run_url', () => {
+  assert.throws(() => check(profileWith(nightly({ check_failed: { branch: 'main' } }, { inputs: { branch: {}, scope: { required: true } } }))), {
+    message: `c.yaml:15: ${N}: trigger check_failed passes inputs branch and run_url; declare them under pipelines.nightly.inputs`,
   });
 });
