@@ -2,13 +2,13 @@
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { ago, rowState, ticketTitle } from './model.js';
+import { activeBox, ago, needsYou, rowState, ticketTitle } from './model.js';
 import { mark } from './mark.js';
 import { SPIN, own, scrollY } from './ui.js';
 
 const title = (r) => (r.status === 'unreadable' ? r.id : ticketTitle(r));
 const number = (r) => (r.status === 'unreadable' ? '?' : `#${r.ticket.number}`);
-const age = (r, now) => (r.status === 'unreadable' ? '' : ago(r.attention?.since ?? r.createdAt, now));
+const age = (r, now) => (r.status === 'unreadable' ? '' : ago((needsYou(r) && r.attention.since) || r.createdAt, now));
 
 // the state text truncates alone; the round (when there is one) is a separate child, so it is never cut.
 // `width` fixes the cell (wide: states line up); null lets it take the rest of the line (narrow).
@@ -25,8 +25,8 @@ function stateCell(s, width, size, t) {
 
 function icon(t, r) {
   const box = div().w(14).flex_none().flex().items_center().justify_center().text_size(12);
-  if (r.attention?.kind === 'failed') return box.text_color(t.blocked).child('✕');
-  if (r.attention) {
+  if (activeBox(r) === 'failed') return box.text_color(t.blocked).child('✕');
+  if (needsYou(r)) {
     return box.child(div().size(8).rounded(4).bg(t.blocked).loop('opacity', { from: 0.35, to: 1, period: 1200 }));
   }
   if (r.status === 'running') return box.text_color(t.working).frames(SPIN, 90).child(SPIN[0]);
