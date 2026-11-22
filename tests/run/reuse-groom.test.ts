@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { RunContext } from '../../src/engine/runtime.ts';
+import { contractsFor } from '../../src/graph/build.ts';
 import type { Step } from '../../src/graph/build.ts';
+import { FEATURE } from '../../src/graph/core.ts';
 import { reusePriorGroom } from '../../src/run/reuse-groom.ts';
 import { priorGroomFile } from '../../src/tracker/intake.ts';
 import { FakeRuntime } from '../helpers/fake-runtime.ts';
@@ -12,7 +14,8 @@ import { FakeRuntime } from '../helpers/fake-runtime.ts';
 const rm = (d: string) => fs.rm(d, { recursive: true, force: true, maxRetries: 5 });
 const mk = (id: string, stage: Step['stage'], role: Step['role'], slotLast = false) =>
   ({ id, name: id, stage, role, slotLast, def: {} }) as unknown as Step;
-const ctx = (executed: Record<string, number> = {}) => ({ state: { executed } }) as unknown as RunContext;
+const ctx = (executed: Record<string, number> = {}) =>
+  ({ state: { executed }, graph: { contracts: contractsFor(FEATURE, 'feature') } }) as unknown as RunContext;
 
 const PRIOR = {
   text: '# The ticket\n\nbody',

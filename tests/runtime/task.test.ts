@@ -24,8 +24,10 @@ function ctx(over: Partial<RunContext> = {}): RunContext {
   return {
     state: {} as RunContext['state'],
     graph: {
+      pipeline: 'feature',
+      contracts: { intake: ['ticket'], groom: ['groomed_ticket'], plan: ['plan'], implement: ['summary'], review: ['findings'], deliver: ['pr_url'] },
       steps: [step({ id: 'plan', stage: 'plan' }), step({ id: 'implement', stage: 'implement' }), step()],
-    } as RunContext['graph'],
+    } as unknown as RunContext['graph'],
     round: 2,
     maxRounds: 3,
     previousOutputs: {
@@ -57,6 +59,8 @@ function input(over: Partial<TaskInput> = {}): TaskInput {
     ],
     skills: { native: ['a', 'b'] },
     parentTerminal: 'herdr-1',
+    pipeline: 'feature',
+    inputs: {},
     ...over,
   };
 }
@@ -165,4 +169,34 @@ test('the review brief requires findings as a top-level numbered list', () => {
     ),
   );
   assert.ok(t.includes('If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.'));
+});
+
+/** A run of pipeline hotfix whose reproduce stage must write failing_test and fix writes nothing. */
+function hotfixInput(stage: string, over: Partial<TaskInput> = {}): TaskInput {
+  const graph = { ...ctx().graph, pipeline: 'hotfix', contracts: { intake: ['ticket'], reproduce: ['failing_test'], fix: [] } };
+  return input({ step: step({ id: stage, name: stage, stage }), ctx: ctx({ graph }), pipeline: 'hotfix', ...over });
+}
+
+test('task for a custom stage uses the generic brief', () => {
+  const t = buildTask(hotfixInput('reproduce'));
+  assert.ok(t.includes('## Stage contract\n\nCarry out the "reproduce" stage of pipeline hotfix. Write failing_test.md to the outputs directory.'));
+  assert.ok(t.includes('Required: failing_test.md'));
+});
+
+test('a custom stage with no required outputs gets a short brief and no Required line', () => {
+  const t = buildTask(hotfixInput('fix'));
+  assert.ok(t.includes('## Stage contract\n\nCarry out the "fix" stage of pipeline hotfix.\n\n## Task'));
+  assert.doesNotMatch(t, /Required:/);
+});
+
+test('a feature stage name in another pipeline uses the generic brief', () => {
+  const t = buildTask(hotfixInput('intake'));
+  assert.ok(t.includes('## Stage contract\n\nCarry out the "intake" stage of pipeline hotfix. Write ticket.md to the outputs directory.'));
+});
+
+test('{{input_alert_url}} and {{pipeline}} render', () => {
+  const t = buildTask(
+    input({ prompt: 'Look at {{input_alert_url}} for {{pipeline}}', inputs: { alert_url: 'https://x' }, pipeline: 'dd-alert' }),
+  );
+  assert.ok(t.includes('## Task\n\nLook at https://x for dd-alert'));
 });

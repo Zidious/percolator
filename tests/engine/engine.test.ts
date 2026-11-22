@@ -3,9 +3,9 @@ import { mock, test } from 'node:test';
 import { graphFingerprint, runGraph } from '../../src/engine/engine.ts';
 import { grantRound, newState } from '../../src/engine/state.ts';
 import type { RunState } from '../../src/engine/state.ts';
-import type { GraphFragment } from '../../src/config/schema.ts';
+import type { GraphFragment, Pipeline } from '../../src/config/schema.ts';
 import { buildGraph } from '../../src/graph/build.ts';
-import { mergeLayers } from '../../src/graph/merge.ts';
+import { mergeLayers, mergePipelines } from '../../src/graph/merge.ts';
 import { esc, fail, FakeRuntime, pass } from '../helpers/fake-runtime.ts';
 
 const init = { runId: 'r1', ticket: 'T-1', profile: 'default', groundVersions: {} };
@@ -595,4 +595,47 @@ test('a granted round on a back-edge not in the graph is a clear error', async (
     assert.equal(e.message, 'run state has a granted round on back-edge "nope", which is not in this graph');
     return true;
   });
+});
+
+// ---- pipelines ----
+
+/** A hotfix pipeline graph; `over` replaces header keys and adds bindings. */
+function hotfix(over: Partial<Pipeline> = {}) {
+  const p: Pipeline = {
+    stages: ['intake', 'reproduce', 'fix', 'review', 'deliver'],
+    outputs: { reproduce: ['failing_test'] },
+    exit: 'pr',
+    ...over,
+    bindings: { reproduce: { agent: 'claude' }, fix: { agent: 'claude' }, review: { agent: 'claude' }, ...over.bindings },
+  };
+  return buildGraph(mergePipelines([{ source: 'test', fragment: { pipelines: { hotfix: p } } }]).hotfix!);
+}
+
+test("engine checks a custom stage's required outputs", async () => {
+  const g = hotfix();
+  assert.deepEqual(g.contracts['reproduce'], ['failing_test']);
+  const rt = new FakeRuntime({ reproduce: [pass(), pass()] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'paused');
+  assert.equal(s.pausedReason, 'contract: reproduce missing failing_test');
+  assert.deepEqual(s.history.filter((h) => h.stepId === 'reproduce').map((h) => h.status), ['contract_error', 'contract_error']);
+});
+
+test('a looped custom stage is checked on fail too', async () => {
+  const g = hotfix({ outputs: { reproduce: ['failing_test'], fix: ['patch'] }, bindings: { fix: { agent: 'claude', max_rounds: 2 } } });
+  assert.ok(g.loopStages.includes('fix'));
+  const rt = new FakeRuntime({ fix: [{ status: 'fail', outputs: {} }, pass({ patch: 'x' })] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'completed');
+  assert.deepEqual(s.history.filter((h) => h.stepId === 'fix').map((h) => h.status), ['contract_error', 'pass']);
+  assert.equal(s.rounds['fix'], undefined);
+});
+
+test('a looped custom stage that passes clears unresolved findings', async () => {
+  const g = hotfix({ stages: ['intake', 'reproduce', 'fix', 'deliver'], bindings: { fix: { agent: 'claude', max_rounds: 2 } } });
+  const st = newState(init);
+  st.unresolvedFindings = 'stale';
+  const s = await runGraph(g, st, { runtime: new FakeRuntime(), save: saver().save });
+  assert.equal(s.status, 'completed');
+  assert.ok(!('unresolvedFindings' in s));
 });
