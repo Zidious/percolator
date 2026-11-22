@@ -56,6 +56,11 @@ const SCENARIOS: Scenario[] = [
     request:
       'Every weekday at 7am London time, run a pipeline without a ticket that checks our dependencies for known vulnerabilities and opens an issue for each one it finds, but only after I approve the drafts.',
   },
+  {
+    id: 'M',
+    request:
+      'For big epics, I want the plan split into slices, and each slice implemented, reviewed and opened as its own PR in parallel, at most 2 at a time.',
+  },
 ];
 
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
