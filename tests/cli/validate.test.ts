@@ -39,11 +39,32 @@ test('e2e fixture validates and lists steps (relative ground paths resolve again
 });
 
 test('profile overriding locked review fails with locking ground named', async () => {
-  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/config-override.yaml') }), /locked by ground:company/);
+  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/config-override.yaml') }), {
+    message: `${fx('e2e/config-override.yaml')}:13: profiles.work.bindings.review: locked by ${fx('e2e/grounds/company/percolator.yaml')}:2 (required: true); remove this binding or restate it exactly`,
+  });
+});
+
+test('a repo layer changing a locked binding names the repo file', async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    await fs.mkdir(path.dirname(repoFile));
+    await fs.writeFile(repoFile, 'bindings:\n  review: { agent: codex }\n');
+    await assert.rejects(validate({ ...trusted(), cwd }), {
+      message: `${repoFile}:2: bindings.review: locked by ${fx('e2e/grounds/company/percolator.yaml')}:2 (required: true); remove this binding or restate it exactly`,
+    });
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
+  }
 });
 
 test('unbound stages propagate as an error', async () => {
-  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/unbound.yaml') }), /unbound/i);
+  await assert.rejects(validate({ ...opts(), configFile: fx('e2e/unbound.yaml') }), {
+    name: 'GraphError',
+    file: fx('e2e/unbound.yaml'),
+    line: 4,
+    message: `${fx('e2e/unbound.yaml')}:4: profile "work" leaves stages unbound: groom, plan, implement, review, deliver; bind each under bindings:`,
+  });
 });
 
 test('a trusted repo layer is merged as the last layer', async () => {
@@ -70,9 +91,10 @@ test('an untrusted repo layer is refused', async () => {
     const err = await validate({ ...opts(), cwd }).catch((e) => e);
     assert.ok(err instanceof ConfigError);
     assert.equal(err.file, fx('e2e/config.yaml'));
+    assert.equal(err.line, 6);
     assert.equal(
       err.message,
-      `${fx('e2e/config.yaml')}: ${repoFile} exists, but profile "work" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
+      `${fx('e2e/config.yaml')}:6: profiles.work: ${repoFile} exists, but profile "work" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
     );
   } finally {
     await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
@@ -144,11 +166,13 @@ test('rule violations are thrown as one RuleViolationError against the config fi
       err.violations.map((v) => v.target),
       ['bindings.groom', 'bindings.plan', 'bindings.implement', 'bindings.review'],
     );
+    assert.equal(err.line, 12);
+    const fix = `allowed_agents (from ${cfg}:21) allows: codex; use one of those`;
     assert.deepEqual(err.message.split('\n'), [
-      'bindings.groom uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.plan uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.implement uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.review uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      `${cfg}:12: profiles.work.bindings.groom: uses agent "claude", but ${fix}`,
+      `${cfg}:13: profiles.work.bindings.plan: uses agent "claude", but ${fix}`,
+      `${cfg}:14: profiles.work.bindings.implement: uses agent "claude", but ${fix}`,
+      `${fx('e2e/grounds/company/percolator.yaml')}:2: bindings.review: uses agent "claude", but ${fix}`,
     ]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
@@ -199,10 +223,10 @@ test('every node prompt file is resolved inside its ground before start, all pro
       assert.ok(err instanceof ConfigError);
       assert.equal(err.file, cfg);
       assert.deepEqual(err.message.split('\n'), [
-        `${cfg}: bindings.plan.prompt: ground "company": prompts/missing.md does not exist`,
-        `${cfg}: bindings.implement.0.prompt: ground "nope": unknown ground (prompt x.md)`,
-        `${cfg}: bindings.implement.1.prompt: ground "company": ../team/policies/sdlc.md is outside the ground`,
-        `${cfg}: nodes.lint.prompt: ground "team": C:x must not contain ":"`,
+        `${cfg}:13: profiles.work.bindings.plan.prompt.file: ground "company": prompts/missing.md does not exist; fix the path or add it to the ground`,
+        `${cfg}:14: profiles.work.bindings.implement.0.prompt.from: ground "nope" is not declared; add it under grounds:`,
+        `${cfg}:14: profiles.work.bindings.implement.1.prompt.file: ground "company": ../team/policies/sdlc.md is outside the ground; use a path inside the ground`,
+        `${cfg}:17: profiles.work.nodes.lint.prompt.file: ground "team": C:x must not contain ":"; remove the ":"`,
       ]);
     },
   );
@@ -225,8 +249,8 @@ test('mapping applies_to entries must name a stage, a node or "*"', async () => 
       const err = await validate({ ...opts(), configFile: cfg }).catch((e) => e);
       assert.ok(err instanceof ConfigError);
       assert.deepEqual(err.message.split('\n'), [
-        `${cfg}: mapping team:policies/sdlc.md applies_to "reveiw": no such stage or node`,
-        `${cfg}: mapping team:policies/sdlc.md applies_to "nope": no such stage or node`,
+        `${cfg}:9: profiles.work.use.1.applies_to.4: "reveiw" names no stage or node; use "*", a stage or a node name`,
+        `${cfg}:9: profiles.work.use.1.applies_to.5: "nope" names no stage or node; use "*", a stage or a node name`,
       ]);
     },
   );
@@ -244,12 +268,25 @@ test('validate rejects an unknown agent before any agent starts', async () => {
         .replace('      - { from: company, file: percolator.yaml, as: graph }\n', '')
         .replace('      deliver:', '      review: { agent: gemini }\n      deliver:'),
     async (cfg) => {
-      await assert.rejects(
-        validate({ ...opts(), configFile: cfg }),
-        /bindings\.review: unknown agent "gemini" \(known: claude, codex, command\)/,
-      );
+      await assert.rejects(validate({ ...opts(), configFile: cfg }), {
+        message: `${cfg}:14: profiles.work.bindings.review.agent: unknown agent "gemini" (known: claude, codex, command); use one of those`,
+      });
     },
   );
+});
+
+test('an agent problem in the repo layer names the repo file and line', async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    await fs.mkdir(path.dirname(repoFile));
+    await fs.writeFile(repoFile, 'nodes:\n  rc:\n    agent: nope\n    after: plan\n');
+    await assert.rejects(validate({ ...trusted(), cwd }), {
+      message: `${repoFile}:3: nodes.rc.agent: unknown agent "nope" (known: claude, codex, command); use one of those`,
+    });
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
+  }
 });
 
 test('validate walks fragment use', async () => {
@@ -343,4 +380,158 @@ test('validate passes the selected profile runtime and tracker blocks through as
   } finally {
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
   }
+});
+
+// A base profile and a child that extends it, written to a temp config; `child` is spliced in under `acme:`.
+async function withExtends(
+  child: string,
+  fn: (cfg: string) => Promise<void>,
+  base = '',
+  plan = '      plan: { agent: claude, model: opus }',
+): Promise<void> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-ext-'));
+  try {
+    const cfg = path.join(dir, 'config.yaml');
+    await fs.writeFile(
+      cfg,
+      [
+        'version: 1',
+        'grounds:',
+        `  team: { path: ${JSON.stringify(fx('e2e/grounds/team'))} }`,
+        'profiles:',
+        '  base:',
+        '    match: { remote: "github.com/*/*" }',
+        '    tracker: { kind: github, approvers: [alice] }',
+        '    runtime: { space: false }',
+        '    use:',
+        '      - { from: team, file: policies/sdlc.md, as: policy }',
+        '    bindings:',
+        '      intake: { builtin: github.intake }',
+        '      groom: { agent: claude, model: opus }',
+        plan,
+        '      implement: { agent: claude, model: opus }',
+        '      review: { agent: claude, model: opus }',
+        '      deliver: { builtin: github.open_pr }',
+        '    nodes:',
+        '      lint: { command: [pnpm, lint], after: implement }',
+        ...(base ? [base] : []),
+        '  acme:',
+        child,
+        '',
+      ].join('\n'),
+    );
+    await fn(cfg);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
+}
+
+test('a profile that extends another starts from its bindings, nodes, use, tracker and runtime', async () => {
+  await withExtends(
+    ['    extends: base', '    bindings:', '      implement: { agent: codex, model: gpt-5.5 }'].join('\n'),
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg, profile: 'acme' });
+      const def = (id: string) => r.graph.steps.find((s) => s.id === id)!.def;
+      assert.deepEqual(def('implement'), { agent: 'codex', model: 'gpt-5.5' });
+      assert.deepEqual(def('plan'), { agent: 'claude', model: 'opus' });
+      assert.deepEqual(def('lint').command, ['pnpm', 'lint']);
+      assert.deepEqual(r.mappings.map((m) => m.as), ['policy']);
+      assert.deepEqual(r.tracker, { kind: 'github', approvers: ['alice'] });
+      assert.deepEqual(r.runtime, { space: false });
+    },
+  );
+});
+
+test('an extending profile replaces tracker and runtime as whole blocks and adds to use', async () => {
+  await withExtends(
+    [
+      '    extends: base',
+      '    tracker: { kind: github }',
+      '    runtime: { keep_terminals: true }',
+      '    use:',
+      '      - { from: team, dir: policies, as: context }',
+    ].join('\n'),
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg, profile: 'acme' });
+      assert.deepEqual(r.tracker, { kind: 'github' });
+      assert.deepEqual(r.runtime, { keep_terminals: true });
+      assert.deepEqual(r.mappings.map((m) => m.as), ['policy', 'context']);
+    },
+  );
+});
+
+test('an extending profile does not inherit match: it is picked only by its own', async () => {
+  await withExtends('    extends: base\n    match: { remote: "github.com/acme/*" }', async (cfg) => {
+    const git = new FakeGit();
+    git.urls.set(fx('e2e/repo'), 'https://github.com/other/repo.git');
+    const { profile: _picked, ...auto } = opts();
+    const r = await validate({ ...auto, configFile: cfg, git });
+    assert.equal(r.profile, 'base');
+  });
+});
+
+test('an extending profile does not inherit trust_repo_config', async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
+  try {
+    const repoFile = path.join(cwd, '.percolator', 'percolator.yaml');
+    await fs.mkdir(path.dirname(repoFile));
+    await fs.writeFile(repoFile, 'nodes:\n  repo-check:\n    command: [echo, hi]\n    after: plan\n');
+    await withExtends(
+      '    extends: base',
+      async (cfg) => {
+        await assert.rejects(validate({ ...opts(), cwd, configFile: cfg, profile: 'acme' }), {
+          message: `${cfg}:21: profiles.acme: ${repoFile} exists, but profile "acme" does not trust repo config (it can add nodes that run commands); set trust_repo_config: true in that profile to use it`,
+        });
+      },
+      '    trust_repo_config: true',
+    );
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
+test('an extending profile cannot change a binding its base locked', async () => {
+  await withExtends(
+    '    extends: base\n    bindings:\n      plan: { agent: codex }',
+    async (cfg) => {
+      await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'acme' }), {
+        message: `${cfg}:23: profiles.acme.bindings.plan: locked by ${cfg}:14 (required: true); remove this binding or restate it exactly`,
+      });
+    },
+    '',
+    '      plan: { agent: claude, model: opus, required: true }',
+  );
+});
+
+test('extends must name another existing profile', async () => {
+  await withExtends('    extends: nope', async (cfg) => {
+    await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'acme' }), {
+      message: `${cfg}:21: profiles.acme.extends: unknown profile "nope" (profiles: base, acme); extend one of those`,
+    });
+  });
+  await withExtends('    extends: acme', async (cfg) => {
+    await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'acme' }), {
+      message: `${cfg}:21: profiles.acme.extends: a profile cannot extend itself; extend another profile or remove extends`,
+    });
+  });
+});
+
+test('extends is one level only', async () => {
+  await withExtends(
+    '    extends: mid',
+    async (cfg) => {
+      await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'acme' }), {
+        message: `${cfg}:23: profiles.acme.extends: profile "mid" extends "base" itself; extends is one level only, so extend "base" directly`,
+      });
+    },
+    '  mid:\n    extends: base',
+  );
+});
+
+test('a broken extends is reported even when another profile is selected', async () => {
+  await withExtends('    extends: nope', async (cfg) => {
+    await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'base' }), {
+      message: `${cfg}:21: profiles.acme.extends: unknown profile "nope" (profiles: base, acme); extend one of those`,
+    });
+  });
 });

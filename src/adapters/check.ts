@@ -1,63 +1,83 @@
 import { BUILTIN_NAMES } from '../tracker/index.ts';
+import { locate } from '../config/locate.ts';
+import type { Problem } from '../config/locate.ts';
 import { effectiveKind } from '../config/schema.ts';
+import { stepKey } from '../graph/build.ts';
 import type { Graph } from '../graph/build.ts';
 import { mappingsFor, throwProblems } from '../grounds/mappings.ts';
 import type { ResolvedMapping } from '../grounds/mappings.ts';
 import { findSkill } from '../workspace/run-dir.ts';
 import { ADAPTERS } from './index.ts';
 
-/** Checks every agent step against its adapter before any agent starts; one ConfigError listing all problems. */
+/**
+ * Checks every agent step against its adapter before any agent starts; one ConfigError listing all
+ * problems, each at the step's or mapping's own file and line (`configFile` when it has none).
+ */
 export async function checkAgents(graph: Graph, mappings: ResolvedMapping[], configFile: string): Promise<void> {
-  const problems: string[] = [];
+  const problems: Problem[] = [];
   const known = Object.keys(ADAPTERS);
   for (const step of graph.steps) {
     const kind = effectiveKind(step.def);
-    const target = `${step.role === 'slot' ? 'bindings' : 'nodes'}.${step.id}`;
+    const target = stepKey(step);
+    const report = (message: string, key?: string) =>
+      problems.push({ ...locate(step.locator, configFile, key === undefined ? target : `${target}.${key}`), message });
     if (kind === 'builtin') {
       const name = step.def.builtin!;
       if (!(BUILTIN_NAMES as readonly string[]).includes(name)) {
-        problems.push(`${target}: unknown builtin "${name}" (known: ${BUILTIN_NAMES.join(', ')})`);
+        report(`unknown builtin "${name}" (known: ${BUILTIN_NAMES.join(', ')}); use one of those`, 'builtin');
       }
       continue;
     }
     if (kind !== 'agent') continue;
     const agent = step.def.agent!;
     if (!Object.hasOwn(ADAPTERS, agent)) {
-      problems.push(`${target}: unknown agent "${agent}" (known: ${known.join(', ')})`);
+      report(`unknown agent "${agent}" (known: ${known.join(', ')}); use one of those`, 'agent');
       continue;
     }
     const adapter = ADAPTERS[agent as keyof typeof ADAPTERS];
     if (agent === 'command') {
       const command = step.def.command;
       if (command === undefined || command.length === 0) {
-        problems.push(`${target}: agent "command" needs "command" (the program to run)`);
+        report('agent "command" needs "command" (the program to run); add command: [program, ...args]');
       } else if (command[0]!.startsWith('-')) {
-        problems.push(`${target}: command must not start with "-"`);
+        report('command must not start with "-"; put the program first', 'command');
       }
     }
     if (!adapter.effort && step.def.effort !== undefined) {
-      problems.push(`${target}: agent "${agent}" does not take "effort"; remove it or use agent "claude"`);
+      report(`agent "${agent}" does not take "effort"; remove it or use agent "claude"`, 'effort');
     }
     const applying = mappingsFor(step, mappings);
     if (!adapter.plugins) {
       for (const m of applying) {
         if (m.as === 'plugins') {
-          problems.push(`${target}: agent "${agent}" cannot load plugins, but mapping ${m.from}:${m.file ?? m.dir} (plugins) applies to it`);
+          report(
+            `agent "${agent}" cannot load plugins, but mapping ${m.from}:${m.file ?? m.dir} (plugins) applies to it; narrow that mapping's applies_to or use agent "claude"`,
+          );
         }
       }
     }
     if (!adapter.nativeSkills) {
-      for (const skill of [...(step.def.skill !== undefined ? [step.def.skill] : []), ...(step.def.skills ?? [])]) {
+      const skills = [
+        ...(step.def.skill !== undefined ? [[step.def.skill, 'skill'] as const] : []),
+        ...(step.def.skills ?? []).map((s, i) => [s, `skills.${i}`] as const),
+      ];
+      for (const [skill, key] of skills) {
         if ((await findSkill(skill, applying)) === undefined) {
-          problems.push(
-            `${target}: skill "${skill}" not found in the skills or plugins mapped to it (agent "${agent}" loads skills from files)`,
+          report(
+            `skill "${skill}" not found in the skills or plugins mapped to it (agent "${agent}" loads skills from files); map a skills dir that has it, or remove the skill`,
+            key,
           );
         }
       }
     }
   }
   for (const m of mappings) {
-    if (m.as === 'skills' && m.dir === undefined) problems.push(`mapping ${m.from}:${m.file}: skills mappings must use dir`);
+    if (m.as === 'skills' && m.dir === undefined) {
+      problems.push({
+        ...locate(m.locator, configFile, `${m.path ?? 'use'}.file`),
+        message: 'skills mappings must use dir; replace file: with dir:',
+      });
+    }
   }
-  throwProblems(problems, configFile);
+  throwProblems(problems);
 }

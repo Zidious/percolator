@@ -89,27 +89,28 @@ describe('collectLayers', () => {
     );
   });
 
-  test('fragment use of an undeclared ground is a ConfigError', async () => {
-    await fs.writeFile(path.join(tmp, 'company', 'percolator.yaml'), `use:\n${yamlUse(graphUse('nope'))}`);
+  test('an unknown ground in a fragment names the fragment and the config', async () => {
+    const frag = path.join(tmp, 'company', 'percolator.yaml');
+    await fs.writeFile(frag, `use:\n${yamlUse(graphUse('nope'))}`);
     await assert.rejects(
       collectLayers({ roots: [root([graphUse('company')])], grounds, configFile: 'config.yaml' }),
       (e: unknown) => {
         assert.ok(e instanceof ConfigError);
         assert.equal(
           e.message,
-          `config.yaml: ground "nope": unknown ground (mapping percolator.yaml, used by ${COMPANY}); declare it under grounds: in config.yaml`,
+          `${frag}:2: use.0.from: ground "nope" is not declared; add it under grounds: in config.yaml`,
         );
         return true;
       },
     );
   });
 
-  test('a profile-level unknown ground keeps the short message', async () => {
+  test('an unknown ground in the user config itself has no "in" hint', async () => {
     await assert.rejects(
       collectLayers({ roots: [root([graphUse('nope')])], grounds, configFile: 'config.yaml' }),
       (e: unknown) => {
         assert.ok(e instanceof ConfigError);
-        assert.equal(e.message, 'config.yaml: ground "nope": unknown ground (mapping percolator.yaml)');
+        assert.equal(e.message, 'config.yaml: use.0.from: ground "nope" is not declared; add it under grounds:');
         return true;
       },
     );
@@ -118,12 +119,16 @@ describe('collectLayers', () => {
   test('a repo-layer unknown ground names the repo layer', async () => {
     const repo = 'repo:.percolator/percolator.yaml';
     await assert.rejects(
-      collectLayers({ roots: [root([]), root([policy({ from: 'nope' })], repo)], grounds, configFile: 'config.yaml' }),
+      collectLayers({
+        roots: [root([]), { ...root([policy({ from: 'nope' })], repo), locator: { file: 'repo.yaml', lines: { 'use.0.from': 3 } } }],
+        grounds,
+        configFile: 'config.yaml',
+      }),
       (e: unknown) => {
         assert.ok(e instanceof ConfigError);
         assert.equal(
           e.message,
-          `config.yaml: ground "nope": unknown ground (mapping p.md, used by ${repo}); declare it under grounds: in config.yaml`,
+          'repo.yaml:3: use.0.from: ground "nope" is not declared; add it under grounds: in config.yaml',
         );
         return true;
       },
@@ -168,7 +173,7 @@ describe('mergeMappings', () => {
         assert.ok(e instanceof LockViolation);
         assert.equal(
           e.message,
-          `mapping team:p.md (policy) is locked by ${COMPANY}; profile:p cannot change it`,
+          `profile:p: mapping team:p.md (policy) is locked by ${COMPANY} (required: true); remove this mapping or restate it exactly`,
         );
         return true;
       },
@@ -193,10 +198,37 @@ describe('mergeMappings', () => {
         ]),
       (e: unknown) => {
         assert.ok(e instanceof LockViolation);
-        assert.equal(e.message, `mapping team:p.md (policy) is locked by ${COMPANY}; repo:r cannot change it`);
+        assert.equal(
+          e.message,
+          `repo:r: mapping team:p.md (policy) is locked by ${COMPANY} (required: true); remove this mapping or restate it exactly`,
+        );
         return true;
       },
     );
+  });
+
+  test('a mapping lock names the attempting and locking files and lines', () => {
+    const at = (file: string, line: number) => ({ locator: { file, lines: { 'use.1': line } }, path: 'use.1' });
+    assert.throws(
+      () =>
+        mergeMappings([
+          { source: COMPANY, mappings: [{ ...resolved(policy({ required: true }), COMPANY), ...at('g.yaml', 4) }] },
+          { source: 'profile:p', mappings: [{ ...resolved(policy({ applies_to: ['review'] }), 'profile:p'), ...at('c.yaml', 9) }] },
+        ]),
+      {
+        message:
+          'c.yaml:9: use.1: mapping team:p.md (policy) is locked by g.yaml:4 (required: true); remove this mapping or restate it exactly',
+      },
+    );
+  });
+
+  test('an identical required mapping from another layer still passes', () => {
+    const out = mergeMappings([
+      { source: 'a', mappings: [{ ...resolved(policy({ required: true }), 'a'), locator: { file: 'a.yaml', lines: {} }, path: 'use.0' }] },
+      { source: 'b', mappings: [{ ...resolved(policy({ required: true }), 'b'), locator: { file: 'b.yaml', lines: {} }, path: 'use.3' }] },
+    ]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0]!.source, 'a');
   });
 
   test('an unlocked mapping is overridden in place by a later layer', () => {

@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expandHome, foldCase, toPosix } from '../util/paths.ts';
 import { ConfigError } from './load.ts';
+import { locate } from './locate.ts';
+import type { LineIndex } from './locate.ts';
 import type { Profile, UserConfig } from './schema.ts';
 
 /** `host/owner/repo`, lower-cased, without scheme, user, `.git` or trailing slash. */
@@ -49,17 +51,23 @@ export function selectProfile(
     override?: string;
     home?: string;
     configFile?: string;
+    /** the config file's line index, so errors give the `profiles:` line */
+    lines?: LineIndex;
     realCwd?: string;
     platform?: NodeJS.Platform;
   },
 ): { name: string; profile: Profile } {
   const file = ctx.configFile ?? 'config';
   const names = Object.keys(config.profiles);
+  const fail = (message: string): ConfigError => {
+    const w = locate(ctx.lines ? { file, lines: ctx.lines } : undefined, file, 'profiles');
+    return new ConfigError(message, w.file, w.line, w.path);
+  };
 
   if (ctx.override !== undefined) {
     const profile = config.profiles[ctx.override];
     if (!profile) {
-      throw new ConfigError(`unknown profile "${ctx.override}" (profiles: ${names.join(', ')})`, file);
+      throw fail(`unknown profile "${ctx.override}" (profiles: ${names.join(', ')}); pass one of those to --profile`);
     }
     return { name: ctx.override, profile };
   }
@@ -80,5 +88,7 @@ export function selectProfile(
     if (remoteHit || pathHit) return { name, profile };
   }
 
-  throw new ConfigError(`no profile matches this repository (profiles: ${names.join(', ')})`, file);
+  throw fail(
+    `no profile matches this repository (profiles: ${names.join(', ')}); add a match (remote or path) to one of them, or pass --profile`,
+  );
 }

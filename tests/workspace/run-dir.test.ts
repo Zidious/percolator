@@ -33,6 +33,7 @@ function mapping(g: ResolvedGround, as: ResolvedMapping['as'], rel: string, kind
     absPath: path.join(g.dir, rel),
     ground: g.name,
     commit: g.commit,
+    source: 'config',
   } as ResolvedMapping;
 }
 

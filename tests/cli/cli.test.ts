@@ -30,10 +30,96 @@ test('validate prints profile, grounds, mappings, steps and back-edges', async (
   assert.ok(lines.includes('ground company local'));
   assert.ok(lines.includes('ground team local'));
   assert.ok(lines.some((l) => /^policy .*policies[\\/]sdlc\.md$/.test(l)));
-  assert.ok(lines.includes('1. intake'));
-  assert.ok(lines.includes('3. approve-groom (after groom)'));
+  assert.ok(lines.includes('1. intake: builtin github.intake'));
+  assert.ok(lines.includes('3. approve-groom (after groom): gate'));
   assert.ok(lines.includes('review → implement (max 3, continue)'));
   assert.ok(lines.includes('approve-groom → groom (max 3, escalate)'));
+});
+
+test('validate shows approvers, what runs each step and the stages a mapping applies to', async () => {
+  const cfg = path.join(tmp, 'detail.yaml');
+  await fs.writeFile(
+    cfg,
+    [
+      'version: 1',
+      'grounds:',
+      `  team: { path: ${JSON.stringify(fx('e2e/grounds/team'))} }`,
+      'profiles:',
+      '  work:',
+      '    tracker: { kind: github, approvers: [alice, bob] }',
+      '    use:',
+      '      - { from: team, file: policies/sdlc.md, as: policy, applies_to: [implement, review] }',
+      '    bindings:',
+      '      intake: { builtin: github.intake }',
+      '      groom: { agent: claude }',
+      '      plan: { agent: claude, model: sonnet }',
+      '      implement: { agent: claude, model: opus, effort: high, skills: [a:one, b:two] }',
+      '      review: { agent: claude, skill: code-review }',
+      '      deliver: { builtin: github.open_pr }',
+      '    nodes:',
+      '      lint: { command: [pnpm, lint], after: implement }',
+      '      sign-off: { kind: gate, after: plan }',
+      '',
+    ].join('\n'),
+  );
+  const r = await run(['validate', '--config', cfg, '--profile', 'work']);
+  assert.equal(r.code, 0, r.err);
+  const lines = r.out.split('\n');
+  assert.ok(lines.includes('approvers: alice, bob'), r.out);
+  assert.ok(lines.some((l) => /^policy .*policies[\\/]sdlc\.md \(applies to implement, review\)$/.test(l)), r.out);
+  for (const line of [
+    '1. intake: builtin github.intake',
+    '2. groom: claude',
+    '3. approve-groom (after groom): gate',
+    '4. plan: claude, model sonnet',
+    '5. sign-off (after plan): gate',
+    '6. implement: claude, model opus, effort high, skills a:one, b:two',
+    '7. lint (after implement): command pnpm lint',
+    '8. review: claude, skills code-review',
+    '9. deliver: builtin github.open_pr',
+  ]) {
+    assert.ok(lines.includes(line), `missing "${line}" in:\n${r.out}`);
+  }
+});
+
+test('validate shows the runtime settings the profile sets', async () => {
+  const cfg = path.join(tmp, 'runtime.yaml');
+  const base = await fs.readFile(fx('e2e/config.yaml'), 'utf8');
+  const abs = (n: string) => JSON.stringify(path.join(fx('e2e/grounds'), n));
+  await fs.writeFile(
+    cfg,
+    base
+      .replace('./grounds/company', abs('company'))
+      .replace('./grounds/team', abs('team'))
+      .replace('  work:\n', '  work:\n    runtime: { space: false, keep_terminals: true, base: dev }\n'),
+  );
+  const r = await run(['validate', '--config', cfg, '--profile', 'work']);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(r.out.split('\n').includes('runtime: base dev, keep_terminals true, space false'), r.out);
+  const plain = await run(['validate', '--config', fx('e2e/config.yaml'), '--profile', 'work']);
+  assert.ok(!plain.out.includes('runtime:'), plain.out);
+});
+
+test('validate says an empty approvers list leaves only local decisions', async () => {
+  const cfg = path.join(tmp, 'no-approvers.yaml');
+  const base = await fs.readFile(fx('e2e/config.yaml'), 'utf8');
+  const abs = (n: string) => JSON.stringify(path.join(fx('e2e/grounds'), n));
+  await fs.writeFile(
+    cfg,
+    base
+      .replace('./grounds/company', abs('company'))
+      .replace('./grounds/team', abs('team'))
+      .replace('  work:\n', '  work:\n    tracker: { kind: github, approvers: [] }\n'),
+  );
+  const r = await run(['validate', '--config', cfg, '--profile', 'work']);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(r.out.split('\n').includes('approvers: none on GitHub (only local perc approve/reject)'), r.out);
+});
+
+test('validate names the default approver when the profile lists none', async () => {
+  const r = await run(['validate', '--config', fx('e2e/config.yaml'), '--profile', 'work']);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(r.out.split('\n').includes('approvers: the gh user running perc'), r.out);
 });
 
 test('validate reports config errors on stderr with exit 1', async () => {
@@ -53,13 +139,14 @@ test('validate prints rule violations and exits 1', async () => {
   const r = await run(['validate', '--config', cfg, '--profile', 'work']);
   assert.equal(r.code, 1);
   assert.equal(r.out, '');
+  const fix = `allowed_agents (from ${cfg}:21) allows: codex; use one of those`;
   assert.equal(
     r.err,
     [
-      'bindings.groom uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.plan uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.implement uses agent "claude", but allowed_agents (from profile:work) allows: codex',
-      'bindings.review uses agent "claude", but allowed_agents (from profile:work) allows: codex',
+      `${cfg}:12: profiles.work.bindings.groom: uses agent "claude", but ${fix}`,
+      `${cfg}:13: profiles.work.bindings.plan: uses agent "claude", but ${fix}`,
+      `${cfg}:14: profiles.work.bindings.implement: uses agent "claude", but ${fix}`,
+      `${fx('e2e/grounds/company/percolator.yaml')}:2: bindings.review: uses agent "claude", but ${fix}`,
       '',
     ].join('\n'),
   );

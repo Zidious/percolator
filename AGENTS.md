@@ -18,6 +18,7 @@ node src/cli.ts delete <id>...|--finished [--yes]  # remove runs; keeps branches
 pnpm herdr:sync                       # mirror herdr/mods/* into the Herdr app (reloads live; removes stale files, keeps perc.json); after any panel/cup change
 node tests/smoke/hc.smoke.ts          # manual smoke tests against the real hc / gh (gh.smoke.ts); flags in each file's header; never in pnpm test
 node tests/smoke/panel.shots.ts [--out dir]   # screenshots of every fixture state at 280/380/720 and in the window; needs Herdr open
+node tests/smoke/skill.smoke.ts       # sandboxed agent scenarios for skills/percolator-config; --verify <root> afterwards; never in pnpm test
 ```
 
 ## Hard rules
@@ -72,7 +73,7 @@ Read the module before changing it.
 
 - **Six core stages, in order:** `intake`, `groom`, `plan`, `implement`, `review`, `deliver`. All must be bound or the engine refuses to start. No built-in bindings for `groom`…`review`; `perc init` writes the recommended config.
 - **Bounded loops:** review caps at 3 rounds, then delivers anyway (the PR body does not carry the findings); a back-edge (`on_fail: { back_to, max_rounds }`) at its cap escalates to the owner.
-- **Locks:** `required: true` wins over merge order. A locked target may only be restated deep-equal; otherwise `LockViolation` (`"<target> is locked by <src>; <attempt> cannot change it"`).
+- **Locks:** `required: true` wins over merge order. A locked target may only be restated deep-equal; otherwise `LockViolation`, located at the attempt: `"<file>:<line>: <path>: locked by <file>:<line> (required: true); remove this <binding|node|mapping> or restate it exactly"` (mappings read `mapping <name> is locked by …`); a core lock reads `"… locked by Percolator core (required: true); remove this node: <name> is built in"`.
 - **Completion** = `done.json` + `outputs/<key>.md`; hc status is only for attention.
 - **Worktrees in the repo:** `<repo>/.worktrees/<run-id>`, listed in `.git/info/exclude`, so the repo's agent trust covers them. Run dirs stay in `~/.percolator/runs`, reached via `--add-dir` (`~/.percolator` must be trusted in Claude Code once).
 - **Terminal ownership:** a terminal not labelled `percolator.run` = this run is never re-attached, adopted, killed or removed. One exception: `perc delete` ends live terminals whose cwd is inside the run's worktree (the run space's own shell, ones opened there), which would otherwise hold it open on Windows.

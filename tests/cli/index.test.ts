@@ -15,7 +15,8 @@ test('public API exports the pipeline', () => {
   }
   assert.ok(Array.isArray(api.CORE_STAGES));
   assert.ok(api.STAGE_CONTRACTS.review);
-  assert.ok(new api.LockViolation('t', 'a', 'b') instanceof api.ConfigError);
+  const lock = { target: 't', noun: 'node' as const, lockedBy: 'a', attemptedBy: 'b', attempt: { file: 'b' }, lock: { file: 'a' } };
+  assert.ok(new api.LockViolation(lock) instanceof api.ConfigError);
   assert.equal(typeof api.GraphError, 'function');
   assert.ok(api.cliGit);
   assert.equal(typeof api.HcError, 'function');

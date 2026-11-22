@@ -1,27 +1,37 @@
 import { ConfigError } from '../config/load.ts';
+import { formatIssue, locate, place, slotKey } from '../config/locate.ts';
+import type { Locator, Where } from '../config/locate.ts';
 import { effectiveKind } from '../config/schema.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
 import { CORE_STAGES } from './core.ts';
 import type { Merged } from './merge.ts';
 
-export type Violation = { rule: string; source: string; target: string; message: string };
+/** `message` is the body only; `where` is the offending key's file, line and path (see formatIssue). */
+export type Violation = { rule: string; source: string; target: string; message: string; where: Where };
 
 const DEFAULT_REVIEW_ROUNDS = 3;
 
-type Entry = { target: string; node: NodeDef; stage?: Stage; core?: boolean };
+type Entry = { target: string; node: NodeDef; stage?: Stage; core?: boolean; source: string; locator?: Locator };
 
 /** Every node in deterministic order: bindings in stage order, then extension nodes by name. */
 function entries(merged: Merged): Entry[] {
   const out: Entry[] = [];
   for (const stage of CORE_STAGES) {
-    const nodes = merged.bindings[stage]?.value ?? [];
+    const binding = merged.bindings[stage];
+    const nodes = binding?.value ?? [];
     nodes.forEach((node, i) => {
-      out.push({ target: nodes.length > 1 ? `bindings.${stage}.${i}` : `bindings.${stage}`, node, stage });
+      out.push({
+        target: slotKey(binding!.locator, stage, i, nodes.length),
+        node,
+        stage,
+        source: binding!.source,
+        ...(binding!.locator ? { locator: binding!.locator } : {}),
+      });
     });
   }
   for (const name of Object.keys(merged.nodes).sort()) {
-    const { value, source } = merged.nodes[name]!;
-    out.push({ target: `nodes.${name}`, node: value, core: source === 'core' });
+    const { value, source, locator } = merged.nodes[name]!;
+    out.push({ target: `nodes.${name}`, node: value, core: source === 'core', source, ...(locator ? { locator } : {}) });
   }
   return out;
 }
@@ -46,20 +56,25 @@ export function checkRules(merged: Merged): Violation[] {
   const all = entries(merged);
   const sets = merged.rules;
 
-  sets.forEach(({ value: rules, source }, idx) => {
+  sets.forEach(({ value: rules, source, locator: ruleLocator }, idx) => {
+    // where the rule is written: `file:line`, or the layer source without a locator
+    const from = (rule: string) => place(locate(ruleLocator, source, `rules.${rule}`));
+    const at = (e: { source: string; locator?: Locator }, target: string) => locate(e.locator, e.source, target);
     for (const req of rules.require_skills ?? []) {
       if (req.stage !== '*') {
-        const bound = merged.bindings[req.stage]?.value;
-        if (bound !== undefined && !bound.some(isAgent)) {
+        const binding = merged.bindings[req.stage];
+        if (binding !== undefined && !binding.value.some(isAgent)) {
           out.push({
             rule: 'require_skills',
             source,
             target: `bindings.${req.stage}`,
-            message: `bindings.${req.stage} has no agent node, but require_skills (from ${source}) requires skill(s) ${req.skills.join(', ')} there`,
+            message: `has no agent node, but require_skills (from ${from('require_skills')}) requires skill(s) ${req.skills.join(', ')} there; bind an agent node there or remove the rule`,
+            where: at(binding, `bindings.${req.stage}`),
           });
         }
       }
-      for (const { target, node, stage } of all) {
+      for (const e of all) {
+        const { target, node, stage } = e;
         if (!isAgent(node)) continue;
         if (req.stage !== '*' && stage !== req.stage) continue;
         const have = [...(node.skills ?? []), ...(node.skill !== undefined ? [node.skill] : [])];
@@ -69,7 +84,8 @@ export function checkRules(merged: Merged): Violation[] {
             rule: 'require_skills',
             source,
             target,
-            message: `${target} is missing required skill(s) ${missing.join(', ')}, required by require_skills (from ${source})`,
+            message: `missing required skill(s) ${missing.join(', ')}, required by require_skills (from ${from('require_skills')}); add them to its skills:`,
+            where: at(e, target),
           });
         }
       }
@@ -81,8 +97,11 @@ export function checkRules(merged: Merged): Violation[] {
     ] as const) {
       const allowed = rules[rule];
       if (allowed === undefined) continue;
-      const list = allowed.length > 0 ? allowed.join(', ') : '(nothing)';
-      for (const { target, node } of all) {
+      const list = allowed.join(', ');
+      // an empty list admits no agent node at all, so naming a value to pick would be advice no one can follow
+      const none = `${rule} (from ${from(rule)}) allows no ${field}s; use a non-agent node here or change that rule`;
+      for (const e of all) {
+        const { target, node } = e;
         if (!isAgent(node)) continue;
         const value = node[field];
         if (value === undefined) {
@@ -92,7 +111,8 @@ export function checkRules(merged: Merged): Violation[] {
             rule,
             source,
             target,
-            message: `${target} has no ${field}, but ${rule} (from ${source}) requires one of: ${list}`,
+            message: allowed.length === 0 ? `has no ${field}, but ${none}` : `has no ${field}, but ${rule} (from ${from(rule)}) requires one of: ${list}; set ${field}: to one of them`,
+            where: at(e, target),
           });
           continue;
         }
@@ -103,7 +123,8 @@ export function checkRules(merged: Merged): Violation[] {
           rule,
           source,
           target,
-          message: `${target} uses ${field} "${value}", but ${rule} (from ${source}) allows: ${list}`,
+          message: allowed.length === 0 ? `uses ${field} "${value}", but ${none}` : `uses ${field} "${value}", but ${rule} (from ${from(rule)}) allows: ${list}; use one of those`,
+          where: at(e, target),
         });
       }
     }
@@ -112,7 +133,8 @@ export function checkRules(merged: Merged): Violation[] {
     if (ceiling !== undefined) {
       const exceededEarlier = (rounds: number) =>
         sets.slice(0, idx).some((s) => s.value.max_rounds_ceiling !== undefined && rounds > s.value.max_rounds_ceiling);
-      for (const { target, node, stage, core } of all) {
+      for (const e of all) {
+        const { target, node, stage, core } = e;
         // Only nodes whose merged source is 'core' (never keyed by name) are exempt. The ceiling is
         // enforced on the core gate by buildGraph clamping its back-edge, not here.
         if (core) continue;
@@ -123,7 +145,8 @@ export function checkRules(merged: Merged): Violation[] {
               rule: 'max_rounds_ceiling',
               source,
               target,
-              message: `${target} allows ${rounds} review rounds, over max_rounds_ceiling ${ceiling} (from ${source})`,
+              message: `allows ${rounds} review rounds, over max_rounds_ceiling ${ceiling} (from ${from('max_rounds_ceiling')}); set max_rounds to ${ceiling} or less`,
+              where: at(e, target),
             });
           }
         }
@@ -133,13 +156,14 @@ export function checkRules(merged: Merged): Violation[] {
             rule: 'max_rounds_ceiling',
             source,
             target: `${target}.on_fail`,
-            message: `${target}.on_fail allows ${back} rounds, over max_rounds_ceiling ${ceiling} (from ${source})`,
+            message: `allows ${back} rounds, over max_rounds_ceiling ${ceiling} (from ${from('max_rounds_ceiling')}); set on_fail.max_rounds to ${ceiling} or less`,
+            where: at(e, `${target}.on_fail`),
           });
         }
       }
     }
 
-    for (const req of rules.required_nodes ?? []) {
+    for (const [k, req] of (rules.required_nodes ?? []).entries()) {
       const name = typeof req === 'string' ? req : req.name;
       const have = merged.nodes[name];
       if (have === undefined) {
@@ -147,19 +171,30 @@ export function checkRules(merged: Merged): Violation[] {
           rule: 'required_nodes',
           source,
           target: `nodes.${name}`,
-          message: `node "${name}" is required by required_nodes (from ${source}) but is not defined`,
+          message: `node "${name}" is required by required_nodes but is not defined; add it under nodes:`,
+          where: locate(ruleLocator, source, `rules.required_nodes.${k}`),
         });
         continue;
       }
       if (typeof req === 'string') continue;
       const want = position(req);
       const got = position(have.value);
-      if (want !== got) {
+      if (want !== got && have.source === 'core') {
+        // a built-in node is locked, so the only thing the user can change is this rule entry
         out.push({
           rule: 'required_nodes',
           source,
           target: `nodes.${name}`,
-          message: `node "${name}" is required ${want} by required_nodes (from ${source}), but it is attached ${got}`,
+          message: `requires ${name} ${want}, but it is built in and attached ${got}; change or remove this required_nodes entry`,
+          where: locate(ruleLocator, source, `rules.required_nodes.${k}`),
+        });
+      } else if (want !== got) {
+        out.push({
+          rule: 'required_nodes',
+          source,
+          target: `nodes.${name}`,
+          message: `required ${want} by required_nodes (from ${from('required_nodes')}), but it is attached ${got}; attach it ${want}`,
+          where: at(have, `nodes.${name}`),
         });
       }
     }
@@ -167,13 +202,14 @@ export function checkRules(merged: Merged): Violation[] {
   return out;
 }
 
-/** Rule violations found by `validate`: one per line in the message, reported against the config file. */
+/** Rule violations found by `validate`: one located line per violation; file, line and path are the first one's. */
 export class RuleViolationError extends ConfigError {
   violations: Violation[];
 
   constructor(violations: Violation[], file: string) {
-    const message = violations.map((v) => v.message).join('\n');
-    super(violations[0]?.message ?? 'rule violations', file, undefined, undefined, message);
+    const first = violations[0];
+    const lines = violations.map((v) => formatIssue(v.message, v.where.file, v.where.line, v.where.path));
+    super(first?.message ?? 'rule violations', first?.where.file || file, first?.where.line, first?.where.path, lines.join('\n'));
     this.name = 'RuleViolationError';
     this.violations = violations;
   }

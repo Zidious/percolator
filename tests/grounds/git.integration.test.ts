@@ -112,3 +112,24 @@ test('redactUrls hides userinfo in every url of a message', () => {
     'fatal: https://***@host/a.git and ssh://***@h2/b, not mail a@b.c or https://host/x',
   );
 });
+
+test('cliGit checks out files whose paths are longer than 260 characters', async () => {
+  const tmp = await mktmp();
+  const work = path.join(tmp, 'work');
+  await fs.mkdir(work);
+  await git(work, 'init');
+  const deep = path.join(...Array.from({ length: 6 }, (_, i) => `${'d'.repeat(40)}${i}`));
+  await fs.mkdir(path.join(work, deep), { recursive: true });
+  await fs.writeFile(path.join(work, deep, `${'f'.repeat(40)}.md`), 'deep'); // no newline: autocrlf would rewrite it
+  await git(work, '-c', 'core.longpaths=true', 'add', '.');
+  await git(work, 'commit', '-m', 'deep');
+  const commit = await git(work, 'rev-parse', 'HEAD');
+
+  const mirror = path.join(tmp, 'deep.mirror');
+  const dir = path.join(tmp, `deep@${commit.slice(0, 12)}`);
+  await cliGit.clone(work, mirror, { mirror: true });
+  await cliGit.clone(mirror, dir);
+  await cliGit.checkout(dir, commit);
+  assert.ok(path.join(dir, deep).length > 260);
+  assert.equal(await fs.readFile(path.join(dir, deep, `${'f'.repeat(40)}.md`), 'utf8'), 'deep');
+});
