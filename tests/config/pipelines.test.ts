@@ -137,6 +137,8 @@ const lines: Record<string, number> = {
   'profiles.work.pipelines.triage.choose.from.0': 8,
   'profiles.work.pipelines.triage.choose.from.1': 9,
   'profiles.work.pipelines.triage.fallback': 10,
+  'profiles.work.pipelines.split': 11,
+  'profiles.work.pipelines.split.next': 12,
 };
 const layer = (pipelines: Record<string, unknown>, withFeature = true) =>
   mergePipelines([
@@ -236,5 +238,36 @@ test('a defaulted fallback is checked like a written one', () => {
   assert.throws(() => check(merged), {
     message:
       'c.yaml:4: profiles.work.pipelines.triage: router "triage" routes tickets, but pipeline "alert" has ticket: none; route to a pipeline that takes a ticket',
+  });
+});
+
+const split = (over: Record<string, unknown>) => ({ split: { stages: ['intake', 'plan', 'deliver'], next: 'hotfix', ...over } });
+
+test('next requires an issue exit', () => {
+  assert.throws(() => check(profileWith(split({ exit: 'pr' }))), {
+    name: 'ConfigError',
+    message: 'c.yaml:12: profiles.work.pipelines.split.next: next only applies to an issue exit; remove it or set exit: issue',
+  });
+});
+
+test('next is accepted on an issue exit, written or implied by the binding', () => {
+  assert.doesNotThrow(() => check(profileWith(split({ exit: 'issue' }))));
+  assert.doesNotThrow(() => check(profileWith(split({ bindings: { deliver: { builtin: 'github.open_issues' } } }))));
+});
+
+test('next may name a router', () => {
+  assert.doesNotThrow(() => check(profileWith({ ...triage(), ...split({ exit: 'issue', next: 'triage' }) })));
+});
+
+test('next must name a pipeline of the profile', () => {
+  assert.throws(() => check(profileWith(split({ exit: 'issue', next: 'nope' }))), {
+    message: `c.yaml:12: profiles.work.pipelines.split.next: route to "nope" names no pipeline in profile "work" (pipelines: feature, hotfix, alert, split); use one of those`,
+  });
+});
+
+test('next must name a pipeline that takes a ticket', () => {
+  assert.throws(() => check(profileWith(split({ exit: 'issue', next: 'alert' }))), {
+    message:
+      'c.yaml:12: profiles.work.pipelines.split.next: pipeline "split" routes tickets, but pipeline "alert" has ticket: none; route to a pipeline that takes a ticket',
   });
 });

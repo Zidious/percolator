@@ -2,6 +2,8 @@ import { FEATURE } from '../graph/core.ts';
 import type { PipelineHeader } from '../graph/core.ts';
 import type { MergedPipeline } from '../graph/merge.ts';
 import type { Violation } from '../graph/rules.ts';
+import { EXITS, EXIT_KINDS } from '../tracker/index.ts';
+import type { ExitKind } from '../tracker/index.ts';
 import { ConfigError } from './load.ts';
 import { locate } from './locate.ts';
 import type { Where } from './locate.ts';
@@ -93,6 +95,13 @@ export function pipelineSpecs(merged: Record<string, MergedPipeline>, profile: s
   return specs;
 }
 
+/** The pipeline's exit: as written, else the one its last stage's single builtin runs. */
+function exitKind(spec: PipelineSpec, merged: MergedPipeline): ExitKind | undefined {
+  if (spec.exit !== undefined) return spec.exit;
+  const nodes = merged.bindings[spec.stages?.at(-1) ?? '']?.value ?? [];
+  return nodes.length === 1 ? EXIT_KINDS.find((k) => EXITS[k].builtin === nodes[0]!.builtin) : undefined;
+}
+
 /**
  * Checks that span pipelines: where a router may hand its ticket. Every routes `to`, choose `from` entry
  * and fallback must name a pipeline of the profile that is not a router and takes a ticket. Throws the
@@ -108,11 +117,18 @@ export function checkPipelines(merged: Record<string, MergedPipeline>, specs: Re
       if (t === undefined) {
         throw fail(`route to "${x}" names no pipeline in profile "${profile}" (pipelines: ${Object.keys(specs).join(', ')}); use one of those`, where);
       }
-      if (t.router === true) throw fail(`router "${p}" cannot route to router "${x}"; route to a pipeline that does the work`, where);
+      if (spec.router === true && t.router === true) {
+        throw fail(`router "${p}" cannot route to router "${x}"; route to a pipeline that does the work`, where);
+      }
       if (t.ticket === 'none') {
-        throw fail(`router "${p}" routes tickets, but pipeline "${x}" has ticket: none; route to a pipeline that takes a ticket`, where);
+        const self = spec.router === true ? 'router' : 'pipeline';
+        throw fail(`${self} "${p}" routes tickets, but pipeline "${x}" has ticket: none; route to a pipeline that takes a ticket`, where);
       }
     };
+    if (spec.next !== undefined) {
+      if (exitKind(spec, merged[p]!) !== 'issue') throw fail('next only applies to an issue exit; remove it or set exit: issue', at('.next'));
+      target(spec.next, at('.next'));
+    }
     if (spec.router !== true) continue;
     if (spec.ticket !== 'required') {
       throw fail(`router "${p}" hands its ticket to another pipeline, so it needs one; set ticket: required or remove ticket`, at('.ticket'));
