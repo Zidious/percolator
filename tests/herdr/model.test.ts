@@ -38,6 +38,9 @@ import {
   findNode,
   ownsCommands,
   loopAtCap,
+  roundOf,
+  roundPill,
+  loopSpans,
   loopLabel,
   moveRow,
   canPick,
@@ -67,6 +70,7 @@ import {
   xOf,
 } from '../../herdr/mods/percolator/model.js';
 import type { RunStatusJson, StatusJson } from '../../src/run/status.ts';
+import type { Loop } from '../../herdr/mods/percolator/model.d.ts';
 import { driverName } from '../../src/run/meta.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
 
@@ -180,7 +184,7 @@ test('rowState gives the tone and the board text for each kind of run', () => {
     ['t9', 'blocked', 'failed · implement'],
     ['t11', 'blocked', 'stalled · driver stopped'],
     ['t13', 'blocked', 'agent blocked · groom'],
-    ['t8', 'working', 'review', 'round 2/3'],
+    ['t8', 'working', 'review', 'round 3/3'],
     ['t3', 'dim', 'delivered · PR #7'],
     ['t5', 'muted', 'unreadable · state.json: Unexpected end of JSON input'],
   ];
@@ -835,4 +839,28 @@ test('selectAfterRefresh keeps a listed selection, else takes the one planned at
   assert.equal(selectAfterRefresh([], [], 'b', null), null);
   // listed in all runs but filtered out of the rows: still the selection, as before
   assert.equal(selectAfterRefresh(rows('a', 'b'), rows('a'), 'b', null), 'b');
+});
+
+test('roundOf counts the round the engine is in', () => {
+  const l = { id: 'review', from: 'review', to: 'implement', max: 3, atCap: 'escalate', round: 0 } as Loop;
+  assert.deepEqual(roundOf(l), { n: 1, max: 3, taken: false, atCap: false });
+  assert.deepEqual(roundOf({ ...l, round: 1 }), { n: 2, max: 3, taken: true, atCap: false });
+  assert.deepEqual(roundOf({ ...l, round: 3 }), { n: 3, max: 3, taken: true, atCap: true });
+});
+
+test('roundPill sits on the loop from step', () => {
+  assert.deepEqual(roundPill(byId('t2'), 'review'), { text: 'round 1/3', tone: 'dim' });
+  assert.deepEqual(roundPill(byId('t16'), 'review'), { text: 'round 2/3', tone: 'working' });
+  assert.deepEqual(roundPill(byId('t4'), 'review'), { text: 'round 3/3 · cap', tone: 'blocked' });
+  assert.equal(roundPill(byId('t4'), 'implement'), null);
+});
+
+test('loopSpans lists every loop with its tone', () => {
+  assert.deepEqual(loopSpans(byId('t2')), [{ id: 'review', from: 'review', to: 'implement', tone: 'dim' }]);
+  assert.deepEqual(loopSpans(byId('t3')).length, 1);
+  assert.deepEqual(loopSpans(byId('t5')), []);
+});
+
+test('rowState gives the round the engine is in', () => {
+  assert.equal(rowState(byId('t16')).round, 'round 2/3');
 });

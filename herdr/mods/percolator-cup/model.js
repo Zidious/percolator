@@ -57,7 +57,7 @@ export function rowState(run) {
   }
   if (run.status === 'running') {
     const loop = (run.loops ?? []).find((l) => l.from === step && l.round > 0);
-    return loop ? { tone: 'working', text: `${step}`, round: `round ${loop.round}/${loop.max}` } : { tone: 'working', text: `${step}` };
+    return loop ? { tone: 'working', text: `${step}`, round: `round ${roundOf(loop).n}/${loop.max}` } : { tone: 'working', text: `${step}` };
   }
   if (run.status === 'completed') {
     const pr = run.pr?.url.split('/').pop();
@@ -206,6 +206,28 @@ export function attentionTag(kind) {
 /** Loops that have gone round at least once (drawn as arcs). */
 export function shownLoops(run) {
   return (run.loops ?? []).filter((l) => l.round > 0);
+}
+
+/** The round the engine is in: `round` counts back-edges already taken, the engine's round is one more, up to the cap. */
+export function roundOf(loop) {
+  return { n: Math.min(1 + loop.round, loop.max), max: loop.max, taken: loop.round > 0, atCap: loop.round >= loop.max };
+}
+
+function loopTone(r) {
+  return r.atCap ? 'blocked' : r.taken ? 'working' : 'dim';
+}
+
+/** The pill on the step a loop starts from; null when no loop starts there. */
+export function roundPill(run, stepId) {
+  const loop = (run.loops ?? []).find((l) => l.from === stepId);
+  if (!loop) return null;
+  const r = roundOf(loop);
+  return { text: `round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r) };
+}
+
+/** Every loop, taken or not, with its tone. */
+export function loopSpans(run) {
+  return (run.loops ?? []).map((l) => ({ id: l.id, from: l.from, to: l.to, tone: loopTone(roundOf(l)) }));
 }
 
 /** A loop has used all its rounds. */
