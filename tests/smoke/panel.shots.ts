@@ -10,8 +10,10 @@
 // fixtures, and drives the panel with `herdr-app do`: layout.switch, layout.resize, percolator-cup.open/<id>,
 // percolator.key/<key>, percolator.place, app.theme, app.zoom_in/out. In `finally` it puts back the mods, settings.json, the
 // zoom, the panel's width and shown/hidden state and the layout, and prints whether every backed-up file hashes equal.
-// Ctrl-C (SIGINT, SIGTERM, SIGBREAK) after the backup stops the shots and runs the same restore; a second one during the
-// restore is ignored. Every herdr-app call times out after 30s (60s for shot), naming the command, and the restore follows.
+// Ctrl-C (SIGINT, SIGTERM, SIGBREAK) or closing the terminal (SIGHUP) after the backup stops the shots and runs the same
+// restore; a second one during the restore is ignored. Closing the console on Windows leaves about 10s before Windows ends
+// the process, so that restore is best effort: check the summary, or restore by hand from the backup if the window
+// closed first. Every herdr-app call times out after 30s (60s for shot), naming the command, and the restore follows.
 // Themes: with --light/--dark the theme goes back to settings.json's "theme"; when settings.json names none (Herdr's
 // default) the original is unknown to app.theme, so the summary says NOT restored and asks you to check the theme.
 // herdr-app: $HERDR_APP (a path, or a JSON argv such as ["node","stub.js"]), else
@@ -57,7 +59,7 @@ const SHOT_TIMEOUT = 60_000;
 // Ctrl-C and friends abort the shots: the call in flight is killed, the next sleep or call throws, and `finally` restores.
 const stop = new AbortController();
 let restoring = false;
-const SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', ...(process.platform === 'win32' ? (['SIGBREAK'] as const) : [])];
+const SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP', ...(process.platform === 'win32' ? (['SIGBREAK'] as const) : [])];
 function onSignal(sig: NodeJS.Signals): void {
   if (restoring) {
     console.log(`${sig}: the restore is in progress; wait for it to finish`);
