@@ -26,7 +26,7 @@ import { deciderLogin, readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
 import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
-import { validate } from './validate.ts';
+import { validate, validateAll } from './validate.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
 import { removeWorktree } from './workspace/worktree.ts';
@@ -38,8 +38,9 @@ const USAGE = `usage: perc <command> [options]
 commands:
   init [--config <file>] [--force]
       write the recommended config (default: ~/.percolator/config.yaml)
-  validate [--config <file>] [--profile <name>] [--update]
-      load the config, resolve grounds and mappings, and check the graph
+  validate [--config <file>] [--profile <name>] [--pipeline <name>] [--update]
+      load the config, resolve grounds and mappings, and check the graph of each pipeline
+      (--pipeline: that one only)
       (default config: ~/.percolator/config.yaml)
   schema [--out <file>]
       write the JSON schema for the config (default: schema/percolator.schema.json)
@@ -119,7 +120,7 @@ function describe(r: ValidateResult): string {
       : approvers.length === 0
         ? 'none on GitHub (only local perc approve/reject)'
         : approvers.join(', ');
-  const lines = [`profile: ${r.profile}`, `approvers: ${who}`];
+  const lines = [`pipeline: ${r.pipeline.name}${r.pipeline.default ? ' (default)' : ''}`, `profile: ${r.profile}`, `approvers: ${who}`];
   const runtime = Object.entries(r.runtime ?? {});
   if (runtime.length > 0) lines.push(`runtime: ${runtime.map(([k, v]) => `${k} ${String(v)}`).join(', ')}`);
   for (const [name, version] of Object.entries(r.groundVersions)) lines.push(`ground ${name} ${version}`);
@@ -151,15 +152,22 @@ next: perc validate --config ${file} --profile default
 }
 
 async function runValidate(args: string[], io: Io): Promise<number> {
-  const { values } = parse(args, { config: { type: 'string' }, profile: { type: 'string' }, update: { type: 'boolean' } });
+  const { values } = parse(args, {
+    config: { type: 'string' },
+    profile: { type: 'string' },
+    pipeline: { type: 'string' },
+    update: { type: 'boolean' },
+  });
   const configFile = path.resolve(values.config ?? defaultConfig());
-  const r = await validate({
+  const opts = {
     configFile,
     cwd: process.cwd(),
     ...(values.profile !== undefined ? { profile: values.profile } : {}),
     ...(values.update ? { update: true } : {}),
-  });
-  io.stdout(describe(r));
+  };
+  const results = values.pipeline !== undefined ? [await validate({ ...opts, pipeline: values.pipeline })] : await validateAll(opts);
+  // one block per pipeline, a blank line between them
+  io.stdout(results.map(describe).join('\n'));
   return 0;
 }
 

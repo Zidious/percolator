@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { ConfigError } from '../../src/config/load.ts';
 import { RuleViolationError } from '../../src/graph/rules.ts';
-import { groundVersion, validate } from '../../src/validate.ts';
+import { groundVersion, validate, validateAll } from '../../src/validate.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
 import { FakeGit } from '../helpers/fake-git.ts';
 
@@ -534,4 +534,102 @@ test('a broken extends is reported even when another profile is selected', async
       message: `${cfg}:21: profiles.acme.extends: unknown profile "nope" (profiles: base, acme); extend one of those`,
     });
   });
+});
+
+// profile `default`: bare feature bindings plus a hotfix pipeline (and `more` lines after its bindings)
+const pipelinesConfig = (abs: (g: string) => string, more = '') => `version: 1
+grounds:
+  team: { path: ${abs('team')} }
+profiles:
+  default:
+    bindings:
+      intake: { builtin: github.intake }
+      groom: { agent: claude }
+      plan: { agent: claude }
+      implement: { agent: claude }
+      review: { agent: claude }
+      deliver: { builtin: github.open_pr }
+    pipelines:
+      hotfix:
+        stages: [intake, implement, deliver]
+        exit: pr
+        ticket: optional
+        inputs:
+          why: { required: true, description: what broke }
+        bindings:
+          implement: { agent: claude }
+${more}`;
+
+test('validate --pipeline hotfix builds the hotfix graph', async () => {
+  await withConfig(pipelinesConfig, async (cfg) => {
+    const r = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'hotfix' });
+    assert.equal(r.graph.pipeline, 'hotfix');
+    assert.equal(r.pipeline.name, 'hotfix');
+    assert.equal(r.pipeline.ticket, 'optional');
+    assert.deepEqual(r.pipeline.inputs, { why: { required: true, description: 'what broke' } });
+    assert.deepEqual(Object.keys(r.pipelines), ['feature', 'hotfix']);
+  });
+});
+
+test('validate without a pipeline builds the default one', async () => {
+  await withConfig(pipelinesConfig, async (cfg) => {
+    const r = await validate({ ...opts(), configFile: cfg, profile: 'default' });
+    assert.equal(r.graph.pipeline, 'feature');
+    assert.equal(r.pipeline.default, true);
+  });
+});
+
+test("validate of an unknown pipeline points at the profile's pipelines line", async () => {
+  await withConfig(pipelinesConfig, async (cfg) => {
+    await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'nope' }), {
+      name: 'ConfigError',
+      message: `${cfg}:13: unknown pipeline "nope" in profile "default" (pipelines: feature, hotfix); pass one of those to --pipeline`,
+    });
+  });
+});
+
+test('validate of an unknown pipeline points at the profile line when it has no pipelines', async () => {
+  await assert.rejects(validate({ ...opts(), pipeline: 'nope' }), {
+    message: `${fx('e2e/config.yaml')}:6: unknown pipeline "nope" in profile "work" (pipelines: feature); pass one of those to --pipeline`,
+  });
+});
+
+test('validateAll validates every pipeline of the profile, in order', async () => {
+  await withConfig(pipelinesConfig, async (cfg) => {
+    const all = await validateAll({ ...opts(), configFile: cfg, profile: 'default' });
+    assert.deepEqual(
+      all.map((r) => r.graph.pipeline),
+      ['feature', 'hotfix'],
+    );
+    assert.deepEqual(
+      all.map((r) => r.pipeline.default),
+      [true, false],
+    );
+  });
+});
+
+test('validateAll throws the first pipeline error', async () => {
+  await withConfig(
+    (abs) => pipelinesConfig(abs, '      broken:\n        stages: [intake, fix, deliver]\n'),
+    async (cfg) => {
+      await assert.rejects(validateAll({ ...opts(), configFile: cfg, profile: 'default' }), {
+        message: `${cfg}:22: profiles.default.pipelines.broken: pipeline "broken" has no exit: bind its last stage "deliver" to one of github.open_pr or set exit:`,
+      });
+    },
+  );
+});
+
+test("a pipeline's own use maps into that pipeline only", async () => {
+  await withConfig(
+    (abs) => pipelinesConfig(abs, '        use:\n          - { from: team, file: policies/sdlc.md, as: context }\n'),
+    async (cfg) => {
+      const hotfix = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'hotfix' });
+      assert.deepEqual(
+        hotfix.mappings.map((m) => m.as),
+        ['context'],
+      );
+      const feature = await validate({ ...opts(), configFile: cfg, profile: 'default' });
+      assert.deepEqual(feature.mappings, []);
+    },
+  );
 });
