@@ -14,7 +14,7 @@ export type PipelineSpec = PipelineHeader & {
   default: boolean;
 };
 
-const fail = (message: string, where: Where): ConfigError => new ConfigError(message, where.file, where.line);
+const fail = (message: string, where: Where): ConfigError => new ConfigError(message, where.file, where.line, where.path);
 
 /** The profile's default pipeline: the one marked `default: true`, else feature. */
 export function defaultPipeline(specs: Record<string, PipelineSpec>, profile: string, where: Where): string {
@@ -85,5 +85,48 @@ export function pipelineSpecs(merged: Record<string, MergedPipeline>, profile: s
   }
   const def = defaultPipeline(specs, profile, where);
   specs[def]!.default = true;
+  // a router's fallback: the profile default, or feature when the default is a router (checkPipelines refuses none)
+  const fallback = specs[def]!.router === true ? (specs.feature !== undefined ? 'feature' : undefined) : def;
+  for (const s of Object.values(specs)) {
+    if (s.router === true && s.fallback === undefined && fallback !== undefined) s.fallback = fallback;
+  }
   return specs;
+}
+
+/**
+ * Checks that span pipelines: where a router may hand its ticket. Every routes `to`, choose `from` entry
+ * and fallback must name a pipeline of the profile that is not a router and takes a ticket. Throws the
+ * first problem, located at the offending key of `merged`.
+ */
+export function checkPipelines(merged: Record<string, MergedPipeline>, specs: Record<string, PipelineSpec>, profile: string): void {
+  for (const spec of Object.values(specs)) {
+    const p = spec.name;
+    const h = merged[p]!.header;
+    const at = (key: string): Where => locate(h.locator, h.source, `pipelines.${p}${key}`);
+    const target = (x: string, where: Where): void => {
+      const t = specs[x];
+      if (t === undefined) {
+        throw fail(`route to "${x}" names no pipeline in profile "${profile}" (pipelines: ${Object.keys(specs).join(', ')}); use one of those`, where);
+      }
+      if (t.router === true) throw fail(`router "${p}" cannot route to router "${x}"; route to a pipeline that does the work`, where);
+      if (t.ticket === 'none') {
+        throw fail(`router "${p}" routes tickets, but pipeline "${x}" has ticket: none; route to a pipeline that takes a ticket`, where);
+      }
+    };
+    if (spec.router !== true) continue;
+    if (spec.ticket !== 'required') {
+      throw fail(`router "${p}" hands its ticket to another pipeline, so it needs one; set ticket: required or remove ticket`, at('.ticket'));
+    }
+    (spec.routes ?? []).forEach((r, i) => target(r.to, at(`.routes.${i}.to`)));
+    (spec.choose?.from ?? []).forEach((x, i) => target(x, at(`.choose.from.${i}`)));
+    const written = h.value.fallback !== undefined;
+    if (spec.fallback === undefined) {
+      const def = Object.values(specs).find((s) => s.default)?.name;
+      throw fail(
+        `router "${p}" has no fallback: the profile default "${def}" is a router and there is no feature pipeline; set fallback to a pipeline that does the work`,
+        at(''),
+      );
+    }
+    target(spec.fallback, at(written ? '.fallback' : ''));
+  }
 }
