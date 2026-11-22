@@ -9,7 +9,7 @@
 
 <p align="center"><b>Tickets in. Pull requests out.</b></p>
 
-Percolator is a deterministic software factory. Point `perc` at a GitHub issue and it takes the ticket through a **pipeline** of fixed stages. The built-in `feature` pipeline runs intake, groom, plan, implement, review and deliver, and ends with a pull request; you can add pipelines of your own, each with its own stages, inputs and exit, with or without a ticket. A run starts from `perc run`, from a triage router that hands a ticket to the pipeline that fits, or from a trigger (a schedule, a label, a pull request, a failed check) while `perc watch` runs. One stage can fan out: each slice of a plan runs through the rest of the pipeline in its own linked run and ends in its own PR. You choose the agent or builtin for each stage. A feature run stops for your approval after groom, and every run saves every step, so it can stop and pick up where it left off.
+Percolator is a deterministic software factory. Point `perc` at a GitHub issue and it takes the ticket through a **pipeline** of fixed stages. The built-in `feature` pipeline runs intake, groom, plan, implement, review and deliver, and ends with a pull request; you can add pipelines of your own, each with its own stages, inputs and exit, with or without a ticket. A run starts from `perc run` (or the Herdr panel, which runs it for you), from a triage router that hands a ticket to the pipeline that fits, or from a trigger (a schedule, a label, a pull request, a failed check) while `perc watch` runs. One stage can fan out: each slice of a plan runs through the rest of the pipeline in its own linked run and ends in its own PR. You choose the agent or builtin for each stage. A feature run stops for your approval after groom, and every run saves every step, so it can stop and pick up where it left off.
 
 ## What you need
 
@@ -83,25 +83,28 @@ Each run works in its own git worktree at `<repo>/.worktrees/<run-id>`, on a bra
 
 ## Integrations
 
-`perc` is complete on its own: it starts runs, waits at gates and takes your answers on the command line. An integration adds a view on top. It reads `perc status --json`, a stable and versioned contract, and answers by running `perc` commands, as you would by hand. It never talks to the engine directly.
+`perc` is complete on its own: it starts runs, waits at gates and takes your answers on the command line. An integration adds a view on top. It reads `perc status --json`, a stable and versioned contract (and `perc pipelines --json` to offer the pipelines a run can start on), and answers by running `perc` commands, as you would by hand. It never talks to the engine directly.
 
-`perc status --json` is at `schema: 2`. Each run carries its `pipeline` and `inputs`; `ticket` is `null` on a ticketless run; `parent` is the run that started it (a router's, an `issue` exit's with `next`, or a fan-out's), or `null`; `children` lists the runs it started, with their pipeline and status; and `opened` lists the issues its exit opened. A run's `attention` says what it needs from you: a `message`, and the `actions` an integration may offer; at a `pick-pipeline` gate those are `pick` and `reject`, with the pipelines to pick from in `choices`. Beside `runs`, `watcher` says whether `perc watch` is running: `alive`, `since` (when it started, only while alive) and the `repos` it watches. An integration that reads schema 1 must be updated.
+`perc status --json` is at `schema: 2`. Each run carries its `pipeline` and `inputs`; `ticket` is `null` on a ticketless run; `parent` is the run that started it (a router's, an `issue` exit's with `next`, or a fan-out's), or `null`; `children` lists the runs it started, with their pipeline and status (a fan-out's slices first, by index, each with `slice: { index, title }`, and `status: pending` for a slice whose run has not started yet); and `opened` lists the issues its exit opened. A run's `attention` says what it needs from you: a `message`, and the `actions` an integration may offer; at a `pick-pipeline` gate those are `pick` and `reject`, with the pipelines to pick from in `choices`. Beside `runs`, `watcher` says whether `perc watch` is running: `alive`, `since` (when it started, only while alive) and the `repos` it watches. An integration that reads schema 1 must be updated.
 
 | Integration | Adds | Lives in |
 |---|---|---|
-| [Herdr](#herdr) | A space per run, a live board of runs and the runs they started, Approve / Reject / Resume / Delete and Run `<pipeline>` buttons, the watcher's state with Start watcher / Stop, notices | [`herdr/`](herdr/) |
+| [Herdr](#herdr) | A space per run, a live board of runs and the runs they started (fan-out slices included), Approve / Reject / Resume / Delete and Run `<pipeline>` buttons, **+ New run** and **▸ Run next…** to start runs (the pipelines come from `perc pipelines --json`), the watcher's state with Start watcher / Stop, notices | [`herdr/`](herdr/) |
 
 ### Herdr
 
 The Herdr app adds a space per run, and the Percolator panel adds a live board of every run and buttons for the same commands. Agents run in terminals started by `hc` either way.
 
-- **Linked runs.** A run that another one started shows `↳ from #42` under its title (the parent's ticket, or the parent's pipeline when the ticket is the run's own or there is none), and a run that started others shows `→ 3 runs`. Clicking the line selects that run (the parent, or the first run it started).
+- **Start a run.** **+ New run** in the title bar opens the start picker, and a finished run offers **▸ Run next…** on its ticket (see [Starting a run](#starting-a-run)).
+- **Pipelines.** A run on a pipeline other than `feature` shows a chip with the pipeline's name after its title, and its spine draws that pipeline's own stages.
+- **Linked runs.** A run that another one started shows `↳ from #42` under its title (the parent's ticket, or the parent's pipeline when the ticket is the run's own or there is none), and a run that started others shows `→ 3 runs` (a fan-out counts its slices that have not started yet too). Clicking the line selects that run (the parent, or the first run it started).
+- **Slices.** Under a fan-out parent's fan-out stage, each slice has a row: its status dot, `<i>.`, its title, the step it is at (`done`, `not started` or the current step) and a `PR ↗` link once it has one. Clicking a row selects that slice's run.
 - **Pick a pipeline.** At a router's `pick-pipeline` gate, the message names the agent's suggestion when it made one, and the panel shows one **Run `<name>`** button per pipeline the router may pick; each runs `perc approve <id> --pipeline <name>`. **Reject** has the agent pick again.
 - **The watcher.** The title bar shows whether `perc watch` runs (`watching 2 repos` or `not watching`). **Stop** runs `perc watch stop`; **Start watcher** runs `perc watch` with a `--repo` for every repo earlier runs used, so it is not offered before the first run.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagram-modes-dark.svg">
-  <img alt="Two setups side by side. On its own you drive perc from a terminal: run, status, approve (with --pipeline at a pick-pipeline gate) or reject, resume, delete, pipelines and watch. With Herdr, the panel and cup read perc status --json and run perc approve (with --pipeline from a Run pipeline button), reject, resume and watch for you. In both, perc starts runs from perc run, from a router or a fan-out as linked runs, and from triggers while perc watch runs; hc and the agents are the same in both." src="assets/diagram-modes-light.svg" width="100%">
+  <img alt="Two setups side by side. On its own you drive perc from a terminal: run, status, approve (with --pipeline at a pick-pipeline gate) or reject, resume, delete, pipelines and watch. With Herdr, the panel and cup read perc status --json and perc pipelines --json, and run perc run (from + New run or Run next…), approve (with --pipeline from a Run pipeline button), reject, resume and watch for you. In both, perc starts runs from perc run, from a router or a fan-out as linked runs, and from triggers while perc watch runs; hc and the agents are the same in both." src="assets/diagram-modes-light.svg" width="100%">
 </picture>
 
 To set it up:
@@ -345,12 +348,14 @@ Pipeline names are lower-case letters, digits and `-` (at most 24 characters); i
 - **Outputs.** Each step's outputs reach the steps after it as inputs, so a stage reads what the stages before it wrote.
 - **Tickets.** A pipeline with `ticket: none` refuses a ticket and runs on its inputs alone: its intake writes them as the ticket (`ticket.md`, an `## Inputs` list), so later stages read them as they would read an issue. The run id, branch and Herdr space take the pipeline's name where a ticket run has the issue number (`dd-alert-20261122-…`), a PR it opens has no `Closes #N`, and its gates are answered with `perc approve`/`perc reject` or the panel, since there is no issue to comment on. It names its repository from the clone's `origin`. With `ticket: optional`, a ticket is fetched when one is given.
 
-`perc validate` checks every pipeline of the profile and prints one block per pipeline; `perc validate --pipeline hotfix` checks just one. `perc pipelines` lists the pipelines a repo can use, one line each (`--json` for integrations):
+`perc validate` checks every pipeline of the profile and prints one block per pipeline; `perc validate --pipeline hotfix` checks just one. `perc pipelines [--repo <dir>] [--profile <name>]` lists the pipelines a repo can use, the default first, one line each:
 
 ```text
 feature (default)  ticket required  exit pr  inputs -
 hotfix  ticket required  exit pr  inputs severity
 ```
+
+With `--json` it is the contract the Herdr panel's start picker reads (`schema: 1`): each pipeline's `name`, `default`, `router`, `ticket`, `inputs` (name, required, description), `exit`, `description`, and the `steps` and `loops` its preview draws; a pipeline that fails validation is listed with its `error` instead.
 
 ### Exits
 
@@ -404,7 +409,15 @@ perc run owner/repo#42 --pipeline hotfix --input severity=sev2
 perc run --pipeline dd-alert --input alert_url=https://app.datadoghq.com/…   # ticket: none, run from the repo's clone
 ```
 
-`--pipeline <name>` picks the pipeline. Without it, a run on a ticket uses the pipeline the issue asks for: a `pipeline:<name>` label, else the latest `/percolator run <name>` comment by an approver, else the profile's default. Without a ticket or a flag, the default is used, and if that one needs a ticket, the run is a usage error. `--input key=value` gives one input; repeat it for each. The value is everything after the first `=`, so it may hold `=`, spaces or a path. Before creating anything, `perc run` refuses an input the pipeline does not declare, a missing required input, and a ticket on a `ticket: none` pipeline (usage errors, exit code 2), and a pipeline the profile does not have. Inputs reach prompts as `{{input_<name>}}`, and intake lists them under `## Inputs` in the ticket.
+`--pipeline <name>` picks the pipeline. Without it, a run on a ticket uses the pipeline the issue asks for: a `pipeline:<name>` label, else the latest `/percolator run <name>` comment by an approver, else the profile's default. Without a ticket or a flag, the default is used, and if that one needs a ticket, the run is a usage error. `--input key=value` gives one input; repeat it for each. The value is everything after the first `=`, so it may hold `=`, spaces or a path. Before creating anything, `perc run` refuses an input the pipeline does not declare, a missing required input, and a ticket on a `ticket: none` pipeline (usage errors, exit code 2), and a pipeline the profile does not have. Inputs reach prompts as `{{input_<name>}}`, and intake lists them under `## Inputs` in the ticket. `--repo <dir>` runs in that repo's clone instead of the current directory.
+
+**From the Herdr panel.** The panel starts the same `perc run`, never through `perc watch`:
+
+- **+ New run** in the title bar (a `+` under 800px wide, the words from 800px) opens the start picker. Pick the pipeline first: the default is preselected, and each one shows its tags (`default`, `no ticket`, `ticket optional`) and its description. Then come the fields that pipeline asks for: a ticket field when it takes a ticket (a URL or `owner/repo#n`), and one field per input, its description as the placeholder. Last is the repo: one of the repos earlier runs used, or **Choose folder…**; a typed ticket preselects the repo of the latest run on that GitHub repo.
+- **▸ Run next…** in the header of a finished run, while no run on its ticket is live, opens the same picker on that run. It lists only the pipelines that take a ticket, and the ticket and repo are fixed: the run's own ticket, or a choice among it and the issues its `issue` exit opened.
+- The picker shows the exact `perc run …` line it will run. **Start** stays disabled until the pipeline's needs are met, and says why: `Pick a repo`, `Enter a ticket` or `Enter <input>`. Enter in a field starts and Esc cancels; once started, the new run is selected.
+- The picked pipeline's preview (its stages, gates, hooks, loops and exit) sits below the picker, and to its right in a window from 720px wide.
+- The Herdr commands `percolator.new` (or `percolator.new/<pipeline>`, with that pipeline picked), `percolator.next` and `percolator.start` do the same from a key binding. With the panel's fixtures, Start only says `fixture: would run perc run …`.
 
 A ticket has at most one live run (`running` or `paused`): starting another pipeline on it is refused until that run finishes or is deleted. The run a router starts on its ticket is linked to the router's run, so it is not refused while that one is still live; neither are a fan-out's slice runs, beside their parent and each other. A run on `feature` has the id `t<n>-<date>-<time>-<rand>`, on another pipeline `t<n>-<pipeline>-…`, without a ticket `<pipeline>-…`, and a fan-out's slice `<parent>-s<i>`.
 
@@ -505,8 +518,25 @@ pipelines:
 - **The parent.** The run walks the stages before `stage`, then a fan-out step. That step writes the split to `fanout.json` in the run dir (each slice's index, run id and title) and starts the slice runs, keeping at most `max_parallel` unfinished at a time. It waits until every slice has finished, then completes with the `slices_done` output, one line per slice: `<i>. <title> → <PR url or status>`. The parent runs no exit of its own.
 - **The slices.** Slice `i` is the run `<parent>-s<i>`, in its own worktree on branch `percolator/<parent>-s<i>`, from the parent's base. Its intake is a seed step: it copies the parent's latest outputs and its issue (so each slice's PR says `Closes #N`) and writes `slice.md`, the slice's title and section. Then it runs from `stage` through the exit. A loop in it may go back only to `stage` or later; `perc validate` refuses one that goes back further.
 - **Resume.** A resume of the parent reuses `fanout.json` and never splits again. It leaves finished slices alone and restarts the driver of an unfinished slice whose driver is gone.
-- **Escalations.** If `from` wrote no `## ` sections, the parent pauses with `percolator.fan_out: plan wrote no slices (## <title> sections in slices.md); fix the output and resume`. If a slice fails, the parent pauses once every slice has finished, naming the failed ones. A failed run cannot be resumed, so run `perc delete <parent>-s<i>` (its branch stays), then `perc resume <parent>`: the parent starts that slice again, on its branch.
+- **Escalations.** If `from` wrote no `## ` sections, the parent pauses with `percolator.fan_out: plan wrote no slices (## <title> sections in slices.md); fix the output and resume`. If a slice fails, the parent pauses once every slice has finished, naming the failed ones: `percolator.fan_out: slice(s) <parent>-s2 failed; perc delete each (its branch stays), then perc resume <parent> to run it again`. A failed run cannot be resumed, so run `perc delete <parent>-s<i>`, then `perc resume <parent>`: the parent starts that slice again, on its branch.
+- **Status.** `perc status --json` lists the slices first among the parent's `children`, with their `slice` index and title (see [Integrations](#integrations)); the Herdr panel shows one row per slice under the fan-out stage (see [Herdr](#herdr)).
 - **Delete.** `perc delete` of the parent leaves its slice runs; delete them by id.
+
+`perc validate` prints the parent's block, whose steps end in the fan-out step (`implement: builtin percolator.fan_out`), then what each slice run walks, so you can check the slice steps and loops:
+
+```text
+slice runs (fan-out of implement, at most 3 at a time):
+steps:
+1. intake: builtin percolator.seed
+2. implement: claude, model opus, skills superpowers:executing-plans, superpowers:test-driven-development
+3. review: claude, model opus, skills deep-dive-review
+4. deliver: builtin github.open_pr
+
+back-edges:
+review → implement (max 3, continue)
+```
+
+To send only big tickets through fan-out, keep it on its own pipeline and point a [router](#triage) at it, with a `routes` rule such as `{ label: epic, to: epic }` or `epic` in `choose.from`.
 
 ### Grounds: shared policy from git
 
@@ -524,7 +554,7 @@ profiles:
 
 A ground is a git repo at a ref, or a local path. `perc validate` pins each git ground to a commit in `percolator.lock`; `--update` moves the pins.
 
-`use` maps a file or dir into the run `as` one of `policy`, `context`, `skills`, `plugins`, `prompt` or `graph`. A `graph` mapping is a whole config fragment: its bindings, nodes and rules become a layer.
+`use` maps a file or dir into the run `as` one of `policy`, `context`, `skills`, `plugins`, `prompt` or `graph`. A `graph` mapping is a whole config fragment: its pipelines, bindings, nodes and rules become a layer. So a team ground can ship whole pipelines: a later layer sets a pipeline's keys over the ground's, key by key, and binds or replaces its stages and nodes by name, unless the ground locked the pipeline with `required: true`.
 
 ### Rules and locks
 
@@ -541,7 +571,7 @@ rules:
 
 Rules check the merged graph, so a team ground can set what every profile must do: which agents and models are allowed, which skills a stage must load, and which nodes must exist. Top-level `rules` apply to every pipeline; `pipelines.<name>.rules` to that pipeline only.
 
-Layers merge in order: core, then grounds, then your profile, then the repo. A later layer replaces a stage's binding or a node by name, and rules from every layer all apply. A target marked `required: true` is locked: later layers may only restate it unchanged.
+Layers merge in order: core, then grounds, then your profile, then the repo. A later layer replaces a stage's binding or a node by name, sets a pipeline's own keys over the earlier ones, and rules from every layer all apply. A target marked `required: true` (a binding, a node, a mapping, or a pipeline's own keys) is locked: later layers may only restate it unchanged.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/diagram-layers-dark.svg">

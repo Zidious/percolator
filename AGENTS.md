@@ -65,14 +65,14 @@ Read the module before changing it.
 | `templates/` | recommended config written by `perc init` |
 | `skills/` | agent-agnostic skills shipped in the package |
 | `scripts/` | repo tooling run by package scripts (`herdr-sync.ts`); typechecked, tested under `tests/scripts/` |
-| `herdr/` | Herdr panel (`mods/percolator/`, plain JS, pure logic in `model.js`) and status-bar cup (`mods/percolator-cup/`), layout, fixtures |
+| `herdr/` | Herdr panel (`mods/percolator/`, plain JS, pure logic in `model.js`, the start picker in `start.js`) and status-bar cup (`mods/percolator-cup/`), layout, fixtures |
 
 ## Conventions
 
 - **Test fakes:** never spawn the real `hc`, `herdr-app` or `gh`: use `FakeHc`, `FakeHerdrApp`, `FakeGh`, `ExecRecorder` (`tests/helpers/`). Unit tests use `FakeGit`; real git only via `makeRepo()` / `setupRunEnv()`. Engine tests use `FakeRuntime`.
 - **No prompts:** git and gh run with prompt-free env (`gitEnv`, the gh client's env); credentials in URLs are redacted from errors.
 - **Errors:** one line, name the file or run, say what to do next; tests assert the exact text.
-- **Panel contract:** `perc status --json` and `herdr/mods/percolator/model.js` (its only reader) change together. After changing either mod, run `pnpm herdr:sync` so the running app shows it (Herdr does not follow symlinks or junctions). Herdr refuses cross-mod imports, so the cup carries copies of the panel's `model.js`, `mark.js`, `source.js`; re-copy them, and `tests/herdr/cup.test.ts` keeps them equal.
+- **Panel contract:** `perc status --json` and `herdr/mods/percolator/model.js` (its only reader) change together; so do `perc pipelines --json` (`src/run/pipelines-json.ts`) and the start picker's reader in `model.js`. After changing either mod, run `pnpm herdr:sync` so the running app shows it (Herdr does not follow symlinks or junctions). Herdr refuses cross-mod imports, so the cup carries copies of the panel's `model.js`, `mark.js`, `source.js`; re-copy them, and `tests/herdr/cup.test.ts` keeps them equal.
 - **Resume-safe:** run ids, terminal names and posted comments are deterministic or marked so a resume finds them instead of duplicating them.
 - **README stays true:** `README.md` is the user-facing doc. A change that makes anything in it wrong (requirements, stages, the example config, config keys, statuses and how to answer them, integrations, setup) updates it in the same commit, including the diagrams in `assets/diagram-*-{light,dark}.svg` (both themes). A new integration gets a row in the Integrations table and its own `###` section. Check it before calling the work done.
 
