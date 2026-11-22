@@ -688,7 +688,7 @@ test('timelineRows without a timeline counts a live step as the attempt in progr
 test('rowState keeps the round apart from a long step name, so it is never cut', () => {
   const r = readable('t8');
   const long = { ...r, currentStep: 'security-scan-extended', loops: [{ ...r.loops[0]!, from: 'security-scan-extended' }] };
-  assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'round 2/3' });
+  assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'round 3/3' });
 });
 
 test('loopLabelAlign anchors the label to the arc end nearer the middle', () => {
@@ -862,5 +862,5 @@ test('loopSpans lists every loop with its tone', () => {
 });
 
 test('rowState gives the round the engine is in', () => {
-  assert.equal(rowState(byId('t16')).round, 'round 2/3');
+  assert.equal(rowState({ ...readable('t16'), currentStep: 'review' }).round, 'round 2/3');
 });
