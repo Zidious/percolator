@@ -222,7 +222,15 @@ test('prReviews lists bodies and html urls through gh api', async () => {
   const rec = new ExecRecorder();
   rec.respond(() => true, { stdout: '[{"body":"b <!-- m -->","url":"ru"}]\n' });
   assert.deepEqual(await cliGh({ exec: rec.exec }).prReviews(R, 4), [{ body: 'b <!-- m -->', url: 'ru' }]);
-  assert.deepEqual(rec.calls[0]!.args, ['api', '--hostname', 'github.com', 'repos/o/r/pulls/4/reviews', '--jq', '[.[]|{body,url:.html_url}]']);
+  assert.deepEqual(rec.calls[0]!.args, [
+    'api', '--hostname', 'github.com', '--paginate', 'repos/o/r/pulls/4/reviews', '--jq', '[.[]|{body,url:.html_url}]',
+  ]);
+});
+
+test('prReviews joins the pages --paginate prints one array each', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '[{"body":"a","url":"u1"}]\n[{"body":"b","url":"u2"}]\n' });
+  assert.deepEqual(await cliGh({ exec: rec.exec }).prReviews(R, 4), [{ body: 'a', url: 'u1' }, { body: 'b', url: 'u2' }]);
 });
 
 test('postReview posts a COMMENT review and returns its url', async () => {
