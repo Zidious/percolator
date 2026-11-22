@@ -65,8 +65,8 @@ async function withYaml(text: string, fn: (file: string) => Promise<void>): Prom
   }
 }
 
-test('unknown stage in a hook lists the valid values', async () => {
-  await withYaml('nodes:\n  x:\n    agent: a\n    before: foo\n', async (file) => {
+test('a malformed stage name in a hook lists the valid values', async () => {
+  await withYaml('nodes:\n  x:\n    agent: a\n    before: foo bar\n', async (file) => {
     const err = await loadFragment(file).catch((e) => e);
     assert.ok(err instanceof ConfigError);
     assert.equal(err.path, 'nodes.x.before');
@@ -105,7 +105,7 @@ test('ordinary ground names are accepted', async () => {
 });
 
 test('every schema issue appears in the message, first one in line/path', async () => {
-  await withYaml('nodes:\n  a:\n    agent: x\n    before: foo\n  b:\n    agent: y\n    after: bar\n', async (file) => {
+  await withYaml('nodes:\n  a:\n    agent: x\n    before: foo bar\n  b:\n    agent: y\n    after: bar baz\n', async (file) => {
     const err = await loadFragment(file).catch((e) => e);
     assert.equal(err.path, 'nodes.a.before');
     assert.equal(err.line, 4);
@@ -247,4 +247,52 @@ test('loadLocated returns data and the line index', async () => {
   assert.deepEqual(data, await loadUserConfig(fx('valid.yaml')));
   assert.equal(lines['profiles.work'], 3);
   assert.equal(lines['profiles.work.bindings.implement'], 9);
+});
+
+test('a profile with pipelines loads', async () => {
+  await withYaml(
+    [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    pipelines:',
+      '      hotfix:',
+      '        stages: [intake, reproduce, fix, review, deliver]',
+      '        outputs: { reproduce: [failing_test] }',
+      '        bindings: { reproduce: { agent: claude } }',
+      '        exit: pr',
+      '',
+    ].join('\n'),
+    async (file) => {
+      const data = await loadUserConfig(file);
+      assert.deepEqual(data.profiles.default!.pipelines!.hotfix!.stages, ['intake', 'reproduce', 'fix', 'review', 'deliver']);
+    },
+  );
+});
+
+test('pipeline names must be lower-case identifiers', async () => {
+  await withYaml('version: 1\nprofiles:\n  default:\n    pipelines:\n      Hot_Fix:\n        stages: [intake, deliver]\n', async (file) => {
+    const err = await loadUserConfig(file).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.equal(err.path, 'profiles.default.pipelines.Hot_Fix');
+    assert.equal(
+      err.message,
+      `${file}:6: profiles.default.pipelines.Hot_Fix: pipeline names must start with a lower-case letter and contain only a-z, 0-9 and "-" (at most 24 characters)`,
+    );
+  });
+});
+
+test('input names must be identifiers', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      dd:\n        inputs:\n          alert-url: {}\n',
+    async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.dd.inputs.alert-url');
+      assert.equal(
+        err.message,
+        `${file}:7: profiles.default.pipelines.dd.inputs.alert-url: input names must start with a lower-case letter and contain only a-z, 0-9 and "_"`,
+      );
+    },
+  );
 });

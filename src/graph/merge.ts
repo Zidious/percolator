@@ -9,7 +9,7 @@ import { CORE_GROOM_GATE } from './core.ts';
 export type Sourced<T> = { value: T; source: string; locked: boolean; locator?: Locator };
 
 export type Merged = {
-  bindings: Partial<Record<Stage, Sourced<NodeDef[]>>>;
+  bindings: Record<Stage, Sourced<NodeDef[]>>;
   nodes: Record<string, Sourced<NodeDef>>;
   rules: Sourced<Rules>[];
 };

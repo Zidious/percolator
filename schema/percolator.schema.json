@@ -160,29 +160,11 @@
                     },
                     "before": {
                       "description": "Hook point: run this node before a stage, or before all; at most one of before/after.",
-                      "type": "string",
-                      "enum": [
-                        "intake",
-                        "groom",
-                        "plan",
-                        "implement",
-                        "review",
-                        "deliver",
-                        "all"
-                      ]
+                      "type": "string"
                     },
                     "after": {
                       "description": "Hook point: run this node after a stage, or after all; at most one of before/after.",
-                      "type": "string",
-                      "enum": [
-                        "intake",
-                        "groom",
-                        "plan",
-                        "implement",
-                        "review",
-                        "deliver",
-                        "all"
-                      ]
+                      "type": "string"
                     },
                     "once": {
                       "description": "Skip the hook once it has passed in this run, so a loop does not re-run it; default false.",
@@ -194,14 +176,7 @@
                       "properties": {
                         "back_to": {
                           "type": "string",
-                          "enum": [
-                            "intake",
-                            "groom",
-                            "plan",
-                            "implement",
-                            "review",
-                            "deliver"
-                          ],
+                          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
                           "description": "Earlier stage the run loops back to when this node fails."
                         },
                         "max_rounds": {
@@ -323,29 +298,11 @@
                       },
                       "before": {
                         "description": "Hook point: run this node before a stage, or before all; at most one of before/after.",
-                        "type": "string",
-                        "enum": [
-                          "intake",
-                          "groom",
-                          "plan",
-                          "implement",
-                          "review",
-                          "deliver",
-                          "all"
-                        ]
+                        "type": "string"
                       },
                       "after": {
                         "description": "Hook point: run this node after a stage, or after all; at most one of before/after.",
-                        "type": "string",
-                        "enum": [
-                          "intake",
-                          "groom",
-                          "plan",
-                          "implement",
-                          "review",
-                          "deliver",
-                          "all"
-                        ]
+                        "type": "string"
                       },
                       "once": {
                         "description": "Skip the hook once it has passed in this run, so a loop does not re-run it; default false.",
@@ -357,14 +314,7 @@
                         "properties": {
                           "back_to": {
                             "type": "string",
-                            "enum": [
-                              "intake",
-                              "groom",
-                              "plan",
-                              "implement",
-                              "review",
-                              "deliver"
-                            ],
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
                             "description": "Earlier stage the run loops back to when this node fails."
                           },
                           "max_rounds": {
@@ -495,29 +445,11 @@
                 },
                 "before": {
                   "description": "Hook point: run this node before a stage, or before all; at most one of before/after.",
-                  "type": "string",
-                  "enum": [
-                    "intake",
-                    "groom",
-                    "plan",
-                    "implement",
-                    "review",
-                    "deliver",
-                    "all"
-                  ]
+                  "type": "string"
                 },
                 "after": {
                   "description": "Hook point: run this node after a stage, or after all; at most one of before/after.",
-                  "type": "string",
-                  "enum": [
-                    "intake",
-                    "groom",
-                    "plan",
-                    "implement",
-                    "review",
-                    "deliver",
-                    "all"
-                  ]
+                  "type": "string"
                 },
                 "once": {
                   "description": "Skip the hook once it has passed in this run, so a loop does not re-run it; default false.",
@@ -529,14 +461,7 @@
                   "properties": {
                     "back_to": {
                       "type": "string",
-                      "enum": [
-                        "intake",
-                        "groom",
-                        "plan",
-                        "implement",
-                        "review",
-                        "deliver"
-                      ],
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
                       "description": "Earlier stage the run loops back to when this node fails."
                     },
                     "max_rounds": {
@@ -577,7 +502,7 @@
             }
           },
           "rules": {
-            "description": "Checks on the merged graph; rules from every layer all apply.",
+            "description": "Checks on the merged graph; rules from every layer all apply, to every pipeline.",
             "type": "object",
             "properties": {
               "require_skills": {
@@ -590,18 +515,11 @@
                       "anyOf": [
                         {
                           "type": "string",
-                          "enum": [
-                            "intake",
-                            "groom",
-                            "plan",
-                            "implement",
-                            "review",
-                            "deliver"
-                          ]
+                          "const": "*"
                         },
                         {
                           "type": "string",
-                          "const": "*"
+                          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
                         }
                       ],
                       "description": "Stage whose agent nodes must load the skills, or * for every stage; a named stage must be bound to an agent node."
@@ -658,29 +576,11 @@
                         },
                         "before": {
                           "description": "The node must be attached before this stage (or all); exactly one of before/after.",
-                          "type": "string",
-                          "enum": [
-                            "intake",
-                            "groom",
-                            "plan",
-                            "implement",
-                            "review",
-                            "deliver",
-                            "all"
-                          ]
+                          "type": "string"
                         },
                         "after": {
                           "description": "The node must be attached after this stage (or all); exactly one of before/after.",
-                          "type": "string",
-                          "enum": [
-                            "intake",
-                            "groom",
-                            "plan",
-                            "implement",
-                            "review",
-                            "deliver",
-                            "all"
-                          ]
+                          "type": "string"
                         }
                       },
                       "required": [
@@ -693,6 +593,671 @@
               }
             },
             "additionalProperties": false
+          },
+          "pipelines": {
+            "description": "Named pipelines: each its own stages, bindings, nodes, inputs and exit; top-level bindings and nodes belong to feature.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "default": {
+                  "description": "This is the profile's default pipeline; at most one per profile; default: feature.",
+                  "type": "boolean"
+                },
+                "description": {
+                  "description": "What the pipeline is for; shown when picking a pipeline.",
+                  "type": "string"
+                },
+                "stages": {
+                  "description": "Ordered stage names; the first must be intake and the last is the exit stage; only feature may leave it out.",
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                  }
+                },
+                "outputs": {
+                  "description": "Output keys each stage must write (stage → keys); a stage left out requires none, unless it is a feature stage.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Output keys the stage must write (<key>.md in its outputs directory)."
+                  }
+                },
+                "exit": {
+                  "description": "How the pipeline ends: pr; runs the matching builtin on the last stage when it is unbound.",
+                  "type": "string",
+                  "enum": [
+                    "pr"
+                  ]
+                },
+                "ticket": {
+                  "description": "Whether a run needs a ticket (an issue): required, optional or none; default required.",
+                  "type": "string",
+                  "enum": [
+                    "required",
+                    "optional",
+                    "none"
+                  ]
+                },
+                "inputs": {
+                  "description": "Named values a run takes (perc run --input key=value), available to prompts as {{input_<name>}}.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "required": {
+                        "default": false,
+                        "description": "The run cannot start without this input; default false.",
+                        "type": "boolean"
+                      },
+                      "description": {
+                        "description": "What the input is; shown as the field hint when starting a run.",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "One named input: perc run --input <name>=<value>."
+                  }
+                },
+                "bindings": {
+                  "description": "What runs each of the pipeline's stages; after all layers merge, every stage must be bound.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "description": "agent, builtin, script or gate; inferred from agent, builtin or command when left out.",
+                            "type": "string",
+                            "enum": [
+                              "agent",
+                              "builtin",
+                              "script",
+                              "gate"
+                            ]
+                          },
+                          "agent": {
+                            "description": "Which agent runs the step (agent nodes only).",
+                            "type": "string"
+                          },
+                          "model": {
+                            "description": "Model the agent uses (agent nodes only); default the agent's own.",
+                            "type": "string"
+                          },
+                          "effort": {
+                            "description": "Reasoning effort for the agent (agent nodes only, claude only); default the agent's own.",
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
+                          },
+                          "skill": {
+                            "description": "One skill the agent loads (agent nodes only).",
+                            "type": "string"
+                          },
+                          "skills": {
+                            "description": "Skills the agent loads (agent nodes only).",
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "prompt": {
+                            "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {{run_id}}, {{worktree}} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "from": {
+                                    "type": "string",
+                                    "description": "Name of the ground the prompt file comes from."
+                                  },
+                                  "file": {
+                                    "type": "string",
+                                    "description": "Prompt file inside the ground."
+                                  }
+                                },
+                                "required": [
+                                  "from",
+                                  "file"
+                                ],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "builtin": {
+                            "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
+                            "type": "string"
+                          },
+                          "command": {
+                            "description": "Argv array, never a shell string: the script for a script node ({run_dir}, {outputs_dir}, {worktree} filled in), or the program for agent: command.",
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "before": {
+                            "description": "Hook point: run this node before a stage, or before all; at most one of before/after.",
+                            "type": "string"
+                          },
+                          "after": {
+                            "description": "Hook point: run this node after a stage, or after all; at most one of before/after.",
+                            "type": "string"
+                          },
+                          "once": {
+                            "description": "Skip the hook once it has passed in this run, so a loop does not re-run it; default false.",
+                            "type": "boolean"
+                          },
+                          "on_fail": {
+                            "description": "Bounded back-edge: on fail, loop back to an earlier stage until max_rounds rounds have failed (the first run counts).",
+                            "type": "object",
+                            "properties": {
+                              "back_to": {
+                                "type": "string",
+                                "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+                                "description": "Earlier stage the run loops back to when this node fails."
+                              },
+                              "max_rounds": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991,
+                                "description": "Failed rounds allowed before escalating to you, the first run counts; 1 escalates on the first fail; required."
+                              }
+                            },
+                            "required": [
+                              "back_to",
+                              "max_rounds"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "max_rounds": {
+                            "description": "Round cap for the review loop, read from the last node bound to review; default 3.",
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "timeout_s": {
+                            "description": "Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.",
+                            "type": "number",
+                            "exclusiveMinimum": 0
+                          },
+                          "escalation": {
+                            "description": "Accepted but not used yet; has no effect.",
+                            "type": "boolean"
+                          },
+                          "required": {
+                            "description": "Locks the node (in bindings, the whole stage binding): later layers may only restate it unchanged; default false.",
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "description": "agent, builtin, script or gate; inferred from agent, builtin or command when left out.",
+                              "type": "string",
+                              "enum": [
+                                "agent",
+                                "builtin",
+                                "script",
+                                "gate"
+                              ]
+                            },
+                            "agent": {
+                              "description": "Which agent runs the step (agent nodes only).",
+                              "type": "string"
+                            },
+                            "model": {
+                              "description": "Model the agent uses (agent nodes only); default the agent's own.",
+                              "type": "string"
+                            },
+                            "effort": {
+                              "description": "Reasoning effort for the agent (agent nodes only, claude only); default the agent's own.",
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max"
+                              ]
+                            },
+                            "skill": {
+                              "description": "One skill the agent loads (agent nodes only).",
+                              "type": "string"
+                            },
+                            "skills": {
+                              "description": "Skills the agent loads (agent nodes only).",
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "prompt": {
+                              "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {{run_id}}, {{worktree}} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "from": {
+                                      "type": "string",
+                                      "description": "Name of the ground the prompt file comes from."
+                                    },
+                                    "file": {
+                                      "type": "string",
+                                      "description": "Prompt file inside the ground."
+                                    }
+                                  },
+                                  "required": [
+                                    "from",
+                                    "file"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "builtin": {
+                              "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
+                              "type": "string"
+                            },
+                            "command": {
+                              "description": "Argv array, never a shell string: the script for a script node ({run_dir}, {outputs_dir}, {worktree} filled in), or the program for agent: command.",
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "before": {
+                              "description": "Hook point: run this node before a stage, or before all; at most one of before/after.",
+                              "type": "string"
+                            },
+                            "after": {
+                              "description": "Hook point: run this node after a stage, or after all; at most one of before/after.",
+                              "type": "string"
+                            },
+                            "once": {
+                              "description": "Skip the hook once it has passed in this run, so a loop does not re-run it; default false.",
+                              "type": "boolean"
+                            },
+                            "on_fail": {
+                              "description": "Bounded back-edge: on fail, loop back to an earlier stage until max_rounds rounds have failed (the first run counts).",
+                              "type": "object",
+                              "properties": {
+                                "back_to": {
+                                  "type": "string",
+                                  "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+                                  "description": "Earlier stage the run loops back to when this node fails."
+                                },
+                                "max_rounds": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 9007199254740991,
+                                  "description": "Failed rounds allowed before escalating to you, the first run counts; 1 escalates on the first fail; required."
+                                }
+                              },
+                              "required": [
+                                "back_to",
+                                "max_rounds"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "max_rounds": {
+                              "description": "Round cap for the review loop, read from the last node bound to review; default 3.",
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            "timeout_s": {
+                              "description": "Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.",
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "escalation": {
+                              "description": "Accepted but not used yet; has no effect.",
+                              "type": "boolean"
+                            },
+                            "required": {
+                              "description": "Locks the node (in bindings, the whole stage binding): later layers may only restate it unchanged; default false.",
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      }
+                    ],
+                    "description": "The node that runs this stage, or a list of nodes run in order."
+                  }
+                },
+                "nodes": {
+                  "description": "Extra nodes of this pipeline by name: hooks, gates and nodes required by rules.",
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "description": "agent, builtin, script or gate; inferred from agent, builtin or command when left out.",
+                        "type": "string",
+                        "enum": [
+                          "agent",
+                          "builtin",
+                          "script",
+                          "gate"
+                        ]
+                      },
+                      "agent": {
+                        "description": "Which agent runs the step (agent nodes only).",
+                        "type": "string"
+                      },
+                      "model": {
+                        "description": "Model the agent uses (agent nodes only); default the agent's own.",
+                        "type": "string"
+                      },
+                      "effort": {
+                        "description": "Reasoning effort for the agent (agent nodes only, claude only); default the agent's own.",
+                        "type": "string",
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh",
+                          "max"
+                        ]
+                      },
+                      "skill": {
+                        "description": "One skill the agent loads (agent nodes only).",
+                        "type": "string"
+                      },
+                      "skills": {
+                        "description": "Skills the agent loads (agent nodes only).",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "prompt": {
+                        "description": "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {{run_id}}, {{worktree}} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "from": {
+                                "type": "string",
+                                "description": "Name of the ground the prompt file comes from."
+                              },
+                              "file": {
+                                "type": "string",
+                                "description": "Prompt file inside the ground."
+                              }
+                            },
+                            "required": [
+                              "from",
+                              "file"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "builtin": {
+                        "description": "Builtin to run: github.intake or github.open_pr (builtin nodes).",
+                        "type": "string"
+                      },
+                      "command": {
+                        "description": "Argv array, never a shell string: the script for a script node ({run_dir}, {outputs_dir}, {worktree} filled in), or the program for agent: command.",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "before": {
+                        "description": "Hook point: run this node before a stage, or before all; at most one of before/after.",
+                        "type": "string"
+                      },
+                      "after": {
+                        "description": "Hook point: run this node after a stage, or after all; at most one of before/after.",
+                        "type": "string"
+                      },
+                      "once": {
+                        "description": "Skip the hook once it has passed in this run, so a loop does not re-run it; default false.",
+                        "type": "boolean"
+                      },
+                      "on_fail": {
+                        "description": "Bounded back-edge: on fail, loop back to an earlier stage until max_rounds rounds have failed (the first run counts).",
+                        "type": "object",
+                        "properties": {
+                          "back_to": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+                            "description": "Earlier stage the run loops back to when this node fails."
+                          },
+                          "max_rounds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991,
+                            "description": "Failed rounds allowed before escalating to you, the first run counts; 1 escalates on the first fail; required."
+                          }
+                        },
+                        "required": [
+                          "back_to",
+                          "max_rounds"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "max_rounds": {
+                        "description": "Round cap for the review loop, read from the last node bound to review; default 3.",
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "timeout_s": {
+                        "description": "Escalate to you if the step is not done after this many seconds (agent and script nodes only); default no timeout.",
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "escalation": {
+                        "description": "Accepted but not used yet; has no effect.",
+                        "type": "boolean"
+                      },
+                      "required": {
+                        "description": "Locks the node (in bindings, the whole stage binding): later layers may only restate it unchanged; default false.",
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "One named node: a hook (with before/after), a gate or a node rules require."
+                  }
+                },
+                "rules": {
+                  "description": "Checks on this pipeline only; top-level rules apply to every pipeline.",
+                  "type": "object",
+                  "properties": {
+                    "require_skills": {
+                      "description": "Skills that agent nodes in a stage must load.",
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "stage": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "*"
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^[A-Za-z][A-Za-z0-9_-]*$"
+                              }
+                            ],
+                            "description": "Stage whose agent nodes must load the skills, or * for every stage; a named stage must be bound to an agent node."
+                          },
+                          "skills": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Skills each agent node in that stage must load."
+                          }
+                        },
+                        "required": [
+                          "stage",
+                          "skills"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "allowed_agents": {
+                      "description": "Agents that agent nodes may use; default any agent.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "allowed_models": {
+                      "description": "Models agent nodes may use; when set, every agent node must name one of them; default any model.",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "max_rounds_ceiling": {
+                      "description": "Highest round cap allowed for the review loop and on_fail back-edges; default no ceiling.",
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 9007199254740991
+                    },
+                    "required_nodes": {
+                      "description": "Nodes that must be defined: a name, or { name, before | after } to also fix where it attaches.",
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "description": "Name of the node that must exist."
+                              },
+                              "before": {
+                                "description": "The node must be attached before this stage (or all); exactly one of before/after.",
+                                "type": "string"
+                              },
+                              "after": {
+                                "description": "The node must be attached after this stage (or all); exactly one of before/after.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "use": {
+                  "description": "Files or dirs from grounds mapped into this pipeline's runs.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "from": {
+                        "type": "string",
+                        "description": "Name of the ground (under grounds) the file or dir comes from."
+                      },
+                      "file": {
+                        "description": "File inside the ground to map; exactly one of file or dir.",
+                        "type": "string"
+                      },
+                      "dir": {
+                        "description": "Directory inside the ground to map; exactly one of file or dir.",
+                        "type": "string"
+                      },
+                      "as": {
+                        "type": "string",
+                        "enum": [
+                          "policy",
+                          "context",
+                          "skills",
+                          "plugins",
+                          "prompt",
+                          "graph"
+                        ],
+                        "description": "What the mapping is: policy (binding rules), context (reference), skills, plugins, prompt (accepted but not used yet; has no effect), or graph (a config fragment layer)."
+                      },
+                      "applies_to": {
+                        "default": [
+                          "*"
+                        ],
+                        "description": "Stages or node names the mapping applies to; default all stages ([\"*\"]).",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "required": {
+                        "default": false,
+                        "description": "Locks the mapping: later layers may only restate it unchanged; default false.",
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "from",
+                      "as"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": {
+                  "description": "Locks the pipeline's settings (stages, outputs, exit, ticket, inputs): later layers may only restate them; default false.",
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false,
+              "description": "One pipeline: its stages, what runs them, its inputs and how it ends."
+            }
           },
           "use": {
             "description": "Files or dirs from grounds mapped into the run as policy, context, skills, plugins, prompt or graph.",

@@ -1,9 +1,23 @@
 import { z } from 'zod';
-import { BUILTIN_NAMES } from '../tracker/index.ts';
+import { BUILTIN_NAMES, EXIT_KINDS } from '../tracker/index.ts';
 
+/** The stages of the built-in feature pipeline, in order. */
 export const STAGES = ['intake', 'groom', 'plan', 'implement', 'review', 'deliver'] as const;
 export const StageSchema = z.enum(STAGES);
-export type Stage = z.infer<typeof StageSchema>;
+export type FeatureStage = z.infer<typeof StageSchema>;
+/** A stage of some pipeline: the feature stages, or any stage a pipeline lists. */
+export type Stage = string;
+
+// Node and stage names become step ids (`stage.i` uses "."), so they are plain identifiers; a leading
+// letter also keeps integer-like keys from reordering in JS objects.
+const NODE_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
+export const STAGE_NAME = NODE_NAME;
+export const PIPELINE_NAME = /^[a-z][a-z0-9-]{0,23}$/;
+export const INPUT_NAME = /^[a-z][a-z0-9_]{0,31}$/;
+
+const StageNameSchema = z
+  .string()
+  .regex(STAGE_NAME, { message: `stage names start with a letter and contain only letters, digits, "_" and "-" (like ${STAGES.join(', ')})` });
 
 export const GroundSpecSchema = z.union([
   z.strictObject({
@@ -60,7 +74,9 @@ export const MappingSchema = z
   });
 export type Mapping = z.infer<typeof MappingSchema>;
 
-const StageOrAllSchema = z.enum([...STAGES, 'all']);
+const StageOrAllSchema = z.string().refine((v) => v === 'all' || STAGE_NAME.test(v), {
+  message: `expected a stage of the pipeline (like ${STAGES.join(', ')}) or all`,
+});
 
 const AGENT_ONLY = ['agent', 'model', 'skill', 'skills', 'effort'] as const;
 
@@ -109,7 +125,7 @@ export const NodeDefSchema = z
       .describe('Skip the hook once it has passed in this run, so a loop does not re-run it; default false.'),
     on_fail: z
       .strictObject({
-        back_to: StageSchema.describe('Earlier stage the run loops back to when this node fails.'),
+        back_to: StageNameSchema.describe('Earlier stage the run loops back to when this node fails.'),
         max_rounds: z
           .number()
           .int()
@@ -198,7 +214,7 @@ export const RulesSchema = z.strictObject({
     .array(
       z.strictObject({
         stage: z
-          .union([StageSchema, z.literal('*')])
+          .union([z.literal('*'), StageNameSchema])
           .describe(
             'Stage whose agent nodes must load the skills, or * for every stage; a named stage must be bound to an agent node.',
           ),
@@ -224,9 +240,6 @@ export const RulesSchema = z.strictObject({
 });
 export type Rules = z.infer<typeof RulesSchema>;
 
-// Node names become step ids (`stage.i` uses "."), so they are plain identifiers; a leading letter
-// also keeps integer-like keys from reordering in JS objects.
-const NODE_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
 export const NodesSchema = z
   .record(
     z.string(),
@@ -244,6 +257,70 @@ export const NodesSchema = z
     }
   });
 
+function namedRecord<T extends z.ZodType>(value: T, name: RegExp, message: string) {
+  return z.record(z.string(), value).superRefine((rec, ctx) => {
+    for (const key of Object.keys(rec)) if (!name.test(key)) ctx.addIssue({ code: 'custom', path: [key], message });
+  });
+}
+
+export const PipelineInputSchema = z.strictObject({
+  required: z.boolean().default(false).describe('The run cannot start without this input; default false.'),
+  description: z.string().optional().describe('What the input is; shown as the field hint when starting a run.'),
+});
+
+export const PipelineSchema = z.strictObject({
+  default: z
+    .boolean()
+    .optional()
+    .describe("This is the profile's default pipeline; at most one per profile; default: feature."),
+  description: z.string().optional().describe('What the pipeline is for; shown when picking a pipeline.'),
+  stages: z
+    .array(StageNameSchema)
+    .min(1)
+    .optional()
+    .describe('Ordered stage names; the first must be intake and the last is the exit stage; only feature may leave it out.'),
+  outputs: z
+    .record(z.string(), z.array(z.string()).describe('Output keys the stage must write (<key>.md in its outputs directory).'))
+    .optional()
+    .describe('Output keys each stage must write (stage → keys); a stage left out requires none, unless it is a feature stage.'),
+  exit: z
+    .enum(EXIT_KINDS)
+    .optional()
+    .describe(`How the pipeline ends: ${EXIT_KINDS.join(', ')}; runs the matching builtin on the last stage when it is unbound.`),
+  ticket: z
+    .enum(['required', 'optional', 'none'])
+    .optional()
+    .describe('Whether a run needs a ticket (an issue): required, optional or none; default required.'),
+  inputs: namedRecord(
+    PipelineInputSchema.describe('One named input: perc run --input <name>=<value>.'),
+    INPUT_NAME,
+    'input names must start with a lower-case letter and contain only a-z, 0-9 and "_"',
+  )
+    .optional()
+    .describe('Named values a run takes (perc run --input key=value), available to prompts as {{input_<name>}}.'),
+  bindings: z
+    .record(z.string(), BindingSchema.describe('The node that runs this stage, or a list of nodes run in order.'))
+    .optional()
+    .describe("What runs each of the pipeline's stages; after all layers merge, every stage must be bound."),
+  nodes: NodesSchema.optional().describe('Extra nodes of this pipeline by name: hooks, gates and nodes required by rules.'),
+  rules: RulesSchema.optional().describe('Checks on this pipeline only; top-level rules apply to every pipeline.'),
+  use: z
+    .array(MappingSchema)
+    .optional()
+    .describe("Files or dirs from grounds mapped into this pipeline's runs."),
+  required: z
+    .boolean()
+    .optional()
+    .describe("Locks the pipeline's settings (stages, outputs, exit, ticket, inputs): later layers may only restate them; default false."),
+});
+export type Pipeline = z.infer<typeof PipelineSchema>;
+
+export const PipelinesSchema = namedRecord(
+  PipelineSchema.describe('One pipeline: its stages, what runs them, its inputs and how it ends.'),
+  PIPELINE_NAME,
+  'pipeline names must start with a lower-case letter and contain only a-z, 0-9 and "-" (at most 24 characters)',
+);
+
 const graphFragmentShape = {
   bindings: z
     .partialRecord(
@@ -255,7 +332,10 @@ const graphFragmentShape = {
       'What runs each core stage (intake, groom, plan, implement, review, deliver); after all layers merge, every stage must be bound.',
     ),
   nodes: NodesSchema.optional().describe('Extra nodes by name: hooks, gates and nodes required by rules.'),
-  rules: RulesSchema.optional().describe('Checks on the merged graph; rules from every layer all apply.'),
+  rules: RulesSchema.optional().describe('Checks on the merged graph; rules from every layer all apply, to every pipeline.'),
+  pipelines: PipelinesSchema.optional().describe(
+    'Named pipelines: each its own stages, bindings, nodes, inputs and exit; top-level bindings and nodes belong to feature.',
+  ),
   use: z
     .array(MappingSchema)
     .optional()

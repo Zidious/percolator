@@ -124,3 +124,11 @@ test('descriptions state the defaults the code uses', () => {
   );
   assert.deepEqual(at(s, '$.profiles.*.use[].applies_to')?.['default'], ['*']);
 });
+
+test('pipelines keys have descriptions', () => {
+  const p = at(generated(), '$.profiles.*.pipelines.*');
+  assert.ok(p, 'no schema node for profiles.*.pipelines.*');
+  const props = p['properties'] as Record<string, Node>;
+  assert.ok(Object.keys(props).length > 0);
+  for (const [k, v] of Object.entries(props)) assert.ok(described(v), `pipelines.*.${k} has no description`);
+});
