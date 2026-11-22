@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "repo": "/home/me/src/percolator",
+  "profile": "default",
+  "pipelines": [
+    {
+      "name": "feature",
+      "default": true,
+      "router": false,
+      "ticket": "required",
+      "inputs": [],
+      "exit": "pr",
+      "description": "Groom, plan, implement and review a ticket, then open a PR",
+      "steps": [
+        { "id": "intake", "stage": "intake", "role": "core", "kind": "builtin" },
+        { "id": "groom", "stage": "groom", "role": "core", "kind": "agent" },
+        { "id": "approve-groom", "stage": "groom", "role": "node", "kind": "gate" },
+        { "id": "plan", "stage": "plan", "role": "core", "kind": "agent" },
+        { "id": "implement", "stage": "implement", "role": "core", "kind": "agent" },
+        { "id": "review", "stage": "review", "role": "core", "kind": "agent" },
+        { "id": "deliver", "stage": "deliver", "role": "core", "kind": "builtin" }
+      ],
+      "loops": [{ "id": "review", "from": "review", "to": "implement", "max": 3, "atCap": "continue" }]
+    },
+    {
+      "name": "hotfix",
+      "default": false,
+      "router": false,
+      "ticket": "required",
+      "inputs": [],
+      "exit": "pr",
+      "description": "Reproduce a bug, fix it and open a PR",
+      "steps": [
+        { "id": "intake", "stage": "intake", "role": "core", "kind": "builtin" },
+        { "id": "reproduce", "stage": "reproduce", "role": "core", "kind": "agent" },
+        { "id": "fix", "stage": "fix", "role": "core", "kind": "agent" },
+        { "id": "review", "stage": "review", "role": "core", "kind": "agent" },
+        { "id": "deliver", "stage": "deliver", "role": "core", "kind": "builtin" }
+      ],
+      "loops": [{ "id": "review", "from": "review", "to": "fix", "max": 3, "atCap": "continue" }]
+    },
+    {
+      "name": "dd-alert",
+      "default": false,
+      "router": false,
+      "ticket": "none",
+      "inputs": [{ "name": "alert_url", "required": true, "description": "Datadog alert URL" }],
+      "exit": "none",
+      "description": "Diagnose a Datadog alert and write a report",
+      "steps": [
+        { "id": "intake", "stage": "intake", "role": "core", "kind": "builtin" },
+        { "id": "gather", "stage": "gather", "role": "core", "kind": "agent" },
+        { "id": "diagnose", "stage": "diagnose", "role": "core", "kind": "agent" },
+        { "id": "report", "stage": "report", "role": "core", "kind": "builtin" }
+      ],
+      "loops": []
+    },
+    {
+      "name": "spike",
+      "default": false,
+      "router": false,
+      "ticket": "optional",
+      "inputs": [
+        { "name": "question", "required": false, "description": "What to find out" },
+        { "name": "depth", "required": false }
+      ],
+      "exit": "none",
+      "steps": [
+        { "id": "intake", "stage": "intake", "role": "core", "kind": "builtin" },
+        { "id": "research", "stage": "research", "role": "core", "kind": "agent" },
+        { "id": "write-up", "stage": "write-up", "role": "core", "kind": "agent" },
+        { "id": "report", "stage": "report", "role": "core", "kind": "builtin" }
+      ],
+      "loops": []
+    }
+  ]
+}

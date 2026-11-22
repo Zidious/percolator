@@ -87,6 +87,21 @@ import type { RunStatusJson, StatusJson } from '../../src/run/status.ts';
 import type { Loop, PipeRow } from '../../herdr/mods/percolator/model.d.ts';
 import { driverName } from '../../src/run/meta.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
+import {
+  canStart,
+  commandLine,
+  guessRepo,
+  knownRepos,
+  pipelinesFixture,
+  previewRun,
+  previewSide,
+  readPipelines,
+  runNextChoices,
+  startArgv,
+  startFields,
+  ticketRepo,
+} from '../../herdr/mods/percolator/model.js';
+import type { Pipeline } from '../../herdr/mods/percolator/model.d.ts';
 
 const FIXTURE = path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'status.json');
 const RAW = fs.readFileSync(FIXTURE, 'utf8');
@@ -1152,4 +1167,176 @@ test('detailParts: one column keeps the box and strip under their rows; two colu
   assert.deepEqual(detailParts(byId('t3'), two('review')), { under: false, side: ['outcome', 'strip'] });
   assert.deepEqual(detailParts(byId('t3'), two('gone')), { under: false, side: ['outcome'] }, 'a stop not in the run');
   assert.deepEqual(detailParts(byId('t5'), two(null)), { under: false, side: ['outcome'] }, 'unreadable');
+});
+
+// ── the start dialog (perc pipelines --json) ──
+
+const PIPES_RAW = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'pipelines.json'), 'utf8');
+const pipe = (name: string) => (JSON.parse(PIPES_RAW).pipelines as Pipeline[]).find((p) => p.name === name)!;
+const started = (o: { id: string; repo: string; createdAt: string; ref?: string }) =>
+  ({ ...readable('t3'), id: o.id, repo: o.repo, createdAt: o.createdAt, ticket: o.ref ? { ref: o.ref, number: 1 } : null }) as unknown as Readable;
+
+test('readPipelines reads perc pipelines --json and refuses what it does not know', () => {
+  const read = readPipelines(PIPES_RAW);
+  assert.ok(read.ok);
+  assert.equal(read.data.pipelines.length, 4);
+  assert.deepEqual(readPipelines('nope'), { ok: false, error: 'perc pipelines --json returned invalid JSON' });
+  assert.deepEqual(readPipelines('{"schema":1}'), { ok: false, error: 'perc pipelines --json returned invalid JSON' });
+  assert.deepEqual(readPipelines('{"schema":2,"pipelines":[]}'), {
+    ok: false,
+    error: 'perc pipelines --json returned schema 2; update the Percolator panel',
+  });
+});
+
+test('pipelinesFixture is pipelines.json beside the status fixture', () => {
+  assert.equal(pipelinesFixture('/home/me/fx/status.json'), '/home/me/fx/pipelines.json');
+  assert.equal(pipelinesFixture('C:\\fx\\status.json'), 'C:\\fx/pipelines.json');
+});
+
+test('startFields: the ticket field (hidden when the pipeline takes none) and each input with its description', () => {
+  assert.deepEqual(startFields(pipe('feature')), { ticket: 'required', inputs: [] });
+  assert.deepEqual(startFields(pipe('dd-alert')), {
+    ticket: 'hidden',
+    inputs: [{ name: 'alert_url', required: true, description: 'Datadog alert URL' }],
+  });
+  assert.deepEqual(startFields(pipe('spike')), {
+    ticket: 'optional',
+    inputs: [
+      { name: 'question', required: false, description: 'What to find out' },
+      { name: 'depth', required: false, description: '' },
+    ],
+  });
+});
+
+test('knownRepos lists each repo once, most recent run first, and skips unreadable runs', () => {
+  const rs = [
+    started({ id: 'a', repo: '/src/a', createdAt: '2026-11-01T00:00:00.000Z' }),
+    started({ id: 'b', repo: '/src/b', createdAt: '2026-11-10T00:00:00.000Z' }),
+    started({ id: 'c', repo: '/src/a', createdAt: '2026-11-20T00:00:00.000Z' }),
+    { id: 'd', status: 'unreadable', error: 'bad' } as RunStatusJson,
+  ];
+  assert.deepEqual(knownRepos(rs), ['/src/a', '/src/b']);
+  assert.deepEqual(knownRepos(runs()), ['/home/me/src/percolator']);
+  assert.deepEqual(knownRepos([]), []);
+});
+
+test('ticketRepo is the lower-cased host/owner/repo of a ticket URL or ref, else null', () => {
+  assert.equal(ticketRepo('https://github.com/O/R/issues/3'), 'github.com/o/r');
+  assert.equal(ticketRepo('  https://ghe.example.com/a/b/pull/2 '), 'ghe.example.com/a/b');
+  assert.equal(ticketRepo('o/r#3'), 'github.com/o/r');
+  assert.equal(ticketRepo('github.com/Zidious/percolator#16'), 'github.com/zidious/percolator');
+  for (const t of ['', '#3', '3', 'not a ticket', 'https://github.com/o']) assert.equal(ticketRepo(t), null, t);
+});
+
+test('guessRepo is the repo of the most recent run on the same GitHub repo, else null', () => {
+  const rs = [
+    started({ id: 'old', repo: '/src/r-old', createdAt: '2026-11-01T00:00:00.000Z', ref: 'github.com/o/r#1' }),
+    started({ id: 'new', repo: '/src/r', createdAt: '2026-11-10T00:00:00.000Z', ref: 'github.com/o/r#2' }),
+    started({ id: 'rx', repo: '/src/rx', createdAt: '2026-11-20T00:00:00.000Z', ref: 'github.com/o/rx#5' }),
+    started({ id: 'none', repo: '/src/x', createdAt: '2026-11-21T00:00:00.000Z' }),
+    { id: 'bad', status: 'unreadable', error: 'bad' } as RunStatusJson,
+  ];
+  assert.equal(guessRepo('https://github.com/o/r/issues/3', rs), '/src/r');
+  assert.equal(guessRepo('o/rx#9', rs), '/src/rx');
+  assert.equal(guessRepo('https://github.com/o/q/issues/3', rs), null);
+  assert.equal(guessRepo('nonsense', rs), null);
+  assert.equal(guessRepo('zidious/percolator#99', runs()), '/home/me/src/percolator');
+});
+
+test('startArgv: the ticket if any, repo, pipeline, then inputs in declared order without empty optional ones', () => {
+  assert.deepEqual(startArgv({ pipeline: pipe('dd-alert'), inputs: { alert_url: 'https://x/a b' }, repo: '/src/r' }), [
+    'run', '--repo', '/src/r', '--pipeline', 'dd-alert', '--input', 'alert_url=https://x/a b',
+  ]);
+  assert.deepEqual(startArgv({ pipeline: pipe('feature'), ticket: ' o/r#3 ', inputs: {}, repo: '/src/r' }), [
+    'run', 'o/r#3', '--repo', '/src/r', '--pipeline', 'feature',
+  ]);
+  assert.deepEqual(startArgv({ pipeline: pipe('spike'), ticket: '', inputs: { depth: '2', question: 'why q' }, repo: '/r' }), [
+    'run', '--repo', '/r', '--pipeline', 'spike', '--input', 'question=why q', '--input', 'depth=2',
+  ]);
+  assert.deepEqual(startArgv({ pipeline: pipe('spike'), inputs: { depth: '2', question: '  ' }, repo: '/r' }), [
+    'run', '--repo', '/r', '--pipeline', 'spike', '--input', 'depth=2',
+  ]);
+});
+
+test('commandLine quotes an argument holding whitespace or a double quote', () => {
+  assert.equal(commandLine(['run', '--input', 'q=a b']), 'perc run --input "q=a b"');
+  assert.equal(commandLine(['run', '--input', 'q=say "hi"']), 'perc run --input "q=say \\"hi\\""');
+  assert.equal(commandLine(['run', '--repo', 'C:\\My Repos\\r']), 'perc run --repo "C:\\My Repos\\r"');
+  assert.equal(commandLine(['run', 'o/r#3', '--pipeline', 'feature']), 'perc run o/r#3 --pipeline feature');
+});
+
+test('canStart says what is missing: the repo, then the ticket, then the first empty required input', () => {
+  assert.deepEqual(canStart({ pipeline: pipe('dd-alert'), inputs: {}, repo: '/r' }), { ok: false, why: 'Enter alert_url' });
+  assert.deepEqual(canStart({ pipeline: pipe('dd-alert'), inputs: { alert_url: ' ' }, repo: '/r' }), { ok: false, why: 'Enter alert_url' });
+  assert.deepEqual(canStart({ pipeline: pipe('dd-alert'), inputs: { alert_url: 'https://x' }, repo: '/r' }), { ok: true });
+  assert.deepEqual(canStart({ pipeline: pipe('dd-alert'), inputs: {}, repo: null }), { ok: false, why: 'Pick a repo' });
+  assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: '', inputs: {}, repo: '' }), { ok: false, why: 'Pick a repo' });
+  assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: '  ', inputs: {}, repo: '/r' }), { ok: false, why: 'Enter a ticket' });
+  assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: 'o/r#3', inputs: {}, repo: '/r' }), { ok: true });
+  assert.deepEqual(canStart({ pipeline: pipe('spike'), inputs: {}, repo: '/r' }), { ok: true });
+});
+
+// ── run next and the pipeline preview ──
+
+const ALL_PIPES = () => [...(JSON.parse(PIPES_RAW).pipelines as Pipeline[]), { name: 'broken', error: 'pipelines.broken: no exit' }];
+const T3 = 'github.com/zidious/percolator#3';
+
+test('run next is hidden while the ticket has a live run', () => {
+  const done = readable('t3');
+  for (const status of ['running', 'waiting', 'paused'] as const) {
+    const live = { ...readable('t8'), id: `t3-${status}`, status, ticket: { ref: T3, number: 3 } } as Readable;
+    assert.equal(runNextChoices(done, ALL_PIPES(), [...runs(), live]), null, status);
+  }
+  assert.equal(runNextChoices(readable('t8'), ALL_PIPES(), runs()), null, 'a running run offers no run next');
+  assert.equal(runNextChoices(byId('t5'), ALL_PIPES(), runs()), null, 'an unreadable run offers none');
+  const old = { ...readable('t9'), id: 't3-old', ticket: { ref: T3, number: 3 } } as Readable;
+  assert.notEqual(runNextChoices(done, ALL_PIPES(), [...runs(), old]), null, 'a failed run on the ticket is not live');
+});
+
+test('run next lists only pipelines that take a ticket', () => {
+  assert.deepEqual(runNextChoices(readable('t3'), ALL_PIPES(), runs()), { tickets: [T3], pipelines: ['feature', 'hotfix', 'spike'] });
+  assert.deepEqual(runNextChoices(readable('t9'), ALL_PIPES(), runs()), {
+    tickets: ['github.com/zidious/percolator#9'],
+    pipelines: ['feature', 'hotfix', 'spike'],
+  });
+});
+
+test('run next offers the issues an issue exit opened', () => {
+  const opened = [
+    { ref: 'github.com/o/r#40', url: 'https://github.com/o/r/issues/40' },
+    { ref: 'github.com/o/r#41', url: 'https://github.com/o/r/issues/41' },
+  ];
+  const withIssues = { ...readable('t3'), opened } as unknown as Readable;
+  assert.deepEqual(runNextChoices(withIssues, ALL_PIPES(), runs())?.tickets, [T3, 'github.com/o/r#40', 'github.com/o/r#41']);
+  const ticketless = { ...readable('t3'), ticket: null, opened } as unknown as Readable;
+  assert.deepEqual(runNextChoices(ticketless, ALL_PIPES(), runs())?.tickets, ['github.com/o/r#40', 'github.com/o/r#41']);
+  assert.equal(runNextChoices({ ...ticketless, opened: [] } as unknown as Readable, ALL_PIPES(), runs()), null);
+  assert.equal(runNextChoices({ ...readable('t3'), ticket: null } as unknown as Readable, ALL_PIPES(), runs()), null);
+});
+
+test('previewRun draws through pipelineRows', () => {
+  const run = previewRun(pipe('hotfix'));
+  assert.deepEqual(
+    { id: run.id, status: run.status, ticket: run.ticket, pipeline: (run as any).pipeline, timeline: run.timeline },
+    { id: 'preview', status: 'pending', ticket: null, pipeline: 'hotfix', timeline: [] },
+  );
+  assert.deepEqual(run.steps[1], { id: 'reproduce', stage: 'reproduce', role: 'core', kind: 'agent', status: 'pending', attempts: 0, outputs: {} });
+  assert.deepEqual(run.loops, [{ id: 'review', from: 'review', to: 'fix', max: 3, atCap: 'continue', round: 0 }]);
+  const rows = pipelineRows(run, { narrow: false, unfolded: [] });
+  const shown = rows.map((r) => r.step.id);
+  for (const id of ['reproduce', 'fix', 'deliver']) assert.ok(shown.includes(id), id);
+  assert.deepEqual(shown, ['intake', 'reproduce', 'fix', 'review', 'deliver']);
+  assert.ok(rows.every((r) => r.state === 'future'));
+  assert.deepEqual(pipelineSpans(rows, run), [{ from: 3, to: 2, tone: 'dim' }]);
+  assert.deepEqual(pipelineMarks(rows, null), { active: -1, reached: -1, stripAt: -1 });
+  const feature = pipelineRows(previewRun(pipe('feature')), { narrow: false, unfolded: [] });
+  assert.deepEqual(feature.map((r) => [r.type, r.step.id]).slice(1, 3), [['stage', 'groom'], ['hook', 'approve-groom']]);
+});
+
+test('previewSide is below at 280 and 380 and right at 720', () => {
+  assert.equal(previewSide(280), 'below');
+  assert.equal(previewSide(380), 'below');
+  assert.equal(previewSide(719), 'below');
+  assert.equal(previewSide(720), 'right');
+  assert.equal(previewSide(1200), 'right');
 });

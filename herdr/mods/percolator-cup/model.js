@@ -760,3 +760,114 @@ export function selectAfterRefresh(runs, rows, selId, pending) {
   if (pending && rows.some((r) => r.id === pending.next)) return pending.next;
   return rows[0]?.id ?? null;
 }
+
+// ── starting a run (`perc pipelines --json`, schema 1) ──
+
+const INVALID_PIPELINES = 'perc pipelines --json returned invalid JSON';
+
+/** `perc pipelines --json` stdout → `{ ok: true, data }`, or `{ ok: false, error }` when it is not one this panel knows. */
+export function readPipelines(stdout) {
+  let data;
+  try {
+    data = JSON.parse(stdout);
+  } catch {
+    return { ok: false, error: INVALID_PIPELINES };
+  }
+  if (data === null || typeof data !== 'object' || !Array.isArray(data.pipelines)) return { ok: false, error: INVALID_PIPELINES };
+  if (data.schema !== 1) return { ok: false, error: `perc pipelines --json returned schema ${data.schema}; update the Percolator panel` };
+  return { ok: true, data };
+}
+
+/** In fixtures mode, the pipelines come from pipelines.json beside the status fixture. */
+export function pipelinesFixture(statusFixture) {
+  return `${statusFixture.replace(/[\\/][^\\/]*$/, '')}/pipelines.json`;
+}
+
+/** What the start dialog asks for a pipeline: its ticket field (hidden when it takes none) and its inputs. */
+export function startFields(pipeline) {
+  return {
+    ticket: pipeline.ticket === 'none' ? 'hidden' : pipeline.ticket,
+    inputs: pipeline.inputs.map((i) => ({ name: i.name, required: i.required, description: i.description ?? '' })),
+  };
+}
+
+const newestFirst = (runs) =>
+  runs.filter((r) => r.status !== 'unreadable' && typeof r.repo === 'string').sort((a, b) => created(b) - created(a));
+
+/** The repos earlier runs ran in, each once, most recent first. */
+export function knownRepos(runs) {
+  return [...new Set(newestFirst(runs).map((r) => r.repo))];
+}
+
+const TICKET_URL = /^https?:\/\/([^/\s]+)\/([^/\s]+)\/([^/\s#]+)\/(?:issues|pull)\/\d+\/?$/i;
+const TICKET_REF = /^(?:([^/\s#]+)\/)?([^/\s#]+)\/([^/\s#]+)#\d+$/;
+
+/** The lower-cased `host/owner/repo` of a ticket URL, `owner/repo#n` (github.com) or `host/owner/repo#n`; else null. */
+export function ticketRepo(text) {
+  const t = String(text ?? '').trim();
+  const m = TICKET_URL.exec(t) ?? TICKET_REF.exec(t);
+  if (!m) return null;
+  return `${m[1] ?? 'github.com'}/${m[2]}/${m[3]}`.toLowerCase();
+}
+
+/** The repo of the most recent run on the ticket's GitHub repo, to preselect; null when none ran there. */
+export function guessRepo(ticketText, runs) {
+  const repo = ticketRepo(ticketText);
+  if (repo === null) return null;
+  return newestFirst(runs).find((r) => r.ticket?.ref?.toLowerCase().startsWith(`${repo}#`))?.repo ?? null;
+}
+
+const blank = (v) => typeof v !== 'string' || v.trim() === '';
+
+/** The `perc run` argv for the dialog's choices: inputs in the pipeline's declared order, empty optional ones left out. */
+export function startArgv(o) {
+  const ticket = blank(o.ticket) ? null : o.ticket.trim();
+  const inputs = o.pipeline.inputs.flatMap((i) => {
+    const v = o.inputs[i.name] ?? '';
+    return !i.required && blank(v) ? [] : [['--input', `${i.name}=${v}`]];
+  });
+  return ['run', ...(ticket ? [ticket] : []), '--repo', o.repo, '--pipeline', o.pipeline.name, ...inputs.flat()];
+}
+
+/** The argv as one `perc …` line to show: an argument holding whitespace or `"` is double-quoted, its `"` escaped. */
+export function commandLine(argv) {
+  const quote = (a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
+  return ['perc', ...argv.map(quote)].join(' ');
+}
+
+/** Whether Start can run, else why not: the repo, then the ticket, then the first empty required input. */
+export function canStart(o) {
+  if (blank(o.repo)) return { ok: false, why: 'Pick a repo' };
+  if (o.pipeline.ticket === 'required' && blank(o.ticket)) return { ok: false, why: 'Enter a ticket' };
+  const missing = o.pipeline.inputs.find((i) => i.required && blank(o.inputs[i.name]));
+  return missing ? { ok: false, why: `Enter ${missing.name}` } : { ok: true };
+}
+
+/** What "Run next…" offers on a finished run: its ticket and the issues its exit opened, and the pipelines that take a
+ *  ticket; null while a run on its ticket is live, or when it has no ticket to offer. */
+export function runNextChoices(run, pipelines, runs) {
+  if (!isFinished(run)) return null;
+  const ref = run.ticket?.ref;
+  if (ref && runs.some((r) => r.ticket?.ref === ref && ACTIVE.has(r.status))) return null;
+  const tickets = [...(ref ? [ref] : []), ...(run.opened ?? []).map((o) => o.ref)];
+  if (tickets.length === 0) return null;
+  return { tickets, pipelines: pipelines.filter((p) => !p.error && p.ticket !== 'none').map((p) => p.name) };
+}
+
+/** A pipeline as a run that has not started, so pipelineRows, pipelineSpans and pipelineMarks draw its preview. */
+export function previewRun(pipeline) {
+  return {
+    id: 'preview',
+    status: 'pending',
+    steps: pipeline.steps.map((s) => ({ ...s, status: 'pending', attempts: 0, outputs: {} })),
+    loops: pipeline.loops.map((l) => ({ ...l, round: 0 })),
+    timeline: [],
+    ticket: null,
+    pipeline: pipeline.name,
+  };
+}
+
+/** Where the pipeline preview sits beside the start picker: below it under 720px wide, else to its right. */
+export function previewSide(width) {
+  return width < 720 ? 'below' : 'right';
+}
