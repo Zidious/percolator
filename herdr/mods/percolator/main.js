@@ -27,7 +27,6 @@ import {
   agentAddress,
   boardHeight,
   boxActions,
-  columns,
   detailParts,
   deleteArgv,
   deleteCommand,
@@ -39,7 +38,7 @@ import {
   dragBoard,
   driverPeek,
   findNode,
-  leftNarrow,
+  panelShape,
   titleLayout,
   unfoldAfterPick,
   moveRow,
@@ -64,7 +63,6 @@ import { activeSlot, turn } from './turn.js';
 import { addressOf, link, own } from './ui.js';
 import { connectSource, fetchStatus, firstLine, watchRuns } from './source.js';
 
-const NARROW = 720;
 const LEFT = 330; // the left column of two: the board and the pipeline
 const BLOCK = 'percolator-panel';
 const WINDOW = 'percolator.window'; // shared: the open window's overlay id, else null
@@ -544,9 +542,7 @@ export default class Percolator extends View {
 
   /** The panel's layout at its width: `narrow`; `cols`, one or two; `left`, the board and pipeline draw narrow. */
   shape() {
-    const narrow = this.width < NARROW;
-    const cols = columns(this.width / zoom());
-    return { narrow, cols, left: leftNarrow(cols, narrow) };
+    return panelShape(this.width, zoom());
   }
 
   // ── the divider between the board and the detail ──────────────────

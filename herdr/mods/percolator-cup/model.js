@@ -570,6 +570,15 @@ export function leftNarrow(cols, narrow) {
   return narrow || cols === 'two';
 }
 
+/** The panel's layout from its measured width (zoomed px) and the zoom, all in design px: `narrow` under 720,
+ *  `cols`, and `left`, whether the board and pipeline draw narrow. */
+export function panelShape(width, zoom) {
+  const w = Math.round(width / zoom); // the width comes zoomed, in floats: 720 at 0.8 reads 575.99
+  const narrow = w < 720;
+  const cols = columns(w);
+  return { narrow, cols, left: leftNarrow(cols, narrow) };
+}
+
 /** Where the detail's pieces show. `under`: the active slot and the stop strip sit under their rows in the pipeline (one
  *  column). `side`, in order: what shows under the pipeline in one column (the box when it has no active row, how the
  *  run ended), or in the right column of two (the box, how the run ended, then the picked stop's strip). */

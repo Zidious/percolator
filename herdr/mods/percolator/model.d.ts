@@ -134,6 +134,7 @@ export declare function historyLabel(run: RunStatusJson, open: boolean, now: num
 export type Columns = 'one' | 'two';
 export declare function columns(width: number): Columns;
 export declare function leftNarrow(cols: Columns, narrow: boolean): boolean;
+export declare function panelShape(width: number, zoom: number): { narrow: boolean; cols: Columns; left: boolean };
 export declare function detailParts(
   run: RunStatusJson,
   o: { cols: Columns; narrow: boolean; unfolded: string[]; stopSel: string | null },

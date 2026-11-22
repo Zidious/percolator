@@ -64,6 +64,7 @@ import {
   columns,
   detailParts,
   leftNarrow,
+  panelShape,
   readerFiles,
   readerMax,
   slotOpensAgent,
@@ -1052,6 +1053,16 @@ test('columns: two columns from 720px wide (the window, a wide panel), else one'
   assert.equal(columns(720), 'two');
   assert.equal(columns(860), 'two');
   assert.equal(columns(380), 'one');
+});
+
+test('panelShape: narrow and columns both measure design px, so they agree at any zoom', () => {
+  assert.deepEqual(panelShape(570, 1.5), { narrow: true, cols: 'one', left: true });
+  assert.deepEqual(panelShape(1080, 1.5), { narrow: false, cols: 'two', left: true });
+  assert.deepEqual(panelShape(750, 1.5), { narrow: true, cols: 'one', left: true });
+  assert.deepEqual(panelShape(720, 1), { narrow: false, cols: 'two', left: true });
+  assert.deepEqual(panelShape(380, 1), { narrow: true, cols: 'one', left: true });
+  assert.deepEqual(panelShape(700, 0.8), { narrow: false, cols: 'two', left: true });
+  assert.deepEqual(panelShape(575.99, 0.8), { narrow: false, cols: 'two', left: true }); // 720 at zoom 0.8, measured in floats
 });
 
 test('leftNarrow: the 330px left column of two columns draws the board and pipeline narrow', () => {
