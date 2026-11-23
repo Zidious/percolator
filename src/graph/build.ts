@@ -268,9 +268,9 @@ function buildWhole(
       }
       // what the exit needs from the pipeline: a ticket, an input, or (release) a tag
       const needs = EXITS[exit].needs;
-      if (needs?.ticket && header.ticket === 'none') {
+      if (needs?.ticket && header.ticket !== undefined && header.ticket !== 'required') {
         throw new GraphError(
-          `exit ${exit} posts on the run's issue, but pipeline "${name}" has ticket: none; set ticket: required or pick another exit`,
+          `exit ${exit} posts on the run's issue, but pipeline "${name}" has ticket: ${header.ticket}; set ticket: required or pick another exit`,
           at(''),
         );
       }

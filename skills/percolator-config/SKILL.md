@@ -164,7 +164,7 @@ The last stage of every pipeline is its exit: a builtin Percolator runs itself, 
 | `exit` | Builtin | Reads | Needs | Writes |
 |---|---|---|---|---|
 | `pr` | `github.open_pr` | `pr_body` (optional) | | `pr_url` |
-| `comment` | `github.comment` | `comment` (required) | a ticket: not with `ticket: none` | `comment_url` |
+| `comment` | `github.comment` | `comment` (required) | a ticket on every run: not with `ticket: none` or `optional` | `comment_url` |
 | `issue` | `github.open_issues` | `issues`: one `## <title>` section per issue; none means no issues | every section titled: a bare `## ` heading escalates with `github.open_issues: draft <n> in issues.md has no title (a bare "## " heading); give it a title and resume` | `issue_urls` |
 | `none` | `percolator.report` | | | nothing; outputs stay in the run dir |
 | `release` | `github.release` | `tag`, `release_notes` | input `tag`, or `tag` under `outputs` of an earlier stage; a tag that already has another release escalates | `release_url` |

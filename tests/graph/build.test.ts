@@ -527,6 +527,14 @@ test('exit comment needs a ticket', () => {
   );
 });
 
+test('exit comment needs a ticket on every run', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ exit: 'comment', ticket: 'optional' })),
+    "c.yaml: profiles.default.pipelines.hotfix: exit comment posts on the run's issue, but pipeline \"hotfix\" has ticket: optional; set ticket: required or pick another exit",
+    'profiles.default.pipelines.hotfix',
+  );
+});
+
 test('exit pr_review needs input pr', () => {
   throwsAt(
     () => buildGraph(hotfix({ exit: 'pr_review' })),
