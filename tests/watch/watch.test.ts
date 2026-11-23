@@ -8,6 +8,7 @@ import { readRunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { validate } from '../../src/validate.ts';
 import { loadLedger, saveLedger } from '../../src/watch/ledger.ts';
+import { triggerId } from '../../src/watch/poll.ts';
 import { watcherStatus, watchLoop } from '../../src/watch/watch.ts';
 import { setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
@@ -26,6 +27,9 @@ const TRIAGE = [
   '          - { schedule: "0 * * * *", timezone: UTC }',
   '          - { label: triage }',
 ].join('\n');
+
+/** The ledger mark of triage's schedule trigger. */
+const HOURLY = `${REPO}:triage:${triggerId({ schedule: '0 * * * *', timezone: 'UTC' })}`;
 
 const pdir = (e: RunEnv) => path.join(e.home, '.percolator');
 const runPath = (e: RunEnv, id: string) => path.join(e.home, '.percolator', 'runs', id);
@@ -124,7 +128,7 @@ test('a poll that throws loses no schedule tick', async () => {
   const e = await setupRunEnv();
   try {
     await e.writeConfig(TRIAGE);
-    const mark = `${REPO}:triage:0`;
+    const mark = HOURLY;
     await saveLedger(pdir(e), { version: 1, fired: {}, lastPoll: { [mark]: '2026-11-22T07:30:00.000Z' } });
     const gh = e.deps.gh;
     const listIssues = gh.listIssues.bind(gh);
@@ -144,7 +148,7 @@ test('a poll that throws loses no schedule tick', async () => {
     });
     assert.equal(lines.length, 2, lines.join('\n'));
     assert.match(lines[0]!, new RegExp(`^watch: ${e.root.replaceAll('\\', '\\\\')}: .*HTTP 502`));
-    const key = `schedule:${REPO}:triage:0:2026-11-22T10:00`;
+    const key = `schedule:${HOURLY}:2026-11-22T10:00`;
     assert.match(lines[1]!, new RegExp(`^watch: ${key} → run triage-20261122-101600-[0-9a-f]{4}$`));
   } finally {
     await e.cleanup();
@@ -174,13 +178,13 @@ test('a restarted watcher starts a schedule firing it recorded but never prepare
   const e = await setupRunEnv();
   try {
     await e.writeConfig(TRIAGE);
-    const key = `schedule:${REPO}:triage:0:2026-11-22T10:00`;
+    const key = `schedule:${HOURLY}:2026-11-22T10:00`;
     const id = 'triage-20261122-100000-abcd';
     // fire() saved the entry (and the poll moved the mark past the tick), then the watcher crashed before prepareRun
     await saveLedger(pdir(e), {
       version: 1,
       fired: { [key]: { runId: id, at: '2026-11-22T10:00:30.000Z', pipeline: 'triage', inputs: {} } },
-      lastPoll: { [`${REPO}:triage:0`]: '2026-11-22T10:00:30.000Z' },
+      lastPoll: { [HOURLY]: '2026-11-22T10:00:30.000Z' },
     });
     const lines = await loop(e);
     assert.deepEqual(lines, [`watch: ${key} → run ${id}`]);
@@ -212,7 +216,7 @@ test('a poll prunes schedule firings older than the lookback from fired.json', a
   const e = await setupRunEnv();
   try {
     await e.writeConfig(TRIAGE);
-    const old = `schedule:${REPO}:triage:0:2026-11-10T10:00`;
+    const old = `schedule:${HOURLY}:2026-11-10T10:00`;
     await saveLedger(pdir(e), {
       version: 1,
       fired: { [old]: { runId: 'triage-20261110-100000-abcd', at: '2026-11-10T10:00:00.000Z', pipeline: 'triage', inputs: {}, prepared: true } },
@@ -247,7 +251,7 @@ test('a recorded firing two triggers ask for is started once after a restart', a
     await saveLedger(pdir(e), {
       version: 1,
       fired: { [key]: { runId: id, at: '2026-11-22T10:00:00.000Z', pipeline: 'deps', inputs: { pr: `https://${REPO}/pull/3` } } },
-      lastPoll: { [`${REPO}:deps:0`]: '2026-11-22T10:00:00.000Z', [`${REPO}:deps:1`]: '2026-11-22T10:00:00.000Z' },
+      lastPoll: { [`${REPO}:deps:${triggerId({ pr_opened: true })}`]: '2026-11-22T10:00:00.000Z', [`${REPO}:deps:${triggerId({ dependabot: true })}`]: '2026-11-22T10:00:00.000Z' },
     });
     assert.deepEqual(await loop(e), [`watch: ${key} → run ${id}`]);
   } finally {

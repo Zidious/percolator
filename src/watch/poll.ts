@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import type { PipelineSpec } from '../config/pipelines.ts';
+import type { Trigger } from '../config/schema.ts';
 import type { Gh, PrRef } from '../tracker/gh.ts';
 import { latestTick, parseCron } from '../util/cron.ts';
 import type { Ledger } from './ledger.ts';
@@ -7,6 +9,25 @@ import type { Ledger } from './ledger.ts';
 export type Firing = { key: string; pipeline: string; ticket?: string; inputs: Record<string, string> };
 
 const DEPENDABOT = new Set(['dependabot[bot]', 'app/dependabot']);
+
+const canonical = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(canonical)
+    : v !== null && typeof v === 'object'
+      ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical((v as Record<string, unknown>)[k])]))
+      : v;
+
+const KINDS = ['schedule', 'label', 'pr_opened', 'dependabot', 'check_failed'] as const;
+
+/**
+ * A trigger's identity in the ledger: its kind and a short hash of its config (JSON with sorted keys), so
+ * reordering triggers keeps each one's marks and editing one makes it a new trigger, polled for the first time.
+ */
+export function triggerId(trigger: Trigger): string {
+  const kind = KINDS.find((k) => k in trigger) ?? 'trigger';
+  const hash = createHash('sha1').update(JSON.stringify(canonical(trigger))).digest('hex').slice(0, 8);
+  return `${kind}-${hash}`;
+}
 
 /**
  * What the triggers of `specs` ask to start now in `repo` (host/owner/repo). Keys already in
@@ -39,8 +60,9 @@ export async function pollTriggers(o: {
 
   for (const spec of Object.values(o.specs)) {
     const pipeline = spec.name;
-    for (const [i, trigger] of (spec.triggers ?? []).entries()) {
-      const mark = `${repo}:${pipeline}:${i}`;
+    for (const trigger of spec.triggers ?? []) {
+      const id = triggerId(trigger);
+      const mark = `${repo}:${pipeline}:${id}`;
       const firstPoll = o.first === true || ledger.lastPoll[mark] === undefined;
       // a PR or check trigger's first poll (ever, or since the watcher started) records what is already
       // there as seen (runId ''), so a watcher starts nothing for PRs opened or checks failed before it ran
@@ -53,7 +75,7 @@ export async function pollTriggers(o: {
         ledger.lastPoll[mark] = o.now.toISOString();
         if (after === undefined) continue;
         const tick = latestTick(parseCron(trigger.schedule), new Date(after), o.now, trigger.timezone);
-        if (tick) add({ key: `schedule:${repo}:${pipeline}:${i}:${tick.key}`, pipeline, inputs: { ...trigger.inputs } });
+        if (tick) add({ key: `schedule:${repo}:${pipeline}:${id}:${tick.key}`, pipeline, inputs: { ...trigger.inputs } });
       } else if ('label' in trigger) {
         // no first-poll seeding here: labelling an issue is asking for a run, and the label stays on
         // the issue, so one labelled before the watcher started is still a request to answer
@@ -82,8 +104,8 @@ export async function pollTriggers(o: {
         const runs = await gh.failedRuns(repo, workflow === undefined ? { branch } : { branch, workflow });
         for (const run of runs) {
           // a re-run keeps its id: a later attempt that fails again is a new failure (attempt 1 keeps the bare id)
-          const id = run.attempt > 1 ? `${run.databaseId}.${run.attempt}` : `${run.databaseId}`;
-          seen({ key: `check:${repo}:${pipeline}:${id}`, pipeline, inputs: { branch, run_url: run.url } });
+          const attempt = run.attempt > 1 ? `${run.databaseId}.${run.attempt}` : `${run.databaseId}`;
+          seen({ key: `check:${repo}:${pipeline}:${attempt}`, pipeline, inputs: { branch, run_url: run.url } });
         }
         ledger.lastPoll[mark] = o.now.toISOString();
       }
