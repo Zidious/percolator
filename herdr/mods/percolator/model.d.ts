@@ -7,7 +7,7 @@ export type Step = Readable['steps'][number];
 export type Stage = 'intake' | 'groom' | 'plan' | 'implement' | 'review' | 'deliver';
 export type TimelineEntry = Readable['timeline'][number];
 export type Attempt = Extract<TimelineEntry, { kind: 'attempt' }>;
-export type Tone = 'blocked' | 'working' | 'dim' | 'muted';
+export type Tone = 'blocked' | 'working' | 'muted';
 
 export declare const STAGES: readonly Stage[];
 export declare function parseStatus(stdout: string): { ok: true; data: StatusJson } | { ok: false; error: string };
@@ -127,6 +127,8 @@ export declare function selectAfterRefresh(
   pending: { ids: string[]; next: string | null } | null,
 ): string | null;
 export declare function agentTone(status: string): 'blocked' | 'working' | 'muted';
+/** The theme colour for text in a model tone: dim (and no tone) read as muted; any other tone stays. */
+export declare function textTone<T extends string>(tone: T | null | undefined): Exclude<T, 'dim'> | 'muted';
 export declare function agentAddress(run: RunStatusJson, live: { address: string; name?: string | null }[]): string | null;
 export declare function openAgentAt(
   run: RunStatusJson | null | undefined,

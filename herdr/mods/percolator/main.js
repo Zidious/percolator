@@ -344,7 +344,7 @@ export default class Percolator extends View {
     this.actError = null;
     this.said = null;
     if (this.conn === 'fixtures') {
-      this.said = `fixtures: would peek at ${peek.terminal}`;
+      this.said = `Fixtures: would peek at ${peek.terminal}`;
       return;
     }
     const terminal = addressOf(peek.terminal);
@@ -432,7 +432,7 @@ export default class Percolator extends View {
   perform(action, argv, cx) {
     if (!argv) return;
     if (this.conn === 'fixtures') {
-      this.said = `fixtures: would run perc ${argv.join(' ')}`;
+      this.said = `Fixtures: would run perc ${argv.join(' ')}`;
       if (action === 'reject') this.closeReject();
       return;
     }
@@ -655,7 +655,7 @@ export default class Percolator extends View {
     const argv = this.watcher?.argv;
     if (!argv || this.busy) return;
     if (this.conn === 'fixtures') {
-      this.notice = `fixtures: would run perc ${argv.join(' ')}`;
+      this.notice = `Fixtures: would run perc ${argv.join(' ')}`;
       cx.notify();
       return;
     }
@@ -669,7 +669,7 @@ export default class Percolator extends View {
       }));
       this.busy = null;
       if (res.code !== 0) this.notice = firstLine(res.stderr) || `perc ${argv.join(' ')} exited ${res.code}`;
-      // a started watcher beats only after its first poll: until then the chip says starting…, not Start again
+      // a started watcher beats only after its first poll: until then the chip says Starting…, not Start again
       this.watchStartedAt = res.code === 0 && argv[1] !== 'stop' ? Date.now() : null;
       this.refresh(cx);
       cx.notify();
@@ -883,7 +883,7 @@ export default class Percolator extends View {
           .rounded(5)
           .text_size(11.5)
           .cursor_pointer()
-          .text_color(this.filter === id ? t.foreground : t.dim)
+          .text_color(this.filter === id ? t.foreground : t.muted)
           .when(this.filter === id, (el) => el.bg(t.raised))
           .on_click((_e, cx) => {
             this.filter = id;
@@ -944,7 +944,7 @@ export default class Percolator extends View {
         ),
       )
       .when(Boolean(this.watcher), (el) => el.child(this.watcherChip(t, narrow || fit.tabs === 'below')))
-      .when(this.conn === 'fixtures' && !narrow, (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child('fixtures')))
+      .when(this.conn === 'fixtures' && !narrow, (el) => el.child(div().flex_none().text_size(10).text_color(t.muted).child('Fixtures')))
       .child(
         icon('place', '⧉', window ? 'Dock in the side panel' : 'Pop out into a window', () =>
           window ? this.dockBack() : this.popOut(),
@@ -971,7 +971,7 @@ export default class Percolator extends View {
       .border_color(t.border)
       .bg(t.chrome)
       .text_size(10.5)
-      .text_color(t.dim)
+      .text_color(t.muted)
       .child(div().min_w(0).truncate().child('↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · esc close'));
   }
 
@@ -990,7 +990,7 @@ export default class Percolator extends View {
       .flex_1()
       .items_center()
       .justify_center()
-      .child(div().text_size(12).text_color(t.dim).child(this.error ? '' : 'Loading…'));
+      .child(div().text_size(12).text_color(t.muted).child(this.error ? '' : 'Loading…'));
   }
 
   // The measured frames (area, board-frame) are drawn from the first frame on, whatever the state: Herdr reports sizes

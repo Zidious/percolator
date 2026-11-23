@@ -18,6 +18,7 @@ import {
   historyLabel,
   outcomeOf,
   programInitial,
+  textTone,
   timelineRows,
 } from './model.js';
 import { stopStrip } from './pipeline.js';
@@ -34,7 +35,6 @@ const LABELS = {
 const tag = (label, c) =>
   div().flex_none().px(6).py(1).rounded(4).text_size(10).font_semibold().border(1).border_color(c).text_color(c).child(label);
 
-const toneColor = (t, tone) => (tone ? t[tone] : t.dim);
 
 /** The run history's rows, newest first. */
 function historyList(t, r) {
@@ -43,20 +43,20 @@ function historyList(t, r) {
     .py(4)
     .children(
       rows.length === 0
-        ? [div().px(12).py(3).text_size(11.5).text_color(t.dim).child('Nothing has run yet.')]
+        ? [div().px(12).py(3).text_size(11.5).text_color(t.muted).child('Nothing has run yet.')]
         : rows.map((x) =>
             h_flex()
               .px(12)
               .py(3)
               .gap(10)
               .text_size(11.5)
-              .child(div().w(10).flex_none().text_color(toneColor(t, x.tone)).child(x.mark))
+              .child(div().w(10).flex_none().text_color(t[textTone(x.tone)]).child(x.mark))
               .child(div().w(130).flex_none().truncate().text_color(t.foreground).child(x.step))
-              .child(div().w(60).flex_none().text_color(t.dim).child(x.round))
-              .child(div().w(90).flex_none().text_color(toneColor(t, x.tone)).child(x.status))
-              .child(div().w(50).flex_none().text_color(t.dim).child(x.started))
-              .child(div().w(50).flex_none().text_color(t.dim).child(x.took))
-              .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(x.note)),
+              .child(div().w(60).flex_none().text_color(t.muted).child(x.round))
+              .child(div().w(90).flex_none().text_color(t[textTone(x.tone)]).child(x.status))
+              .child(div().w(50).flex_none().text_color(t.muted).child(x.started))
+              .child(div().w(50).flex_none().text_color(t.muted).child(x.took))
+              .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(x.note)),
           ),
     );
 }
@@ -131,7 +131,7 @@ function rejectBox(p, t) {
         .items_center()
         .child(button(t, 'reject-send', 'Send', 'no', (_e, cx) => p.sendReject(cx), { busy: p.busy === 'reject', disabled: Boolean(p.busy) }))
         .child(button(t, 'reject-cancel', 'Cancel', '', (_e, cx) => p.cancelReject(cx), { disabled: Boolean(p.busy) }))
-        .child(div().text_size(11).text_color(p.rejectError ? t.blocked : t.dim).child(p.rejectError ?? 'Ctrl+Enter sends · Esc cancels')),
+        .child(div().text_size(11).text_color(p.rejectError ? t.blocked : t.muted).child(p.rejectError ?? 'Ctrl+Enter sends · Esc cancels')),
     );
 }
 
@@ -256,7 +256,7 @@ function attentionBox(p, t, r, kind, narrow, fill) {
         .child(tag(attentionTag(kind), t.blocked))
         .when(!narrow, (el) => el.child(div().flex_1().min_w(0).text_size(12.5).font_semibold().child(a.message)))
         .when(narrow, (el) => el.child(div().flex_1()))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(`${ago(a.since, Date.now())} ago`)),
+        .child(div().flex_none().text_size(11).text_color(t.muted).child(`${ago(a.since, Date.now())} ago`)),
     )
     .when(narrow, (el) => el.child(div().text_size(12.5).font_semibold().child(a.message)))
     .when(Boolean(a.detail), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(a.detail)))
@@ -284,7 +284,7 @@ export function activeSlot(p, t, r, narrow, fill = false) {
   if (kind === null) return div();
   if (kind === 'agent') {
     const card = agentCard(r, terminals(), agents(), Date.now());
-    if (!card) return div().mt(2).mb(8).text_size(11).text_color(t.dim).child(agentNote(card));
+    if (!card) return div().mt(2).mb(8).text_size(11).text_color(t.muted).child(agentNote(card));
     return agentBox(p, t, card, narrow);
   }
   return attentionBox(p, t, r, kind, narrow, fill);

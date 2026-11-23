@@ -27,7 +27,7 @@ function stateCell(s, width, size, t) {
 function linked(p, t, r, rows, size) {
   const l = linkedLine(r, p.runs);
   if (!l) return null;
-  const el = div().id(`linked-${r.id}`).min_w(0).truncate().text_size(size).text_color(t.dim).child(l.text);
+  const el = div().id(`linked-${r.id}`).min_w(0).truncate().text_size(size).text_color(t.muted).child(l.text);
   if (l.run === null) return el;
   return own(
     el
@@ -70,7 +70,7 @@ function empty(t, filter) {
         .text_color(t.muted)
         .child(filter === 'all' ? 'No runs yet' : 'Nothing running, nothing waiting on you'),
     )
-    .child(div().text_size(11.5).text_color(t.dim).child('perc run <ticket> [--pipeline <name>]'));
+    .child(div().text_size(11.5).text_color(t.muted).child('perc run <ticket> [--pipeline <name>]'));
 }
 
 /** The run list; its frame in main.js takes the divider's height; it scrolls, and ↑/↓ bring the selected row into view. */
@@ -116,7 +116,7 @@ export function board(p, t, narrow, rows) {
                 .child(div().flex_none().font_semibold().child(number(r)))
                 .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(title(r)))
                 .when(Boolean(pipelineChip(r)), (el) => el.child(chip(t, pipelineChip(r))))
-                .child(div().flex_none().text_size(10.5).text_color(t.dim).child(age(r, now))),
+                .child(div().flex_none().text_size(10.5).text_color(t.muted).child(age(r, now))),
             )
             .when(Boolean(linkedLine(r, p.runs)), (el) => el.child(h_flex().pl(20).min_w(0).child(linked(p, t, r, rows, 10.5))))
             .child(h_flex().pl(20).items_center().child(stateCell(s, null, 10.5, t)));
@@ -158,7 +158,7 @@ export function board(p, t, narrow, rows) {
                     .when(Boolean(linkedLine(r, p.runs)), (el) => el.child(linked(p, t, r, rows, 11))),
                 )
                 .child(stateCell(s, 240, 11.5, t))
-                .child(div().w(34).flex_none().text_size(11).text_color(t.dim).child(age(r, now)));
+                .child(div().w(34).flex_none().text_size(11).text_color(t.muted).child(age(r, now)));
             }),
           ),
       ),

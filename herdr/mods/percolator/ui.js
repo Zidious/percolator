@@ -101,7 +101,7 @@ export function inlineReader(p, t, path, id, fill = false) {
           .bg(t.surface)
           .border(1)
           .border_color(t.border)
-          .child(scrollY(id, v_flex().px(12).py(8).text_size(12).child(TextView.markdown(`md-${id}-${path}`, md ?? 'loading…')))),
+          .child(scrollY(id, v_flex().px(12).py(8).text_size(12).child(TextView.markdown(`md-${id}-${path}`, md ?? 'Loading…')))),
       ),
     );
 }

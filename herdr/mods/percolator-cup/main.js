@@ -129,7 +129,7 @@ export default class PercolatorCup extends View {
           .child(
             div()
               .truncate()
-              .text_color(label.tone === 'blocked' ? t.blocked : this.error ? t.dim : t.muted)
+              .text_color(label.tone === 'blocked' ? t.blocked : t.muted)
               .child(label.text),
           ),
       );

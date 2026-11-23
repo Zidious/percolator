@@ -38,6 +38,9 @@ export function visibleRuns(runs, filter) {
   return runs.filter((r) => needsYou(r) || (r.status !== 'completed' && r.status !== 'failed'));
 }
 
+/** `text` with its first letter capitalised: the panel's labels are in sentence case. */
+const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
 /** The board row's state line and its tone. */
 export function rowState(run) {
   const a = run.attention;
@@ -46,29 +49,29 @@ export function rowState(run) {
     const blocked = (text) => ({ tone: 'blocked', text });
     switch (a.kind) {
       case 'gate':
-        return blocked(`your turn · ${step}`);
+        return blocked(`Your turn · ${step}`);
       case 'cap':
-        return blocked(`paused · ${step} at cap`);
+        return blocked(`Paused · ${step} at cap`);
       case 'paused':
-        return blocked(`paused · ${step}`);
+        return blocked(`Paused · ${step}`);
       case 'failed':
-        return blocked(`failed · ${step}`);
+        return blocked(`Failed · ${step}`);
       case 'stalled':
-        return blocked('stalled · driver stopped');
+        return blocked('Stalled · driver stopped');
     }
   }
   if (run.status === 'running') {
     const loop = (run.loops ?? []).find((l) => l.from === step && l.round > 0);
-    return loop ? { tone: 'working', text: `${step}`, round: `round ${roundOf(loop).n}/${loop.max}` } : { tone: 'working', text: `${step}` };
+    return loop ? { tone: 'working', text: `${step}`, round: `Round ${roundOf(loop).n}/${loop.max}` } : { tone: 'working', text: `${step}` };
   }
   if (run.status === 'completed') {
     const end = completedAs(run);
-    if (end.kind === 'pr') return { tone: 'dim', text: `delivered · PR #${end.pr.split('/').pop()}` };
-    if (end.kind === 'routed') return { tone: 'dim', text: end.to ? `routed → ${end.to}` : 'routed' };
-    return { tone: 'dim', text: end.kind };
+    if (end.kind === 'pr') return { tone: 'muted', text: `Delivered · PR #${end.pr.split('/').pop()}` };
+    if (end.kind === 'routed') return { tone: 'muted', text: end.to ? `Routed → ${end.to}` : 'Routed' };
+    return { tone: 'muted', text: sentence(end.kind) };
   }
-  if (run.status === 'unreadable') return { tone: 'muted', text: `unreadable · ${run.error}` };
-  return { tone: 'muted', text: run.status };
+  if (run.status === 'unreadable') return { tone: 'muted', text: `Unreadable · ${run.error}` };
+  return { tone: 'muted', text: sentence(run.status) };
 }
 
 /** How a completed run ended: its PR, where a router sent it, done (nothing delivered to a tracker), or delivered. */
@@ -193,7 +196,7 @@ export function roundPill(run, stepId) {
   const loop = (run.loops ?? []).find((l) => l.from === stepId);
   if (!loop) return null;
   const r = roundOf(loop);
-  return { text: `round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r) };
+  return { text: `Round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r) };
 }
 
 /** The engine's round of a loop that goes back to `stepId`, past round 1; null otherwise. */
@@ -202,13 +205,13 @@ function roundAt(run, stepId) {
   return loop ? roundOf(loop).n : null;
 }
 
-/** Beside the step a loop goes back to, past round 1: "round N · <time>" (its latest attempt's), else "". */
+/** Beside the step a loop goes back to, past round 1: "Round N · <time>" (its latest attempt's), else "". */
 export function roundNote(run, stepId, now) {
   const n = roundAt(run, stepId);
   if (n === null) return '';
   const last = stepAttempts(run, stepId).at(-1);
   const time = last ? took(last, now) : '';
-  return time ? `round ${n} · ${time}` : `round ${n}`;
+  return time ? `Round ${n} · ${time}` : `Round ${n}`;
 }
 
 /** Every loop, taken or not, with its tone. */
@@ -314,7 +317,9 @@ export function hookNote(run, row, now) {
   const waited = s.status === 'waiting' && s.startedAt ? `waiting ${ago(s.startedAt, now)}` : '';
   const decision = decisionNote(stepAttempts(run, s.id).at(-1)?.decision);
   const n = roundAt(run, s.id);
-  return [row.where, n === null ? '' : `round ${n}`, decision, took(s, now) || waited].filter(Boolean).join(' · ');
+  // before and after are words, so they lead in sentence case; before-all and after-all are the stages' names
+  const where = SIDE[row.where] === row.where ? sentence(row.where) : row.where;
+  return [where, n === null ? '' : `round ${n}`, decision, took(s, now) || waited].filter(Boolean).join(' · ');
 }
 
 /** The stages to show unfolded after the selected stop moves from `from` to `to` (null closes it): a picked stage row
@@ -432,11 +437,11 @@ export function timelineRows(run, now) {
             mark: ROW_MARKS[e.status] ?? '✕',
             tone: stepTone(e.status),
             step: e.step,
-            round: `round ${e.attempt}`,
+            round: `Round ${e.attempt}`,
             status: e.status,
             started: clock(e.startedAt),
             took: took(e, now),
-            note: decisionNote(e.decision),
+            note: sentence(decisionNote(e.decision)),
           },
     )
     .reverse();
@@ -574,6 +579,12 @@ export function agentTone(status) {
   return status === 'blocked' || status === 'working' ? status : 'muted';
 }
 
+/** The theme colour for text in a model tone: dim (and no tone) read as muted, so text keeps its contrast; dim stays
+ *  for disabled controls, decorative glyphs and lines. */
+export function textTone(tone) {
+  return !tone || tone === 'dim' ? 'muted' : tone;
+}
+
 /** The live address of the current step's agent terminal (Open terminal ↗ focuses it), or null: then it is off. */
 export function agentAddress(run, live) {
   if (!run || run.status === 'unreadable') return null;
@@ -586,7 +597,7 @@ export function openAgentAt(run, live, fixtures) {
   if (!run || run.status === 'unreadable') return null;
   const name = agentTerminal(run);
   if (!name) return null;
-  if (fixtures) return { said: `fixtures: would open ${name}` };
+  if (fixtures) return { said: `Fixtures: would open ${name}` };
   const address = terminalAddress(live, name);
   return address ? { address } : { error: `${name} is not a live terminal; refresh the panel` };
 }
@@ -672,7 +683,7 @@ export function programInitial(program) {
 
 /** The line under an agent stop with no agent terminal yet, else null (the card shows). */
 export function agentNote(card) {
-  return card ? null : 'agent not started';
+  return card ? null : 'Agent not started';
 }
 
 /** The driver peek a failed or stalled box offers (its last screen often says why), else null. */
@@ -761,7 +772,7 @@ export function linkedLine(run, runs) {
 
 // ── the watcher (`perc watch`) ──
 
-/** How long after Start the panel waits for the watcher's first heartbeat, saying starting… meanwhile. */
+/** How long after Start the panel waits for the watcher's first heartbeat, saying Starting… meanwhile. */
 const STARTING_MS = 60_000;
 const WATCH_TERMINAL = 'percolator-watch';
 
@@ -773,12 +784,12 @@ export function watcherState(status, o = { startedAt: null, now: 0, live: [] }) 
   const w = status.watcher;
   if (w?.alive) {
     const n = w.repos.length;
-    return { alive: true, label: `watching ${n} repo${n === 1 ? '' : 's'}`, argv: ['watch', 'stop'] };
+    return { alive: true, label: `Watching ${n} repo${n === 1 ? '' : 's'}`, argv: ['watch', 'stop'] };
   }
-  if (o.startedAt !== null && o.now - o.startedAt < STARTING_MS) return { alive: false, label: 'starting…', argv: null };
-  if (o.live.some((t) => t.name === WATCH_TERMINAL)) return { alive: false, label: 'watcher not responding', argv: ['watch', 'stop'] };
+  if (o.startedAt !== null && o.now - o.startedAt < STARTING_MS) return { alive: false, label: 'Starting…', argv: null };
+  if (o.live.some((t) => t.name === WATCH_TERMINAL)) return { alive: false, label: 'Watcher not responding', argv: ['watch', 'stop'] };
   const repos = knownRepos(status.runs ?? []);
-  return { alive: false, label: 'not watching', argv: repos.length === 0 ? null : ['watch', ...repos.flatMap((r) => ['--repo', r])] };
+  return { alive: false, label: 'Not watching', argv: repos.length === 0 ? null : ['watch', ...repos.flatMap((r) => ['--repo', r])] };
 }
 
 // ── delete ──
@@ -960,8 +971,8 @@ export function startPick(pipelines, want, names = null) {
 /** A pipeline's row in the picker: its name, its tags (default, how it takes a ticket) and the line under it. */
 export function pipelineOption(p) {
   if (p.error) return { name: p.name, tags: [], note: p.error, error: true };
-  const ticket = p.ticket === 'none' ? ['no ticket'] : p.ticket === 'optional' ? ['ticket optional'] : [];
-  return { name: p.name, tags: [...(p.default ? ['default'] : []), ...ticket], note: p.description ?? `ends with ${p.exit}`, error: false };
+  const ticket = p.ticket === 'none' ? ['No ticket'] : p.ticket === 'optional' ? ['Ticket optional'] : [];
+  return { name: p.name, tags: [...(p.default ? ['Default'] : []), ...ticket], note: p.description ?? `Ends with ${p.exit}`, error: false };
 }
 
 /** The run id `perc run` prints (`run <id> started`), so the panel can select the new run; else null. */
@@ -971,7 +982,7 @@ export function startedRun(stdout) {
 
 /** What Start says in fixtures mode instead of running perc. */
 export function wouldStart(argv) {
-  return `fixture: would run ${commandLine(argv)}`;
+  return `Fixture: would run ${commandLine(argv)}`;
 }
 
 /** What "Run next…" offers on a finished run: its ticket and the issues its exit opened, and the pipelines that take a
@@ -1005,8 +1016,8 @@ export function previewSide(width) {
 
 // ── fan-out slices ──
 
-/** A fan-out parent's slices, by index, each with its child's status, the step it is at (`done` once completed, `not
- *  started` before its run exists) and its PR. Read from the child's own run when it is listed, else from the parent's
+/** A fan-out parent's slices, by index, each with its child's status, the step it is at (`Done` once completed, `Not
+ *  started` before its run exists, else its status) and its PR. Read from the child's own run when it is listed, else from the parent's
  *  child entry. Empty for a run without slices. */
 export function sliceRows(run, runs) {
   if (run.status === 'unreadable') return [];
@@ -1016,7 +1027,7 @@ export function sliceRows(run, runs) {
     .map((c) => {
       const r = runs.find((x) => x.id === c.id && x.status !== 'unreadable');
       const status = r?.status ?? c.status;
-      const stepLabel = status === 'completed' ? 'done' : (r?.currentStep ?? (status === 'pending' ? 'not started' : status));
+      const stepLabel = status === 'completed' ? 'Done' : (r?.currentStep ?? (status === 'pending' ? 'Not started' : sentence(status)));
       const prUrl = r?.pr?.url;
       return { index: c.slice.index, title: c.slice.title, id: c.id, status, stepLabel, ...(prUrl ? { prUrl } : {}) };
     });

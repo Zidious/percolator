@@ -62,6 +62,7 @@ import {
   agentAddress,
   openAgentAt,
   agentTone,
+  textTone,
   boxActions,
   boxOutside,
   columns,
@@ -219,17 +220,34 @@ test('visibleRuns "all" keeps everything in order', () => {
 
 test('rowState gives the tone and the board text for each kind of run', () => {
   const cases: [string, string, string, string?][] = [
-    ['t2', 'blocked', 'your turn · approve-groom'],
-    ['t4', 'blocked', 'paused · review at cap'],
-    ['t12', 'blocked', 'paused · plan'],
-    ['t9', 'blocked', 'failed · implement'],
-    ['t11', 'blocked', 'stalled · driver stopped'],
+    ['t2', 'blocked', 'Your turn · approve-groom'],
+    ['t4', 'blocked', 'Paused · review at cap'],
+    ['t12', 'blocked', 'Paused · plan'],
+    ['t9', 'blocked', 'Failed · implement'],
+    ['t11', 'blocked', 'Stalled · driver stopped'],
     ['t13', 'working', 'groom'],
-    ['t8', 'working', 'review', 'round 3/3'],
-    ['t3', 'dim', 'delivered · PR #7'],
-    ['t5', 'muted', 'unreadable · state.json: Unexpected end of JSON input'],
+    ['t8', 'working', 'review', 'Round 3/3'],
+    ['t3', 'muted', 'Delivered · PR #7'],
+    ['t5', 'muted', 'Unreadable · state.json: Unexpected end of JSON input'],
   ];
   for (const [id, tone, text, round] of cases) assert.deepEqual(rowState(byId(id)), { tone, text, ...(round ? { round } : {}) }, id);
+});
+
+test('rowState capitalises a bare status: a run with nothing more to say', () => {
+  const failed = { ...readable('t3'), status: 'failed', attention: undefined } as Readable;
+  assert.deepEqual(rowState(failed), { tone: 'muted', text: 'Failed' });
+});
+
+test('textTone gives text a readable colour: dim (and no tone) read as muted, other tones stay', () => {
+  assert.deepEqual(['dim', null, undefined, 'muted', 'working', 'blocked', 'done'].map(textTone), [
+    'muted',
+    'muted',
+    'muted',
+    'muted',
+    'working',
+    'blocked',
+    'done',
+  ]);
 });
 
 test('rowState for a running step outside a loop shows only the step', () => {
@@ -237,17 +255,17 @@ test('rowState for a running step outside a loop shows only the step', () => {
 });
 
 test('rowState for a completed run without a PR says delivered', () => {
-  assert.deepEqual(rowState({ ...readable('t3'), pr: null }), { tone: 'dim', text: 'delivered' });
+  assert.deepEqual(rowState({ ...readable('t3'), pr: null }), { tone: 'muted', text: 'Delivered' });
 });
 
 test('rowState for a completed router says where it routed; a ticketless run that opened nothing says done', () => {
   const triage = runs().find((r) => r.id === TRIAGE) as Readable;
-  assert.deepEqual(rowState(triage), { tone: 'dim', text: 'routed → hotfix' });
-  assert.deepEqual(rowState({ ...triage, children: [] }), { tone: 'dim', text: 'routed' });
+  assert.deepEqual(rowState(triage), { tone: 'muted', text: 'Routed → hotfix' });
+  assert.deepEqual(rowState({ ...triage, children: [] }), { tone: 'muted', text: 'Routed' });
   const dd = { ...readable('dd'), status: 'completed', attention: undefined, currentStep: undefined } as Readable;
-  assert.deepEqual(rowState(dd), { tone: 'dim', text: 'done' });
+  assert.deepEqual(rowState(dd), { tone: 'muted', text: 'Done' });
   // a ticketless run whose exit opened issues delivered them
-  assert.deepEqual(rowState(readable('audit')), { tone: 'dim', text: 'delivered' });
+  assert.deepEqual(rowState(readable('audit')), { tone: 'muted', text: 'Delivered' });
 });
 
 test("a completed run's outcome box says what rowState says: delivered, routed or done", () => {
@@ -338,7 +356,7 @@ test('readStatus refuses another schema and says to update the panel', () => {
 test('status and model functions handle ticket: null', () => {
   const dd = readable('dd-alert');
   assert.equal(dd.ticket, null);
-  assert.deepEqual(rowState(dd), { tone: 'blocked', text: 'your turn · sign-off' });
+  assert.deepEqual(rowState(dd), { tone: 'blocked', text: 'Your turn · sign-off' });
   assert.equal(ticketTitle(dd), 'dd-alert · https://app.datadoghq.com/monitors/1234…');
   assert.equal(ticketTitle(dd).length, 'dd-alert · '.length + 40);
   assert.deepEqual(notice(dd), {
@@ -606,13 +624,13 @@ test('timelineRows lists every attempt newest first, with round, start, duration
     mark: '●',
     tone: 'working',
     step: 'review',
-    round: 'round 3',
+    round: 'Round 3',
     status: 'running',
     started: hhmm('2026-11-21T00:41:10.000Z'),
     took: '2m',
     note: '',
   });
-  assert.equal(rows.find((r) => r.key === 'approve-groom#1')!.note, 'approved by @zidious');
+  assert.equal(rows.find((r) => r.key === 'approve-groom#1')!.note, 'Approved by @zidious');
   assert.equal(rows.at(-1)!.step, 'setup');
 });
 
@@ -627,7 +645,7 @@ test('timelineRows without a timeline lists the steps that ran, newest first', (
 
 test('timelineRows without a timeline counts a live step as the attempt in progress', () => {
   const first = timelineRows(readable('t14'), 0).find((r) => r.key === 'intake#1');
-  assert.equal(first?.round, 'round 1');
+  assert.equal(first?.round, 'Round 1');
   assert.equal(stepAttempts(readable('t11'), 'implement').at(-1)!.attempt, 1);
   assert.equal(stepAttempts(readable('t11'), 'plan').at(-1)!.attempt, 1, 'a finished step keeps its attempts');
 });
@@ -635,7 +653,7 @@ test('timelineRows without a timeline counts a live step as the attempt in progr
 test('rowState keeps the round apart from a long step name, so it is never cut', () => {
   const r = readable('t8');
   const long = { ...r, currentStep: 'security-scan-extended', loops: [{ ...r.loops[0]!, from: 'security-scan-extended' }] };
-  assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'round 3/3' });
+  assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'Round 3/3' });
 });
 
 const T8_DRIVER = 't8_driver_a0_b65d';
@@ -769,9 +787,9 @@ test('roundOf counts the round the engine is in', () => {
 });
 
 test('roundPill sits on the loop from step', () => {
-  assert.deepEqual(roundPill(byId('t2'), 'review'), { text: 'round 1/3', tone: 'dim' });
-  assert.deepEqual(roundPill(byId('t16'), 'review'), { text: 'round 2/3', tone: 'working' });
-  assert.deepEqual(roundPill(byId('t4'), 'review'), { text: 'round 3/3 · cap', tone: 'blocked' });
+  assert.deepEqual(roundPill(byId('t2'), 'review'), { text: 'Round 1/3', tone: 'dim' });
+  assert.deepEqual(roundPill(byId('t16'), 'review'), { text: 'Round 2/3', tone: 'working' });
+  assert.deepEqual(roundPill(byId('t4'), 'review'), { text: 'Round 3/3 · cap', tone: 'blocked' });
   assert.equal(roundPill(byId('t4'), 'implement'), null);
 });
 
@@ -782,7 +800,7 @@ test('loopSpans lists every loop with its tone', () => {
 });
 
 test('rowState gives the round the engine is in', () => {
-  assert.equal(rowState({ ...readable('t16'), currentStep: 'review' }).round, 'round 2/3');
+  assert.equal(rowState({ ...readable('t16'), currentStep: 'review' }).round, 'Round 2/3');
 });
 
 test('an agent-blocked run is a running run to the panel', () => {
@@ -822,7 +840,7 @@ test('pipelineRows gives each row its state, gate and the round pill on stage ro
   );
   assert.deepEqual(rows.filter((r) => r.gate).map((r) => r.step.id), ['approve-groom']);
   const review = row(rows, 'review');
-  assert.equal(review.type === 'stage' && review.round?.text, 'round 3/3');
+  assert.equal(review.type === 'stage' && review.round?.text, 'Round 3/3');
   const plan = row(rows, 'plan');
   assert.equal(plan.type === 'stage' && plan.round, null);
   assert.deepEqual(foldedOf(plan), []);
@@ -902,7 +920,7 @@ test('pipelineRows places a stage at its first core step, not at a node listed e
 
 test('pipelineRows of the t4 run carries the capped round on review', () => {
   const review = row(pipelineRows(byId('t4'), WIDE), 'review');
-  assert.deepEqual(review.type === 'stage' && review.round, { text: 'round 3/3 · cap', tone: 'blocked' });
+  assert.deepEqual(review.type === 'stage' && review.round, { text: 'Round 3/3 · cap', tone: 'blocked' });
   assert.equal(review.state, 'active');
 });
 
@@ -1023,30 +1041,30 @@ test('agentCard and agentAddress fall back to the attention terminal when the st
 test('hookNote says where a hook runs, the gate decision and its time', () => {
   const now = Date.parse('2026-11-21T03:54:45.575Z');
   const t8 = pipelineRows(byId('t8'), WIDE);
-  assert.equal(hookNote(byId('t8'), row(t8, 'approve-groom'), now), 'after · approved by @zidious');
-  assert.equal(hookNote(byId('t8'), row(t8, 'security-scan'), now), 'after · 34s');
+  assert.equal(hookNote(byId('t8'), row(t8, 'approve-groom'), now), 'After · approved by @zidious');
+  assert.equal(hookNote(byId('t8'), row(t8, 'security-scan'), now), 'After · 34s');
   assert.equal(hookNote(byId('t8'), row(t8, 'notify'), now), 'after-all');
   const t2 = pipelineRows(byId('t2'), WIDE);
-  assert.equal(hookNote(byId('t2'), row(t2, 'approve-groom'), Date.parse('2026-11-21T03:54:45.575Z')), 'after · waiting 3h');
+  assert.equal(hookNote(byId('t2'), row(t2, 'approve-groom'), Date.parse('2026-11-21T03:54:45.575Z')), 'After · waiting 3h');
 });
 
 test('roundNote gives a loop target past round 1 its round and its latest attempt time', () => {
   const now = Date.parse('2026-11-21T05:00:00.000Z');
-  assert.equal(roundNote(byId('t4'), 'implement', now), 'round 3 · 4m'); // its third attempt took 3m50s
-  assert.equal(roundNote(byId('t16'), 'lint-baseline', now), 'round 2 · 4s');
+  assert.equal(roundNote(byId('t4'), 'implement', now), 'Round 3 · 4m'); // its third attempt took 3m50s
+  assert.equal(roundNote(byId('t16'), 'lint-baseline', now), 'Round 2 · 4s');
   assert.equal(roundNote(byId('t3'), 'implement', now), '', 'round 1');
   assert.equal(roundNote(byId('t4'), 'review', now), '', 'a loop start, not its target');
   const t4 = readable('t4');
   const untimed = { ...t4, timeline: [] } as RunStatusJson;
-  assert.equal(roundNote(untimed, 'implement', now), 'round 3', 'no time to show');
+  assert.equal(roundNote(untimed, 'implement', now), 'Round 3', 'no time to show');
 });
 
 test('hookNote carries the round of a hook a loop goes back to', () => {
   const now = Date.parse('2026-11-21T05:00:00.000Z');
   const r = byId('t16');
   const open = pipelineRows(r, { narrow: false, unfolded: ['implement'] });
-  assert.equal(hookNote(r, row(open, 'lint-baseline'), now), 'before · round 2 · 4s');
-  assert.equal(hookNote(r, row(open, 'deps-audit'), now), 'before · 15s');
+  assert.equal(hookNote(r, row(open, 'lint-baseline'), now), 'Before · round 2 · 4s');
+  assert.equal(hookNote(r, row(open, 'deps-audit'), now), 'Before · 15s');
 });
 
 test('unfoldAfterPick opens a picked stage that holds folded hooks, and folds it again when it is closed', () => {
@@ -1093,7 +1111,7 @@ test('openAgentAt focuses a live agent terminal, else says why it did not', () =
   const live = [{ address: 'w1:7', name }];
   assert.deepEqual(openAgentAt(byId('t16'), live, false), { address: 'w1:7' });
   assert.deepEqual(openAgentAt(byId('t16'), [], false), { error: `${name} is not a live terminal; refresh the panel` });
-  assert.deepEqual(openAgentAt(byId('t16'), live, true), { said: `fixtures: would open ${name}` });
+  assert.deepEqual(openAgentAt(byId('t16'), live, true), { said: `Fixtures: would open ${name}` });
   assert.equal(openAgentAt(byId('t11'), live, false), null, 'the step has no terminal');
   assert.equal(openAgentAt(byId('t5'), live, true), null, 'unreadable');
 });
@@ -1182,7 +1200,7 @@ test('programInitial is the badge letter of the agent program', () => {
 });
 
 test('agentNote says the agent has not started when the active stop has no agent terminal', () => {
-  assert.equal(agentNote(null), 'agent not started');
+  assert.equal(agentNote(null), 'Agent not started');
   assert.equal(agentNote({ address: null, name: 'x', status: 'not open', program: 'Agent', since: '' }), null);
 });
 
@@ -1385,12 +1403,12 @@ test('startPick keeps the wanted pipeline while it is listed and pickable, else 
 test('pipelineOption gives a picker row its tags and its note: the description, else the exit, else the error', () => {
   assert.deepEqual(pipelineOption(pipe('feature')), {
     name: 'feature',
-    tags: ['default'],
+    tags: ['Default'],
     note: 'Groom, plan, implement and review a ticket, then open a PR',
     error: false,
   });
-  assert.deepEqual(pipelineOption(pipe('dd-alert')).tags, ['no ticket']);
-  assert.deepEqual(pipelineOption(pipe('spike')), { name: 'spike', tags: ['ticket optional'], note: 'ends with none', error: false });
+  assert.deepEqual(pipelineOption(pipe('dd-alert')).tags, ['No ticket']);
+  assert.deepEqual(pipelineOption(pipe('spike')), { name: 'spike', tags: ['Ticket optional'], note: 'Ends with none', error: false });
   assert.deepEqual(pipelineOption({ name: 'broken', error: 'pipelines.broken: no exit' }), {
     name: 'broken',
     tags: [],
@@ -1408,7 +1426,7 @@ test('startedRun reads the run id perc run prints, else null', () => {
 test('wouldStart says what a fixture-mode Start would run', () => {
   assert.equal(
     wouldStart(['run', '--repo', '/r', '--pipeline', 'dd-alert', '--input', 'alert_url=a b']),
-    'fixture: would run perc run --repo /r --pipeline dd-alert --input "alert_url=a b"',
+    'Fixture: would run perc run --repo /r --pipeline dd-alert --input "alert_url=a b"',
   );
 });
 
@@ -1542,9 +1560,9 @@ test("sliceRows shows each slice's step and PR", () => {
   const rs = runs();
   const of = (id: string) => rs.find((r) => r.id === id)!;
   assert.deepEqual(sliceRows(of(EPIC), rs), [
-    { index: 1, title: 'Status field', id: `${EPIC}-s1`, status: 'completed', stepLabel: 'done', prUrl: 'https://github.com/Zidious/percolator/pull/31' },
+    { index: 1, title: 'Status field', id: `${EPIC}-s1`, status: 'completed', stepLabel: 'Done', prUrl: 'https://github.com/Zidious/percolator/pull/31' },
     { index: 2, title: 'Panel rows', id: `${EPIC}-s2`, status: 'running', stepLabel: 'review' },
-    { index: 3, title: 'Docs', id: `${EPIC}-s3`, status: 'pending', stepLabel: 'not started' },
+    { index: 3, title: 'Docs', id: `${EPIC}-s3`, status: 'pending', stepLabel: 'Not started' },
   ]);
   // a linked run that is not a slice, a run with no children and an unreadable one have none
   assert.deepEqual(sliceRows(of(TRIAGE), rs), []);
@@ -1561,8 +1579,8 @@ test('sliceRows reads a slice no longer listed from its child entry', () => {
     ],
   } as Readable;
   assert.deepEqual(sliceRows(parent, [parent]), [
-    { index: 1, title: 'A', id: 'p-s1', status: 'completed', stepLabel: 'done' },
-    { index: 2, title: 'B', id: 'p-s2', status: 'failed', stepLabel: 'failed' },
+    { index: 1, title: 'A', id: 'p-s1', status: 'completed', stepLabel: 'Done' },
+    { index: 2, title: 'B', id: 'p-s2', status: 'failed', stepLabel: 'Failed' },
   ]);
 });
 
@@ -1575,33 +1593,33 @@ test('fanOutRow is the row of the last stage, where the fan-out step sits; -1 wi
 
 test('watcherState labels and argv', () => {
   const st = load();
-  assert.deepEqual(watcherState(st), { alive: true, label: 'watching 1 repo', argv: ['watch', 'stop'] });
+  assert.deepEqual(watcherState(st), { alive: true, label: 'Watching 1 repo', argv: ['watch', 'stop'] });
   const two = { ...st, watcher: { alive: true, since: 'x', repos: ['/a', '/b'] } };
-  assert.equal(watcherState(two).label, 'watching 2 repos');
+  assert.equal(watcherState(two).label, 'Watching 2 repos');
   const off = { ...st, watcher: { alive: false, repos: [] } };
-  assert.deepEqual(watcherState(off), { alive: false, label: 'not watching', argv: ['watch', '--repo', '/home/me/src/percolator'] });
+  assert.deepEqual(watcherState(off), { alive: false, label: 'Not watching', argv: ['watch', '--repo', '/home/me/src/percolator'] });
   // with no earlier runs there is no repo to watch: no Start button
-  assert.deepEqual(watcherState({ schema: 2, runs: [], watcher: { alive: false, repos: [] } }), { alive: false, label: 'not watching', argv: null });
+  assert.deepEqual(watcherState({ schema: 2, runs: [], watcher: { alive: false, repos: [] } }), { alive: false, label: 'Not watching', argv: null });
   // a perc without the watcher field reads as not watching
   const { watcher: _w, ...older } = st;
-  assert.equal(watcherState(older as StatusJson).label, 'not watching');
+  assert.equal(watcherState(older as StatusJson).label, 'Not watching');
 });
 
 test('watcherState says starting… after Start until the heartbeat appears, and offers nothing meanwhile', () => {
   const off = { ...load(), watcher: { alive: false, repos: [] } };
   const now = Date.parse('2026-11-21T10:00:00.000Z');
   const live = [{ address: 'w:1', name: 'percolator-watch' }];
-  assert.deepEqual(watcherState(off, { startedAt: now - 5_000, now, live }), { alive: false, label: 'starting…', argv: null });
-  assert.deepEqual(watcherState(off, { startedAt: now - 5_000, now, live: [] }), { alive: false, label: 'starting…', argv: null });
+  assert.deepEqual(watcherState(off, { startedAt: now - 5_000, now, live }), { alive: false, label: 'Starting…', argv: null });
+  assert.deepEqual(watcherState(off, { startedAt: now - 5_000, now, live: [] }), { alive: false, label: 'Starting…', argv: null });
   // the heartbeat came: watching
-  assert.equal(watcherState(load(), { startedAt: now - 5_000, now, live }).label, 'watching 1 repo');
+  assert.equal(watcherState(load(), { startedAt: now - 5_000, now, live }).label, 'Watching 1 repo');
   // a minute without a heartbeat: starting is over
-  assert.equal(watcherState(off, { startedAt: now - 61_000, now, live: [] }).label, 'not watching');
+  assert.equal(watcherState(off, { startedAt: now - 61_000, now, live: [] }).label, 'Not watching');
 });
 
 test('watcherState offers Stop when the heartbeat is stale but the percolator-watch terminal is live', () => {
   const off = { ...load(), watcher: { alive: false, repos: ['/r'] } };
   const live = [{ address: 'w:1', name: 'percolator-watch' }];
-  assert.deepEqual(watcherState(off, { startedAt: null, now: 0, live }), { alive: false, label: 'watcher not responding', argv: ['watch', 'stop'] });
-  assert.equal(watcherState(off, { startedAt: null, now: 0, live: [{ address: 'x', name: 'other' }] }).label, 'not watching');
+  assert.deepEqual(watcherState(off, { startedAt: null, now: 0, live }), { alive: false, label: 'Watcher not responding', argv: ['watch', 'stop'] });
+  assert.equal(watcherState(off, { startedAt: null, now: 0, live: [{ address: 'x', name: 'other' }] }).label, 'Not watching');
 });

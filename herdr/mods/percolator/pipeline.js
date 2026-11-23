@@ -4,7 +4,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { ago, canPick, driverPeek, fanOutRow, hookNote, nowTone, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, ticketTitle, took } from './model.js';
+import { ago, canPick, driverPeek, fanOutRow, hookNote, nowTone, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, textTone, ticketTitle, took } from './model.js';
 import { chip, inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
@@ -22,7 +22,7 @@ export function header(p, t, r, narrow) {
       .pt(14)
       .gap(5)
       .child(div().text_size(15).font_semibold().child(r.id))
-      .child(div().text_size(11).text_color(t.dim).child('This run could not be read.'))
+      .child(div().text_size(11).text_color(t.muted).child('This run could not be read.'))
       .child(h_flex().gap(6).items_center().child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx))));
   }
   const drv = driverPeek(r);
@@ -54,16 +54,17 @@ export function header(p, t, r, narrow) {
             .min_w(0)
             .truncate()
             .text_size(11)
-            .text_color(t.dim)
+            .text_color(t.muted)
             .child(
               narrow
-                ? `started ${ago(r.createdAt, now)} ago · ${short(r.id)}`
+                ? `Started ${ago(r.createdAt, now)} ago · ${short(r.id)}`
                 : `${r.branch ?? ''} · started ${ago(r.createdAt, now)} ago · ${short(r.id)}`,
             ),
         ),
     );
 }
 
+/** A loop span's line colour (dim before its loop is taken); its round pill's text reads the same tone via textTone. */
 const toneColor = (t, tone) => (tone === 'working' ? t.working : tone === 'blocked' ? t.blocked : t.dim);
 
 /** A piece of a vertical line, absolutely placed in its column: the top half, the bottom half or the whole height. */
@@ -197,7 +198,7 @@ function stageLabel(t, r, row) {
           .flex_none()
           .text_size(11)
           .text_color(t.muted)
-          .tooltip(`also ${row.folded.map((f) => f.id).join(', ')}`)
+          .tooltip(`Also ${row.folded.map((f) => f.id).join(', ')}`)
           .child(`+${row.folded.length}`),
       ),
     )
@@ -205,7 +206,7 @@ function stageLabel(t, r, row) {
     .when(Boolean(row.round), (el) => {
       const rc = toneColor(t, row.round.tone);
       return el.child(
-        div().flex_none().px(7).py(1).rounded(9).border(1).border_color(rc).text_size(10).text_color(rc).child(row.round.text),
+        div().flex_none().px(7).py(1).rounded(9).border(1).border_color(rc).text_size(10).text_color(t[textTone(row.round.tone)]).child(row.round.text),
       );
     });
 }
@@ -234,7 +235,7 @@ function hookLabel(p, t, r, row) {
     .child(div().flex_none().ml(-SPINE / 2).w(20).h(2).bg(branch))
     .child(hookNode(p, t, r, row))
     .child(div().flex_none().ml(7).font_family('monospace').text_size(11).text_color(name).child(row.step.id))
-    .child(div().min_w(0).ml(6).truncate().text_size(10).text_color(t.dim).child(hookNote(r, row, Date.now())));
+    .child(div().min_w(0).ml(6).truncate().text_size(10).text_color(t.muted).child(hookNote(r, row, Date.now())));
 }
 
 /** The vertical pipeline of a readable run, folding every passed hook when `fold` (under 320px); while `under` (one
@@ -293,8 +294,9 @@ export function pipeline(p, t, r, fold, narrow, under = true) {
     );
 }
 
-const sliceColor = (t, status) =>
-  status === 'completed' ? t.accent : status === 'failed' ? t.blocked : status === 'running' || status === 'waiting' ? t.working : t.dim;
+/** A slice's colour: its dot's (dim before it runs), or with `text` its step label's (muted, so it stays readable). */
+const sliceColor = (t, status, text = false) =>
+  status === 'completed' ? t.accent : status === 'failed' ? t.blocked : status === 'running' || status === 'waiting' ? t.working : text ? t.muted : t.dim;
 
 /** One sub-row per slice: its number and title, the step its run is at and its PR; clicking a started slice selects
  *  its run (on All when the Active tab hides it). A slice not started yet is not clickable. */
@@ -314,9 +316,9 @@ function sliceList(p, t, slices) {
           .items_center()
           .text_size(11)
           .child(div().flex_none().size(8).rounded(4).bg(sliceColor(t, s.status)))
-          .child(div().flex_none().text_color(t.dim).child(`${s.index}.`))
+          .child(div().flex_none().text_color(t.muted).child(`${s.index}.`))
           .child(div().min_w(0).truncate().text_color(t.foreground).child(s.title))
-          .child(div().flex_none().text_color(sliceColor(t, s.status)).child(s.stepLabel))
+          .child(div().flex_none().text_color(sliceColor(t, s.status, true)).child(s.stepLabel))
           .child(div().flex_1())
           .when(Boolean(s.prUrl), (el) => el.child(link(t, `slice-pr-${s.index}`, 'PR ↗', (_e, cx) => cx.open_url(s.prUrl))));
         if (!listed) return row;
@@ -340,7 +342,7 @@ function sliceList(p, t, slices) {
 export function stopStrip(p, t, r, fill = false) {
   const st = (r.steps ?? []).find((s) => s.id === p.stopSel);
   if (!st) return div();
-  const kv = (k, v) => h_flex().gap(4).child(div().text_color(t.dim).child(k)).child(div().text_color(t.foreground).child(v));
+  const kv = (k, v) => h_flex().gap(4).child(div().text_color(t.muted).child(k)).child(div().text_color(t.foreground).child(v));
   const rv = roundView(r, st.id, p.roundSel); // null for a step that has not run: its own values show
   const shown = rv?.attempt ?? st;
   const spent = took(shown, Date.now());
@@ -376,7 +378,7 @@ export function stopStrip(p, t, r, fill = false) {
         .when(rv !== null && rv.of > 1, (el) =>
           el
             .child(step('‹', rv.prev, 'round-prev'))
-            .child(div().flex_none().text_color(t.dim).child(`round ${rv.n} of ${rv.of}${rv.mark ? ` · ${rv.mark}` : ''}`))
+            .child(div().flex_none().text_color(t.muted).child(`Round ${rv.n} of ${rv.of}${rv.mark ? ` · ${rv.mark}` : ''}`))
             .child(step('›', rv.next, 'round-next')),
         ),
     )
@@ -386,11 +388,11 @@ export function stopStrip(p, t, r, fill = false) {
         .flex_wrap()
         .gap_x(10)
         .gap_y(2)
-        .child(kv('kind', st.kind))
-        .child(kv('stage', st.stage))
-        .child(kv('status', shown.status))
-        .child(kv('attempts', String(st.attempts ?? 0)))
-        .when(Boolean(spent), (el) => el.child(kv('took', spent))),
+        .child(kv('Kind', st.kind))
+        .child(kv('Stage', st.stage))
+        .child(kv('Status', shown.status))
+        .child(kv('Attempts', String(st.attempts ?? 0)))
+        .when(Boolean(spent), (el) => el.child(kv('Took', spent))),
     )
     .when(outputs.length > 0, (el) =>
       el.child(

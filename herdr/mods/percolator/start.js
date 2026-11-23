@@ -14,7 +14,7 @@ const label = (t, text, note) =>
     .gap(6)
     .pt(6)
     .text_size(11)
-    .text_color(t.dim)
+    .text_color(t.muted)
     .child(div().flex_none().child(text))
     .when(Boolean(note), (el) => el.child(div().min_w(0).truncate().italic().child(note)));
 
@@ -88,7 +88,7 @@ function pipelinesPart(p, t, s, list) {
           ? 'No pipeline here takes a ticket'
           : null;
   const part = v_flex().flex_none().gap(2).child(label(t, 'Pipeline'));
-  if (why) return part.child(div().text_size(11.5).text_color(got && got !== 'loading' && !got.ok ? t.blocked : t.dim).child(why));
+  if (why) return part.child(div().text_size(11.5).text_color(got && got !== 'loading' && !got.ok ? t.blocked : t.muted).child(why));
   return part.children(
     list.map((pl) => {
       const o = pipelineOption(pl);
@@ -102,12 +102,12 @@ function pipelinesPart(p, t, s, list) {
 
 function fieldsPart(p, t, s, pl) {
   const f = startFields(pl);
-  const hint = (text) => div().text_size(11).text_color(t.dim).child(text);
+  const hint = (text) => div().text_size(11).text_color(t.muted).child(text);
   let part = v_flex().flex_none().gap(2);
   if (f.ticket !== 'hidden') {
     part = part.child(label(t, 'Ticket', f.ticket === 'optional' ? 'optional' : ''));
     if (s.mode !== 'next') part = part.child(field(t, p.ticketInput)).child(hint('URL or owner/repo#n'));
-    else if (s.tickets.length === 1) part = part.child(div().min_w(0).truncate().text_size(12).child(s.tickets[0])).child(hint('from this run'));
+    else if (s.tickets.length === 1) part = part.child(div().min_w(0).truncate().text_size(12).child(s.tickets[0])).child(hint('From this run'));
     else part = part.children(s.tickets.map((ref, i) => choice(t, `ticket-${i}`, ref === s.ticket, ref, '', (_e, cx) => p.pickTicket(ref, cx))));
   }
   for (const i of f.inputs) part = part.child(label(t, i.name, i.required ? '' : 'optional')).child(field(t, p.inputState(pl.name, i)));
@@ -133,7 +133,7 @@ function foot(p, t, s, pl) {
     .flex_none()
     .gap(6)
     .pt(8)
-    .when(Boolean(line), (el) => el.child(div().font_family('monospace').text_size(10.5).text_color(t.dim).child(line)))
+    .when(Boolean(line), (el) => el.child(div().font_family('monospace').text_size(10.5).text_color(t.muted).child(line)))
     .child(
       h_flex()
         .flex_wrap()
@@ -141,7 +141,7 @@ function foot(p, t, s, pl) {
         .items_center()
         .child(button(t, 'start-go', 'Start', 'ok', (_e, cx) => p.startRun(cx), { busy, disabled: !can.ok || Boolean(p.busy) }))
         .child(button(t, 'start-cancel', 'Cancel', '', (_e, cx) => p.closeStart(cx)))
-        .child(div().min_w(0).text_size(11).text_color(s.error ? t.blocked : t.dim).child(note)),
+        .child(div().min_w(0).text_size(11).text_color(s.error ? t.blocked : t.muted).child(note)),
     );
 }
 
@@ -155,8 +155,8 @@ function preview(p, t, pl, fold, narrow) {
       h_flex()
         .gap(8)
         .text_size(11)
-        .text_color(t.dim)
-        .child(div().min_w(0).truncate().child(`${pl.name} pipeline`))
+        .text_color(t.muted)
+        .child(div().min_w(0).truncate().child(`Pipeline: ${pl.name}`))
         .child(div().flex_1())
         .child(div().flex_none().child(`${pl.steps.length} steps`)),
     )
