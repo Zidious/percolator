@@ -5,7 +5,7 @@ import type {
 
 export type FakeGhMethod =
   | 'issue' | 'comment' | 'editComment' | 'user' | 'findPr' | 'createPr' | 'editPr'
-  | 'createIssue' | 'myIssues' | 'findComment' | 'releaseUrl' | 'createRelease' | 'prReviews' | 'postReview' | 'advisoryFork'
+  | 'createIssue' | 'myIssues' | 'findComment' | 'release' | 'createRelease' | 'prReviews' | 'postReview' | 'advisoryFork'
   | 'listIssues' | 'listPrs' | 'failedRuns';
 export type FakePr = {
   number: number; url: string; repo: string; base: string; head: string; title: string; body: string;
@@ -182,9 +182,10 @@ export class FakeGh implements Gh {
     return c ? structuredClone(c) : undefined;
   }
 
-  async releaseUrl(repo: string, tag: string): Promise<string | undefined> {
-    this.enter('releaseUrl', [repo, tag]);
-    return this.releases.find((r) => r.repo === repo && r.tag === tag)?.url;
+  async release(repo: string, tag: string): Promise<{ url: string; body: string } | undefined> {
+    this.enter('release', [repo, tag]);
+    const r = this.releases.find((x) => x.repo === repo && x.tag === tag);
+    return r ? { url: r.url, body: r.notes } : undefined;
   }
 
   async createRelease(repo: string, o: { tag: string; target: string; notesFile: string }): Promise<string> {

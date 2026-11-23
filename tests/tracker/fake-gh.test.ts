@@ -85,13 +85,13 @@ test('FakeGh findComment finds the marked comment', async () => {
   assert.deepEqual(gh.calls.at(-1), { method: 'findComment', args: [R, 1, '<!-- other -->'] });
 });
 
-test('FakeGh createRelease is found by releaseUrl', async () => {
+test('FakeGh createRelease is found by release', async () => {
   const R = 'github.com/o/r';
   const gh = new FakeGh({ readFile: () => 'notes' });
-  assert.equal(await gh.releaseUrl(R, 'v1'), undefined);
+  assert.equal(await gh.release(R, 'v1'), undefined);
   const url = await gh.createRelease(R, { tag: 'v1', target: 'abc', notesFile: 'n.md' });
   assert.equal(url, 'https://github.com/o/r/releases/tag/v1');
-  assert.equal(await gh.releaseUrl(R, 'v1'), url);
+  assert.deepEqual(await gh.release(R, 'v1'), { url, body: 'notes' });
   assert.deepEqual(gh.releases, [{ repo: R, tag: 'v1', target: 'abc', notes: 'notes', url }]);
 });
 

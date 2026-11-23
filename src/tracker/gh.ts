@@ -38,8 +38,8 @@ export interface Gh {
   myIssues(repo: string): Promise<IssueHit[]>;
   /** The first comment on issue `n` whose body includes `marker`. */
   findComment(repo: string, n: number, marker: string): Promise<IssueComment | undefined>;
-  /** The release's URL, or undefined when no release has that tag. */
-  releaseUrl(repo: string, tag: string): Promise<string | undefined>;
+  /** The release with that tag (its URL and notes), or undefined when there is none. */
+  release(repo: string, tag: string): Promise<{ url: string; body: string } | undefined>;
   /** Returns the new release's URL. */
   createRelease(repo: string, o: { tag: string; target: string; notesFile: string }): Promise<string>;
   prReviews(repo: string, n: number): Promise<PrReview[]>;
@@ -182,15 +182,15 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
     async findComment(repo, n, marker) {
       return (await issue(repo, n)).comments.find((c) => c.body.includes(marker));
     },
-    async releaseUrl(repo, tag) {
+    async release(repo, tag) {
       noDash('release view', 'tag', tag);
-      const r = await exec(bin, ['release', 'view', '--repo', repo, '--json', 'url', '--', tag], { env: GH_ENV });
+      const r = await exec(bin, ['release', 'view', '--repo', repo, '--json', 'url,body', '--', tag], { env: GH_ENV });
       if (r.code !== 0) {
         if (/release not found/i.test(r.stderr)) return undefined;
         throw new GhError('release view', r.stderr.trim().slice(0, 500));
       }
-      const j = parseJson('release view', r.stdout) as { url?: unknown } | null;
-      return j?.url ? String(j.url) : undefined;
+      const j = parseJson('release view', r.stdout) as { url?: unknown; body?: unknown } | null;
+      return j?.url ? { url: String(j.url), body: String(j.body ?? '') } : undefined;
     },
     async createRelease(repo, p) {
       noDash('release create', 'tag', p.tag);
