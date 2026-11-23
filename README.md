@@ -123,12 +123,14 @@ The config is `~/.percolator/config.yaml`, or the file you pass with `--config`.
 This is what `perc init` writes:
 
 ```yaml
+# Percolator config, written by `perc init`. Edit freely.
+# Schema for editor completion and validation: the Percolator package's schema/percolator.schema.json
 version: 1
 profiles:
   default:
     match: { remote: "github.com/*/*" }     # which repos: globs host/owner/repo (or match.path)
     pipelines:
-      feature:                              # tickets in, pull requests out
+      feature:                              # tickets in, pull requests out: intake, groom, plan, implement, review, deliver
         default: true                       # what perc run uses without --pipeline
         bindings:
           intake: { builtin: github.intake }  # builtins are handled by Percolator itself
@@ -167,7 +169,8 @@ profiles:
               Do not write "Closes #…": Percolator adds it. Do not push, open the PR or comment on the issue; Percolator opens the PR with this text.
               Finish with status pass, even if you could not write a description; Percolator then opens the PR with only "Closes #…".
 
-      # A second pipeline, commented out: stages you name, ending in an exit (see Pipelines).
+      # A second pipeline: stages you name, ending in an exit. Uncomment and adapt it, then
+      # check it with: perc validate --pipeline dd-alert
       # dd-alert:
       #   description: Diagnose a Datadog alert and write a report
       #   ticket: none                 # runs without an issue
@@ -179,10 +182,17 @@ profiles:
       #     diagnose: [diagnosis]
       #   exit: none                   # the outputs stay in the run dir; nothing is posted
       #   bindings:
-      #     gather: { agent: claude, model: sonnet, prompt: … }
-      #     diagnose: { agent: claude, model: opus, prompt: … }
+      #     gather:
+      #       agent: claude
+      #       model: sonnet
+      #       prompt: Collect the logs, metrics and recent deploys behind {{input_alert_url}} into evidence.md.
+      #     diagnose:
+      #       agent: claude
+      #       model: opus
+      #       prompt: From the evidence in the inputs, find the likely cause and write it to diagnosis.md.
 
-      # A short pipeline for small fixes, and a triage router that sends each ticket to feature or hotfix (see Triage).
+      # A short pipeline for small fixes, and a triage router that sends each ticket to feature or hotfix.
+      # Uncomment both, then: perc validate --pipeline triage
       # hotfix:
       #   description: Small fix, no grooming
       #   stages: [intake, implement, review, deliver]
@@ -205,7 +215,8 @@ profiles:
       #   triggers:
       #     - { label: triage }        # while perc watch runs, each issue labelled triage starts a triage run
 
-      # A pipeline that plans once, then builds each slice of the plan in its own linked run and PR (see Fan-out).
+      # A pipeline that plans once, then implements, reviews and delivers each slice of the plan in its own
+      # linked run and PR, three at a time. Uncomment it, then: perc validate --pipeline epic
       # epic:
       #   description: Plan a big ticket, then build each slice in its own PR
       #   stages: [intake, plan, implement, review, deliver]
@@ -217,7 +228,11 @@ profiles:
       #     slices: { from: plan, output: slices }   # plan writes slices.md: one "## <title>" section per slice
       #     max_parallel: 3            # slices running at once (default 3)
       #   bindings:
-      #     plan: { agent: claude, model: opus, skill: superpowers:writing-plans, prompt: … }
+      #     plan:
+      #       agent: claude
+      #       model: opus
+      #       skill: superpowers:writing-plans
+      #       prompt: Write the plan to plan.md, and split the work into independent slices in slices.md, one "## <title>" section each.
       #     implement: { agent: claude, model: opus, skills: [superpowers:executing-plans, superpowers:test-driven-development] }
       #     review: { agent: claude, model: opus, skill: deep-dive-review, max_rounds: 3 }
 ```

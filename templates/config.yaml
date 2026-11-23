@@ -3,16 +3,16 @@
 version: 1
 profiles:
   default:
-    match: { remote: "github.com/*/*" }
+    match: { remote: "github.com/*/*" }     # which repos: globs host/owner/repo (or match.path)
     pipelines:
-      feature:                       # tickets in, pull requests out: intake, groom, plan, implement, review, deliver
-        default: true                # what perc run uses without --pipeline
+      feature:                              # tickets in, pull requests out: intake, groom, plan, implement, review, deliver
+        default: true                       # what perc run uses without --pipeline
         bindings:
-          intake: { builtin: github.intake }
+          intake: { builtin: github.intake }  # builtins are handled by Percolator itself
           groom:
-            agent: claude
+            agent: claude                   # claude, codex or command
             model: opus
-            skill: superpowers:brainstorming
+            skill: superpowers:brainstorming  # loaded as a plugin for claude; SKILL.md in the task otherwise
             prompt: |
               Let's brainstorm this ticket to make sure it matches expectations before we move on to planning or implementing it.
               Write the agreed ticket (goal, acceptance criteria, out of scope, open questions) as the groomed ticket, then stop: no plan and no code.
@@ -27,12 +27,12 @@ profiles:
           review:
             agent: claude
             model: opus
-            effort: medium
+            effort: medium                  # low … max, claude only
             skill: deep-dive-review
-            max_rounds: 3
+            max_rounds: 3                   # caps the review loop
           deliver: { builtin: github.open_pr }
         nodes:
-          pr-description:
+          pr-description:                   # writes outputs/pr_body.md; deliver puts it under "Closes #N"
             agent: claude
             model: opus
             before: deliver
