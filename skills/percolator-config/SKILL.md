@@ -63,7 +63,7 @@ profiles:                       # checked in order: the FIRST whose match fits w
       <router>: { router: true, stages: [intake, route], routes: […], choose: { … }, fallback: …, triggers: […] }
     bindings: { … }                                  # top-level bindings and nodes also belong to feature
     nodes: { … }
-    rules: { allowed_agents: […], allowed_models: […], max_rounds_ceiling: n, require_skills: […], required_nodes: […] }   # every pipeline
+    rules: { allowed_agents: […], allowed_models: […], max_rounds_ceiling: n, require_skills: […], required_nodes: […] }   # every pipeline; max_rounds_ceiling caps every loop (review, any stage with max_rounds, on_fail.max_rounds)
 ```
 
 Everything except `version` and `grounds` belongs to one profile. Edit the feature pipeline where the config already has it: the recommended config keeps its bindings and nodes under `pipelines.feature`; an existing config may keep them at the top of the profile instead, and then you edit them where they already are (do not move them under `pipelines.feature`). To add another pipeline to such a profile, a new `pipelines:` block can sit beside them. If one profile sets the same stage or node in both places, `pipelines.feature` wins. Top-level `rules` apply to every pipeline; `pipelines.<p>.rules` to that one only. A profile inherits nothing unless it sets `extends`. Grounds are shared: every profile's `perc validate` and runs fetch all of them.
@@ -165,7 +165,7 @@ The last stage of every pipeline is its exit: a builtin Percolator runs itself, 
 |---|---|---|---|---|
 | `pr` | `github.open_pr` | `pr_body` (optional) | | `pr_url` |
 | `comment` | `github.comment` | `comment` (required) | a ticket: not with `ticket: none` | `comment_url` |
-| `issue` | `github.open_issues` | `issues`: one `## <title>` section per issue; none means no issues | | `issue_urls` |
+| `issue` | `github.open_issues` | `issues`: one `## <title>` section per issue; none means no issues | every section titled: a bare `## ` heading escalates with `github.open_issues: draft <n> in issues.md has no title (a bare "## " heading); give it a title and resume` | `issue_urls` |
 | `none` | `percolator.report` | | | nothing; outputs stay in the run dir |
 | `release` | `github.release` | `tag`, `release_notes` | input `tag`, or `tag` under `outputs` of an earlier stage; a tag that already has another release escalates | `release_url` |
 | `pr_review` | `github.pr_review` | `review` (required) | input `pr` | `review_url` |
@@ -277,8 +277,8 @@ pipelines:
 - Each `## ` section of the slices output is one slice; tell the `from` stage's prompt to write them. The slices key need not be listed under `outputs:`: fan-out makes it a required output of the `from` stage.
 - The run (the parent) stops at the fanned stage and starts slice runs `<parent>-s<i>` (1, 2, …), each on branch `percolator/<parent>-s<i>` from the parent's base. A slice run starts with a seed step (the parent's outputs plus `slice.md`, its own section), then runs the fanned stage through the exit. The parent waits for every slice, then completes with `slices_done`, one line per slice with its PR.
 - The split is saved in the parent's run dir as `fanout.json`; a resume reuses it and never splits again.
-- A loop (`on_fail.back_to`, `max_rounds`) in a slice may only go back to the fanned stage or later; `perc validate` refuses one that goes back before it.
-- A failed slice pauses the parent once every slice has finished, with `percolator.fan_out: slice(s) <slice-ids> failed; perc delete each (its branch stays), then perc resume <parent-id> to run it again`. A failed run cannot be resumed, so the user runs `perc delete <slice-id>` and then `perc resume <parent-id>`, which starts that slice again on its branch. If the `from` stage wrote no `## ` sections, the parent pauses at the fan-out step; fix the output, then `perc resume <parent-id>`.
+- A loop (`on_fail.back_to`, `max_rounds`) in a slice may only go back to the fanned stage or later; `perc validate` refuses one that goes back before it (`<node> loops back to <stage>, which runs before the fan-out at <fanned stage>; loop back to <fanned stage> or later`). So the fanned stage cannot be one that loops (`review`, or a stage whose binding sets `max_rounds`), since it goes back to the stage before it every round: `review loops back to implement every round, so it cannot start a fan-out slice; set fan_out.stage to implement or an earlier stage`.
+- A failed slice pauses the parent once every slice has finished, with `percolator.fan_out: slice(s) <slice-ids> failed; perc delete each (its branch stays), then perc resume <parent-id> to run it again`. A failed run cannot be resumed, so the user runs `perc delete <slice-id>` and then `perc resume <parent-id>`, which starts that slice again on its branch. If the `from` stage wrote no `## ` sections, the parent pauses at the fan-out step; fix the output, then `perc resume <parent-id>`. A section with a bare `## ` heading pauses it with `percolator.fan_out: slice <n> in <output>.md has no title (a bare "## " heading); give it a title and resume`. A slice run deleted while running pauses it with `percolator.fan_out: slice(s) <slice-ids> deleted while running; perc resume <parent-id> to start it again`, and that resume starts the slice again.
 - `perc delete <parent-id>` leaves the slice runs alone.
 
 `perc validate --pipeline epic` prints the parent's steps (ending in the fan-out step, `builtin percolator.fan_out`), then a second block with what each slice run walks; check the slice steps and loops there:

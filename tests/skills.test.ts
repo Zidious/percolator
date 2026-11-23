@@ -92,6 +92,26 @@ test('the config skill answers what smoke agents got wrong about routes, hooks a
     fanOut.includes('percolator.fan_out: slice(s) <slice-ids> failed; perc delete each (its branch stays), then perc resume <parent-id> to run it again'),
     'fan-out must quote the failed-slice escalation',
   );
+  assert.ok(
+    fanOut.includes('percolator.fan_out: slice <n> in <output>.md has no title (a bare "## " heading); give it a title and resume'),
+    'fan-out must quote the untitled-slice escalation',
+  );
+  assert.ok(
+    fanOut.includes('percolator.fan_out: slice(s) <slice-ids> deleted while running; perc resume <parent-id> to start it again'),
+    'fan-out must quote the deleted-slice escalation',
+  );
+  assert.ok(
+    fanOut.includes('review loops back to implement every round, so it cannot start a fan-out slice; set fan_out.stage to implement or an earlier stage'),
+    'fan-out must say a looping stage cannot be the fanned stage',
+  );
+  assert.ok(
+    text.includes('max_rounds_ceiling caps every loop (review, any stage with max_rounds, on_fail.max_rounds)'),
+    'max_rounds_ceiling caps every loop, not only review',
+  );
+  assert.ok(
+    section('Exits').includes('github.open_issues: draft <n> in issues.md has no title (a bare "## " heading); give it a title and resume'),
+    'the issue exit must quote the untitled-draft escalation',
+  );
 });
 
 test('the config skill says which pipelines triggers need and quotes the refusal', async () => {
