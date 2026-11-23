@@ -143,9 +143,12 @@ test('FakeGh failedRuns filters by repo, branch and workflow', async () => {
   const ci = gh.addFailedRun(R, { branch: 'main', workflowName: 'CI', workflow: 'ci.yml' });
   const lint = gh.addFailedRun(R, { branch: 'main', workflowName: 'Lint' });
   gh.addFailedRun(R, { branch: 'dev', workflowName: 'CI' });
-  assert.deepEqual(ci, { databaseId: 1, url: 'https://github.com/o/r/actions/runs/1', workflowName: 'CI' });
+  assert.deepEqual(ci, { databaseId: 1, attempt: 1, url: 'https://github.com/o/r/actions/runs/1', workflowName: 'CI' });
   assert.deepEqual(await gh.failedRuns(R, { branch: 'main' }), [ci, lint]);
   assert.deepEqual(await gh.failedRuns(R, { branch: 'main', workflow: 'ci.yml' }), [ci]);
   assert.deepEqual(await gh.failedRuns(R, { branch: 'main', workflow: 'Lint' }), [lint]);
   assert.deepEqual(await gh.failedRuns('github.com/o/other', { branch: 'main' }), []);
+  gh.rerun(ci.databaseId);
+  assert.deepEqual(await gh.failedRuns(R, { branch: 'main', workflow: 'ci.yml' }), [{ ...ci, attempt: 2 }]);
+  assert.throws(() => gh.rerun(99), { message: 'FakeGh: no run 99' });
 });
