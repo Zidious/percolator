@@ -31,8 +31,11 @@ export interface Gh {
   editPr(repo: string, n: number, bodyFile: string): Promise<void>;
   /** Returns the new issue's URL. */
   createIssue(repo: string, o: { title: string; bodyFile: string }): Promise<string>;
-  /** Issues in any state whose body contains `text` (GitHub search, up to 100). */
-  findIssues(repo: string, text: string): Promise<IssueHit[]>;
+  /**
+   * The latest issues (any state, newest first, up to 50) the gh user opened. A plain list, not a search:
+   * GitHub's search index lags behind a just-created issue, and would read `percolator:` as a qualifier.
+   */
+  myIssues(repo: string): Promise<IssueHit[]>;
   /** The first comment on issue `n` whose body includes `marker`. */
   findComment(repo: string, n: number, marker: string): Promise<IssueComment | undefined>;
   /** The release's URL, or undefined when no release has that tag. */
@@ -167,10 +170,10 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
       const out = await call('issue create', ['issue', 'create', '--repo', repo, `--title=${p.title}`, '--body-file', p.bodyFile]);
       return out.trim();
     },
-    async findIssues(repo, text) {
-      noDash('issue list', 'text', text);
+    async myIssues(repo) {
+      // 50: enough to hold the issues one exit opens before a crash, the only thing it is read for
       const out = await call('issue list', [
-        'issue', 'list', '--repo', repo, '--state', 'all', '--search', `${text} in:body`, '--json', 'number,url,body', '--limit', '100',
+        'issue', 'list', '--repo', repo, '--state', 'all', '--author', '@me', '--json', 'number,url,body', '--limit', '50',
       ]);
       return list(parseJson('issue list', out)).map((i) => ({
         number: Number(i['number']), url: String(i['url'] ?? ''), body: String(i['body'] ?? ''),

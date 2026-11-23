@@ -159,15 +159,14 @@ test('createIssue passes the title as one token and returns the url', async () =
   assert.deepEqual(rec.calls[0]!.args, ['issue', 'create', '--repo', R, '--title=-x Fix', '--body-file', 'b.md']);
 });
 
-test('findIssues searches bodies across all states', async () => {
+test('myIssues lists the user\'s latest issues in any state without a search', async () => {
   const rec = new ExecRecorder();
-  rec.respond(() => true, { stdout: '[{"number":8,"url":"iu","body":"x percolator:issue run=r n=1"}]' });
-  const found = await cliGh({ exec: rec.exec }).findIssues(R, 'percolator:issue run=r n=1');
+  rec.respond(() => true, { stdout: '[{"number":8,"url":"iu","body":"x <!-- percolator:issue run=r n=1 -->"}]' });
+  const found = await cliGh({ exec: rec.exec }).myIssues(R);
   assert.deepEqual(rec.calls[0]!.args, [
-    'issue', 'list', '--repo', R, '--state', 'all', '--search', 'percolator:issue run=r n=1 in:body', '--json', 'number,url,body', '--limit', '100',
+    'issue', 'list', '--repo', R, '--state', 'all', '--author', '@me', '--json', 'number,url,body', '--limit', '50',
   ]);
-  assert.deepEqual(found, [{ number: 8, url: 'iu', body: 'x percolator:issue run=r n=1' }]);
-  await assert.rejects(cliGh({ exec: rec.exec }).findIssues(R, '-x'), { message: 'gh issue list: text must not start with "-": -x' });
+  assert.deepEqual(found, [{ number: 8, url: 'iu', body: 'x <!-- percolator:issue run=r n=1 -->' }]);
 });
 
 test('findComment returns the first comment holding the marker', async () => {

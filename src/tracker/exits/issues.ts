@@ -75,9 +75,8 @@ export function githubOpenIssues(o: {
         let url: string | undefined = created[n]?.url;
         if (!url) {
           // a crash between create and record leaves the issue unrecorded: find it by its marker first
-          const search = `percolator:issue run=${o.runId} n=${n}`;
-          const marker = `<!-- ${search} -->`;
-          url = (await o.gh.findIssues(o.repo, search)).find((i) => i.body.includes(marker))?.url;
+          const marker = `<!-- percolator:issue run=${o.runId} n=${n} -->`;
+          url = (await o.gh.myIssues(o.repo)).find((i) => i.body.includes(marker))?.url;
           if (!url) {
             const bodyFile = path.join(io.stepDir, `issue-${n}.md`);
             await writeFileAtomic(bodyFile, `${item.body}\n\n${marker}\n`);

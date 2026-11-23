@@ -88,7 +88,7 @@ test('issue exit finds the issues it created before a crash', async () => {
   const s = await setup(DRAFTS);
   try {
     const gh = newGh();
-    gh.addIssue(REPO, 5, { title: 'Flaky login test', body: `It fails on Windows.\n\n${marker(1)}\n` });
+    gh.addIssue(REPO, 5, { title: 'Flaky login test', body: `It fails on Windows.\n\n${marker(1)}\n`, author: gh.userLogin });
     const out = await mk(s, gh)(step, s.ctx, s.io);
     const created = gh.calls.filter((c) => c.method === 'createIssue');
     assert.equal(created.length, 1);
@@ -107,9 +107,23 @@ test('issue exit does not take n=10 for n=1 when it searches', async () => {
   const s = await setup('## One\n\nFirst.\n');
   try {
     const gh = newGh();
-    gh.addIssue(REPO, 3, { body: `Other.\n\n${marker(10)}\n` });
+    gh.addIssue(REPO, 3, { body: `Other.\n\n${marker(10)}\n`, author: gh.userLogin });
     await mk(s, gh)(step, s.ctx, s.io);
     assert.equal(readFileSync(path.join(s.io.outputsDir, 'issue_urls.md'), 'utf8'), `https://${REPO}/issues/4\n`);
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('issue exit looks for its marker among the user\'s own issues, without a search', async () => {
+  const s = await setup('## One\n\nFirst.\n');
+  try {
+    const gh = newGh();
+    // someone else quoting the marker is not the issue this run opened
+    gh.addIssue(REPO, 3, { body: `Quoted: ${marker(1)}`, author: 'mallory' });
+    await mk(s, gh)(step, s.ctx, s.io);
+    assert.equal(readFileSync(path.join(s.io.outputsDir, 'issue_urls.md'), 'utf8'), `https://${REPO}/issues/4\n`);
+    assert.deepEqual(gh.calls.filter((c) => c.method === 'myIssues').map((c) => c.args), [[REPO]]);
   } finally {
     await rm(s.runDir);
   }
