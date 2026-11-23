@@ -36,3 +36,13 @@ test('splitSections reads CRLF and gives nothing without a heading', () => {
   assert.deepEqual(splitSections('no headings\n```\n## fenced\n```\n'), []);
   assert.deepEqual(splitSections(''), []);
 });
+
+test('splitSections strips a closing ## sequence and keeps a bare heading as an empty title', () => {
+  assert.deepEqual(splitSections('## Title ##\nA\n## C# tips\nB\n## Spaced  ###   \nC\n## ##\nD\n## \nE\n'), [
+    { title: 'Title', body: 'A' },
+    { title: 'C# tips', body: 'B' },
+    { title: 'Spaced', body: 'C' },
+    { title: '', body: 'D' },
+    { title: '', body: 'E' },
+  ]);
+});

@@ -129,6 +129,22 @@ test('issue exit looks for its marker among the user\'s own issues, without a se
   }
 });
 
+test('issue exit escalates a draft with no title and opens nothing', async () => {
+  const s = await setup('## One\n\nFirst.\n\n## \n\nUntitled.\n');
+  try {
+    const gh = newGh();
+    const out = await mk(s, gh)(step, s.ctx, s.io);
+    assert.deepEqual(out, {
+      status: 'escalate',
+      outputs: {},
+      reason: 'github.open_issues: draft 2 in issues.md has no title (a bare "## " heading); give it a title and resume',
+    });
+    assert.deepEqual(gh.calls, []);
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
 test('issue exit reuses what an earlier attempt recorded in created.json', async () => {
   const s = await setup(DRAFTS, 2);
   try {

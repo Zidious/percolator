@@ -65,6 +65,11 @@ export function githubOpenIssues(o: {
       const text = await latestOutput(ctx, o.runDir, 'issues');
       const items = text === undefined ? [] : splitSections(text);
       if (items.length === 0) return { status: 'pass', outputs: {} };
+      // checked before opening any: gh refuses an empty title, which would leave the drafts half opened
+      const untitled = items.findIndex((i) => i.title === '');
+      if (untitled >= 0) {
+        return escalate(`github.open_issues: draft ${untitled + 1} in issues.md has no title (a bare "## " heading); give it a title and resume`);
+      }
 
       await fs.mkdir(io.outputsDir, { recursive: true });
       const createdFile = path.join(io.stepDir, 'created.json');
