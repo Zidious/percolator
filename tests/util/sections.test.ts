@@ -46,3 +46,11 @@ test('splitSections strips a closing ## sequence and keeps a bare heading as an 
     { title: '', body: 'E' },
   ]);
 });
+
+test('splitSections reads a bare ## and a tab after ## as headings', () => {
+  assert.deepEqual(splitSections('## One\nA\n##\tTwo\nB\n##\nC\n'), [
+    { title: 'One', body: 'A' },
+    { title: 'Two', body: 'B' },
+    { title: '', body: 'C' },
+  ]);
+});
