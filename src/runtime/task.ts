@@ -54,6 +54,8 @@ export type TaskInput = {
   pipeline: string;
   /** run inputs, available to prompts as {{input_<name>}} */
   inputs: Record<string, string>;
+  /** the inputs the pipeline declares: one the run was not given renders as '' */
+  declaredInputs?: readonly string[];
 };
 
 const bullets = (items: string[]): string => items.map((i) => `- ${i}`).join('\n');
@@ -83,6 +85,7 @@ export function buildTask(t: TaskInput): string {
     run_dir: t.runDir,
     outputs_dir: t.outputsDir,
     pipeline: t.pipeline,
+    ...Object.fromEntries((t.declaredInputs ?? []).map((k) => [`input_${k}`, ''])),
     ...Object.fromEntries(Object.entries(t.inputs).map(([k, v]) => [`input_${k}`, v])),
   };
   const required = ctx.graph.contracts[step.stage] ?? [];

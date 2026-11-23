@@ -173,6 +173,7 @@ async function driveHeld(
     ticket: meta.ticket ?? meta.pipeline,
     pipeline: meta.pipeline,
     inputs: meta.inputs,
+    declaredInputs: Object.keys(v.pipeline.inputs),
     runDir: dir,
     worktree: meta.worktree,
     branch: meta.branch,

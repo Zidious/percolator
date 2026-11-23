@@ -10,6 +10,7 @@ import { exists, writeFileAtomic } from '../util/fs.ts';
 import { splitSections } from '../util/sections.ts';
 import { runDir as runDirOf } from '../workspace/run-dir.ts';
 import { startLinkedRun } from './child.ts';
+import { prUrl } from './drive.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 
@@ -65,13 +66,6 @@ export function percolatorSeed(o: { runDir: string; meta: RunMeta; home: string;
   };
 }
 
-/** The PR url a run recorded last, if any. */
-async function prUrlOf(dir: string, state: RunState): Promise<string | undefined> {
-  const rel = state.history.findLast((h) => h.outputs['pr_url'] !== undefined)?.outputs['pr_url'];
-  if (rel === undefined) return undefined;
-  return (await fs.readFile(path.join(dir, rel), 'utf8').catch(() => '')).trim() || undefined;
-}
-
 const finished = (s: RunState['status'] | undefined): boolean => s === 'completed' || s === 'failed';
 
 /**
@@ -99,6 +93,12 @@ export function fanOut(o: {
         if (sections.length === 0) {
           return escalate(
             `percolator.fan_out: ${fan.slices.from} wrote no slices (## <title> sections in ${fan.slices.output}.md); fix the output and resume`,
+          );
+        }
+        const untitled = sections.findIndex((s) => s.title === '');
+        if (untitled >= 0) {
+          return escalate(
+            `percolator.fan_out: slice ${untitled + 1} in ${fan.slices.output}.md has no title (a bare "## " heading); give it a title and resume`,
           );
         }
         file = { children: sections.map((s, i) => ({ index: i + 1, id: `${runId}-s${i + 1}`, title: s.title })) };
@@ -136,25 +136,34 @@ export function fanOut(o: {
         }
         for (const c of children) {
           if (active >= max) break;
-          if (status[c.id] !== undefined) continue;
+          // launched by this drive and since gone: deleted while running (perc delete); not recreated
+          if (status[c.id] !== undefined || launched.has(c.id)) continue;
           await start(c);
           launched.add(c.id);
           status[c.id] = 'running';
           active++;
         }
-        if (children.every((c) => finished(status[c.id]))) break;
+        if (children.every((c) => finished(status[c.id]) || (status[c.id] === undefined && launched.has(c.id)))) break;
         await sleep(o.pollMs ?? 5000);
       }
       const lines: string[] = [];
       const failed: string[] = [];
+      const deleted: string[] = [];
       for (const c of children) {
         const dir = runDirOf(o.deps.home, c.id);
+        if (!(await exists(path.join(dir, 'run.json')))) {
+          deleted.push(c.id);
+          continue;
+        }
         const state = await loadState(dir);
         if (state.status === 'failed') failed.push(c.id);
-        lines.push(`${c.index}. ${c.title} → ${(await prUrlOf(dir, state)) ?? state.status}`);
+        lines.push(`${c.index}. ${c.title} → ${(await prUrl(dir, state)) ?? state.status}`);
       }
       if (failed.length > 0) {
         return escalate(`percolator.fan_out: slice(s) ${failed.join(', ')} failed; perc delete each (its branch stays), then perc resume ${runId} to run it again`);
+      }
+      if (deleted.length > 0) {
+        return escalate(`percolator.fan_out: slice(s) ${deleted.join(', ')} deleted while running; perc resume ${runId} to start it again`);
       }
       await fs.mkdir(io.outputsDir, { recursive: true });
       await writeFileAtomic(path.join(io.outputsDir, 'slices_done.md'), `${lines.join('\n')}\n`);

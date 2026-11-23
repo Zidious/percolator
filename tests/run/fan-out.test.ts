@@ -258,6 +258,45 @@ test('a failed slice whose run was deleted starts again on a resume', async () =
   }
 });
 
+test('a slice with a bare "## " heading escalates before anything is split or started', async () => {
+  const fx = await setup('## One\n\na\n\n## \n\nb\n');
+  try {
+    assert.deepEqual(await run(fx), {
+      status: 'escalate',
+      outputs: {},
+      reason: 'percolator.fan_out: slice 2 in slices.md has no title (a bare "## " heading); give it a title and resume',
+    });
+    assert.equal(await readFanOut(fx.dir), undefined);
+    assert.deepEqual(fx.drivers(), []);
+  } finally {
+    await fx.e.cleanup();
+  }
+});
+
+test('a slice deleted while the fan-out waits is not started again; the fan-out escalates once the others finish', async () => {
+  const fx = await setup('## One\n\na\n\n## Two\n\nb\n');
+  try {
+    fx.sleeps.push(
+      async () => {
+        // `perc delete <slice-id>` while slice 2 runs
+        await fs.rm(runDir(fx.e.home, sid(fx, 2)), { recursive: true, force: true });
+        for (const t of fx.e.deps.hc.terminals.values()) if (t.argv.at(-1) === sid(fx, 2)) t.state = 'finished';
+      },
+      async () => {
+        await fx.setStatus(sid(fx, 1), 'completed');
+      },
+    );
+    assert.deepEqual(await run(fx), {
+      status: 'escalate',
+      outputs: {},
+      reason: `percolator.fan_out: slice(s) ${sid(fx, 2)} deleted while running; perc resume ${fx.parent.runId} to start it again`,
+    });
+    assert.deepEqual(fx.drivers(), [sid(fx, 1), sid(fx, 2)]);
+  } finally {
+    await fx.e.cleanup();
+  }
+});
+
 test('no slices escalates', async () => {
   const fx = await setup('Nothing to split.\n');
   try {

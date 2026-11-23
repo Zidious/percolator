@@ -49,8 +49,7 @@ export async function pipelinesJson(o: { repoDir: string; configFile: string; pr
       return {
         name: spec.name,
         default: spec.default,
-        // another change adds `router:`; read it without depending on its type
-        router: (spec as { router?: unknown }).router === true,
+        router: spec.router === true,
         ticket: spec.ticket,
         inputs: Object.entries(spec.inputs).map(([name, i]) => ({
           name,

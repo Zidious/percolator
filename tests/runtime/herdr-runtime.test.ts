@@ -425,6 +425,16 @@ test("the task renders the run's pipeline and inputs, defaulting to the graph's 
   assert.match(await fs.readFile(path.join(e.runDir, 'steps', 'plan', '2', 'task.md'), 'utf8'), /## Task\n\nRun feature/);
 });
 
+test('a declared input the run was not given renders empty in the task', async () => {
+  const e = await env(async (t, n) => {
+    if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+  });
+  const prompt = step({ def: { agent: 'claude', prompt: 'note={{input_note}}.' } as Step['def'] });
+  const out = await runtime(e, { inputs: {}, declaredInputs: ['note'] }).executeStep(prompt, ctx());
+  assert.equal(out.status, 'pass');
+  assert.match(await fs.readFile(path.join(e.runDir, 'steps', 'plan', '1', 'task.md'), 'utf8'), /## Task\n\nnote=\./);
+});
+
 test('a prompt file is read from its ground; a missing one escalates', async () => {
   const e = await env(async (t, n) => {
     if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });

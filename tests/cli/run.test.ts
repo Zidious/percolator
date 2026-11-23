@@ -720,10 +720,13 @@ test('approve when not waiting', async () => {
   const e = await setup();
   try {
     const meta = await e.prepare();
+    const want = `run ${meta.runId} is not waiting at a gate; see where it is with perc status ${meta.runId}\n`;
     const r = await e.perc(['approve', meta.runId]);
     assert.equal(r.code, 1);
-    assert.equal(r.err, 'run is not waiting at a gate\n');
+    assert.equal(r.err, want);
     assert.equal(r.out, '');
+    assert.equal((await e.perc(['approve', meta.runId, '--pipeline', 'hotfix'])).err, want);
+    assert.equal((await e.perc(['reject', meta.runId, 'no'])).err, want);
   } finally {
     await e.cleanup();
   }

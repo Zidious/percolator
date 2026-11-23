@@ -367,9 +367,9 @@ async function runDecide(decision: 'approve' | 'reject', args: string[], deps: D
   const dir = runDir(deps.home, runId);
   const meta = await readRunMeta(dir);
   const pipeline = values.pipeline as string | undefined;
+  const waiting = await readWaiting(dir);
+  if (waiting === undefined) throw new Error(`run ${runId} is not waiting at a gate; see where it is with perc status ${runId}`);
   if (pipeline !== undefined) {
-    const waiting = await readWaiting(dir);
-    if (waiting === undefined) throw new Error('run is not waiting at a gate');
     if (waiting.stepId !== 'pick-pipeline') {
       throw new Error(`--pipeline only answers a pick-pipeline gate; run ${runId} is waiting at ${waiting.stepId}`);
     }
