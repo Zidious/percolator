@@ -52,7 +52,8 @@ export function worktreeIn(root: string, repoName: string, runId: string): strin
 }
 
 /**
- * Validate, then create the run: worktree, Herdr space, `run.json`, materialized grounds and `state.json`.
+ * Validate, then create the run: worktree, Herdr space, materialized grounds, `state.json`, `graph.json`, and
+ * `run.json` last (it marks the run dir complete).
  * Every check that can fail cheaply (config, ticket, base) runs before anything is created.
  */
 export async function prepareRun(
@@ -199,14 +200,15 @@ export async function prepareRun(
   };
   const dir = runDir(deps.home, runId);
   await fs.mkdir(dir, { recursive: true });
-  await writeRunMeta(dir, meta);
   await materializeGrounds(dir, v.mappings, v.grounds);
   const state = newState({ runId, ...(ticket !== undefined ? { ticket } : {}), profile: v.profile, groundVersions: v.groundVersions });
   state.graphFingerprint = graphFingerprint(v.graph);
-  await writeRunGraph(dir, v.graph);
   state.mappingKeys = mappingKeys(v.mappings);
   state.mappingsFingerprint = mappingsFingerprint(state.mappingKeys);
   await saveState(dir, state);
+  await writeRunGraph(dir, v.graph);
+  // run.json last: it marks a complete run dir; a dir without it is prepared again
+  await writeRunMeta(dir, meta);
   return meta;
 }
 

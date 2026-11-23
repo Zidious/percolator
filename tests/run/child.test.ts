@@ -120,3 +120,72 @@ test('a child run is allowed while its parent is live on the same ticket', async
     await e.cleanup();
   }
 });
+
+test('startLinkedRun leaves a paused child for perc resume <child>: no relaunch, no round granted', async () => {
+  const e = await setupRunEnv({ extra: HOTFIX });
+  try {
+    const parent = await prepareParent(e);
+    const child = await startLinkedRun({ parent, pipeline: 'hotfix', ticket: parent.ticket!, runId: 'child-1' }, e.deps);
+    const dir = path.join(e.home, '.percolator', 'runs', 'child-1');
+    const paused = { ...(await loadState(dir)), status: 'paused' as const, pausedCap: 'review.0', pausedReason: 'review: cap reached' };
+    await saveState(dir, paused);
+    e.deps.hc.terminals.get(child.driver)!.state = 'finished';
+    assert.deepEqual(await startLinkedRun({ parent, pipeline: 'hotfix', ticket: parent.ticket!, runId: 'child-1' }, e.deps), child);
+    assert.equal(runCalls(e).length, 1);
+    assert.deepEqual(await loadState(dir), paused);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a child whose prepare stopped before run.json is prepared again on the next start', async () => {
+  const e = await setupRunEnv({ extra: HOTFIX });
+  try {
+    const parent = await prepareParent(e);
+    const dir = path.join(e.home, '.percolator', 'runs', 'child-1');
+    // a directory where graph.json goes makes the prepare fail after the worktree and grounds
+    await fs.mkdir(path.join(dir, 'graph.json'), { recursive: true });
+    await assert.rejects(startLinkedRun({ parent, pipeline: 'hotfix', ticket: parent.ticket!, runId: 'child-1' }, e.deps));
+    assert.equal(await fs.stat(path.join(dir, 'run.json')).then(() => true, () => false), false);
+    await fs.rm(path.join(dir, 'graph.json'), { recursive: true });
+    const child = await startLinkedRun({ parent, pipeline: 'hotfix', ticket: parent.ticket!, runId: 'child-1' }, e.deps);
+    assert.deepEqual(await readRunMeta(dir), child);
+    assert.equal((await loadState(dir)).status, 'running');
+    assert.equal(runCalls(e).length, 1);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a child that cannot resume is not relaunched; the error names the child', async () => {
+  const e = await setupRunEnv({ extra: HOTFIX });
+  try {
+    const parent = await prepareParent(e);
+    const child = await startLinkedRun({ parent, pipeline: 'hotfix', ticket: parent.ticket!, runId: 'child-1' }, e.deps);
+    const dir = path.join(e.home, '.percolator', 'runs', 'child-1');
+    await saveState(dir, { ...(await loadState(dir)), graphFingerprint: 'other' });
+    e.deps.hc.terminals.get(child.driver)!.state = 'finished';
+    await assert.rejects(startLinkedRun({ parent, pipeline: 'hotfix', ticket: parent.ticket!, runId: 'child-1' }, e.deps), {
+      message: 'linked run child-1 cannot be resumed: run child-1 was started with a different graph (config changed since); start a new run',
+    });
+    assert.equal(runCalls(e).length, 1);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test("a live terminal named like the child's driver but not labelled with it is not its driver", async () => {
+  const e = await setupRunEnv({ extra: HOTFIX });
+  try {
+    const parent = await prepareParent(e);
+    const child = await startLinkedRun({ parent, pipeline: 'hotfix', ticket: parent.ticket!, runId: 'child-1' }, e.deps);
+    e.deps.hc.terminals.delete(child.driver);
+    e.deps.hc.add({ name: child.driver, labels: { 'percolator.run': 'other' } });
+    await assert.rejects(startLinkedRun({ parent, pipeline: 'hotfix', ticket: parent.ticket!, runId: 'child-1' }, e.deps), {
+      message: `linked run child-1 cannot be resumed: terminal ${child.driver} is not part of run child-1 (percolator.run=other); remove it with hc rm or rename it, then resume`,
+    });
+    assert.equal(runCalls(e).length, 1);
+  } finally {
+    await e.cleanup();
+  }
+});
