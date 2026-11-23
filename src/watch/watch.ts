@@ -37,6 +37,7 @@ export type WatchOptions = { repos: string[]; configFile: string; profile?: stri
 const percDir = (home: string): string => path.join(home, '.percolator');
 export const watchFile = (home: string): string => path.join(percDir(home), 'watch', 'watch.json');
 
+const exists = (p: string): Promise<boolean> => fs.stat(p).then(() => true, () => false);
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
@@ -120,17 +121,20 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
     await launchDriver(meta, deps);
   };
 
-  // after a restart, each recorded firing of this repo once: one never prepared is started from the
-  // ledger with its id (its trigger may never ask again: a schedule tick is behind the mark); one
-  // prepared but never launched is relaunched; one prepared whose dir is gone was deleted and stays done
+  // after a restart, each recorded firing of this repo once: one never prepared, or whose prepare stopped
+  // before run.json (written last), is started from the ledger with its id (its trigger may never ask
+  // again: a schedule tick is behind the mark); one prepared but never launched is relaunched; one
+  // prepared whose dir is gone was deleted and stays done
   if (first) {
     for (const [key, entry] of Object.entries(ledger.fired)) {
       const { runId } = entry;
       if (keyRepo(key) !== repo || runId === '') continue;
       const dir = runDir(deps.home, runId);
       try {
-        if (!(await fs.stat(dir).then(() => true, () => false))) {
-          if (entry.prepared || entry.pipeline === undefined) continue;
+        const dirExists = await exists(dir);
+        if (!dirExists && entry.prepared) continue;
+        if (!dirExists || !(await exists(path.join(dir, 'run.json')))) {
+          if (entry.pipeline === undefined) continue;
           const f: Firing = {
             key,
             pipeline: entry.pipeline,

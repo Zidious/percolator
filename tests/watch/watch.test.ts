@@ -276,6 +276,30 @@ test('a restarted watcher relaunches a run it prepared but never launched', asyn
   }
 });
 
+test('a restarted watcher prepares again a firing whose prepare stopped before run.json', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    const key = `label:${REPO}:triage:7`;
+    const id = 't7-triage-20261122-100000-abcd';
+    // prepareRun made the run dir (state.json, graph) and the watcher recorded it prepared, then it crashed before run.json
+    await prepareRun(
+      { ticket: `https://${REPO}/issues/7`, pipeline: 'triage', runId: id, repoDir: e.root, configFile: e.configFile, profile: 'work' },
+      e.deps,
+    );
+    await fs.rm(path.join(runPath(e, id), 'run.json'));
+    await saveLedger(pdir(e), {
+      version: 1,
+      fired: { [key]: { runId: id, at: '2026-11-22T10:00:00.000Z', pipeline: 'triage', ticket: `https://${REPO}/issues/7`, inputs: {}, prepared: true } },
+      lastPoll: {},
+    });
+    assert.deepEqual(await loop(e), [`watch: ${key} → run ${id}`]);
+    assert.equal((await readRunMeta(runPath(e, id))).ticket, `${REPO}#7`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('watcher alive from a fresh heartbeat; dead from a stale one', async (t) => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-watcher-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
