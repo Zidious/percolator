@@ -93,14 +93,15 @@ export function checkGlobalStages(merged: Record<string, MergedPipeline>, specs:
 
 /**
  * The specs of the merged pipelines, defaults filled in and the default pipeline marked. feature is
- * listed only when it has bindings or some layer defines it under `pipelines:`.
+ * listed only when it has bindings, some layer defines it under `pipelines:`, or no other pipeline exists.
  */
 export function pipelineSpecs(merged: Record<string, MergedPipeline>, profile: string, where: Where): Record<string, PipelineSpec> {
   const specs: Record<string, PipelineSpec> = {};
   for (const [name, p] of Object.entries(merged)) {
     const h = p.header;
     const defined = Object.keys(p.bindings).length > 0 || h.source !== 'core' || h.locator !== undefined;
-    if (name === 'feature' && !defined) continue;
+    // with no other pipeline, an undefined feature stays listed, so building it reports its unbound stages
+    if (name === 'feature' && !defined && Object.keys(merged).length > 1) continue;
     const base: PipelineHeader = name === 'feature' ? { ...FEATURE } : {};
     const { name: _n, ...header } = { ...base, ...h.value } as PipelineHeader & { name?: string };
     specs[name] = {
