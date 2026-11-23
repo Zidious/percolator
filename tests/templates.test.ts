@@ -115,10 +115,10 @@ function uncommentExamples(text: string): string {
   return text.replace(/^(\s*)# ((?:[a-z][a-z0-9_-]*:|  ).*)$/gm, '$1$2');
 }
 
-test("the README's example config is exactly what perc init writes", async () => {
-  const readme = await fs.readFile(path.resolve(import.meta.dirname, '..', 'README.md'), 'utf8');
-  const example = readme.split('### Example config')[1]?.split('```yaml\n')[1]?.split('```\n')[0];
-  assert.ok(example !== undefined, 'README has a yaml block under "### Example config"');
+test("the docs' example config is exactly what perc init writes", async () => {
+  const doc = await fs.readFile(path.resolve(import.meta.dirname, '..', 'docs', 'configuration.md'), 'utf8');
+  const example = doc.split('## Example config')[1]?.split('```yaml\n')[1]?.split('```\n')[0];
+  assert.ok(example !== undefined, 'docs/configuration.md has a yaml block under "## Example config"');
   assert.equal(example, await fs.readFile(TEMPLATE, 'utf8'));
 });
 
