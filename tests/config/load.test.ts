@@ -401,6 +401,20 @@ test('pipeline names must be lower-case identifiers', async () => {
   });
 });
 
+test('stage names all, before-all and after-all are reserved', async () => {
+  for (const name of ['all', 'before-all', 'after-all']) {
+    await withYaml(`version: 1\nprofiles:\n  default:\n    pipelines:\n      p:\n        stages: [intake, ${name}, deliver]\n`, async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.p.stages.1');
+      assert.equal(
+        err.message,
+        `${file}:6: profiles.default.pipelines.p.stages.1: stage name "${name}" is reserved (all, before-all and after-all name hook positions); pick another name`,
+      );
+    });
+  }
+});
+
 test('input names must be identifiers', async () => {
   await withYaml(
     'version: 1\nprofiles:\n  default:\n    pipelines:\n      dd:\n        inputs:\n          alert-url: {}\n',

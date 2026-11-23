@@ -15,9 +15,14 @@ export const STAGE_NAME = NODE_NAME;
 export const PIPELINE_NAME = /^[a-z][a-z0-9-]{0,23}$/;
 export const INPUT_NAME = /^[a-z][a-z0-9_]{0,31}$/;
 
+const RESERVED_STAGES: readonly string[] = ['all', 'before-all', 'after-all'];
 const StageNameSchema = z
   .string()
-  .regex(STAGE_NAME, { message: `stage names start with a letter and contain only letters, digits, "_" and "-" (like ${STAGES.join(', ')})` });
+  .regex(STAGE_NAME, { message: `stage names start with a letter and contain only letters, digits, "_" and "-" (like ${STAGES.join(', ')})` })
+  // hooks attach `before: all` / `after: all`, and their steps run in the before-all / after-all stages
+  .refine((s) => !RESERVED_STAGES.includes(s), {
+    error: (issue) => `stage name "${String(issue.input)}" is reserved (all, before-all and after-all name hook positions); pick another name`,
+  });
 
 export const GroundSpecSchema = z.union([
   z.strictObject({
