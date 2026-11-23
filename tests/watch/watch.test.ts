@@ -157,10 +157,99 @@ test('a restarted watcher prepares a firing it recorded but never started, with 
     await e.writeConfig(TRIAGE);
     e.deps.gh.addIssue(REPO, 7, { labels: ['triage'] });
     const key = `label:${REPO}:triage:7`;
-    await saveLedger(pdir(e), { version: 1, fired: { [key]: { runId: 't7-triage-20261122-100000-abcd', at: '2026-11-22T10:00:00.000Z' } }, lastPoll: {} });
+    await saveLedger(pdir(e), {
+      version: 1,
+      fired: { [key]: { runId: 't7-triage-20261122-100000-abcd', at: '2026-11-22T10:00:00.000Z', pipeline: 'triage', ticket: `https://${REPO}/issues/7`, inputs: {} } },
+      lastPoll: {},
+    });
     const lines = await loop(e);
     assert.deepEqual(lines, [`watch: ${key} → run t7-triage-20261122-100000-abcd`]);
     assert.equal((await readRunMeta(runPath(e, 't7-triage-20261122-100000-abcd'))).ticket, `${REPO}#7`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a restarted watcher starts a schedule firing it recorded but never prepared', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    const key = `schedule:${REPO}:triage:0:2026-11-22T10:00`;
+    const id = 'triage-20261122-100000-abcd';
+    // fire() saved the entry (and the poll moved the mark past the tick), then the watcher crashed before prepareRun
+    await saveLedger(pdir(e), {
+      version: 1,
+      fired: { [key]: { runId: id, at: '2026-11-22T10:00:30.000Z', pipeline: 'triage', inputs: {} } },
+      lastPoll: { [`${REPO}:triage:0`]: '2026-11-22T10:00:30.000Z' },
+    });
+    const lines = await loop(e);
+    assert.deepEqual(lines, [`watch: ${key} → run ${id}`]);
+    assert.equal((await readRunMeta(runPath(e, id))).pipeline, 'triage');
+    assert.equal((await loadLedger(pdir(e))).fired[key]?.prepared, true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a run the user deleted is not started again by a restarted watcher', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    e.deps.gh.addIssue(REPO, 7, { labels: ['triage'] });
+    await loop(e);
+    const key = `label:${REPO}:triage:7`;
+    const id = (await loadLedger(pdir(e))).fired[key]!.runId;
+    // perc delete <id>: the run dir is gone
+    await fs.rm(runPath(e, id), { recursive: true, force: true });
+    assert.deepEqual(await loop(e), []);
+    assert.equal(await exists(runPath(e, id)), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a poll prunes schedule firings older than the lookback from fired.json', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    const old = `schedule:${REPO}:triage:0:2026-11-10T10:00`;
+    await saveLedger(pdir(e), {
+      version: 1,
+      fired: { [old]: { runId: 'triage-20261110-100000-abcd', at: '2026-11-10T10:00:00.000Z', pipeline: 'triage', inputs: {}, prepared: true } },
+      lastPoll: {},
+    });
+    await loop(e);
+    assert.equal(Object.hasOwn((await loadLedger(pdir(e))).fired, old), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a recorded firing two triggers ask for is started once after a restart', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig([
+      '    pipelines:',
+      '      deps:',
+      '        stages: [intake, fix, deliver]',
+      '        exit: pr',
+      '        ticket: none',
+      '        inputs: { pr: { required: true } }',
+      '        bindings:',
+      '          fix: { command: [echo, fix] }',
+      '        triggers:',
+      '          - { pr_opened: true }',
+      '          - { dependabot: true }',
+    ].join('\n'));
+    e.deps.gh.addPr(REPO, { number: 3, author: 'dependabot[bot]' });
+    const key = `pr:${REPO}:deps:3`;
+    const id = 'deps-20261122-100000-abcd';
+    await saveLedger(pdir(e), {
+      version: 1,
+      fired: { [key]: { runId: id, at: '2026-11-22T10:00:00.000Z', pipeline: 'deps', inputs: { pr: `https://${REPO}/pull/3` } } },
+      lastPoll: { [`${REPO}:deps:0`]: '2026-11-22T10:00:00.000Z', [`${REPO}:deps:1`]: '2026-11-22T10:00:00.000Z' },
+    });
+    assert.deepEqual(await loop(e), [`watch: ${key} → run ${id}`]);
   } finally {
     await e.cleanup();
   }

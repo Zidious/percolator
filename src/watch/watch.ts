@@ -11,7 +11,7 @@ import { formatTicket, parseTicket } from '../tracker/ticket.ts';
 import { writeFileAtomic } from '../util/fs.ts';
 import { validate } from '../validate.ts';
 import { runDir } from '../workspace/run-dir.ts';
-import { fire, loadLedger, saveLedger } from './ledger.ts';
+import { fire, loadLedger, markPrepared, pruneLedger, saveLedger } from './ledger.ts';
 import type { Ledger } from './ledger.ts';
 import { pollTriggers } from './poll.ts';
 import type { Firing } from './poll.ts';
@@ -52,6 +52,7 @@ export async function watchLoop(o: WatchOptions, deps: DriverDeps & { signal?: A
   const stopped = (): boolean => deps.signal?.aborted === true;
   let first = true;
   while (!stopped()) {
+    pruneLedger(ledger, now());
     for (const repoDir of o.repos) await pollRepo(repoDir, o, deps, ledger, first);
     first = false;
     await writeHeartbeat(deps, o, startedAt, now());
@@ -114,21 +115,33 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
       },
       deps,
     );
+    // from here a missing run dir means the user deleted the run: a restart must not start it again
+    await markPrepared(ledgerHome, ledger, f.key);
     await launchDriver(meta, deps);
   };
 
-  // after a restart: a recorded firing whose run was never prepared is retried with its id;
-  // one prepared but never launched is relaunched
-  const retry = new Map<string, string>();
+  // after a restart, each recorded firing of this repo once: one never prepared is started from the
+  // ledger with its id (its trigger may never ask again: a schedule tick is behind the mark); one
+  // prepared but never launched is relaunched; one prepared whose dir is gone was deleted and stays done
   if (first) {
-    for (const [key, { runId }] of Object.entries(ledger.fired)) {
-      if (keyRepo(key) !== repo) continue;
+    for (const [key, entry] of Object.entries(ledger.fired)) {
+      const { runId } = entry;
+      if (keyRepo(key) !== repo || runId === '') continue;
       const dir = runDir(deps.home, runId);
-      if (!(await fs.stat(dir).then(() => true, () => false))) {
-        retry.set(key, runId);
-        continue;
-      }
       try {
+        if (!(await fs.stat(dir).then(() => true, () => false))) {
+          if (entry.prepared || entry.pipeline === undefined) continue;
+          const f: Firing = {
+            key,
+            pipeline: entry.pipeline,
+            ...(entry.ticket !== undefined ? { ticket: entry.ticket } : {}),
+            inputs: entry.inputs ?? {},
+          };
+          await start(f, runId);
+          log(`${key} → run ${runId}`);
+          continue;
+        }
+        await markPrepared(ledgerHome, ledger, key);
         const meta = await readRunMeta(dir);
         const state = await loadState(dir);
         if (state.history.length > 0 || (await deps.hc.get(meta.driver)) !== undefined) continue;
@@ -144,7 +157,6 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
   const marks = { ...ledger.lastPoll };
   let firings: Firing[];
   try {
-    const fired = Object.fromEntries(Object.entries(ledger.fired).filter(([k]) => !retry.has(k)));
     firings = await pollTriggers({
       home: ledgerHome,
       repoRoot: repoDir,
@@ -152,7 +164,7 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
       specs,
       gh: deps.gh,
       now,
-      ledger: { version: 1, fired, lastPoll: ledger.lastPoll },
+      ledger,
       liveRunOn: async (ref) => (await liveRunOn(deps.home, formatTicket(parseTicket(ref, repo)))) !== undefined,
     });
   } catch (err) {
@@ -162,19 +174,8 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
   }
 
   for (const f of firings) {
-    const again = retry.get(f.key);
-    let r: { skipped: true } | { runId: string; error?: string };
-    if (again !== undefined) {
-      try {
-        await start(f, again);
-        r = { runId: again };
-      } catch (err) {
-        r = { runId: again, error: messageOf(err) };
-      }
-    } else {
-      const issue = f.ticket === undefined ? undefined : parseTicket(f.ticket, repo).number;
-      r = await fire(ledgerHome, ledger, f.key, (id) => start(f, id), () => newRunId({ ...(issue !== undefined ? { issue } : {}), pipeline: f.pipeline }, now), () => now);
-    }
+    const issue = f.ticket === undefined ? undefined : parseTicket(f.ticket, repo).number;
+    const r = await fire(ledgerHome, ledger, f, (id) => start(f, id), () => newRunId({ ...(issue !== undefined ? { issue } : {}), pipeline: f.pipeline }, now), () => now);
     if ('skipped' in r) continue;
     log(r.error === undefined ? `${f.key} → run ${r.runId}` : `${f.key} → run ${r.runId} failed: ${r.error}`);
   }

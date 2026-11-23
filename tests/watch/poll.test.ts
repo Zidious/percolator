@@ -47,7 +47,7 @@ function poll(o: Opts): Promise<Firing[]> {
 /** Fire every firing through the real ledger, as the watcher does. */
 async function fireAll(h: string, ledger: Ledger, firings: Firing[]): Promise<void> {
   let n = 0;
-  for (const f of firings) await fire(h, ledger, f.key, async () => {}, () => `run-${++n}`);
+  for (const f of firings) await fire(h, ledger, f, async () => {}, () => `run-${++n}`);
 }
 
 test('a schedule fires once for the latest missed tick', async (t) => {
