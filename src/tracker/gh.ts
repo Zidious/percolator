@@ -224,6 +224,9 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
       if (!j?.full_name || !j.clone_url) throw new Error(`gh api advisory fork returned no full_name or clone_url for ${ghsa}`);
       return { fullName: String(j.full_name), cloneUrl: String(j.clone_url) };
     },
+    // the watcher's lists are capped (100 issues, 100 PRs, 20 failed runs) and not paginated: they are
+    // polled every interval and gh lists the newest first, so a new one is always seen; an older one past
+    // the cap is seen only once enough newer ones are closed (or, for failed runs, superseded)
     async listIssues(repo, p) {
       noDash('issue list', 'label', p.label);
       const out = await call('issue list', [
