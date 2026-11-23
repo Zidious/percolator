@@ -16,6 +16,7 @@ import {
   boxAsks,
   boxDriver,
   historyLabel,
+  outcomeOf,
   programInitial,
   timelineRows,
 } from './model.js';
@@ -289,15 +290,15 @@ export function activeSlot(p, t, r, narrow, fill = false) {
   return attentionBox(p, t, r, kind, narrow, fill);
 }
 
-/** How a run with nothing under its active stop stands: delivered, unreadable, or its status. */
+/** How a run with nothing under its active stop stands: delivered, routed, done, unreadable, or its status. */
 function outcome(t, r) {
   if (r.status === 'completed') {
-    const pr = r.pr?.url;
+    const o = outcomeOf(r);
     return h_flex()
       .gap(8)
       .items_center()
-      .child(tag('DELIVERED', t.done))
-      .child(div().min_w(0).truncate().text_size(12.5).child(pr ? `Opened ${pr.replace(/^https:\/\/github\.com\//, '')}` : 'Done.'));
+      .child(tag(o.tag, t.done))
+      .when(o.text !== '', (el) => el.child(div().min_w(0).truncate().text_size(12.5).child(o.text)));
   }
   if (r.status === 'unreadable') {
     return h_flex().gap(8).items_center().child(tag('UNREADABLE', t.muted)).child(div().min_w(0).text_size(12.5).truncate().child(r.error));

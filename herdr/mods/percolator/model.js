@@ -62,17 +62,31 @@ export function rowState(run) {
     return loop ? { tone: 'working', text: `${step}`, round: `round ${roundOf(loop).n}/${loop.max}` } : { tone: 'working', text: `${step}` };
   }
   if (run.status === 'completed') {
-    const pr = run.pr?.url.split('/').pop();
-    if (pr) return { tone: 'dim', text: `delivered · PR #${pr}` };
-    if ((run.steps ?? []).some((s) => s.stage === 'route')) {
-      const to = (run.children ?? []).find((c) => !c.slice)?.pipeline;
-      return { tone: 'dim', text: to ? `routed → ${to}` : 'routed' };
-    }
-    // a ticketless run with no PR and no opened issues delivered nothing to a tracker (report, none)
-    return { tone: 'dim', text: run.ticket === null && (run.opened ?? []).length === 0 ? 'done' : 'delivered' };
+    const end = completedAs(run);
+    if (end.kind === 'pr') return { tone: 'dim', text: `delivered · PR #${end.pr.split('/').pop()}` };
+    if (end.kind === 'routed') return { tone: 'dim', text: end.to ? `routed → ${end.to}` : 'routed' };
+    return { tone: 'dim', text: end.kind };
   }
   if (run.status === 'unreadable') return { tone: 'muted', text: `unreadable · ${run.error}` };
   return { tone: 'muted', text: run.status };
+}
+
+/** How a completed run ended: its PR, where a router sent it, done (nothing delivered to a tracker), or delivered. */
+function completedAs(run) {
+  const pr = run.pr?.url;
+  if (pr) return { kind: 'pr', pr };
+  if ((run.steps ?? []).some((s) => s.stage === 'route')) return { kind: 'routed', to: (run.children ?? []).find((c) => !c.slice)?.pipeline };
+  // a ticketless run with no PR and no opened issues delivered nothing to a tracker (report, none)
+  return { kind: run.ticket === null && (run.opened ?? []).length === 0 ? 'done' : 'delivered' };
+}
+
+/** The outcome box of a completed run: its tag and the line beside it, from the same ending as rowState. */
+export function outcomeOf(run) {
+  const end = completedAs(run);
+  if (end.kind === 'pr') return { tag: 'DELIVERED', text: `Opened ${end.pr.replace(/^https:\/\/github\.com\//, '')}` };
+  if (end.kind === 'routed') return { tag: 'ROUTED', text: end.to ? `→ ${end.to}` : '' };
+  if (end.kind === 'done') return { tag: 'DONE', text: '' };
+  return { tag: 'DELIVERED', text: 'Done.' };
 }
 
 /** Runs in `next` that need you and did not in `prev` (or were not there); none on the first load (`prev` null). */

@@ -14,6 +14,7 @@ export declare function parseStatus(stdout: string): { ok: true; data: StatusJso
 export declare function sortRuns(runs: RunStatusJson[]): RunStatusJson[];
 export declare function visibleRuns(runs: RunStatusJson[], filter: 'active' | 'all'): RunStatusJson[];
 export declare function rowState(run: RunStatusJson): { tone: Tone; text: string; round?: string };
+export declare function outcomeOf(run: RunStatusJson): { tag: 'DELIVERED' | 'ROUTED' | 'DONE'; text: string };
 export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
 /** `feedback` is the reject feedback, or the picked pipeline for `pick`. */
 export declare function actionArgv(action: Action, run: { id: string }, feedback?: string): string[] | null;

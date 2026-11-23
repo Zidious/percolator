@@ -78,6 +78,7 @@ import {
   historyLabel,
   readFullShown,
   ticketTitle,
+  outcomeOf,
   pipelineChip,
   runLabel,
   sortRuns,
@@ -247,6 +248,17 @@ test('rowState for a completed router says where it routed; a ticketless run tha
   assert.deepEqual(rowState(dd), { tone: 'dim', text: 'done' });
   // a ticketless run whose exit opened issues delivered them
   assert.deepEqual(rowState(readable('audit')), { tone: 'dim', text: 'delivered' });
+});
+
+test("a completed run's outcome box says what rowState says: delivered, routed or done", () => {
+  assert.deepEqual(outcomeOf(readable('t3')), { tag: 'DELIVERED', text: 'Opened Zidious/percolator/pull/7' });
+  assert.deepEqual(outcomeOf({ ...readable('t3'), pr: null }), { tag: 'DELIVERED', text: 'Done.' });
+  const triage = runs().find((r) => r.id === TRIAGE) as Readable;
+  assert.deepEqual(outcomeOf(triage), { tag: 'ROUTED', text: '→ hotfix' });
+  assert.deepEqual(outcomeOf({ ...triage, children: [] }), { tag: 'ROUTED', text: '' });
+  const dd = { ...readable('dd'), status: 'completed', attention: undefined, currentStep: undefined } as Readable;
+  assert.deepEqual(outcomeOf(dd), { tag: 'DONE', text: '' });
+  assert.deepEqual(outcomeOf(readable('audit')), { tag: 'DELIVERED', text: 'Done.' });
 });
 
 test('newlyNeeding is empty on the first load', () => {
