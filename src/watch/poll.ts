@@ -59,7 +59,13 @@ export async function pollTriggers(o: {
         // the issue, so one labelled before the watcher started is still a request to answer
         for (const issue of await gh.listIssues(repo, { label: trigger.label })) {
           const key = `label:${repo}:${pipeline}:${issue.number}`;
-          if (Object.hasOwn(ledger.fired, key) || (await o.liveRunOn(issue.url))) continue;
+          if (Object.hasOwn(ledger.fired, key)) continue;
+          // a live run already answers the label: record it as seen, so the issue does not fire again
+          // once that run finishes
+          if (await o.liveRunOn(issue.url)) {
+            ledger.fired[key] = { runId: '', at: o.now.toISOString() };
+            continue;
+          }
           add({ key, pipeline, ticket: issue.url, inputs: {} });
         }
       } else if ('pr_opened' in trigger || 'dependabot' in trigger) {

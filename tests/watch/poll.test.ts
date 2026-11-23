@@ -105,7 +105,22 @@ test('a label trigger fires once per issue', async (t) => {
   await fireAll(h, ledger, first);
   const second = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z'), live });
   assert.deepEqual(second, []);
-  assert.deepEqual(Object.keys((await loadLedger(h)).fired), [`label:${REPO}:hotfix:7`]);
+  const fired = (await loadLedger(h)).fired;
+  assert.deepEqual(Object.keys(fired).sort(), [`label:${REPO}:hotfix:7`, `label:${REPO}:hotfix:8`]);
+  assert.equal(fired[`label:${REPO}:hotfix:8`]?.runId, '');
+});
+
+test('a labelled issue a live run already answers does not fire once that run finishes', async (t) => {
+  const h = await home(t);
+  const gh = new FakeGh();
+  gh.addIssue(REPO, 5, { labels: ['bug'] });
+  const specs = spec('hotfix', [{ label: 'bug' }]);
+  const ledger = emptyLedger();
+  const live = new Set([`https://${REPO}/issues/5`]);
+  assert.deepEqual(await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:00:00Z'), live }), []);
+  const after = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z'), live: new Set() });
+  assert.deepEqual(after, []);
+  assert.deepEqual(ledger.fired[`label:${REPO}:hotfix:5`], { runId: '', at: '2026-11-22T10:00:00.000Z' });
 });
 
 test('dependabot fires only for dependabot PRs', async (t) => {

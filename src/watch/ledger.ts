@@ -6,7 +6,8 @@ import { writeFileAtomic } from '../util/fs.ts';
  * One recorded firing. `pipeline`, `ticket` and `inputs` are what the run is started with, so a restarted
  * watcher can start a firing it recorded but never prepared without polling for it again; `prepared` is set
  * once `prepareRun` made the run dir, so a dir gone after that means `perc delete` and the firing is done.
- * A `runId` of '' marks a key seen on a trigger's first poll and never started (no backfill).
+ * A `runId` of '' marks a key seen and never started: on a trigger's first poll (no backfill), or a
+ * labelled issue a live run already answered.
  */
 export type Fired = {
   runId: string;
