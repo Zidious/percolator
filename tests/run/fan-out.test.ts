@@ -200,6 +200,29 @@ test('a failed slice escalates with its id', async () => {
   }
 });
 
+test('a fan-out escalates when every unfinished slice is paused, naming them', async () => {
+  const fx = await setup(THREE, 2);
+  try {
+    fx.sleeps.push(
+      async () => {
+        await fx.setStatus(sid(fx, 1), 'paused');
+        await fx.setStatus(sid(fx, 2), 'completed');
+      },
+      async () => {
+        await fx.setStatus(sid(fx, 3), 'completed');
+      },
+    );
+    assert.deepEqual(await run(fx), {
+      status: 'escalate',
+      outputs: {},
+      reason: `percolator.fan_out: slice(s) ${sid(fx, 1)} paused; answer each (perc status <id>), then perc resume ${fx.parent.runId}`,
+    });
+    assert.deepEqual(fx.drivers(), [sid(fx, 1), sid(fx, 2), sid(fx, 3)]);
+  } finally {
+    await fx.e.cleanup();
+  }
+});
+
 test('a resume continues only the unfinished slices', async () => {
   const fx = await setup(THREE);
   try {

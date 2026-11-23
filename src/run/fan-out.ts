@@ -144,6 +144,11 @@ export function fanOut(o: {
           active++;
         }
         if (children.every((c) => finished(status[c.id]) || (status[c.id] === undefined && launched.has(c.id)))) break;
+        // a paused slice waits for its owner: once none is running, nothing moves until they answer it
+        const paused = children.filter((c) => status[c.id] === 'paused').map((c) => c.id);
+        if (paused.length > 0 && !children.some((c) => status[c.id] === 'running')) {
+          return escalate(`percolator.fan_out: slice(s) ${paused.join(', ')} paused; answer each (perc status <id>), then perc resume ${runId}`);
+        }
         await sleep(o.pollMs ?? 5000);
       }
       const lines: string[] = [];
