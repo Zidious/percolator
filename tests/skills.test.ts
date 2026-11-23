@@ -93,3 +93,61 @@ test('the config skill answers what smoke agents got wrong about routes, hooks a
     'fan-out must quote the failed-slice escalation',
   );
 });
+
+test('the config skill says which pipelines triggers need and quotes the refusal', async () => {
+  const text = await fs.readFile(path.join(ROOT, 'skills', 'percolator-config', 'SKILL.md'), 'utf8');
+  const triggers = text.split('\n## Triggers')[1]?.split('\n## ')[0] ?? '';
+  for (const name of ['review-pr', 'fix-ci']) {
+    const example = triggers.split(`  ${name}:\n`)[1]?.split(/\n {2}\S/)[0] ?? '';
+    assert.ok(example.includes('ticket: none'), `the ${name} example must set ticket: none`);
+  }
+  assert.ok(
+    triggers.includes('`pr_opened`, `dependabot` and `check_failed` start runs without a ticket, so they need `ticket: none` or `optional`'),
+    'the Triggers section must say PR and check triggers need a ticketless pipeline',
+  );
+  assert.ok(
+    triggers.includes('a <kind> trigger starts runs without a ticket; set ticket: none or ticket: optional'),
+    'the Triggers section must quote the validate refusal',
+  );
+  assert.ok(triggers.includes('only within the last 7 days'), 'a schedule makes up its latest missed time only within 7 days');
+  assert.ok(
+    triggers.includes('the first poll of a `pr_opened`, `dependabot` or `check_failed` trigger records what is already open or failed'),
+    'a new watcher does not backfill PR and check triggers',
+  );
+  assert.ok(triggers.includes('A run you deleted is not started again'), 'deleted runs are not refired');
+});
+
+test('the config skill is right about outputs, names and the feature pipeline', async () => {
+  const text = await fs.readFile(path.join(ROOT, 'skills', 'percolator-config', 'SKILL.md'), 'utf8');
+  const section = (name: string) => text.split(`\n## ${name}`)[1]?.split('\n## ')[0] ?? '';
+  const pipelines = section('Pipelines');
+  assert.ok(
+    pipelines.includes('a stage left out needs none, except groom, plan, implement and review, which keep their feature outputs unless listed'),
+    'stages named like feature stages keep their contracts',
+  );
+  assert.ok(pipelines.includes('Names start with a lower-case letter'), 'pipeline names start with a letter');
+  assert.ok(pipelines.includes('at most 32 characters'), 'input names are at most 32 characters');
+  assert.ok(pipelines.includes('`all`, `before-all` and `after-all` are reserved'), 'reserved stage names');
+  assert.ok(section('Exits').includes('must be declared with `required: true`'), 'exit inputs must be required');
+  const ddAlert = pipelines.split('  dd-alert:\n')[1]?.split('\n```')[0] ?? '';
+  assert.ok(ddAlert.includes('ticket: none'), 'the dd-alert example runs without a ticket, as in the template');
+  const cannot = section('What the config cannot do');
+  assert.ok(
+    cannot.includes('a `feature` whose own `stages` leave out `groom` has no `approve-groom` gate'),
+    'redefining feature without groom drops the gate',
+  );
+  assert.ok(
+    cannot.includes('a `feature` with its own `stages` gets no default intake or exit binding'),
+    'a redefined feature binds every stage itself',
+  );
+  const routers = section('Routers');
+  assert.ok(
+    routers.includes('takes required inputs a <router|next> cannot pass; make them optional or route elsewhere'),
+    'route and next targets with required inputs are refused',
+  );
+  assert.ok(
+    routers.includes('the router ignores a `pipeline:<name>` label or `/percolator run <name>` comment'),
+    'routers ignore names they cannot run',
+  );
+  assert.ok(routers.includes('`next` may not lead back'), 'next cycles are refused');
+});

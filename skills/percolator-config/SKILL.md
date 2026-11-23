@@ -127,13 +127,13 @@ What `extends` takes from the other profile: its bindings, nodes, rules and `use
 
 ## Pipelines
 
-A profile can run more than one kind of work. Each entry under `pipelines:` is a pipeline: its own stages, inputs, outputs and exit. `feature` (intake, groom, plan, implement, review, deliver, ending in a PR) is the built-in one. Names are lower-case letters, digits and `-`, at most 24 characters.
+A profile can run more than one kind of work. Each entry under `pipelines:` is a pipeline: its own stages, inputs, outputs and exit. `feature` (intake, groom, plan, implement, review, deliver, ending in a PR) is the built-in one. Names start with a lower-case letter, then lower-case letters, digits and `-`, at most 24 characters.
 
 ```yaml
 pipelines:
   dd-alert:
     description: Diagnose a Datadog alert and write a report      # shown by perc pipelines
-    ticket: required                 # required (default), optional or none
+    ticket: none                     # required (default), optional or none: this one runs without an issue
     inputs:
       alert_url: { required: true, description: Link to the alert }
     stages: [intake, gather, diagnose, report]   # intake first; the last stage is the exit stage
@@ -146,14 +146,14 @@ pipelines:
       diagnose: { agent: claude, model: opus }
 ```
 
-- `stages` is required for every pipeline but `feature`. `intake` must come first; when it is unbound it runs `github.intake`, which reads the issue into `ticket.md`. Every other stage needs a binding under `pipelines.<p>.bindings`, except the last one when `exit:` is set (Percolator binds the exit's builtin there).
-- `outputs` lists the keys each stage must write; a stage left out needs none. The `feature` stages keep their fixed outputs (groomed_ticket, plan, summary, findings, pr_url).
-- `inputs` are named values a run gets with `perc run --input <name>=<value>` (repeat `--input` for each); `required: true` refuses a run without it, and an unknown name is refused too. Input names are lower-case letters, digits and `_`. Prompts read them as `{{input_<name>}}`.
+- `stages` is required for every pipeline but `feature`. `intake` must come first; when it is unbound it runs `github.intake`, which reads the issue into `ticket.md`. Every other stage needs a binding under `pipelines.<p>.bindings`, except the last one when `exit:` is set (Percolator binds the exit's builtin there). `all`, `before-all` and `after-all` are reserved: they cannot be stage names.
+- `outputs` lists the keys each stage must write; a stage left out needs none, except groom, plan, implement and review, which keep their feature outputs unless listed. The `feature` stages keep their fixed outputs (groomed_ticket, plan, summary, findings, pr_url).
+- `inputs` are named values a run gets with `perc run --input <name>=<value>` (repeat `--input` for each); `required: true` refuses a run without it, and an unknown name is refused too. Input names start with a lower-case letter, then lower-case letters, digits and `_`, at most 32 characters. Prompts read them as `{{input_<name>}}`.
 - `ticket: none` means the pipeline takes no issue: `perc run` with a ticket is refused, and the run starts with `perc run --pipeline <name> --input …` alone. Its intake writes the inputs as the ticket (`ticket.md`), its PR (if any) has no `Closes #N`, and its gates are answered with `perc approve`/`perc reject` or the panel, since there is no issue to comment on. A ticketless run needs the repo to have an `origin` remote. `ticket: optional` takes a ticket or not.
 - `default: true` marks the pipeline `perc run` uses without `--pipeline`; at most one per profile. Without one, `feature` is the default.
 - A stage named `review` loops back to the stage before it (3 rounds unless its binding sets `max_rounds`); any other stage loops the same way when its binding sets `max_rounds`.
 - Hooks (`before`/`after`) must name a stage of their own pipeline, or `all`.
-- The `approve-groom` gate is built into `feature` only. Another pipeline gets no gate unless you add one as a node with `kind: gate`.
+- The `approve-groom` gate is built into `feature` only, after its `groom` stage. Another pipeline gets no gate unless you add one as a node with `kind: gate`.
 
 Start one with `perc run [<ticket>] --pipeline <name> [--input key=value]…`. Without `--pipeline`, `perc run <ticket>` uses a `pipeline:<name>` label on the issue, else the latest `/percolator run <name>` comment by an approver, else the profile default. `perc pipelines` lists the pipelines a repo can use, with their ticket mode, exit and inputs. Validate each pipeline you touched: `perc validate --config <file> --profile <name> --pipeline <pipeline>` (without `--pipeline` it checks all of them).
 
@@ -167,11 +167,11 @@ The last stage of every pipeline is its exit: a builtin Percolator runs itself, 
 | `comment` | `github.comment` | `comment` (required) | a ticket: not with `ticket: none` | `comment_url` |
 | `issue` | `github.open_issues` | `issues`: one `## <title>` section per issue; none means no issues | | `issue_urls` |
 | `none` | `percolator.report` | | | nothing; outputs stay in the run dir |
-| `release` | `github.release` | `tag`, `release_notes` | input `tag`, or `tag` under `outputs` of an earlier stage | `release_url` |
+| `release` | `github.release` | `tag`, `release_notes` | input `tag`, or `tag` under `outputs` of an earlier stage; a tag that already has another release escalates | `release_url` |
 | `pr_review` | `github.pr_review` | `review` (required) | input `pr` | `review_url` |
 | `private_fork_pr` | `github.private_fork_pr` | `pr_body` (optional) | input `advisory` (a GHSA id) | `pr_url` |
 
-`perc validate` refuses an exit whose needs are missing and says what to declare. `pr_review` posts a comment review only; it never approves or requests changes. `private_fork_pr` opens the PR in the advisory's temporary private fork, without `Closes #N`.
+`perc validate` refuses an exit whose needs are missing and says what to declare; an input an exit needs (`pr`, `advisory`) must be declared with `required: true`. `pr_review` posts a comment review only; it never approves or requests changes. `private_fork_pr` opens the PR in the advisory's temporary private fork, without `Closes #N`.
 
 **Approve drafted issues before they are opened** (`approve-issue`): a gate node before the exit stage, with `when_output`, so it stops only when the stage before wrote drafts:
 
@@ -214,17 +214,17 @@ pipelines:
     fallback: feature                # optional; default the profile default (feature if the default is itself a router)
 ```
 
-The route is decided in this order: a pipeline the issue names (a `pipeline:<name>` label or an approver's `/percolator run <name>` comment), then the first `routes:` rule whose label the issue has, then the `choose` agent's pick, then `fallback:`. The decision is saved in the run dir as `route.json` before the linked run starts. A matching `routes:` rule skips the pick-pipeline gate (as does a pipeline the issue names): `confirm` only covers the agent's pick, so a ticket a rule routes never waits for a human. To have every ticket confirmed, leave `routes:` out and set `confirm: always`.
+The route is decided in this order: a pipeline the issue names (a `pipeline:<name>` label or an approver's `/percolator run <name>` comment; the router ignores a `pipeline:<name>` label or `/percolator run <name>` comment that names a `ticket: none` pipeline or one with required inputs), then the first `routes:` rule whose label the issue has, then the `choose` agent's pick, then `fallback:`. The decision is saved in the run dir as `route.json` before the linked run starts. A matching `routes:` rule skips the pick-pipeline gate (as does a pipeline the issue names): `confirm` only covers the agent's pick, so a ticket a rule routes never waits for a human. To have every ticket confirmed, leave `routes:` out and set `confirm: always`.
 
-- A router needs a ticket (`ticket: required`, the default), and every target (`routes[].to`, `choose.from`, `fallback`) must be a pipeline of the same profile that takes a ticket and is not a router.
+- A router needs a ticket (`ticket: required`, the default), and every target (`routes[].to`, `choose.from`, `fallback`) must be a pipeline of the same profile that takes a ticket, is not a router and has no required inputs (a route passes none): validate refuses one with `… takes required inputs a <router|next> cannot pass; make them optional or route elsewhere`.
 - When the run stops at the `pick-pipeline` gate, the user answers with `perc approve <run-id>` (take the agent's pick, or the fallback when it made none), `perc approve <run-id> --pipeline <name>` (a pipeline from `choose.from` instead), or `perc reject <run-id> <feedback>` (the agent picks again with the feedback, at most 3 rounds).
 - To make triage the default, set `default: true` on it (and remove it from `feature`).
 
-**Send the issues a pipeline opens through another pipeline**: on a pipeline with `exit: issue`, `next: <pipeline>` starts a linked run of that pipeline for each issue it opened, for example `next: triage`. `next:` is refused on any other exit, and its target must take a ticket.
+**Send the issues a pipeline opens through another pipeline**: on a pipeline with `exit: issue`, `next: <pipeline>` starts a linked run of that pipeline for each issue it opened, for example `next: triage`. `next:` is refused on any other exit, and its target must take a ticket and have no required inputs. `next` may not lead back to the pipeline itself, directly or through other pipelines' `next`.
 
 ## Triggers
 
-`triggers:` on a pipeline start runs of it automatically, but only while `perc watch` runs: nothing fires while it is stopped, and missed firings are not made up later (a schedule fires once for its latest missed time).
+`triggers:` on a pipeline start runs of it automatically, but only while `perc watch` runs: nothing fires while it is stopped, and missed firings are not made up later (a schedule fires once for its latest missed time, only within the last 7 days).
 
 ```yaml
 pipelines:                # only the keys triggers need; stages, bindings and exit as usual
@@ -237,19 +237,21 @@ pipelines:                # only the keys triggers need; stages, bindings and ex
     triggers:
       - { label: triage }                          # each open issue with this label
   review-pr:
+    ticket: none
     inputs: { pr: { required: true } }
     triggers:
       - { pr_opened: { not_author: [alice] } }     # or pr_opened: true; each open PR (here: not alice's), as input pr
       - { dependabot: true }                       # each open Dependabot PR, as input pr
   fix-ci:
+    ticket: none
     inputs: { branch: { required: true }, run_url: { required: true } }
     triggers:
       - { check_failed: { branch: main, workflow: ci.yml } }   # each failed workflow run on the branch
 ```
 
-What `perc validate` requires: `schedule` needs `ticket: none` or `optional`, a cron of five numeric fields (no names) and a known IANA `timezone` (default: the watching machine's), and its `inputs` must cover the pipeline's required inputs. `label` needs a pipeline that takes a ticket. `pr_opened` and `dependabot` pass input `pr`, and `check_failed` passes inputs `branch` and `run_url`, so the pipeline must declare them.
+What `perc validate` requires: `schedule` needs `ticket: none` or `optional`, a cron of five numeric fields (no names) and a known IANA `timezone` (default: the watching machine's), and its `inputs` must cover the pipeline's required inputs. `label` needs a pipeline that takes a ticket. `pr_opened`, `dependabot` and `check_failed` start runs without a ticket, so they need `ticket: none` or `optional`; validate refuses one on a pipeline that requires a ticket with `a <kind> trigger starts runs without a ticket; set ticket: none or ticket: optional`. `pr_opened` and `dependabot` pass input `pr`, and `check_failed` passes inputs `branch` and `run_url`, so the pipeline must declare them.
 
-Then tell the user to start the watcher: `perc watch --repo <dir>` (repeat `--repo` per repo; default the current directory; `--interval <s>`, default 60, at least 15) starts it in its own terminal, and `perc watch stop` ends it. Each firing starts exactly one run, even across watcher restarts.
+Then tell the user to start the watcher: `perc watch --repo <dir>` (repeat `--repo` per repo; default the current directory; `--interval <s>`, default 60, at least 15) starts it in its own terminal, and `perc watch stop` ends it. Each firing starts exactly one run, even across watcher restarts. A watcher does not backfill: the first poll of a `pr_opened`, `dependabot` or `check_failed` trigger records what is already open or failed without starting runs (a `label` trigger does fire for issues already labelled). A run you deleted is not started again by a restarted watcher.
 
 ## Fan-out
 
@@ -302,11 +304,11 @@ review → implement (max 3, continue)
 
 ## What the config cannot do
 
-- **Turn off the groom approval.** Every run of the `feature` pipeline pauses at `approve-groom` after `groom`; a rejection re-runs `groom` (at most 3 times, then escalates). It is built in, which is why `perc validate` lists it although the config never mentions it. Offer instead: `tracker.approvers` to let others approve, or answering faster with `perc approve <run-id>` or a `/percolator approve` comment on the issue. Extra gates can be added as nodes with `kind: gate`.
+- **Turn off the groom approval and keep groom.** Every run of the `feature` pipeline pauses at `approve-groom` after `groom`; a rejection re-runs `groom` (at most 3 times, then escalates). It is built in, which is why `perc validate` lists it although the config never mentions it, and no key removes it while `groom` is a stage. The gate belongs to groom: a `feature` whose own `stages` leave out `groom` has no `approve-groom` gate, and neither does a pipeline without groom (like `hotfix`). Offer instead: `tracker.approvers` to let others approve, answering faster with `perc approve <run-id>` or a `/percolator approve` comment on the issue, or a pipeline without groom for the tickets that need no grooming. Extra gates can be added as nodes with `kind: gate`.
 - **Remove or change a locked target** (`required: true` in a ground). Validation reports the lock and the file that set it; tell the user to change the ground or ask its owner.
 - **Set `effort` on codex or command.** Offer to keep the stage on claude with that effort, or to switch without it.
 - **Give one gate its own approvers.** `tracker.approvers` applies to all gates of the profile.
-- **Bind fewer stages than the pipeline lists.** `feature`'s `intake`, `groom`, `plan`, `implement`, `review`, `deliver` must all be bound; another pipeline must bind every stage it lists (intake and the exit stage can come from defaults, see "Pipelines"). To run different stages, add a pipeline instead.
+- **Bind fewer stages than the pipeline lists.** `feature`'s `intake`, `groom`, `plan`, `implement`, `review`, `deliver` must all be bound, and so must every stage of a `feature` given its own `stages`: a `feature` with its own `stages` gets no default intake or exit binding. Another pipeline must bind every stage it lists (intake and the exit stage can come from defaults, see "Pipelines"). To run different stages, add a pipeline instead.
 - **Run an agent in the exit stage.** The last stage of a pipeline is a builtin that Percolator runs itself (opening the PR, for `feature`); put agents in earlier stages or in a hook before it.
 
 ## 3. Edit the YAML
