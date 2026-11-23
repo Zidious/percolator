@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { PipelineSpec } from '../config/pipelines.ts';
 import type { Trigger } from '../config/schema.ts';
+import { ISSUE_LIST_LIMIT } from '../tracker/gh.ts';
 import type { Gh, PrRef } from '../tracker/gh.ts';
 import { latestTick, parseCron } from '../util/cron.ts';
 import type { Ledger } from './ledger.ts';
@@ -60,6 +61,8 @@ export async function pollTriggers(o: {
 
   for (const spec of Object.values(o.specs)) {
     const pipeline = spec.name;
+    // the issues every label trigger of this pipeline sees, or undefined once a list may be cut short
+    let labelled: Set<number> | undefined = (spec.triggers ?? []).some((t) => 'label' in t) ? new Set() : undefined;
     for (const trigger of spec.triggers ?? []) {
       const id = triggerId(trigger);
       const mark = `${repo}:${pipeline}:${id}`;
@@ -79,7 +82,10 @@ export async function pollTriggers(o: {
       } else if ('label' in trigger) {
         // no first-poll seeding here: labelling an issue is asking for a run, and the label stays on
         // the issue, so one labelled before the watcher started is still a request to answer
-        for (const issue of await gh.listIssues(repo, { label: trigger.label })) {
+        const issues = await gh.listIssues(repo, { label: trigger.label });
+        if (issues.length >= ISSUE_LIST_LIMIT) labelled = undefined;
+        for (const issue of issues) {
+          labelled?.add(issue.number);
           const key = `label:${repo}:${pipeline}:${issue.number}`;
           if (Object.hasOwn(ledger.fired, key)) continue;
           // a live run already answers the label: record it as seen, so the issue does not fire again
@@ -108,6 +114,15 @@ export async function pollTriggers(o: {
           seen({ key: `check:${repo}:${pipeline}:${attempt}`, pipeline, inputs: { branch, run_url: run.url } });
         }
         ledger.lastPoll[mark] = o.now.toISOString();
+      }
+    }
+    // an issue no label trigger sees any more (label removed, or issue closed) is re-armed, so labelling it
+    // again asks for a new run; a firing recorded but never prepared stays for a restarted watcher to start
+    if (labelled !== undefined) {
+      const prefix = `label:${repo}:${pipeline}:`;
+      for (const [key, f] of Object.entries(ledger.fired)) {
+        if (!key.startsWith(prefix) || labelled.has(Number(key.slice(prefix.length)))) continue;
+        if (f.runId === '' || f.prepared === true) delete ledger.fired[key];
       }
     }
   }

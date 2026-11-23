@@ -63,6 +63,9 @@ export class GhError extends Error {
   }
 }
 
+/** The most issues `listIssues` returns; a full list may have more past it. */
+export const ISSUE_LIST_LIMIT = 100;
+
 const GH_ENV = { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' };
 const GHSA = /^GHSA(-[23456789cfghjmpqrvwx]{4}){3}$/;
 
@@ -231,7 +234,7 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
     async listIssues(repo, p) {
       noDash('issue list', 'label', p.label);
       const out = await call('issue list', [
-        'issue', 'list', '--repo', repo, '--label', p.label, '--state', 'open', '--json', 'number,url', '--limit', '100',
+        'issue', 'list', '--repo', repo, '--label', p.label, '--state', 'open', '--json', 'number,url', '--limit', String(ISSUE_LIST_LIMIT),
       ]);
       return list(parseJson('issue list', out)).map((i) => ({ number: Number(i['number']), url: String(i['url'] ?? '') }));
     },

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { Trigger } from '../../src/config/schema.ts';
 import type { PipelineSpec } from '../../src/config/pipelines.ts';
-import { fire, loadLedger } from '../../src/watch/ledger.ts';
+import { fire, loadLedger, markPrepared } from '../../src/watch/ledger.ts';
 import type { Ledger } from '../../src/watch/ledger.ts';
 import { pollTriggers, triggerId } from '../../src/watch/poll.ts';
 import type { Firing } from '../../src/watch/poll.ts';
@@ -154,6 +154,59 @@ test('a labelled issue a live run already answers does not fire once that run fi
   const after = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z'), live: new Set() });
   assert.deepEqual(after, []);
   assert.deepEqual(ledger.fired[`label:${REPO}:hotfix:5`], { runId: '', at: '2026-11-22T10:00:00.000Z' });
+});
+
+test('removing the label re-arms an issue, so labelling it again starts a new run', async (t) => {
+  const h = await home(t);
+  const gh = new FakeGh();
+  const issue = gh.addIssue(REPO, 7, { labels: ['bug'] });
+  const specs = spec('hotfix', [{ label: 'bug' }]);
+  const ledger = emptyLedger();
+  const key = `label:${REPO}:hotfix:7`;
+  const first = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:00:00Z') });
+  await fireAll(h, ledger, first);
+  await markPrepared(h, ledger, key);
+  issue.labels = [];
+  assert.deepEqual(await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z') }), []);
+  assert.equal(Object.hasOwn(ledger.fired, key), false);
+  issue.labels = ['bug'];
+  const again = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:02:00Z') });
+  assert.deepEqual(again.map((f) => f.key), [key]);
+});
+
+test("an issue one label trigger fired stays fired while another label trigger of the pipeline polls", async (t) => {
+  const h = await home(t);
+  const gh = new FakeGh();
+  gh.addIssue(REPO, 7, { labels: ['bug'] });
+  const specs = spec('hotfix', [{ label: 'bug' }, { label: 'urgent' }]);
+  const ledger = emptyLedger();
+  await fireAll(h, ledger, await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:00:00Z') }));
+  await markPrepared(h, ledger, `label:${REPO}:hotfix:7`);
+  assert.deepEqual(await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z') }), []);
+  assert.equal(Object.hasOwn(ledger.fired, `label:${REPO}:hotfix:7`), true);
+});
+
+test('a label firing never prepared is kept for a restarted watcher to start, even without its label', async (t) => {
+  const h = await home(t);
+  const gh = new FakeGh();
+  const issue = gh.addIssue(REPO, 7, { labels: ['bug'] });
+  const specs = spec('hotfix', [{ label: 'bug' }]);
+  const ledger = emptyLedger();
+  await fireAll(h, ledger, await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:00:00Z') }));
+  issue.labels = [];
+  await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z') });
+  assert.equal(Object.hasOwn(ledger.fired, `label:${REPO}:hotfix:7`), true);
+});
+
+test('a full page of labelled issues re-arms nothing, since more may be past it', async (t) => {
+  const h = await home(t);
+  const gh = new FakeGh();
+  for (let n = 1; n <= 100; n++) gh.addIssue(REPO, n, { labels: ['bug'] });
+  const specs = spec('hotfix', [{ label: 'bug' }]);
+  const ledger = emptyLedger();
+  ledger.fired[`label:${REPO}:hotfix:500`] = { runId: '', at: '2026-11-22T09:00:00.000Z' };
+  await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:00:00Z') });
+  assert.equal(Object.hasOwn(ledger.fired, `label:${REPO}:hotfix:500`), true);
 });
 
 test('dependabot fires only for dependabot PRs', async (t) => {
