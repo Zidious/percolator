@@ -169,6 +169,7 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
       gh: deps.gh,
       now,
       ledger,
+      first,
       liveRunOn: async (ref) => (await liveRunOn(deps.home, formatTicket(parseTicket(ref, repo)))) !== undefined,
     });
   } catch (err) {

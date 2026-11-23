@@ -34,7 +34,7 @@ function polled(pipeline: string): Ledger {
   return { version: 1, fired: {}, lastPoll: { [`${REPO}:${pipeline}:0`]: '2026-11-22T09:00:00.000Z' } };
 }
 
-type Opts = { h: string; gh: FakeGh; specs: Record<string, PipelineSpec>; ledger: Ledger; now: Date; live?: Set<string> };
+type Opts = { h: string; gh: FakeGh; specs: Record<string, PipelineSpec>; ledger: Ledger; now: Date; live?: Set<string>; first?: boolean };
 
 function poll(o: Opts): Promise<Firing[]> {
   return pollTriggers({
@@ -46,6 +46,7 @@ function poll(o: Opts): Promise<Firing[]> {
     now: o.now,
     ledger: o.ledger,
     liveRunOn: async (ref) => o.live?.has(ref) ?? false,
+    ...(o.first !== undefined ? { first: o.first } : {}),
   });
 }
 
@@ -176,4 +177,44 @@ test('the first poll of a check_failed trigger records every current failure as 
   const next = gh.addFailedRun(REPO, { branch: 'main', workflowName: 'CI' });
   const later = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z') });
   assert.deepEqual(later.map((f) => f.key), [`check:${REPO}:ci-fix:${next.databaseId}`]);
+});
+
+test("a restarted watcher's first poll records PRs and failures that appeared while it was stopped as seen", async (t) => {
+  const h = await home(t);
+  const gh = new FakeGh();
+  gh.addPr(REPO, { number: 1, author: 'alice' });
+  gh.addPr(REPO, { number: 2, author: 'dependabot[bot]' });
+  const run = gh.addFailedRun(REPO, { branch: 'main', workflowName: 'CI' });
+  const specs = {
+    ...spec('review', [{ pr_opened: true }]),
+    ...spec('deps', [{ dependabot: true }]),
+    ...spec('ci-fix', [{ check_failed: { branch: 'main' } }]),
+  };
+  // every trigger was polled before the watcher stopped
+  const before = '2026-11-22T09:00:00.000Z';
+  const ledger: Ledger = {
+    version: 1,
+    fired: {},
+    lastPoll: { [`${REPO}:review:0`]: before, [`${REPO}:deps:0`]: before, [`${REPO}:ci-fix:0`]: before },
+  };
+  const now = new Date('2026-11-22T10:00:00Z');
+  assert.deepEqual(await poll({ h, gh, specs, ledger, now, first: true }), []);
+  assert.deepEqual(ledger.fired, {
+    [`pr:${REPO}:review:1`]: { runId: '', at: now.toISOString() },
+    [`pr:${REPO}:review:2`]: { runId: '', at: now.toISOString() },
+    [`pr:${REPO}:deps:2`]: { runId: '', at: now.toISOString() },
+    [`check:${REPO}:ci-fix:${run.databaseId}`]: { runId: '', at: now.toISOString() },
+  });
+  gh.addPr(REPO, { number: 3, author: 'dependabot[bot]' });
+  const later = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z'), first: false });
+  assert.deepEqual(later.map((f) => f.key), [`pr:${REPO}:review:3`, `pr:${REPO}:deps:3`]);
+});
+
+test("a restarted watcher's first poll still fires a labelled issue", async (t) => {
+  const h = await home(t);
+  const gh = new FakeGh();
+  gh.addIssue(REPO, 7, { labels: ['hotfix'] });
+  const specs = spec('hotfix', [{ label: 'hotfix' }]);
+  const firings = await poll({ h, gh, specs, ledger: polled('hotfix'), now: new Date('2026-11-22T10:00:00Z'), first: true });
+  assert.deepEqual(firings.map((f) => f.key), [`label:${REPO}:hotfix:7`]);
 });

@@ -111,8 +111,10 @@ test('the config skill says which pipelines triggers need and quotes the refusal
   );
   assert.ok(triggers.includes('only within the last 7 days'), 'a schedule makes up its latest missed time only within 7 days');
   assert.ok(
-    triggers.includes('the first poll of a `pr_opened`, `dependabot` or `check_failed` trigger records what is already open or failed'),
-    'a new watcher does not backfill PR and check triggers',
+    triggers.includes(
+      'each time it starts, its first poll of a `pr_opened`, `dependabot` or `check_failed` trigger records what is already open or failed (including what appeared while it was stopped)',
+    ),
+    'a new or restarted watcher does not backfill PR and check triggers',
   );
   assert.ok(triggers.includes('A run you deleted is not started again'), 'deleted runs are not refired');
 });

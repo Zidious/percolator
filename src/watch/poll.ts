@@ -11,9 +11,11 @@ const DEPENDABOT = new Set(['dependabot[bot]', 'app/dependabot']);
 /**
  * What the triggers of `specs` ask to start now in `repo` (host/owner/repo). Keys already in
  * `ledger.fired` are left out, so a caller firing each result through `fire` starts it once.
- * Schedule, PR and check triggers move `ledger.lastPoll` to `now` in memory (the caller saves it); one
- * with no mark yet only seeds it (and a PR or check trigger records what it sees in `ledger.fired`), so a
- * new or long-stopped watcher never backfills.
+ * Schedule, PR and check triggers move `ledger.lastPoll` to `now` in memory (the caller saves it); a
+ * schedule with no mark yet only seeds it, so a new watcher never backfills. On `first` (the first poll
+ * since the watcher started) and on a trigger's first poll ever, a PR or check trigger records every
+ * PR or failure it sees in `ledger.fired` as seen instead of firing it, so nothing that appeared while
+ * the watcher was stopped is made up later.
  */
 export async function pollTriggers(o: {
   home: string;
@@ -24,6 +26,8 @@ export async function pollTriggers(o: {
   now: Date;
   ledger: Ledger;
   liveRunOn: (ticketRef: string) => Promise<boolean>;
+  /** the first poll since the watcher started */
+  first?: boolean;
 }): Promise<Firing[]> {
   const { repo, gh, ledger } = o;
   const out: Firing[] = [];
@@ -37,9 +41,9 @@ export async function pollTriggers(o: {
     const pipeline = spec.name;
     for (const [i, trigger] of (spec.triggers ?? []).entries()) {
       const mark = `${repo}:${pipeline}:${i}`;
-      const firstPoll = ledger.lastPoll[mark] === undefined;
-      // a PR or check trigger's first poll records what is already there as seen (runId ''), so a new
-      // watcher starts nothing for PRs opened or checks failed before it ran
+      const firstPoll = o.first === true || ledger.lastPoll[mark] === undefined;
+      // a PR or check trigger's first poll (ever, or since the watcher started) records what is already
+      // there as seen (runId ''), so a watcher starts nothing for PRs opened or checks failed before it ran
       const seen = (f: Firing): void => {
         if (!firstPoll) return add(f);
         if (!Object.hasOwn(ledger.fired, f.key)) ledger.fired[f.key] = { runId: '', at: o.now.toISOString() };

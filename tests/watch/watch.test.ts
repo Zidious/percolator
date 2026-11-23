@@ -255,6 +255,38 @@ test('a recorded firing two triggers ask for is started once after a restart', a
   }
 });
 
+test('a restarted watcher starts nothing for a PR opened while it was stopped, and fires a later one', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig([
+      '    pipelines:',
+      '      review-pr:',
+      '        stages: [intake, fix, deliver]',
+      '        exit: pr',
+      '        ticket: none',
+      '        inputs: { pr: { required: true } }',
+      '        bindings:',
+      '          fix: { command: [echo, fix] }',
+      '        triggers:',
+      '          - { pr_opened: true }',
+    ].join('\n'));
+    // the watcher polled this trigger before it stopped; PR 3 was opened while it was stopped
+    await saveLedger(pdir(e), { version: 1, fired: {}, lastPoll: { [`${REPO}:review-pr:0`]: '2026-11-22T09:00:00.000Z' } });
+    e.deps.gh.addPr(REPO, { number: 3, author: 'alice' });
+    const lines = await loop(e, {
+      polls: 2,
+      onSleep: (n) => {
+        if (n === 1) e.deps.gh.addPr(REPO, { number: 4, author: 'bob' });
+      },
+    });
+    assert.equal(lines.length, 1);
+    assert.match(lines[0]!, new RegExp(`^watch: pr:${REPO}:review-pr:4 → run review-pr-`));
+    assert.equal((await loadLedger(pdir(e))).fired[`pr:${REPO}:review-pr:3`]?.runId, '');
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('a restarted watcher relaunches a run it prepared but never launched', async () => {
   const e = await setupRunEnv();
   try {
