@@ -54,7 +54,7 @@ The diagram shows the example config mid-run: intake and groom are done, and the
 |---|---|---|
 | **intake** | builtin `github.intake` | The issue is read and the run has a ticket. |
 | **groom … review** | an `agent`, `script` or `builtin` node, or a list of them | The step wrote `done.json` and its `outputs/<key>.md`. |
-| **approve-groom** | `gate`, built in and locked, always after groom (in `feature` only) | You approve, locally or with a `/percolator approve` comment on the issue. The gate keeps one comment on the issue and edits it each round; rejected rounds stay in a collapsed history, and approval adds "Approved by @you". A rejection re-runs groom, 3 times at most. |
+| **approve-groom** | `gate`, built in and locked, after groom (in `feature` only; a `feature` whose own `stages` leave out groom has none) | You approve, locally or with a `/percolator approve` comment on the issue. The gate keeps one comment on the issue and edits it each round; rejected rounds stay in a collapsed history, and approval adds "Approved by @you". A rejection re-runs groom, 3 times at most. |
 | **deliver** | builtin `github.open_pr` | The branch is pushed and the PR is open. Its body is `Closes #N`, followed by the `pr_body` output if a step wrote one. |
 
 ## The engine
@@ -97,8 +97,8 @@ The Herdr app adds a space per run, and the Percolator panel adds a live board o
 
 - **Start a run.** **+ New run** in the title bar opens the start picker, and a finished run offers **▸ Run next…** on its ticket (see [Starting a run](#starting-a-run)).
 - **Pipelines.** A run on a pipeline other than `feature` shows a chip with the pipeline's name after its title, and its spine draws that pipeline's own stages.
-- **Linked runs.** A run that another one started shows `↳ from #42` under its title (the parent's ticket, or the parent's pipeline when the ticket is the run's own or there is none), and a run that started others shows `→ 3 runs` (a fan-out counts its slices that have not started yet too). Clicking the line selects that run (the parent, or the first run it started).
-- **Slices.** Under a fan-out parent's fan-out stage, each slice has a row: its status dot, `<i>.`, its title, the step it is at (`done`, `not started` or the current step) and a `PR ↗` link once it has one. Clicking a row selects that slice's run.
+- **Linked runs.** A run that another one started shows `↳ from #42` under its title (the parent's ticket, or the parent's pipeline when the ticket is the run's own or there is none); a fan-out's slice shows `↳ slice 2 of #42: <title>` instead (`↳ slice 2 of <pipeline>: <title>` when the parent has no ticket). A run that started others shows `→ 3 runs`; a fan-out parent shows `→ 4 slices · 2 started` while some slices have not started, then `→ 4 slices`. Clicking the line selects that run (the parent, or the first run it started that is listed). On the board, a router's completed run has the state line `routed → <pipeline>`, and a completed ticketless run on `exit: none` the line `done`.
+- **Slices.** Under a fan-out parent's fan-out stage, each slice has a row: its status dot, `<i>.`, its title, the step it is at (`done`, `not started` or the current step) and a `PR ↗` link once it has one. Clicking a row selects that slice's run; a slice that has not started has no run to select yet.
 - **Pick a pipeline.** At a router's `pick-pipeline` gate, the message names the agent's suggestion when it made one, and the panel shows one **Run `<name>`** button per pipeline the router may pick; each runs `perc approve <id> --pipeline <name>`. **Reject** has the agent pick again.
 - **The watcher.** The title bar shows whether `perc watch` runs (`watching 2 repos` or `not watching`). **Stop** runs `perc watch stop`; **Start watcher** runs `perc watch` with a `--repo` for every repo earlier runs used, so it is not offered before the first run.
 
@@ -252,7 +252,7 @@ profiles:
     bindings: { … }                                    # as in the example config
 ```
 
-Profiles are checked in order; the first whose `match.remote` or `match.path` fits the repo wins, and `--profile <name>` picks one by hand. Each profile must bind every stage of each of its pipelines (for `feature`, all six), itself, through a `graph` ground or through the profile it extends. Bindings and nodes written at the top of a profile, as in the `personal` and `acme` examples, belong to `feature`; when one profile sets the same stage or node in both places, `pipelines.feature` wins.
+Profiles are checked in order; the first whose `match.remote` or `match.path` fits the repo wins, and `--profile <name>` picks one by hand. Each profile must bind every stage of each of its pipelines (for `feature`, all six, or every stage it lists), itself, through a `graph` ground or through the profile it extends. Bindings and nodes written at the top of a profile, as in the `personal` and `acme` examples, belong to `feature`; when one profile sets the same stage or node in both places, `pipelines.feature` wins.
 
 ```yaml
 profiles:
@@ -341,9 +341,9 @@ profiles:
 
 | Key | What it does |
 |---|---|
-| `stages` | The stages in order. `intake` comes first and the last one is the exit stage. Required for every pipeline but `feature`, whose stages are fixed. |
-| `bindings` / `nodes` | What runs each stage, and the pipeline's hooks and gates, as for `feature`. `intake` left unbound runs `github.intake`; the exit stage left unbound runs the builtin of `exit`. The exit stage is never an agent. |
-| `outputs` | Per stage, the output keys it must write (`outputs/<key>.md`). A stage left out needs none; `feature`'s stages keep their fixed outputs, and the exit stage writes its exit's output. |
+| `stages` | The stages in order. `intake` comes first and the last one is the exit stage. Required for every pipeline but `feature`, which runs its six stages unless it lists its own; a `feature` whose `stages` leave out groom has no `approve-groom` gate. |
+| `bindings` / `nodes` | What runs each stage, and the pipeline's hooks and gates, as for `feature`. On every pipeline but `feature`, `intake` left unbound runs `github.intake` and the exit stage left unbound runs the builtin of `exit`; `feature` binds every stage itself, even with its own `stages`. The exit stage is never an agent. |
+| `outputs` | Per stage, the output keys it must write (`outputs/<key>.md`). A stage left out needs none, except groom, plan, implement and review, which keep their feature outputs unless listed; `feature`'s stages keep their fixed outputs, and the exit stage writes its exit's output. |
 | `exit` | How the run ends: `pr`, `comment`, `issue`, `none`, `release`, `pr_review` or `private_fork_pr` (see [Exits](#exits)). Optional when the last stage is bound to an exit builtin; when both are set they must agree. |
 | `inputs` | Named values a run takes with `--input <name>=<value>`; `required: true` refuses a run without it, `description` is the hint. Prompts read them as `{{input_<name>}}`. |
 | `ticket` | `required` (default), `optional` or `none`. |
@@ -356,10 +356,10 @@ profiles:
 | `rules` / `use` | Rules and mappings for this pipeline only. |
 | `required` | Locks the pipeline's own keys (all but `bindings`, `nodes`, `rules` and `use`): later layers may only restate them. |
 
-Pipeline names are lower-case letters, digits and `-` (at most 24 characters); input names are lower-case letters, digits and `_`.
+Pipeline names start with a lower-case letter, then lower-case letters, digits and `-` (at most 24 characters); input names start with a lower-case letter, then lower-case letters, digits and `_` (at most 32 characters). `all`, `before-all` and `after-all` are reserved and cannot be stage names.
 
 - **Loops.** A stage named `review` loops back to the stage before it, 3 rounds unless its binding sets `max_rounds`; any other stage loops the same way when its binding sets `max_rounds`.
-- **Gates.** `approve-groom` belongs to `feature`. Another pipeline has no built-in gate; add one as a node with `kind: gate` where you want to decide.
+- **Gates.** `approve-groom` belongs to `feature`, after its groom stage. Another pipeline has no built-in gate; add one as a node with `kind: gate` where you want to decide.
 - **Outputs.** Each step's outputs reach the steps after it as inputs, so a stage reads what the stages before it wrote.
 - **Tickets.** A pipeline with `ticket: none` refuses a ticket and runs on its inputs alone: its intake writes them as the ticket (`ticket.md`, an `## Inputs` list), so later stages read them as they would read an issue. The run id, branch and Herdr space take the pipeline's name where a ticket run has the issue number (`dd-alert-20261122-…`), a PR it opens has no `Closes #N`, and its gates are answered with `perc approve`/`perc reject` or the panel, since there is no issue to comment on. It names its repository from the clone's `origin`. With `ticket: optional`, a ticket is fetched when one is given.
 
@@ -370,7 +370,7 @@ feature (default)  ticket required  exit pr  inputs -
 hotfix  ticket required  exit pr  inputs severity
 ```
 
-With `--json` it is the contract the Herdr panel's start picker reads (`schema: 1`): each pipeline's `name`, `default`, `router`, `ticket`, `inputs` (name, required, description), `exit`, `description`, and the `steps` and `loops` its preview draws; a pipeline that fails validation is listed with its `error` instead.
+With `--json` it is the contract the Herdr panel's start picker reads (`schema: 1`): the `repo` and `profile` it read, then each pipeline's `name`, `default`, `router`, `ticket`, `inputs` (name, required, description), `exit` (one of the kinds under [Exits](#exits), or `route` for a router), `description`, and the `steps` and `loops` its preview draws; a pipeline that fails validation is listed with its `error` instead.
 
 ### Exits
 
@@ -382,11 +382,11 @@ The last stage of a pipeline is its exit: a builtin that Percolator runs itself,
 | `comment` | `github.comment` | Posts the `comment` output on the run's issue. | A ticket (`ticket: none` is refused); a stage before it writes `comment.md`, else the step escalates | `comment_url` | `<!-- percolator:exit run=<id> step=<step> -->` in the comment, which it then edits |
 | `issue` | `github.open_issues` | Opens one issue per `## <title>` section of the `issues` output, in the run's repo. With no `issues` output, or no sections, it opens nothing and the run ends done. | Nothing | `issue_urls` (one URL per line) | `<!-- percolator:issue run=<id> n=<i> -->` in each issue, and `created.json` in the step dir |
 | `none` | `percolator.report` | Nothing: the run ends, and its outputs stay in the run dir until `perc delete` removes them. | Nothing | Nothing | Nothing to find |
-| `release` | `github.release` | Pushes the run branch and publishes a GitHub release of its head commit. The tag is the `tag` output, else input `tag`; the notes are the `release_notes` output. | Input `tag`, or `tag` under `outputs` of an earlier stage | `release_url` | The release with that tag |
+| `release` | `github.release` | Pushes the run branch and publishes a GitHub release of its head commit. The tag is the `tag` output, else input `tag`; the notes are the `release_notes` output. | Input `tag`, or `tag` under `outputs` of an earlier stage | `release_url` | `<!-- percolator:release run=<id> -->` in the release notes of the release with that tag; a tag that another release already has escalates with `github.release: tag "<t>" already has a release (<url>); pick another tag and resume` |
 | `pr_review` | `github.pr_review` | Posts the `review` output on the pull request in input `pr`, as a comment review: never approve or request changes. | Input `pr` (`#123`, `owner/repo#123` or a pull request URL); a stage before it writes `review.md` | `review_url` | `<!-- percolator:review run=<id> -->` in the review |
 | `private_fork_pr` | `github.private_fork_pr` | Creates the temporary private fork of the security advisory in input `advisory`, pushes the run branch there and opens the PR in it, with the `pr_body` output and no `Closes #N`, so the fix stays private until the advisory is published. | Input `advisory`, a GHSA id (`GHSA-xxxx-xxxx-xxxx`) | `pr_url` | `fork.json` in the step dir, then the open PR for the run branch in the fork |
 
-`perc validate` refuses an exit whose needs the pipeline does not declare, for example:
+`perc validate` refuses an exit whose needs the pipeline does not declare, or declares without `required: true`, for example:
 
 ```text
 exit pr_review needs input "pr" (the pull request to review); declare it under pipelines.<name>.inputs
@@ -414,7 +414,7 @@ pipelines:
         on_fail: { back_to: diagnose, max_rounds: 3 }   # a rejection redrafts
 ```
 
-Leave `issues` out of `outputs`: an output listed there is required, so the gate would always stop. `next` is only for an `issue` exit, and it must name a pipeline that takes a ticket. Each new issue gets its own linked run, recorded in the exit's `created.json` before it starts, so a resume starts only the ones still missing.
+Leave `issues` out of `outputs`: an output listed there is required, so the gate would always stop. `next` is only for an `issue` exit, and it must name a pipeline that takes a ticket and has no required inputs (a `next` run gets none); a `next` that leads back to its own pipeline, directly or through other pipelines' `next`, is refused. Each new issue gets its own linked run, recorded in the exit's `created.json` before it starts, so a resume starts only the ones still missing.
 
 ### Starting a run
 
@@ -448,7 +448,7 @@ A router is a pipeline that reads the ticket and hands it to another pipeline. S
 
 The route step decides in this order and stops at the first answer:
 
-1. **Named.** The issue names a pipeline: a `pipeline:<name>` label, or an approver's `/percolator run <name>` comment. (Naming one with `perc run --pipeline` skips the router altogether.)
+1. **Named.** The issue names a pipeline: a `pipeline:<name>` label, or an approver's `/percolator run <name>` comment. A name the router cannot hand the ticket to (a `ticket: none` pipeline, or one with required inputs) is ignored, and the next step decides. (Naming one with `perc run --pipeline` skips the router altogether.)
 2. **Rule.** The first `routes` rule whose label the issue has.
 3. **Agent.** The `choose` agent writes `pick.md`: `pipeline: <name>`, `unsure: true|false`, then its reasons. A pick outside `from` counts as unsure. A sure pick goes ahead on its own; an unsure one (or every one, with `confirm: always`) waits at the `pick-pipeline` gate.
 4. **Fallback.** `fallback`, when the agent made no valid pick and you approved without naming one, or when the router has no `choose`.
@@ -463,7 +463,7 @@ At the `pick-pipeline` gate:
 | `perc approve <id> --pipeline <name>` | `<name>` instead; it must be one of `choose.from`. `--pipeline` answers only a `pick-pipeline` gate. The panel's **Run `<name>`** buttons run this. |
 | `perc reject <id> "<feedback>"` | The agent picks again with your feedback, 3 rounds at most. |
 
-`perc validate` checks the routes across the profile: every `to`, `choose.from` entry and `fallback` must be a pipeline of the profile that takes a ticket and is not itself a router, and the router needs a ticket:
+`perc validate` checks the routes across the profile: every `to`, `choose.from` entry and `fallback` must be a pipeline of the profile that takes a ticket, is not itself a router and has no required inputs (a route passes none: `… takes required inputs a <router|next> cannot pass; make them optional or route elsewhere`), and the router needs a ticket:
 
 ```text
 router "triage" routes tickets, but pipeline "dd-alert" has ticket: none; route to a pipeline that takes a ticket
@@ -471,7 +471,7 @@ router "triage" routes tickets, but pipeline "dd-alert" has ticket: none; route 
 
 ### Triggers and perc watch
 
-`triggers` on a pipeline start runs of it without you. They fire only while `perc watch` runs: it polls each repo through `gh` and starts one run per firing, exactly as `perc run` would. Nothing fires while it is stopped, and nothing it missed is made up later, except that a schedule fires once for its latest missed time.
+`triggers` on a pipeline start runs of it without you. They fire only while `perc watch` runs: it polls each repo through `gh` and starts one run per firing, exactly as `perc run` would. Nothing fires while it is stopped, and nothing it missed is made up later, except that a schedule fires once for its latest missed time within the last 7 days.
 
 ```yaml
 pipelines:                # only the keys triggers need; stages, bindings and exit as usual
@@ -500,9 +500,15 @@ pipelines:                # only the keys triggers need; stages, bindings and ex
 |---|---|---|---|
 | `schedule: "<cron>"` | On each matching minute: five fields (minute, hour, day of month, month, day of week; `*`, numbers, ranges, lists, `/steps`; 0 or 7 is Sunday), in `timezone` (an IANA name; default the machine's). | No ticket; the trigger's `inputs`. | `ticket: none` or `optional`; the `inputs` cover its required inputs. |
 | `label: <name>` | Once for each open issue with the label, unless the issue already has a live run. | The issue as its ticket. | A ticket (`required` or `optional`). |
-| `pr_opened: true` or `{ not_author: [<login>…] }` | On each open pull request (skipping those authors). | Input `pr`: the PR's URL. | Input `pr`. |
-| `dependabot: true` | On each open Dependabot pull request. | Input `pr`. | Input `pr`. |
-| `check_failed: { branch, workflow? }` | On each failed workflow run on the branch (of that workflow file only, when set). | Inputs `branch` and `run_url`. | Inputs `branch` and `run_url`. |
+| `pr_opened: true` or `{ not_author: [<login>…] }` | On each open pull request (skipping those authors). | Input `pr`: the PR's URL. | `ticket: none` or `optional`, and input `pr`. |
+| `dependabot: true` | On each open Dependabot pull request. | Input `pr`. | `ticket: none` or `optional`, and input `pr`. |
+| `check_failed: { branch, workflow? }` | On each failed workflow run on the branch (of that workflow file only, when set). | Inputs `branch` and `run_url`. | `ticket: none` or `optional`, and inputs `branch` and `run_url`. |
+
+`perc validate` refuses a pull request or check trigger on a pipeline that needs a ticket, for example:
+
+```text
+~/.percolator/config.yaml:31: profiles.default.pipelines.review-pr.triggers.0: a pr_opened trigger starts runs without a ticket; set ticket: none or ticket: optional
+```
 
 ```sh
 perc watch --repo ~/src/app --repo ~/src/api   # default: the current directory; --interval <s>, default 60, at least 15
@@ -511,7 +517,7 @@ perc watch stop
 
 `perc watch` starts the watcher in its own hc terminal, `percolator-watch` (labelled `percolator.role=watcher`), and returns; `--foreground` runs it in yours. Each poll validates each repo's config (a broken one is logged and skipped until it is fixed) and writes a heartbeat to `~/.percolator/watch/watch.json`. `perc watch stop` ends that terminal. A second `perc watch` while one runs is refused. `perc status --json` reports the watcher under `watcher`: alive while its process runs on this machine and its heartbeat is fresh. The Herdr panel shows it, with a Start watcher / Stop button (see [Herdr](#herdr)).
 
-Every firing has a key (the issue, PR, workflow run or schedule time it is for) and goes in the firing ledger, `~/.percolator/watch/fired.json`, with its run id **before** the run starts. So each firing starts exactly one run, even when the watcher is restarted; one that crashed before its run started is retried with the same id. The first time a schedule is polled, it only records the time, so a new watcher does not start runs for times before it began. `perc run` never goes through the watcher. A schedule fires once per watched repo whose config has it.
+Every firing has a key (the issue, PR, workflow run or schedule time it is for) and goes in the firing ledger, `~/.percolator/watch/fired.json`, with its run id **before** the run starts. So each firing starts exactly one run, even when the watcher is restarted; one that crashed before its run started is retried with the same id. The first time a schedule is polled, it only records the time, so a new watcher does not start runs for times before it began; likewise the first poll of a `pr_opened`, `dependabot` or `check_failed` trigger records the pull requests and failed runs already there without starting runs (a `label` trigger does start runs for issues labelled before the watcher began). A firing whose run you deleted with `perc delete` is not started again. `perc run` never goes through the watcher. A schedule fires once per watched repo whose config has it.
 
 ### Fan-out
 
@@ -615,10 +621,11 @@ Anything that needs you shows up in `perc status`, and in any [integration](#int
 |---|---|---|
 | **your turn · approve-groom** | The groomed ticket is ready. | `perc approve <id>` or `perc reject <id> "what to change"`, or an approver replies `/percolator approve` or `/percolator reject <what to change>` on the issue |
 | **your turn · approve-issue** (any gate of a ticketless run) | A gate of a run without a ticket: "approve or reject here (no issue to comment on)". | `perc approve <id>` or `perc reject <id> "what to change"`, or the panel's buttons; there is no issue to reply on |
-| **your turn · pick-pipeline** | A router's agent is unsure of its pick (or the router has `confirm: always`): "pick the pipeline for this ticket (the agent suggests hotfix)". | `perc approve <id>` to take the pick, `perc approve <id> --pipeline <name>` to pick another (the panel's **Run `<name>`** buttons), or `perc reject <id> "why"` to have the agent pick again (see [Triage](#triage)) |
+| **your turn · pick-pipeline** | A router's agent is unsure of its pick (or the router has `confirm: always`): "pick the pipeline for this ticket (the agent suggests hotfix)". | `perc approve <id>` to take the pick, `perc approve <id> --pipeline <name>` to pick another (`perc status <id>` lists one such line per pipeline it may pick; the panel's **Run `<name>`** buttons), or `perc reject <id> "why"` to have the agent pick again (see [Triage](#triage)) |
 | **paused · implement** (a fan-out step) | A slice failed, or the stage before it wrote no slices. | Fix the slices output and `perc resume <id>`; for a failed slice, `perc delete <id>-s<i>`, then `perc resume <id>` starts it again (see [Fan-out](#fan-out)) |
 | **paused · review at cap** | A back-edge used all its rounds. | `perc resume <id>` grants one more round |
 | **paused · plan** | A step escalated: it timed out, or twice finished without the outputs its stage needs. | Read its step dir, then `perc resume <id>` re-runs the step |
+| **failed · implement** (a fan-out slice) | A step of a slice run failed: "Delete this slice (its branch stays), then resume <parent> to run it again". | `perc delete <id>`, then `perc resume <parent>` starts the slice again on its branch |
 | **failed · implement** | A step failed and has no loop to go back through. | A failed run can't be resumed: read its step dir, then `perc delete <id>` (or `perc clean <id>` to keep the record) and start a new run |
 | **stalled · driver stopped** | The driver terminal exited mid-run. | `perc resume <id>` |
 | **agent blocked** (in `perc status` and in Herdr's own agent status; the Percolator panel counts the run as running) | The agent is asking something in its terminal. | Answer it in the agent's terminal |

@@ -17,7 +17,7 @@ node src/cli.ts <command> …           # run perc from a checkout; `perc --help
 node src/cli.ts validate [--pipeline <name>]        # check every pipeline of the profile, or one
 node src/cli.ts run [<ticket>] [--pipeline <name>] [--input key=value]...  # start a run of a pipeline (default: the profile's); no ticket for ticket: none
 node src/cli.ts approve <id> [--pipeline <name>]  # answer a gate; --pipeline answers a router's pick-pipeline gate
-node src/cli.ts pipelines [--json]                  # list the repo's pipelines (--json: the panel's contract)
+node src/cli.ts pipelines [--repo <dir>] [--profile <name>] [--json]  # list the repo's pipelines (--json: the panel's contract)
 node src/cli.ts delete <id>...|--finished [--yes]  # remove runs; keeps branches
 node src/cli.ts watch [--repo <dir>]... [--interval <s>] [--foreground]  # start runs from triggers (hc terminal percolator-watch); `watch stop` ends it
 pnpm herdr:sync                       # mirror herdr/mods/* into the Herdr app (reloads live; removes stale files, keeps perc.json); after any panel/cup change
@@ -78,7 +78,7 @@ Read the module before changing it.
 
 ## Design decisions to keep
 
-- **Pipelines:** every pipeline starts with intake and ends with one exit builtin; the feature pipeline's stages are intake, groom, plan, implement, review, deliver, and its approve-groom gate is built in (required) there only. Every stage must be bound or the engine refuses to start. No built-in bindings for `groom`…`review`; `perc init` writes the recommended config (`pipelines.feature`). Top-level `bindings`/`nodes` belong to `feature`; top-level `rules` apply to every pipeline.
+- **Pipelines:** every pipeline starts with intake and ends with one exit builtin, except a router (it ends with the built-in `route` stage) and a fan-out parent (it ends at its fan-out step; each slice run ends with the exit). The feature pipeline's stages are intake, groom, plan, implement, review, deliver unless `pipelines.feature.stages` lists others; its approve-groom gate is built in (required) after groom, in feature only, so a feature whose stages leave out groom has none, and a feature with its own stages gets no default intake or exit binding. Every stage must be bound or the engine refuses to start. No built-in bindings for `groom`…`review`; `perc init` writes the recommended config (`pipelines.feature`). Top-level `bindings`/`nodes` belong to `feature`; top-level `rules` apply to every pipeline.
 - **Routing hands off:** a router's route step starts a new linked run; a run's graph never changes once it starts.
 - **Fan-out runs children:** each slice is a linked run `<parent>-s<i>` from the fanned stage to the exit; the parent waits for them.
 - **Bounded loops:** review caps at 3 rounds, then delivers anyway (the PR body does not carry the findings); a back-edge (`on_fail: { back_to, max_rounds }`) at its cap escalates to the owner.
