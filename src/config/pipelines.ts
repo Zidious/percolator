@@ -1,6 +1,7 @@
-import { FEATURE } from '../graph/core.ts';
+import { CORE_GROOM_GATE, FEATURE } from '../graph/core.ts';
 import type { PipelineHeader } from '../graph/core.ts';
 import type { MergedPipeline } from '../graph/merge.ts';
+import { appliesTo } from '../graph/rules.ts';
 import type { Violation } from '../graph/rules.ts';
 import { EXITS, EXIT_KINDS } from '../tracker/index.ts';
 import type { ExitKind } from '../tracker/index.ts';
@@ -64,20 +65,43 @@ export function checkGlobalStages(merged: Record<string, MergedPipeline>, specs:
         where: locate(locator, source, `rules.require_skills.${k}.stage`),
       });
     }
+    // checkRules skips an entry a pipeline cannot have; one that concerns none of them is a mistake
+    for (const [k, req] of (value.required_nodes ?? []).entries()) {
+      const name = typeof req === 'string' ? req : req.name;
+      const concerned = Object.values(specs).some(
+        (s) => merged[s.name]?.nodes[name] !== undefined || appliesTo(req, s.stages ?? FEATURE.stages ?? []),
+      );
+      if (concerned) continue;
+      // the core gate's entry is wrong whatever its stage; another entry's stage is what no pipeline has
+      const positioned = typeof req !== 'string' && name !== CORE_GROOM_GATE.name;
+      const point = positioned && req.before !== undefined ? 'before' : 'after';
+      const at = positioned ? (req.before ?? req.after) : undefined;
+      out.push({
+        rule: 'required_nodes',
+        source,
+        target: `rules.required_nodes.${k}`,
+        message:
+          at !== undefined
+            ? `names stage "${at}", which no pipeline in profile "${profile}" has; use one of their stages or all`
+            : `node "${name}" is required by required_nodes, but no pipeline in profile "${profile}" has it; remove this required_nodes entry`,
+        where: locate(locator, source, `rules.required_nodes.${k}${at !== undefined ? `.${point}` : ''}`),
+      });
+    }
   }
   return out;
 }
 
 /**
  * The specs of the merged pipelines, defaults filled in and the default pipeline marked. feature is
- * listed only when it has bindings or some layer defines it under `pipelines:`.
+ * listed only when it has bindings, some layer defines it under `pipelines:`, or no other pipeline exists.
  */
 export function pipelineSpecs(merged: Record<string, MergedPipeline>, profile: string, where: Where): Record<string, PipelineSpec> {
   const specs: Record<string, PipelineSpec> = {};
   for (const [name, p] of Object.entries(merged)) {
     const h = p.header;
     const defined = Object.keys(p.bindings).length > 0 || h.source !== 'core' || h.locator !== undefined;
-    if (name === 'feature' && !defined) continue;
+    // with no other pipeline, an undefined feature stays listed, so building it reports its unbound stages
+    if (name === 'feature' && !defined && Object.keys(merged).length > 1) continue;
     const base: PipelineHeader = name === 'feature' ? { ...FEATURE } : {};
     const { name: _n, ...header } = { ...base, ...h.value } as PipelineHeader & { name?: string };
     specs[name] = {
@@ -126,17 +150,42 @@ function checkTrigger(spec: PipelineSpec, t: Trigger, at: (key: string) => Where
     } catch (err) {
       throw fail(`schedule trigger: ${(err as Error).message}`, at('.inputs'));
     }
-  } else if ('label' in t) {
+    return;
+  }
+  if ('label' in t) {
     if (spec.ticket === 'none') {
       throw fail(`a label trigger starts runs on issues, but pipeline "${p}" has ticket: none; set ticket: required or optional`, at(''));
     }
-  } else if ('pr_opened' in t || 'dependabot' in t) {
-    const kind = 'pr_opened' in t ? 'pr_opened' : 'dependabot';
+    passes('label', []);
+    return;
+  }
+  const kind = 'pr_opened' in t ? 'pr_opened' : 'dependabot' in t ? 'dependabot' : 'check_failed';
+  if (spec.ticket === 'required') {
+    throw fail(`a ${kind} trigger starts runs without a ticket; set ticket: none or ticket: optional`, at(''));
+  }
+  if (kind === 'check_failed') {
+    if (!has('branch') || !has('run_url')) {
+      throw fail(`trigger check_failed passes inputs branch and run_url; declare them under pipelines.${p}.inputs`, at(''));
+    }
+    passes(kind, ['branch', 'run_url']);
+  } else {
     if (!has('pr')) throw fail(`trigger ${kind} passes input pr; declare it under pipelines.${p}.inputs`, at(''));
-  } else if (!has('branch') || !has('run_url')) {
-    throw fail(`trigger check_failed passes inputs branch and run_url; declare them under pipelines.${p}.inputs`, at(''));
+    passes(kind, ['pr']);
+  }
+
+  /** The run request a firing makes fits the pipeline: every required input is one the trigger passes. */
+  function passes(kind: string, given: string[]): void {
+    try {
+      checkRequest(spec, kind === 'label' ? '#0' : undefined, Object.fromEntries(given.map((k) => [k, ''])));
+    } catch {
+      const missing = requiredInputs(spec).find((k) => !given.includes(k))!;
+      const what = given.length === 0 ? 'no inputs' : `only ${given.length === 1 ? 'input' : 'inputs'} ${given.join(' and ')}`;
+      throw fail(`a ${kind} trigger passes ${what}, but pipeline "${p}" needs input ${missing}; make it optional or drop the trigger`, at(''));
+    }
   }
 }
+
+const requiredInputs = (spec: PipelineSpec): string[] => Object.entries(spec.inputs).filter(([, d]) => d.required).map(([k]) => k);
 
 /**
  * Checks that span pipelines: where a router may hand its ticket. Every routes `to`, choose `from` entry
@@ -160,9 +209,19 @@ export function checkPipelines(merged: Record<string, MergedPipeline>, specs: Re
         const self = spec.router === true ? 'router' : 'pipeline';
         throw fail(`${self} "${p}" routes tickets, but pipeline "${x}" has ticket: none; route to a pipeline that takes a ticket`, where);
       }
+      // a handoff passes the ticket only
+      if (requiredInputs(t).length > 0) {
+        const by = spec.router === true ? 'router' : 'next';
+        throw fail(`pipeline "${x}" takes required inputs a ${by} cannot pass; make them optional or route elsewhere`, where);
+      }
     };
     if (spec.next !== undefined) {
       if (exitKind(spec, merged[p]!) !== 'issue') throw fail('next only applies to an issue exit; remove it or set exit: issue', at('.next'));
+      const chain = [p];
+      for (let x: string | undefined = spec.next; x !== undefined && !chain.slice(1).includes(x); x = specs[x]?.next) {
+        chain.push(x);
+        if (x === p) throw fail(`next of pipeline "${p}" leads back to it (${chain.join(' → ')}); remove next from one of them`, at('.next'));
+      }
       target(spec.next, at('.next'));
     }
     (spec.triggers ?? []).forEach((t, i) => checkTrigger(spec, t, (key) => at(`.triggers.${i}${key}`)));

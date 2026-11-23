@@ -127,6 +127,45 @@ test('a top-level require_skills stage must belong to some pipeline of the profi
   ]);
 });
 
+test('a top-level required_nodes entry that concerns no pipeline of the profile is reported once', () => {
+  const locator = {
+    file: 'c.yaml',
+    lines: { 'profiles.work.rules.required_nodes.1': 9, 'profiles.work.rules.required_nodes.2.after': 10 },
+    prefix: 'profiles.work',
+  };
+  const merged = mergePipelines([
+    {
+      source: 'profile:work',
+      locator,
+      fragment: {
+        rules: {
+          required_nodes: [
+            { name: 'audit', after: 'triage' },
+            'approve-groom',
+            { name: 'scan', after: 'tirage' },
+          ],
+        },
+        pipelines: { alert: { stages: ['intake', 'triage', 'deliver'], exit: 'comment', default: true } },
+      },
+    },
+  ]);
+  assert.deepEqual(
+    checkGlobalStages(merged, pipelineSpecs(merged, 'work', where), 'work').map((v) => [v.target, v.message, v.where]),
+    [
+      [
+        'rules.required_nodes.1',
+        'node "approve-groom" is required by required_nodes, but no pipeline in profile "work" has it; remove this required_nodes entry',
+        { file: 'c.yaml', line: 9, path: 'profiles.work.rules.required_nodes.1' },
+      ],
+      [
+        'rules.required_nodes.2',
+        'names stage "tirage", which no pipeline in profile "work" has; use one of their stages or all',
+        { file: 'c.yaml', line: 10, path: 'profiles.work.rules.required_nodes.2.after' },
+      ],
+    ],
+  );
+});
+
 // cross-pipeline checks: a profile `work` at c.yaml, its pipeline keys indexed at known lines
 const lines: Record<string, number> = {
   'profiles.work.pipelines': 3,
@@ -295,10 +334,12 @@ test('a valid trigger list passes the checks', () => {
   assert.doesNotThrow(() =>
     check(profileWith(nightly({ schedule: '30 6 * * 1-5', timezone: 'Europe/London', inputs: { scope: 'deps' } }))),
   );
+  // scope optional: only a schedule passes it
+  const inputs = { pr: {}, branch: {}, run_url: {}, scope: {} };
   for (const t of [{ pr_opened: true }, { pr_opened: { not_author: ['bot'] } }, { dependabot: true }, { check_failed: { branch: 'main' } }]) {
-    assert.doesNotThrow(() => check(profileWith(nightly(t))));
+    assert.doesNotThrow(() => check(profileWith(nightly(t, { inputs }))));
   }
-  assert.doesNotThrow(() => check(profileWith(nightly({ label: 'nightly' }, { ticket: 'optional' }))));
+  assert.doesNotThrow(() => check(profileWith(nightly({ label: 'nightly' }, { ticket: 'optional', inputs }))));
 });
 
 test('a schedule trigger needs a cron that parses', () => {
@@ -315,7 +356,7 @@ test('a schedule trigger needs a known time zone', () => {
 });
 
 test('a schedule trigger needs a pipeline that runs without a ticket', () => {
-  assert.throws(() => check(profileWith(nightly({ schedule: '0 3 * * *', inputs: { scope: 'all' } }, { ticket: 'required', triggers: [{ label: 'x' }, { schedule: '0 3 * * *', inputs: { scope: 'all' } }] }))), {
+  assert.throws(() => check(profileWith(nightly({ schedule: '0 3 * * *', inputs: { scope: 'all' } }, { ticket: 'required', inputs: { scope: {} }, triggers: [{ label: 'x' }, { schedule: '0 3 * * *', inputs: { scope: 'all' } }] }))), {
     message: `c.yaml:15: ${N}: a schedule trigger starts runs without a ticket, but pipeline "nightly" needs one; set ticket: none or optional`,
   });
 });
@@ -348,5 +389,59 @@ test('pr_opened and dependabot triggers need input pr', () => {
 test('a check_failed trigger needs inputs branch and run_url', () => {
   assert.throws(() => check(profileWith(nightly({ check_failed: { branch: 'main' } }, { inputs: { branch: {}, scope: { required: true } } }))), {
     message: `c.yaml:15: ${N}: trigger check_failed passes inputs branch and run_url; declare them under pipelines.nightly.inputs`,
+  });
+});
+
+test('pr_opened, dependabot and check_failed triggers need a pipeline that runs without a ticket', () => {
+  const inputs = { pr: {}, branch: {}, run_url: {} };
+  for (const [t, kind] of [
+    [{ pr_opened: true }, 'pr_opened'],
+    [{ dependabot: true }, 'dependabot'],
+    [{ check_failed: { branch: 'main' } }, 'check_failed'],
+  ] as const) {
+    assert.throws(() => check(profileWith(nightly(t, { inputs, ticket: 'required', triggers: [{ label: 'x' }, t] }))), {
+      message: `c.yaml:15: ${N}: a ${kind} trigger starts runs without a ticket; set ticket: none or ticket: optional`,
+    });
+  }
+});
+
+test('a trigger is refused when the pipeline needs an input it does not pass', () => {
+  assert.throws(() => check(profileWith(nightly({ pr_opened: true }))), {
+    message: `c.yaml:15: ${N}: a pr_opened trigger passes only input pr, but pipeline "nightly" needs input scope; make it optional or drop the trigger`,
+  });
+  assert.throws(() => check(profileWith(nightly({ check_failed: { branch: 'main' } }))), {
+    message: `c.yaml:15: ${N}: a check_failed trigger passes only inputs branch and run_url, but pipeline "nightly" needs input scope; make it optional or drop the trigger`,
+  });
+  assert.throws(() => check(profileWith(nightly({ label: 'nightly' }, { ticket: 'optional' }))), {
+    message: `c.yaml:15: ${N}: a label trigger passes no inputs, but pipeline "nightly" needs input scope; make it optional or drop the trigger`,
+  });
+});
+
+const needsNote = { hotfix: { stages: ['intake', 'implement', 'deliver'], exit: 'pr', inputs: { note: { required: true } } } };
+
+test('next cannot name a pipeline with required inputs', () => {
+  assert.throws(() => check(profileWith({ ...needsNote, ...split({ exit: 'issue' }) })), {
+    message:
+      'c.yaml:12: profiles.work.pipelines.split.next: pipeline "hotfix" takes required inputs a next cannot pass; make them optional or route elsewhere',
+  });
+});
+
+test('a router cannot route to a pipeline with required inputs', () => {
+  assert.throws(() => check(profileWith({ ...needsNote, ...triage({ routes: [{ label: 'bug', to: 'hotfix' }] }) })), {
+    message:
+      'c.yaml:6: profiles.work.pipelines.triage.routes.0.to: pipeline "hotfix" takes required inputs a router cannot pass; make them optional or route elsewhere',
+  });
+});
+
+test('next cannot name its own pipeline', () => {
+  assert.throws(() => check(profileWith(split({ exit: 'issue', next: 'split' }))), {
+    message: 'c.yaml:12: profiles.work.pipelines.split.next: next of pipeline "split" leads back to it (split → split); remove next from one of them',
+  });
+});
+
+test('next cannot form a cycle', () => {
+  assert.throws(() => check(profileWith({ ...split({ exit: 'issue', next: 'other' }), other: { stages: ['intake', 'deliver'], exit: 'issue', next: 'split' } })), {
+    message:
+      'c.yaml:12: profiles.work.pipelines.split.next: next of pipeline "split" leads back to it (split → other → split); remove next from one of them',
   });
 });

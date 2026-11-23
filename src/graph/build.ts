@@ -280,6 +280,12 @@ function buildWhole(
           at(''),
         );
       }
+      if (needs?.input !== undefined && header.inputs?.[needs.input]?.required !== true) {
+        throw new GraphError(
+          `exit ${exit} needs input "${needs.input}" (${NEEDED_INPUT[needs.input]}) on every run, but pipeline "${name}" makes it optional; set required: true on pipelines.${name}.inputs.${needs.input}`,
+          at(''),
+        );
+      }
       if (exit === 'release' && header.inputs?.tag === undefined && !stages.slice(0, -1).some((s) => header.outputs?.[s]?.includes('tag'))) {
         throw new GraphError('exit release needs a tag: declare input "tag" or list "tag" under outputs of an earlier stage', at(''));
       }
@@ -528,6 +534,13 @@ function sliceChild(g: Graph, sliceFrom: string): Graph {
     const step = g.steps.find((s) => s.id === e.fromStepId)!;
     const target = g.stages.find((s) => g.regionStart[s] === e.toStepIndex)!;
     const key = step.def.on_fail !== undefined ? `${stepKey(step)}.on_fail.back_to` : stepKey(step);
+    if (step.def.on_fail === undefined && g.loopStages.includes(step.stage)) {
+      // a stage loop always returns to the stage before it, so only an earlier fan-out stage can hold it
+      throw new GraphError(
+        `${step.stage} loops back to ${target} every round, so it cannot start a fan-out slice; set fan_out.stage to ${target} or an earlier stage`,
+        locate(step.locator, 'config', key),
+      );
+    }
     throw new GraphError(
       `${step.id} loops back to ${target}, which runs before the fan-out at ${sliceFrom}; loop back to ${sliceFrom} or later`,
       locate(step.locator, 'config', key),

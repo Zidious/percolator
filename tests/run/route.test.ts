@@ -126,6 +126,42 @@ test('a pipeline: label routes without the agent', async () => {
   }
 });
 
+/** routerConfig plus alerts (ticket: none) and noted (a required input): pipelines a router cannot hand a ticket to. */
+const withUnroutable = [
+  routerConfig(),
+  '      alerts:',
+  '        stages: [intake, deliver]',
+  '        exit: none',
+  '        ticket: none',
+  '      noted:',
+  '        stages: [intake, deliver]',
+  '        exit: none',
+  '        inputs: { note: { required: true } }',
+].join('\n');
+
+test('a pipeline: label naming a ticket: none pipeline is ignored', async () => {
+  const e = await setup(['pipeline:alerts', 'bug'], withUnroutable);
+  try {
+    const child = await driveRouter(e);
+    assert.equal(child.pipeline, 'hotfix');
+    assert.deepEqual(await e.routeJson(), { pipeline: 'hotfix', by: 'rule', detail: 'label bug', child: child.runId });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a /percolator run comment naming a pipeline with required inputs is ignored', async () => {
+  const e = await setup(['bug'], withUnroutable);
+  try {
+    e.deps.gh.addComment(REPO, 5, 'alice', '/percolator run noted');
+    const child = await driveRouter(e);
+    assert.equal(child.pipeline, 'hotfix');
+    assert.deepEqual(await e.routeJson(), { pipeline: 'hotfix', by: 'rule', detail: 'label bug', child: child.runId });
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('a /percolator run comment by an approver routes without the agent', async () => {
   const e = await setup([]);
   try {

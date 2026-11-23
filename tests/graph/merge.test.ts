@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mergeLayers, mergePipelines, LockViolation } from '../../src/graph/merge.ts';
 import { CORE_STAGES, STAGE_CONTRACTS, CORE_GROOM_GATE } from '../../src/graph/core.ts';
 import type { Layer } from '../../src/grounds/mappings.ts';
+import { buildGraph } from '../../src/graph/build.ts';
 
 const L = (source: string, fragment: Layer['fragment']): Layer => ({ source, fragment });
 
@@ -356,4 +357,57 @@ test('bindings inside a pipeline locate under pipelines.<p>', () => {
     },
   ]);
   assert.equal(r.hotfix!.bindings.fix!.locator!.prefix, 'profiles.default.pipelines.hotfix');
+});
+
+const SIX = {
+  intake: { agent: 'claude' },
+  groom: { agent: 'claude' },
+  plan: { agent: 'claude' },
+  implement: { agent: 'claude' },
+  review: { agent: 'claude' },
+  deliver: { builtin: 'github.open_pr' },
+};
+
+test('locking feature with required: true alone keeps the approve-groom gate', () => {
+  const m = mergePipelines([L('p', { bindings: SIX, pipelines: { feature: { required: true } } })]);
+  assert.ok('approve-groom' in m.feature!.nodes);
+  assert.deepEqual(m.feature!.header.value.stages, CORE_STAGES);
+  assert.ok(buildGraph(m.feature!).steps.some((s) => s.id === 'approve-groom'));
+});
+
+test('locking feature with required + description keeps the core stages and the gate', () => {
+  const m = mergePipelines([L('p', { bindings: SIX, pipelines: { feature: { required: true, description: 'Features' } } })]);
+  assert.ok('approve-groom' in m.feature!.nodes);
+  assert.equal(m.feature!.header.value.description, 'Features');
+  assert.deepEqual(m.feature!.header.value.stages, CORE_STAGES);
+});
+
+test('a header lock keeps the header keys of earlier layers', () => {
+  const m = mergePipelines([
+    L('ground:co', { pipelines: { docs: { stages: ['intake', 'deliver'], exit: 'comment' } } }),
+    L('profile:w', { pipelines: { docs: { required: true, description: 'Docs' } } }),
+  ]);
+  assert.deepEqual(m.docs!.header.value, { stages: ['intake', 'deliver'], exit: 'comment', description: 'Docs' });
+  assert.equal(m.docs!.header.locked, true);
+});
+
+test('after a merged header lock, a later layer may restate some of its keys', () => {
+  const m = mergePipelines([
+    L('ground:co', { pipelines: { docs: { stages: ['intake', 'deliver'], exit: 'comment' } } }),
+    L('profile:w', { pipelines: { docs: { required: true, description: 'Docs' } } }),
+    L('repo', { pipelines: { docs: { exit: 'comment' } } }),
+  ]);
+  assert.equal(m.docs!.header.source, 'profile:w');
+});
+
+test('after a merged header lock, changing an earlier layer key is a lock violation', () => {
+  assert.throws(
+    () =>
+      mergePipelines([
+        L('ground:co', { pipelines: { docs: { stages: ['intake', 'deliver'], exit: 'comment' } } }),
+        L('profile:w', { pipelines: { docs: { required: true, description: 'Docs' } } }),
+        L('repo', { pipelines: { docs: { exit: 'issue' } } }),
+      ]),
+    { message: 'repo: pipelines.docs: locked by profile:w (required: true); remove this pipeline or restate it exactly' },
+  );
 });

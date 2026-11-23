@@ -536,6 +536,19 @@ test('exit pr_review needs input pr', () => {
   assert.equal(buildGraph(hotfix({ exit: 'pr_review', inputs: { pr: { required: true } } })).exit, 'pr_review');
 });
 
+test("an exit's input must be required", () => {
+  throwsAt(
+    () => buildGraph(hotfix({ exit: 'pr_review', inputs: { pr: { required: false } } })),
+    'c.yaml: profiles.default.pipelines.hotfix: exit pr_review needs input "pr" (the pull request to review) on every run, but pipeline "hotfix" makes it optional; set required: true on pipelines.hotfix.inputs.pr',
+    'profiles.default.pipelines.hotfix',
+  );
+  throwsAt(
+    () => buildGraph(hotfix({ exit: 'private_fork_pr', inputs: { advisory: {} } as never })),
+    'c.yaml: profiles.default.pipelines.hotfix: exit private_fork_pr needs input "advisory" (the GHSA id) on every run, but pipeline "hotfix" makes it optional; set required: true on pipelines.hotfix.inputs.advisory',
+    'profiles.default.pipelines.hotfix',
+  );
+});
+
 test('exit private_fork_pr needs input advisory', () => {
   throwsAt(
     () => buildGraph(hotfix({ exit: 'private_fork_pr' })),
@@ -787,6 +800,15 @@ test('fan-out child graph starts with seed and then the fanned stage', () => {
   assert.deepEqual(g.contracts, { intake: ['ticket', 'slice'], implement: ['summary'], review: ['findings'], deliver: ['pr_url'] });
   assert.deepEqual(g.loopStages, ['review']);
   assert.equal(g.exit, 'pr');
+});
+
+test('a loop stage cannot be the fan-out stage', () => {
+  const lines = { 'profiles.default.pipelines.epic.bindings.review': 12 };
+  throwsAt(
+    () => buildGraph(epic({ nodes: {}, fan_out: { stage: 'review', slices: { from: 'plan', output: 'slices' } } }, lines)),
+    'c.yaml:12: profiles.default.pipelines.epic.bindings.review: review loops back to implement every round, so it cannot start a fan-out slice; set fan_out.stage to implement or an earlier stage',
+    'profiles.default.pipelines.epic.bindings.review',
+  );
 });
 
 test('child loops rebase onto the sliced steps', () => {

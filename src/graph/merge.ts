@@ -94,7 +94,9 @@ export function mergePipelines(layers: Layer[]): Record<string, MergedPipeline> 
       if (Object.keys(header).length > 0 || def.required === true) {
         const existing = target.header;
         if (existing.locked) {
-          if (!isDeepStrictEqual(existing.value, header)) {
+          // a restatement may name some of the locked keys, each exactly as locked
+          const locked = existing.value as Record<string, unknown>;
+          if (!Object.entries(header).every(([k, v]) => isDeepStrictEqual(locked[k], v))) {
             throw new LockViolation({
               target: `pipelines.${name}`,
               noun: 'pipeline',
@@ -105,8 +107,9 @@ export function mergePipelines(layers: Layer[]): Record<string, MergedPipeline> 
             });
           }
         } else {
+          // a lock locks the merged header, so earlier layers' keys stay
           target.header = {
-            value: def.required === true ? header : { ...existing.value, ...header },
+            value: { ...existing.value, ...header },
             source,
             locked: def.required === true,
             ...(locator ? { locator } : {}),
@@ -120,7 +123,7 @@ export function mergePipelines(layers: Layer[]): Record<string, MergedPipeline> 
   }
   for (const p of Object.values(out)) p.rules.unshift(...structuredClone(globalRules));
   const feature = out.feature!;
-  if (!(feature.header.value.stages ?? []).includes('groom')) delete feature.nodes[CORE_GROOM_GATE.name];
+  if (!(feature.header.value.stages ?? FEATURE.stages ?? []).includes('groom')) delete feature.nodes[CORE_GROOM_GATE.name];
   return out;
 }
 

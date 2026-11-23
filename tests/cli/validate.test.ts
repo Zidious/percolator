@@ -68,6 +68,20 @@ test('unbound stages propagate as an error', async () => {
   });
 });
 
+test('a profile with no bindings and no pipelines is told its stages are unbound', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-empty-'));
+  try {
+    const configFile = path.join(dir, 'config.yaml');
+    await fs.writeFile(configFile, 'version: 1\nprofiles:\n  work:\n    tracker: { kind: github }\n');
+    await assert.rejects(validate({ ...opts(), configFile }), {
+      name: 'GraphError',
+      message: `${configFile}:3: profile "work" leaves stages unbound: intake, groom, plan, implement, review, deliver; bind each under bindings:`,
+    });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
 test('a trusted repo layer is merged as the last layer', async () => {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-repo-'));
   try {
@@ -660,10 +674,12 @@ test("a pipeline's rules are checked against that pipeline's stages", async () =
 
 const triageLines = (from: string) =>
   ['      triage:', '        router: true', '        stages: [intake, route]', `        choose: { agent: claude, from: [${from}] }`, ''].join('\n');
+/** hotfix's input why made optional: a router cannot pass a required one */
+const routable = (config: string) => config.replace('why: { required: true', 'why: { required: false');
 
 test('validate refuses a router that routes to an unknown pipeline, whichever pipeline is validated', async () => {
   await withConfig(
-    (abs) => pipelinesConfig(abs, triageLines('hotfix, nope')),
+    (abs) => routable(pipelinesConfig(abs, triageLines('hotfix, nope'))),
     async (cfg) => {
       await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'hotfix' }), {
         name: 'ConfigError',
@@ -699,7 +715,7 @@ test('validate with sliceFrom builds the slice child graph of a fan-out pipeline
 
 test("a router's default choose prompt lists the pipelines' descriptions", async () => {
   await withConfig(
-    (abs) => pipelinesConfig(abs, triageLines('hotfix, feature')).replace('        exit: pr\n        ticket: optional', '        exit: pr\n        description: fix a bug fast\n        ticket: optional'),
+    (abs) => routable(pipelinesConfig(abs, triageLines('hotfix, feature'))).replace('        exit: pr\n        ticket: optional', '        exit: pr\n        description: fix a bug fast\n        ticket: optional'),
     async (cfg) => {
       const r = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'triage' });
       const choose = r.graph.steps.find((s) => s.id === 'route.1')!;
