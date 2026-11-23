@@ -45,7 +45,7 @@ type Env = RunEnv & {
   /** each gate the run waited at, in order */
   waited: string[];
   /** the decision written at the pick-pipeline gate */
-  answer: { decision: 'approve' | 'reject'; pipeline?: string };
+  answer: { decision: 'approve' | 'reject'; pipeline?: string; byComment?: string };
   meta: RunMeta;
   dir(id: string): string;
   routeJson(): Promise<Record<string, unknown>>;
@@ -69,11 +69,18 @@ async function setup(labels: string[], config = routerConfig()): Promise<Env> {
   const waited: string[] = [];
   const answer: Env['answer'] = { decision: 'approve' };
   let meta: RunMeta | undefined;
+  let commented = false;
   Object.assign(base.deps, {
     sleep: async () => {
       const w = await readWaiting(dir(meta!.runId));
       if (w === undefined) return;
-      waited.push(w.stepId);
+      if (waited.at(-1) !== w.stepId) waited.push(w.stepId);
+      if (answer.byComment !== undefined) {
+        // answered on the issue instead: the gate sees the comment on its next poll
+        if (!commented) gh.addComment(REPO, 5, answer.byComment, '/percolator approve');
+        commented = true;
+        return;
+      }
       await writeDecision(dir(meta!.runId), { ...answer, by: 'bob' });
     },
   });
@@ -210,6 +217,23 @@ test('an unsure pick stops at pick-pipeline', async () => {
     assert.deepEqual(e.waited, ['pick-pipeline']);
     assert.equal(child.pipeline, 'hotfix');
     assert.deepEqual(await e.routeJson(), { pipeline: 'hotfix', by: 'agent', detail: 'picked, approved by @bob', child: child.runId });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('an unsure pick approved by a comment on the issue records who approved it', async () => {
+  const e = await setup([]);
+  try {
+    e.pick.text = 'pipeline: hotfix\nunsure: true\n';
+    e.answer.byComment = 'alice';
+    // the gate reads the issue's comments every 30s of the run's clock
+    let clock = Date.parse('2026-11-22T10:00:00Z');
+    e.deps.now = () => new Date((clock += 31_000));
+    const child = await driveRouter(e);
+    assert.deepEqual(e.waited, ['pick-pipeline']);
+    assert.equal(child.pipeline, 'hotfix');
+    assert.deepEqual(await e.routeJson(), { pipeline: 'hotfix', by: 'agent', detail: 'picked, approved by @alice', child: child.runId });
   } finally {
     await e.cleanup();
   }

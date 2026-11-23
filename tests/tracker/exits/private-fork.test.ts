@@ -103,6 +103,21 @@ test('private fork exit titles the PR after the advisory when issue.json has no 
   }
 });
 
+test('private fork exit takes its title from the latest pr_title output, over the issue title', async () => {
+  const s = await setup({ title: 'Overflow in parser lets anyone read memory' });
+  try {
+    const rel = 'steps/patch/1/outputs/pr_title.md';
+    await fs.mkdir(path.join(s.runDir, 'steps', 'patch', '1', 'outputs'), { recursive: true });
+    await fs.writeFile(path.join(s.runDir, rel), '  Harden the parser  \n');
+    s.ctx.previousOutputs['patch'] = { pr_title: rel };
+    const gh = new FakeGh({ readFile: readBody });
+    assert.equal((await mk(s, gh, [])(step, s.ctx, s.io)).status, 'pass');
+    assert.deepEqual(gh.prs.map((p) => p.title), ['Harden the parser']);
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
 test('private fork exit reuses the fork and PR from before a crash', async () => {
   const s = await setup({ attempt: 2 });
   try {

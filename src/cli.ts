@@ -29,7 +29,8 @@ import { cliGh } from './tracker/gh.ts';
 import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
 import { validate, validateAll } from './validate.ts';
-import { WATCH_TERMINAL, WATCHER_LABELS, watchFile, watchLoop } from './watch/watch.ts';
+import { pidAlive } from './run/lock.ts';
+import { otherWatcher, WATCH_TERMINAL, WATCHER_LABELS, watchFile, watchLoop } from './watch/watch.ts';
 import type { Graph } from './graph/build.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
@@ -558,6 +559,12 @@ async function runWatch(args: string[], deps: DriverDeps): Promise<number> {
   const configFile = path.resolve(values.config ?? defaultConfig());
   const o = { repos, configFile, ...(values.profile !== undefined ? { profile: values.profile } : {}), intervalS };
   if (values.foreground) {
+    const watcher = await deps.hc.get(WATCH_TERMINAL);
+    if (watcher?.state === 'live' && watcher.labels['percolator.role'] === WATCHER_LABELS['percolator.role'] && watcher.address !== deps.selfTerminal) {
+      throw new Error(`perc watch is already running in terminal ${WATCH_TERMINAL}; perc watch stop to stop it`);
+    }
+    const other = await otherWatcher(deps.home, (deps.now ?? (() => new Date()))(), deps.pidAlive ?? pidAlive, deps.pid ?? process.pid);
+    if (other !== undefined) throw new Error(`perc watch is already running as pid ${other}; stop it first (perc watch stop, or end pid ${other})`);
     deps.out(`watching ${repos.join(', ')} every ${intervalS}s`);
     await watchLoop(o, deps);
     return 0;

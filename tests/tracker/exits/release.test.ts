@@ -135,3 +135,29 @@ test('an invalid tag escalates', async () => {
     await rm(s.runDir);
   }
 });
+
+test('a tag git refuses as a ref name escalates before the push', async () => {
+  for (const tag of ['v1..2', 'v1.lock', 'v1/', 'v1.', 'v1//2', 'v1@{2', 'v1/.x', 'v1/2.lock/3']) {
+    const s = await setup({ prepare: { tag } });
+    try {
+      const gh = new FakeGh({ readFile: readBody });
+      const pushes: string[][] = [];
+      const out = await mk(s, gh, { pushes })(step, s.ctx, s.io);
+      assert.deepEqual(out, { status: 'escalate', outputs: {}, reason: `github.release: tag "${tag}" is not a valid tag name` });
+      assert.deepEqual(pushes, []);
+    } finally {
+      await rm(s.runDir);
+    }
+  }
+});
+
+test('a dotted tag with path parts is still a valid tag', async () => {
+  const s = await setup({ prepare: { tag: 'release/v1.2.3' } });
+  try {
+    const gh = new FakeGh({ readFile: readBody });
+    const out = await mk(s, gh, { pushes: [] })(step, s.ctx, s.io);
+    assert.equal(out.status, 'pass', JSON.stringify(out));
+  } finally {
+    await rm(s.runDir);
+  }
+});

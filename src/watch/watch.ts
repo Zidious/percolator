@@ -51,12 +51,18 @@ export async function watchLoop(o: WatchOptions, deps: DriverDeps & { signal?: A
   const ledger = await loadLedger(ledgerHome);
   const startedAt = now().toISOString();
   const stopped = (): boolean => deps.signal?.aborted === true;
-  let first = true;
+  // repos not yet recovered after the restart, and not yet polled once since it: kept per repo, so a repo
+  // whose first poll fails (validate, origin, gh) still gets both on its first poll that gets that far
+  const fresh = { recover: new Set(o.repos), seed: new Set(o.repos) };
+  // beat before the first pass and after each repo, so a long pass (recovery, slow grounds) never looks dead
+  const beat = (): Promise<void> => writeHeartbeat(deps, o, startedAt, now());
+  await beat();
   while (!stopped()) {
     pruneLedger(ledger, now());
-    for (const repoDir of o.repos) await pollRepo(repoDir, o, deps, ledger, first);
-    first = false;
-    await writeHeartbeat(deps, o, startedAt, now());
+    for (const repoDir of o.repos) {
+      await pollRepo(repoDir, o, deps, ledger, fresh);
+      await beat();
+    }
     if (stopped()) break;
     await sleep(o.intervalS * 1000);
   }
@@ -80,7 +86,13 @@ async function writeHeartbeat(deps: DriverDeps, o: WatchOptions, startedAt: stri
 /** Ledger keys are `<kind>:<repo>:<pipeline>:…`. */
 const keyRepo = (key: string): string | undefined => key.split(':')[1];
 
-async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledger: Ledger, first: boolean): Promise<void> {
+async function pollRepo(
+  repoDir: string,
+  o: WatchOptions,
+  deps: DriverDeps,
+  ledger: Ledger,
+  fresh: { recover: Set<string>; seed: Set<string> },
+): Promise<void> {
   const now = (deps.now ?? (() => new Date()))();
   const ledgerHome = percDir(deps.home);
   const log = (s: string) => deps.out(`watch: ${s}`);
@@ -125,7 +137,7 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
   // before run.json (written last), is started from the ledger with its id (its trigger may never ask
   // again: a schedule tick is behind the mark); one prepared but never launched is relaunched; one
   // prepared whose dir is gone was deleted and stays done
-  if (first) {
+  if (fresh.recover.delete(repoDir)) {
     for (const [key, entry] of Object.entries(ledger.fired)) {
       const { runId } = entry;
       if (keyRepo(key) !== repo || runId === '') continue;
@@ -169,7 +181,7 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
       gh: deps.gh,
       now,
       ledger,
-      first,
+      first: fresh.seed.has(repoDir),
       liveRunOn: async (ref) => (await liveRunOn(deps.home, formatTicket(parseTicket(ref, repo)))) !== undefined,
     });
   } catch (err) {
@@ -177,6 +189,7 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
     log(`${repoDir}: ${messageOf(err)}`);
     return;
   }
+  fresh.seed.delete(repoDir);
 
   for (const f of firings) {
     const issue = f.ticket === undefined ? undefined : parseTicket(f.ticket, repo).number;
@@ -187,22 +200,14 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
   await saveLedger(ledgerHome, ledger);
 }
 
-/**
- * Whether a watcher is running: `watch.json` written on this host by a live pid, with a heartbeat
- * no older than three intervals.
- */
-export async function watcherStatus(
-  home: string,
-  now: Date,
-  isPidAlive: (pid: number) => boolean,
-): Promise<{ alive: boolean; since?: string; repos: string[] }> {
+/** `watch.json`, and whether it is a live watcher: written on this host by a live pid, with a heartbeat no older than three intervals. */
+async function readWatch(home: string, now: Date, isPidAlive: (pid: number) => boolean): Promise<{ w: Partial<WatchFile>; alive: boolean } | undefined> {
   let w: Partial<WatchFile>;
   try {
     w = JSON.parse(await fs.readFile(watchFile(home), 'utf8')) as Partial<WatchFile>;
   } catch {
-    return { alive: false, repos: [] };
+    return undefined;
   }
-  const repos = Array.isArray(w.repos) ? w.repos.filter((r): r is string => typeof r === 'string') : [];
   const beat = typeof w.heartbeatAt === 'string' ? Date.parse(w.heartbeatAt) : NaN;
   const alive =
     w.host === os.hostname() &&
@@ -210,5 +215,24 @@ export async function watcherStatus(
     typeof w.intervalS === 'number' &&
     now.getTime() - beat <= 3 * w.intervalS * 1000 &&
     isPidAlive(w.pid);
+  return { w, alive };
+}
+
+/** Whether a watcher is running, as `watch.json` tells. */
+export async function watcherStatus(
+  home: string,
+  now: Date,
+  isPidAlive: (pid: number) => boolean,
+): Promise<{ alive: boolean; since?: string; repos: string[] }> {
+  const r = await readWatch(home, now, isPidAlive);
+  if (r === undefined) return { alive: false, repos: [] };
+  const { w, alive } = r;
+  const repos = Array.isArray(w.repos) ? w.repos.filter((x): x is string => typeof x === 'string') : [];
   return alive && typeof w.startedAt === 'string' ? { alive, since: w.startedAt, repos } : { alive: false, repos };
+}
+
+/** The pid of a live watcher in `watch.json` other than `selfPid` (a pid reused by this process is not another). */
+export async function otherWatcher(home: string, now: Date, isPidAlive: (pid: number) => boolean, selfPid: number): Promise<number | undefined> {
+  const r = await readWatch(home, now, isPidAlive);
+  return r?.alive === true && r.w.pid !== selfPid ? r.w.pid : undefined;
 }

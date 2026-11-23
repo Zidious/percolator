@@ -65,6 +65,8 @@ export class GhError extends Error {
 
 /** The most issues `listIssues` returns; a full list may have more past it. */
 export const ISSUE_LIST_LIMIT = 100;
+/** How many open PRs `listPrs` lists; a full page may be cut short. */
+export const PR_LIST_LIMIT = 100;
 
 const GH_ENV = { GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' };
 const GHSA = /^GHSA(-[23456789cfghjmpqrvwx]{4}){3}$/;
@@ -239,7 +241,7 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
       return list(parseJson('issue list', out)).map((i) => ({ number: Number(i['number']), url: String(i['url'] ?? '') }));
     },
     async listPrs(repo) {
-      const out = await call('pr list', ['pr', 'list', '--repo', repo, '--state', 'open', '--json', 'number,url,author', '--limit', '100']);
+      const out = await call('pr list', ['pr', 'list', '--repo', repo, '--state', 'open', '--json', 'number,url,author', '--limit', String(PR_LIST_LIMIT)]);
       return list(parseJson('pr list', out)).map((p) => ({
         number: Number(p['number']), url: String(p['url'] ?? ''), author: login(p['author']),
       }));

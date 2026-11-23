@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { PipelineSpec } from '../config/pipelines.ts';
 import type { Trigger } from '../config/schema.ts';
-import { ISSUE_LIST_LIMIT } from '../tracker/gh.ts';
+import { ISSUE_LIST_LIMIT, PR_LIST_LIMIT } from '../tracker/gh.ts';
 import type { Gh, PrRef } from '../tracker/gh.ts';
 import { latestTick, parseCron } from '../util/cron.ts';
 import type { Ledger } from './ledger.ts';
@@ -10,6 +10,9 @@ import type { Ledger } from './ledger.ts';
 export type Firing = { key: string; pipeline: string; ticket?: string; inputs: Record<string, string> };
 
 const DEPENDABOT = new Set(['dependabot[bot]', 'app/dependabot']);
+
+/** How long a PR or check key the lists no longer show is kept before it is dropped from the ledger. */
+const DROP_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 
 const canonical = (v: unknown): unknown =>
   Array.isArray(v)
@@ -63,6 +66,12 @@ export async function pollTriggers(o: {
     const pipeline = spec.name;
     // the issues every label trigger of this pipeline sees, or undefined once a list may be cut short
     let labelled: Set<number> | undefined = (spec.triggers ?? []).some((t) => 'label' in t) ? new Set() : undefined;
+    // keys a first poll saw, recorded once every trigger of the pipeline polled: triggers share PR and check
+    // keys, so a key another trigger fires in this poll is not seen, whichever trigger comes first
+    const seeds = new Set<string>();
+    // the PR and check keys this poll's lists show: undefined if no trigger listed them, or a list may be cut short
+    let prKeys: Set<string> | undefined;
+    let checkKeys: Set<string> | undefined;
     for (const trigger of spec.triggers ?? []) {
       const id = triggerId(trigger);
       const mark = `${repo}:${pipeline}:${id}`;
@@ -71,7 +80,7 @@ export async function pollTriggers(o: {
       // there as seen (runId ''), so a watcher starts nothing for PRs opened or checks failed before it ran
       const seen = (f: Firing): void => {
         if (!firstPoll) return add(f);
-        if (!Object.hasOwn(ledger.fired, f.key)) ledger.fired[f.key] = { runId: '', at: o.now.toISOString() };
+        seeds.add(f.key);
       };
       if ('schedule' in trigger) {
         const after = ledger.lastPoll[mark];
@@ -101,20 +110,34 @@ export async function pollTriggers(o: {
           'dependabot' in trigger
             ? (pr: PrRef) => DEPENDABOT.has(pr.author)
             : (pr: PrRef) => trigger.pr_opened === true || !(trigger.pr_opened.not_author ?? []).includes(pr.author);
-        for (const pr of await openPrs()) {
+        const open = await openPrs();
+        prKeys ??= open.length >= PR_LIST_LIMIT ? undefined : new Set(open.map((pr) => `pr:${repo}:${pipeline}:${pr.number}`));
+        for (const pr of open) {
           if (wanted(pr)) seen({ key: `pr:${repo}:${pipeline}:${pr.number}`, pipeline, inputs: { pr: pr.url } });
         }
         ledger.lastPoll[mark] = o.now.toISOString();
       } else {
         const { branch, workflow } = trigger.check_failed;
         const runs = await gh.failedRuns(repo, workflow === undefined ? { branch } : { branch, workflow });
+        checkKeys ??= new Set();
         for (const run of runs) {
           // a re-run keeps its id: a later attempt that fails again is a new failure (attempt 1 keeps the bare id)
           const attempt = run.attempt > 1 ? `${run.databaseId}.${run.attempt}` : `${run.databaseId}`;
+          checkKeys.add(`check:${repo}:${pipeline}:${attempt}`);
           seen({ key: `check:${repo}:${pipeline}:${attempt}`, pipeline, inputs: { branch, run_url: run.url } });
         }
         ledger.lastPoll[mark] = o.now.toISOString();
       }
+    }
+    for (const key of seeds) {
+      if (!Object.hasOwn(ledger.fired, key) && !out.some((f) => f.key === key)) ledger.fired[key] = { runId: '', at: o.now.toISOString() };
+    }
+    // a PR closed, or a failure off the run list, for a week can never fire again: drop its key, unless it
+    // was recorded but never prepared (a restarted watcher starts it)
+    for (const [key, f] of Object.entries(ledger.fired)) {
+      const shown = key.startsWith(`pr:${repo}:${pipeline}:`) ? prKeys : key.startsWith(`check:${repo}:${pipeline}:`) ? checkKeys : undefined;
+      if (shown === undefined || shown.has(key) || (f.runId !== '' && f.prepared !== true)) continue;
+      if (o.now.getTime() - Date.parse(f.at) > DROP_AFTER_MS) delete ledger.fired[key];
     }
     // an issue no label trigger sees any more (label removed, or issue closed) is re-armed, so labelling it
     // again asks for a new run; a firing recorded but never prepared stays for a restarted watcher to start

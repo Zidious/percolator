@@ -8,10 +8,14 @@ import { writeFileAtomic } from '../util/fs.ts';
 import type { Gh } from './gh.ts';
 import { issueMetaIfAny } from './intake.ts';
 
-/** `Closes #<n>` (none without an issue), then the trimmed description. */
-export function prBody(issueNumber: number | undefined, description?: string): string {
+/**
+ * `Closes #<n>` (none without an issue), then the trimmed description. A fan-out slice's PR is one of several
+ * for the issue: it says `Part of #<n>`, so merging it leaves the issue open for the other slices.
+ */
+export function prBody(issueNumber: number | undefined, description?: string, o: { slice?: boolean } = {}): string {
   const text = description?.trim();
-  const parts = [...(issueNumber !== undefined ? [`Closes #${issueNumber}`] : []), ...(text ? [text] : [])];
+  const ref = o.slice === true ? 'Part of' : 'Closes';
+  const parts = [...(issueNumber !== undefined ? [`${ref} #${issueNumber}`] : []), ...(text ? [text] : [])];
   return parts.length === 0 ? '' : `${parts.join('\n\n')}\n`;
 }
 
@@ -40,6 +44,8 @@ export function githubOpenPr(o: {
   repo?: string;
   pipeline?: string;
   runId?: string;
+  /** a fan-out slice run: its PR is titled `<issue title or pipeline>: <slice title>` and closes nothing */
+  slice?: { title: string };
   push?: (worktree: string, branch: string) => Promise<void>;
 }): StepHandler {
   return async (_step, ctx, io) => {
@@ -54,8 +60,10 @@ export function githubOpenPr(o: {
         return rel ? readOptional(path.join(o.runDir, rel)) : undefined;
       };
       const description = await latest('pr_body');
-      const body = prBody(issue?.number, description);
-      const title = (await latest('pr_title'))?.trim() || (issue?.title ?? `${o.pipeline}: ${o.runId}`);
+      const body = prBody(issue?.number, description, { slice: o.slice !== undefined });
+      const fallback =
+        o.slice !== undefined ? `${issue?.title ?? o.pipeline}: ${o.slice.title}` : (issue?.title ?? `${o.pipeline}: ${o.runId}`);
+      const title = (await latest('pr_title'))?.trim() || fallback;
 
       await (o.push ?? defaultPush)(o.worktree, o.branch);
       await fs.mkdir(io.outputsDir, { recursive: true });

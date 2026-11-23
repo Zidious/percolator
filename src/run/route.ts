@@ -109,16 +109,18 @@ export function skipDecidedRoute(inner: Runtime, runDir: string, spec: PipelineS
   };
 }
 
-/** The pick-pipeline gate's local decision of this round, when it approved. */
-async function gateDecision(ctx: RunContext, runDir: string): Promise<Decision | undefined> {
+/** The pick-pipeline gate's decision of this round, when it approved: who, and the pipeline of a local `--pipeline`. */
+async function gateDecision(ctx: RunContext, runDir: string): Promise<Pick<Decision, 'by' | 'pipeline'> | undefined> {
   const rel = ctx.previousOutputs[PICK_GATE]?.['approval'];
   if (rel === undefined) return undefined;
   const file = path.join(runDir, path.dirname(path.dirname(rel)), 'decision.json');
   try {
     return JSON.parse(await fs.readFile(file, 'utf8')) as Decision;
   } catch {
-    // approved by a comment: no decision.json, so no pipeline either
-    return undefined;
+    // approved by a comment: no decision.json, so no pipeline; approval.md names the approver
+    const text = await fs.readFile(path.join(runDir, rel), 'utf8').catch(() => '');
+    const by = /^Approved by @(\S+) via /.exec(text)?.[1];
+    return by === undefined ? undefined : { by };
   }
 }
 

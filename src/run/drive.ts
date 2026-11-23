@@ -202,6 +202,7 @@ async function driveHeld(
         repo: meta.repo,
         pipeline: meta.pipeline,
         runId,
+        ...(meta.fanOut !== undefined ? { slice: { title: meta.fanOut.title } } : {}),
       }),
       'github.comment': githubComment({ gh: deps.gh, runDir: dir, runId }),
       'percolator.report': percolatorReport(),

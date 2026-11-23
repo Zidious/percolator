@@ -257,9 +257,17 @@ export type YourTurnInput = {
   choices?: string[];
 };
 
-/** A value as typed (the repo, an input after `--input k=`): double-quoted when it holds a blank or a quote, its `"`
- *  escaped and its backslashes kept as they are, like the panel's commandLine. */
-const quoted = (v: string): string => (/[\s"']/.test(v) ? `"${v.replace(/"/g, '\\"')}"` : v);
+/**
+ * A value as typed (the repo, an input after `--input k=`), backslashes kept as they are. A blank or a `'`:
+ * double-quoted, which sh, PowerShell and cmd read alike. A `"`, `$` or backtick: single-quoted, which sh and
+ * PowerShell take as typed (no shell reads a `\"` escape alike). Both kinds of quote: PowerShell's `''`, as
+ * Windows is the owner's OS.
+ */
+const quoted = (v: string): string => {
+  if (!/[\s"'$`]/.test(v)) return v;
+  if (!/["$`]/.test(v)) return `"${v}"`;
+  return `'${v.replace(/'/g, "''")}'`;
+};
 
 /** The `perc run` that starts the same kind of run again: its ticket, its pipeline (unless feature) and its inputs. */
 export function runAgain(a: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs' | 'repoRoot'>): string {

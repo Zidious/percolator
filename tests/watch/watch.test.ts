@@ -10,7 +10,7 @@ import { prepareRun } from '../../src/run/prepare.ts';
 import { validate } from '../../src/validate.ts';
 import { loadLedger, saveLedger } from '../../src/watch/ledger.ts';
 import { triggerId } from '../../src/watch/poll.ts';
-import { watcherStatus, watchLoop } from '../../src/watch/watch.ts';
+import { otherWatcher, watcherStatus, watchLoop } from '../../src/watch/watch.ts';
 import { setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
 
@@ -143,6 +143,40 @@ test('heartbeat is written each poll', async () => {
   }
 });
 
+test('the heartbeat is written before the first poll and after each repo, so a long pass does not look dead', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    const file = path.join(pdir(e), 'watch', 'watch.json');
+    const seen: string[] = [];
+    const gh = e.deps.gh;
+    const listIssues = gh.listIssues.bind(gh);
+    gh.listIssues = async (repo, o) => {
+      seen.push((JSON.parse(await fs.readFile(file, 'utf8')) as { heartbeatAt: string }).heartbeatAt);
+      return listIssues(repo, o);
+    };
+    let clock = new Date('2026-11-22T10:15:00Z');
+    const ac = new AbortController();
+    await watchLoop(
+      { repos: [e.root, e.root], configFile: e.configFile, profile: 'work', intervalS: 60 },
+      {
+        ...e.deps,
+        // every read of the clock moves it 10s on, as a slow pass would
+        now: () => (clock = new Date(clock.getTime() + 10_000)),
+        out: () => {},
+        pid: 4242,
+        signal: ac.signal,
+        sleep: async () => ac.abort(),
+      },
+    );
+    assert.equal(seen.length, 2);
+    // the second repo's poll sees a beat written after the first repo, newer than the one before the pass
+    assert.ok(Date.parse(seen[1]!) > Date.parse(seen[0]!), seen.join(' '));
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('a poll that throws loses no schedule tick', async () => {
   const e = await setupRunEnv();
   try {
@@ -209,6 +243,62 @@ test('a restarted watcher starts a schedule firing it recorded but never prepare
     assert.deepEqual(lines, [`watch: ${key} → run ${id}`]);
     assert.equal((await readRunMeta(runPath(e, id))).pipeline, 'triage');
     assert.equal((await loadLedger(pdir(e))).fired[key]?.prepared, true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a restarted watcher whose first poll of a repo fails still starts its unprepared firing on a later poll', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig('    nope: 1');
+    const key = `schedule:${HOURLY}:2026-11-22T10:00`;
+    const id = 'triage-20261122-100000-abcd';
+    await saveLedger(pdir(e), {
+      version: 1,
+      fired: { [key]: { runId: id, at: '2026-11-22T10:00:30.000Z', pipeline: 'triage', inputs: {} } },
+      lastPoll: { [HOURLY]: '2026-11-22T10:00:30.000Z' },
+    });
+    const lines = await loop(e, {
+      polls: 2,
+      onSleep: async (n) => {
+        if (n === 1) await e.writeConfig(TRIAGE);
+      },
+    });
+    assert.equal(lines.length, 2, lines.join('\n'));
+    assert.equal(lines[1], `watch: ${key} → run ${id}`);
+    assert.equal((await readRunMeta(runPath(e, id))).pipeline, 'triage');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a restarted watcher whose first poll of a repo fails still records PRs opened while it was stopped as seen', async () => {
+  const e = await setupRunEnv();
+  try {
+    const PRS = [
+      '    pipelines:',
+      '      review-pr:',
+      '        stages: [intake, fix, deliver]',
+      '        exit: pr',
+      '        ticket: none',
+      '        inputs: { pr: { required: true } }',
+      '        bindings:',
+      '          fix: { command: [echo, fix] }',
+      '        triggers:',
+      '          - { pr_opened: true }',
+    ].join('\n');
+    await e.writeConfig('    nope: 1');
+    await saveLedger(pdir(e), { version: 1, fired: {}, lastPoll: { [`${REPO}:review-pr:${triggerId({ pr_opened: true })}`]: '2026-11-22T09:00:00.000Z' } });
+    e.deps.gh.addPr(REPO, { number: 3, author: 'alice' });
+    const lines = await loop(e, {
+      polls: 2,
+      onSleep: async (n) => {
+        if (n === 1) await e.writeConfig(PRS);
+      },
+    });
+    assert.equal(lines.length, 1, lines.join('\n'));
+    assert.equal((await loadLedger(pdir(e))).fired[`pr:${REPO}:review-pr:3`]?.runId, '');
   } finally {
     await e.cleanup();
   }
@@ -374,4 +464,20 @@ test('watcher alive from a fresh heartbeat; dead from a stale one', async (t) =>
   assert.deepEqual(await watcherStatus(home, now, () => true), { alive: false, repos: ['/r'] });
   await write({ host: 'elsewhere' });
   assert.deepEqual(await watcherStatus(home, now, () => true), { alive: false, repos: ['/r'] });
+});
+
+test('otherWatcher is a live watcher in watch.json that is not this process', async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-watcher-'));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const now = new Date('2026-11-22T10:15:00Z');
+  assert.equal(await otherWatcher(home, now, () => true, 10), undefined);
+  await fs.mkdir(path.join(home, '.percolator', 'watch'), { recursive: true });
+  await fs.writeFile(
+    path.join(home, '.percolator', 'watch', 'watch.json'),
+    JSON.stringify({ pid: 9, host: os.hostname(), startedAt: '2026-11-22T09:00:00.000Z', heartbeatAt: '2026-11-22T10:14:00.000Z', repos: ['/r'], intervalS: 60 }),
+  );
+  assert.equal(await otherWatcher(home, now, () => true, 10), 9);
+  // a pid reused by this very process is not another watcher
+  assert.equal(await otherWatcher(home, now, () => true, 9), undefined);
+  assert.equal(await otherWatcher(home, now, () => false, 10), undefined);
 });

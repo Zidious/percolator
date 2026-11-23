@@ -86,7 +86,10 @@ export function githubPrivateForkPr(o: {
       if (url === undefined) {
         const issue = await readOptional(path.join(o.runDir, 'issue.json'));
         const issueTitle = issue === undefined ? undefined : (JSON.parse(issue) as { title?: unknown }).title;
-        const title = typeof issueTitle === 'string' && issueTitle.trim() !== '' ? issueTitle : `Fix for ${advisory}`;
+        // a pr_title the run wrote wins: the public issue's title may describe the vulnerability
+        const title =
+          (await latestOutput(ctx, o.runDir, 'pr_title'))?.trim() ||
+          (typeof issueTitle === 'string' && issueTitle.trim() !== '' ? issueTitle : `Fix for ${advisory}`);
         // no "Closes #n": a PR in the advisory fork must not close (or point at) the public issue
         const bodyFile = path.join(io.stepDir, 'pr-body.md');
         await writeFileAtomic(bodyFile, prBody(undefined, await latestOutput(ctx, o.runDir, 'pr_body')));

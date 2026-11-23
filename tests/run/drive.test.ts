@@ -897,7 +897,9 @@ test('a fan-out slice runs percolator.seed, then its stages to a PR on its own b
     const slice = (await loadState(sliceDir(2))).history[0]!.outputs['slice']!;
     assert.equal(await fs.readFile(path.join(sliceDir(2), slice), 'utf8'), '# Printer\n\nPrint it.\n');
     assert.deepEqual(e.deps.gh.prs.map((p) => p.head), [`percolator/${meta.runId}-s1`, `percolator/${meta.runId}-s2`]);
-    for (const pr of e.deps.gh.prs) assert.match(pr.body, /^Closes #5$/m);
+    // a slice PR is part of the issue: merging one must not close it while the others are open
+    for (const pr of e.deps.gh.prs) assert.match(pr.body, /^Part of #5$/m);
+    assert.deepEqual(e.deps.gh.prs.map((p) => p.title), ['Fix the thing: Parser', 'Fix the thing: Printer']);
     const done = state.history.at(-1)!.outputs['slices_done']!;
     assert.equal(
       await fs.readFile(path.join(e.runDir(meta), done), 'utf8'),

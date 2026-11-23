@@ -377,6 +377,25 @@ test('perc watch refuses a second watcher', async () => {
   assert.deepEqual(hc.calls.filter((c) => c[0] === 'run'), []);
 });
 
+test('perc watch --foreground refuses while the watcher terminal is live in another terminal', async () => {
+  const hc = new FakeHc();
+  hc.add({ name: 'percolator-watch', labels: { 'percolator.role': 'watcher' } });
+  const r = await runWith(['watch', '--foreground', '--repo', tmp], { hc, home: tmp, entry: WATCH_ENTRY, selfTerminal: 'w9:p9' });
+  assert.equal(r.code, 1);
+  assert.equal(r.err, 'perc watch is already running in terminal percolator-watch; perc watch stop to stop it\n');
+});
+
+test('perc watch --foreground refuses while another watcher beats in watch.json', async () => {
+  const home = await fs.mkdtemp(path.join(tmp, 'home-'));
+  const file = path.join(home, '.percolator', 'watch', 'watch.json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const at = new Date().toISOString();
+  await fs.writeFile(file, JSON.stringify({ pid: 9, host: os.hostname(), startedAt: at, heartbeatAt: at, repos: [tmp], intervalS: 60 }));
+  const r = await runWith(['watch', '--foreground', '--repo', tmp], { hc: new FakeHc(), home, entry: WATCH_ENTRY, pid: 10, pidAlive: (pid) => pid === 9 });
+  assert.equal(r.code, 1);
+  assert.equal(r.err, 'perc watch is already running as pid 9; stop it first (perc watch stop, or end pid 9)\n');
+});
+
 test('perc watch replaces a finished watcher terminal and leaves a foreign one alone', async () => {
   const hc = new FakeHc();
   hc.add({ name: 'percolator-watch', labels: { 'percolator.role': 'watcher' }, state: 'finished' });

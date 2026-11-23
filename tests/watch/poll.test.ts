@@ -268,6 +268,69 @@ test('the first poll of a pr trigger records every open PR as seen and fires onl
   assert.deepEqual(later.map((f) => f.key), [`pr:${REPO}:review:3`]);
 });
 
+test("a trigger's first poll does not swallow a PR another trigger of the pipeline fires in that poll, in either order", async (t) => {
+  const h = await home(t);
+  const old = { pr_opened: true } as const;
+  const added = { dependabot: true } as const;
+  for (const triggers of [[old, added], [added, old]]) {
+    const gh = new FakeGh();
+    gh.addPr(REPO, { number: 7, author: 'dependabot[bot]' });
+    const ledger: Ledger = { version: 1, fired: {}, lastPoll: { [`${REPO}:deps:${triggerId(old)}`]: '2026-11-22T09:00:00.000Z' } };
+    const firings = await poll({ h, gh, specs: spec('deps', triggers), ledger, now: new Date('2026-11-22T10:00:00Z') });
+    assert.deepEqual(firings.map((f) => f.key), [`pr:${REPO}:deps:7`], JSON.stringify(triggers));
+    assert.equal(Object.hasOwn(ledger.fired, `pr:${REPO}:deps:7`), false);
+  }
+});
+
+test('a poll drops done PR and check keys older than a week that its lists no longer show, and keeps the rest', async (t) => {
+  const h = await home(t);
+  const gh = new FakeGh();
+  gh.addPr(REPO, { number: 2, author: 'alice' });
+  const failing = gh.addFailedRun(REPO, { branch: 'main', workflowName: 'CI', workflow: 'ci.yml' });
+  const specs = spec('ops', [{ pr_opened: true }, { check_failed: { branch: 'main' } }]);
+  const ledger = polled(specs);
+  const old = '2026-11-10T10:00:00.000Z';
+  const recent = '2026-11-20T10:00:00.000Z';
+  ledger.fired = {
+    [`pr:${REPO}:ops:1`]: { runId: '', at: old }, // closed, seen, old: dropped
+    [`pr:${REPO}:ops:2`]: { runId: '', at: old }, // still open: kept
+    [`pr:${REPO}:ops:3`]: { runId: 'r3', at: recent, prepared: true }, // closed but recent: kept
+    [`pr:${REPO}:ops:4`]: { runId: 'r4', at: old, pipeline: 'ops', inputs: {} }, // never prepared: kept for a restart
+    [`pr:${REPO}:ops:5`]: { runId: 'r5', at: old, prepared: true }, // closed, prepared, old: dropped
+    [`check:${REPO}:ops:${failing.databaseId}`]: { runId: '', at: old }, // still listed: kept
+    [`check:${REPO}:ops:999`]: { runId: 'r9', at: old, prepared: true }, // off the list, old: dropped
+    [`check:${REPO}:ops:998`]: { runId: '', at: recent }, // off the list but recent: kept
+  };
+  await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:00:00Z') });
+  assert.deepEqual(Object.keys(ledger.fired).sort(), [
+    `check:${REPO}:ops:${failing.databaseId}`,
+    `check:${REPO}:ops:998`,
+    `pr:${REPO}:ops:2`,
+    `pr:${REPO}:ops:3`,
+    `pr:${REPO}:ops:4`,
+  ]);
+});
+
+test('a check trigger that lists no failure at all still drops old check keys', async (t) => {
+  const h = await home(t);
+  const specs = spec('ops', [{ check_failed: { branch: 'main' } }]);
+  const ledger = polled(specs);
+  ledger.fired = { [`check:${REPO}:ops:999`]: { runId: '', at: '2026-11-10T10:00:00.000Z' } };
+  await poll({ h, gh: new FakeGh(), specs, ledger, now: new Date('2026-11-22T10:00:00Z') });
+  assert.deepEqual(ledger.fired, {});
+});
+
+test('a full page of open PRs drops no PR key, since more may be past it', async (t) => {
+  const h = await home(t);
+  const gh = new FakeGh();
+  for (let n = 100; n < 200; n++) gh.addPr(REPO, { number: n, author: 'alice' });
+  const specs = spec('ops', [{ pr_opened: true }]);
+  const ledger = polled(specs);
+  ledger.fired = { [`pr:${REPO}:ops:1`]: { runId: '', at: '2026-11-10T10:00:00.000Z' } };
+  await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:00:00Z') });
+  assert.equal(Object.hasOwn(ledger.fired, `pr:${REPO}:ops:1`), true);
+});
+
 test('the first poll of a check_failed trigger records every current failure as seen', async (t) => {
   const h = await home(t);
   const gh = new FakeGh();

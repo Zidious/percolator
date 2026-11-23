@@ -1331,7 +1331,7 @@ test('yourTurn failed', () => {
 test('yourTurn failed on another pipeline starts it again with its inputs, quoted when they hold a blank or a quote', () => {
   const { ticket: _t, ...ticketless } = TURN;
   const t = yourTurn({ ...ticketless, kind: 'failed', pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x', note: 'a b', q: 'say "hi"' } });
-  assert.equal(t.next[0], 'perc run --pipeline dd-alert --input alert_url=https://dd/x --input note="a b" --input q="say \\"hi\\"" --repo /repo');
+  assert.equal(t.next[0], `perc run --pipeline dd-alert --input alert_url=https://dd/x --input note="a b" --input q='say "hi"' --repo /repo`);
   assert.equal(yourTurn({ ...TURN, kind: 'failed', pipeline: 'hotfix', inputs: {} }).next[0], 'perc run github.com/o/r#5 --pipeline hotfix --repo /repo');
   assert.equal(yourTurn({ ...TURN, kind: 'failed', pipeline: 'feature', inputs: {} }).next[0], 'perc run github.com/o/r#5 --repo /repo');
 });
@@ -1447,6 +1447,16 @@ test('runAgain double-quotes a repo or input with a blank and keeps Windows back
     runAgain({ ticket: 'o/r#1', pipeline: 'hotfix', inputs: { path: 'C:\\a b\\c' }, repoRoot: 'C:\\My Repos\\r' }),
     'perc run o/r#1 --pipeline hotfix --input path="C:\\a b\\c" --repo "C:\\My Repos\\r"',
   );
+});
+
+test('runAgain single-quotes a value with a double quote, $ or backtick, which PowerShell and sh then take as typed', () => {
+  const line = (v: string) => runAgain({ inputs: { q: v }, repoRoot: '/repo' });
+  assert.equal(line('say "hi"'), `perc run --input q='say "hi"' --repo /repo`);
+  assert.equal(line('cost $5'), `perc run --input q='cost $5' --repo /repo`);
+  assert.equal(line('a`b'), "perc run --input q='a`b' --repo /repo");
+  assert.equal(line("it's"), `perc run --input q="it's" --repo /repo`);
+  // both kinds of quote: PowerShell's '' escape (Windows is the owner's OS)
+  assert.equal(line(`it's "x"`), `perc run --input q='it''s "x"' --repo /repo`);
 });
 
 /** Writes `~/.percolator/watch/watch.json` as perc watch does. */

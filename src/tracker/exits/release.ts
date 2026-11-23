@@ -10,6 +10,10 @@ import { errText, latestOutput } from './latest.ts';
 
 const TAG = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
+/** A tag name git takes (`git check-ref-format`): no `..`, and no part empty, starting with `.` or ending with `.` or `.lock`. */
+const validTag = (tag: string): boolean =>
+  TAG.test(tag) && !tag.includes('..') && tag.split('/').every((p) => p !== '' && !p.startsWith('.') && !p.endsWith('.') && !p.endsWith('.lock'));
+
 const escalate = (reason: string): NodeOutcome => ({ status: 'escalate', outputs: {}, reason: `github.release: ${reason}` });
 
 const defaultPush = async (worktree: string, branch: string): Promise<void> => {
@@ -35,7 +39,7 @@ export function githubRelease(o: {
   return async (_step, ctx, io) => {
     try {
       const tag = (await latestOutput(ctx, o.runDir, 'tag'))?.trim() || (o.inputs['tag'] ?? '').trim();
-      if (!TAG.test(tag)) return escalate(`tag "${tag}" is not a valid tag name`);
+      if (!validTag(tag)) return escalate(`tag "${tag}" is not a valid tag name`);
       await (o.push ?? defaultPush)(o.worktree, o.branch);
       // a crash after createRelease leaves the release but no saved release_url: look it up first,
       // and take it only when its notes carry this run's marker
