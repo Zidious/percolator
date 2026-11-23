@@ -53,21 +53,25 @@ test('FakeGh issues carry labels, empty unless seeded', async () => {
   assert.deepEqual((await gh.issue('github.com/o/r', 2)).labels, ['pipeline:hotfix']);
 });
 
-test('FakeGh createIssue is found by findIssues through its body text', async () => {
+test('FakeGh myIssues lists the issues its user opened, newest first, up to 50', async () => {
   const R = 'github.com/o/r';
-  const gh = new FakeGh({ user: 'bot', readFile: (f) => `draft\n\n<!-- percolator:issue run=r1 n=${f} -->\n` });
+  const gh = new FakeGh({ user: 'bot', readFile: (f) => `draft ${f}` });
   gh.addIssue(R, 3);
   const url = await gh.createIssue(R, { title: 'New', bodyFile: '1' });
   assert.equal(url, 'https://github.com/o/r/issues/4');
-  assert.deepEqual(await gh.findIssues(R, 'percolator:issue run=r1 n=1'), [
-    { number: 4, url, body: 'draft\n\n<!-- percolator:issue run=r1 n=1 -->\n' },
+  gh.addIssue(R, 5, { author: 'bot', state: 'CLOSED', body: 'closed one' });
+  assert.deepEqual(await gh.myIssues(R), [
+    { number: 5, url: 'https://github.com/o/r/issues/5', body: 'closed one' },
+    { number: 4, url, body: 'draft 1' },
   ]);
-  assert.deepEqual(await gh.findIssues(R, 'percolator:issue run=r1 n=2'), []);
-  assert.deepEqual(await gh.findIssues('github.com/o/other', 'percolator:issue run=r1 n=1'), []);
+  assert.deepEqual(await gh.myIssues('github.com/o/other'), []);
+  for (let n = 6; n < 60; n++) gh.addIssue(R, n, { author: 'bot' });
+  const many = await gh.myIssues(R);
+  assert.equal(many.length, 50);
+  assert.equal(many[0]!.number, 59);
   const i = await gh.issue(R, 4);
   assert.equal(i.title, 'New');
   assert.equal(i.author, 'bot');
-  assert.deepEqual(gh.calls.map((c) => c.method), ['createIssue', 'findIssues', 'findIssues', 'findIssues', 'issue']);
 });
 
 test('FakeGh findComment finds the marked comment', async () => {
@@ -81,13 +85,13 @@ test('FakeGh findComment finds the marked comment', async () => {
   assert.deepEqual(gh.calls.at(-1), { method: 'findComment', args: [R, 1, '<!-- other -->'] });
 });
 
-test('FakeGh createRelease is found by releaseUrl', async () => {
+test('FakeGh createRelease is found by release', async () => {
   const R = 'github.com/o/r';
   const gh = new FakeGh({ readFile: () => 'notes' });
-  assert.equal(await gh.releaseUrl(R, 'v1'), undefined);
+  assert.equal(await gh.release(R, 'v1'), undefined);
   const url = await gh.createRelease(R, { tag: 'v1', target: 'abc', notesFile: 'n.md' });
   assert.equal(url, 'https://github.com/o/r/releases/tag/v1');
-  assert.equal(await gh.releaseUrl(R, 'v1'), url);
+  assert.deepEqual(await gh.release(R, 'v1'), { url, body: 'notes' });
   assert.deepEqual(gh.releases, [{ repo: R, tag: 'v1', target: 'abc', notes: 'notes', url }]);
 });
 

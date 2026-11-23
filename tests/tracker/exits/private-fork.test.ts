@@ -89,6 +89,20 @@ test('private fork exit without a ticket titles the PR after the advisory', asyn
   }
 });
 
+test('private fork exit titles the PR after the advisory when issue.json has no title', async () => {
+  for (const issue of [{ repo: REPO, number: 7, url: 'u' }, { repo: REPO, number: 7, title: '  ', url: 'u' }]) {
+    const s = await setup();
+    try {
+      await fs.writeFile(path.join(s.runDir, 'issue.json'), JSON.stringify(issue));
+      const gh = new FakeGh({ readFile: readBody });
+      assert.equal((await mk(s, gh, [])(step, s.ctx, s.io)).status, 'pass');
+      assert.deepEqual(gh.prs.map((p) => p.title), [`Fix for ${GHSA}`]);
+    } finally {
+      await rm(s.runDir);
+    }
+  }
+});
+
 test('private fork exit reuses the fork and PR from before a crash', async () => {
   const s = await setup({ attempt: 2 });
   try {

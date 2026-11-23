@@ -65,6 +65,11 @@ export function githubOpenIssues(o: {
       const text = await latestOutput(ctx, o.runDir, 'issues');
       const items = text === undefined ? [] : splitSections(text);
       if (items.length === 0) return { status: 'pass', outputs: {} };
+      // checked before opening any: gh refuses an empty title, which would leave the drafts half opened
+      const untitled = items.findIndex((i) => i.title === '');
+      if (untitled >= 0) {
+        return escalate(`github.open_issues: draft ${untitled + 1} in issues.md has no title (a bare "## " heading); give it a title and resume`);
+      }
 
       await fs.mkdir(io.outputsDir, { recursive: true });
       const createdFile = path.join(io.stepDir, 'created.json');
@@ -75,9 +80,8 @@ export function githubOpenIssues(o: {
         let url: string | undefined = created[n]?.url;
         if (!url) {
           // a crash between create and record leaves the issue unrecorded: find it by its marker first
-          const search = `percolator:issue run=${o.runId} n=${n}`;
-          const marker = `<!-- ${search} -->`;
-          url = (await o.gh.findIssues(o.repo, search)).find((i) => i.body.includes(marker))?.url;
+          const marker = `<!-- percolator:issue run=${o.runId} n=${n} -->`;
+          url = (await o.gh.myIssues(o.repo)).find((i) => i.body.includes(marker))?.url;
           if (!url) {
             const bodyFile = path.join(io.stepDir, `issue-${n}.md`);
             await writeFileAtomic(bodyFile, `${item.body}\n\n${marker}\n`);

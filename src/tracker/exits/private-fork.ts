@@ -85,7 +85,8 @@ export function githubPrivateForkPr(o: {
       let url = (await o.gh.findPr(forkRepo, o.branch))?.url;
       if (url === undefined) {
         const issue = await readOptional(path.join(o.runDir, 'issue.json'));
-        const title = issue === undefined ? `Fix for ${advisory}` : String((JSON.parse(issue) as { title?: unknown }).title);
+        const issueTitle = issue === undefined ? undefined : (JSON.parse(issue) as { title?: unknown }).title;
+        const title = typeof issueTitle === 'string' && issueTitle.trim() !== '' ? issueTitle : `Fix for ${advisory}`;
         // no "Closes #n": a PR in the advisory fork must not close (or point at) the public issue
         const bodyFile = path.join(io.stepDir, 'pr-body.md');
         await writeFileAtomic(bodyFile, prBody(undefined, await latestOutput(ctx, o.runDir, 'pr_body')));

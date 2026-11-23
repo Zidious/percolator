@@ -14,6 +14,7 @@ const SHA = 'a'.repeat(40);
 const rm = (d: string) => fs.rm(d, { recursive: true, force: true, maxRetries: 5 });
 const readBody = (f: string) => readFileSync(f, 'utf8');
 const step = { id: 'release' } as Step;
+const MARK = '<!-- percolator:release run=r1 -->';
 
 type Setup = { runDir: string; io: { stepDir: string; outputsDir: string }; ctx: RunContext };
 
@@ -67,7 +68,7 @@ test('release exit tags the pushed head with the notes', async () => {
     assert.deepEqual(pushes, [['/wt', 'percolator/r1']]);
     assert.deepEqual(heads, ['/wt']);
     assert.deepEqual(gh.releases, [
-      { repo: REPO, tag: 'v1.2.0', target: SHA, notes: '## Changes\n\n- X\n', url: `https://${REPO}/releases/tag/v1.2.0` },
+      { repo: REPO, tag: 'v1.2.0', target: SHA, notes: `## Changes\n\n- X\n\n${MARK}\n`, url: `https://${REPO}/releases/tag/v1.2.0` },
     ]);
     assert.equal(await fs.readFile(path.join(s.io.outputsDir, 'release_url.md'), 'utf8'), `https://${REPO}/releases/tag/v1.2.0\n`);
   } finally {
@@ -81,7 +82,7 @@ test('release exit takes the tag input and empty notes when no step wrote them',
     const gh = new FakeGh({ readFile: readBody });
     const out = await mk(s, gh, { inputs: { tag: 'v2.0.0' } })(step, s.ctx, s.io);
     assert.equal(out.status, 'pass');
-    assert.deepEqual(gh.releases.map((r) => [r.tag, r.notes]), [['v2.0.0', '']]);
+    assert.deepEqual(gh.releases.map((r) => [r.tag, r.notes]), [['v2.0.0', `${MARK}\n`]]);
   } finally {
     await rm(s.runDir);
   }
@@ -91,12 +92,31 @@ test('release exit finds the release it created before a crash', async () => {
   const s = await setup({ prepare: { tag: 'v1.2.0' } });
   try {
     const gh = new FakeGh({ readFile: readBody });
-    gh.releases.push({ repo: REPO, tag: 'v1.2.0', target: SHA, notes: '', url: `https://${REPO}/releases/tag/v1.2.0` });
+    gh.releases.push({ repo: REPO, tag: 'v1.2.0', target: SHA, notes: `Notes.\n\n${MARK}\n`, url: `https://${REPO}/releases/tag/v1.2.0` });
     const out = await mk(s, gh)(step, s.ctx, s.io);
     assert.equal(out.status, 'pass');
     assert.equal(gh.calls.filter((c) => c.method === 'createRelease').length, 0);
     assert.equal(gh.releases.length, 1);
     assert.equal(await fs.readFile(path.join(s.io.outputsDir, 'release_url.md'), 'utf8'), `https://${REPO}/releases/tag/v1.2.0\n`);
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('a tag another release already has escalates and creates nothing', async () => {
+  const s = await setup({ prepare: { tag: 'v1.2.0' } });
+  try {
+    const gh = new FakeGh({ readFile: readBody });
+    const url = `https://${REPO}/releases/tag/v1.2.0`;
+    gh.releases.push({ repo: REPO, tag: 'v1.2.0', target: SHA, notes: 'Hand-made.\n<!-- percolator:release run=r0 -->\n', url });
+    const out = await mk(s, gh)(step, s.ctx, s.io);
+    assert.deepEqual(out, {
+      status: 'escalate',
+      outputs: {},
+      reason: `github.release: tag "v1.2.0" already has a release (${url}); pick another tag and resume`,
+    });
+    assert.equal(gh.calls.filter((c) => c.method === 'createRelease').length, 0);
+    assert.equal(await fs.stat(path.join(s.io.outputsDir, 'release_url.md')).then(() => true, () => false), false);
   } finally {
     await rm(s.runDir);
   }

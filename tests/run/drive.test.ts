@@ -631,7 +631,7 @@ test('a pipeline with exit release runs github.release', async () => {
     const state = await drive(meta.runId, e.deps);
     assert.equal(state.status, 'completed', JSON.stringify(state.history));
     const head = await git(meta.worktree, 'rev-parse', 'HEAD');
-    assert.deepEqual(e.deps.gh.releases.map((r) => [r.repo, r.tag, r.target, r.notes]), [[REPO, 'v1.2.3', head, 'Notes.\n']]);
+    assert.deepEqual(e.deps.gh.releases.map((r) => [r.repo, r.tag, r.target, r.notes]), [[REPO, 'v1.2.3', head, `Notes.\n\n<!-- percolator:release run=${meta.runId} -->\n`]]);
     assert.equal(await git(e.bare, 'rev-parse', `refs/heads/${meta.branch}`), head);
     assert.equal(await shipOutput(e, meta, state, 'release_url'), `https://${REPO}/releases/tag/v1.2.3`);
   } finally {

@@ -31,12 +31,15 @@ export interface Gh {
   editPr(repo: string, n: number, bodyFile: string): Promise<void>;
   /** Returns the new issue's URL. */
   createIssue(repo: string, o: { title: string; bodyFile: string }): Promise<string>;
-  /** Issues in any state whose body contains `text` (GitHub search, up to 100). */
-  findIssues(repo: string, text: string): Promise<IssueHit[]>;
+  /**
+   * The latest issues (any state, newest first, up to 50) the gh user opened. A plain list, not a search:
+   * GitHub's search index lags behind a just-created issue, and would read `percolator:` as a qualifier.
+   */
+  myIssues(repo: string): Promise<IssueHit[]>;
   /** The first comment on issue `n` whose body includes `marker`. */
   findComment(repo: string, n: number, marker: string): Promise<IssueComment | undefined>;
-  /** The release's URL, or undefined when no release has that tag. */
-  releaseUrl(repo: string, tag: string): Promise<string | undefined>;
+  /** The release with that tag (its URL and notes), or undefined when there is none. */
+  release(repo: string, tag: string): Promise<{ url: string; body: string } | undefined>;
   /** Returns the new release's URL. */
   createRelease(repo: string, o: { tag: string; target: string; notesFile: string }): Promise<string>;
   prReviews(repo: string, n: number): Promise<PrReview[]>;
@@ -167,10 +170,10 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
       const out = await call('issue create', ['issue', 'create', '--repo', repo, `--title=${p.title}`, '--body-file', p.bodyFile]);
       return out.trim();
     },
-    async findIssues(repo, text) {
-      noDash('issue list', 'text', text);
+    async myIssues(repo) {
+      // 50: enough to hold the issues one exit opens before a crash, the only thing it is read for
       const out = await call('issue list', [
-        'issue', 'list', '--repo', repo, '--state', 'all', '--search', `${text} in:body`, '--json', 'number,url,body', '--limit', '100',
+        'issue', 'list', '--repo', repo, '--state', 'all', '--author', '@me', '--json', 'number,url,body', '--limit', '50',
       ]);
       return list(parseJson('issue list', out)).map((i) => ({
         number: Number(i['number']), url: String(i['url'] ?? ''), body: String(i['body'] ?? ''),
@@ -179,15 +182,15 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
     async findComment(repo, n, marker) {
       return (await issue(repo, n)).comments.find((c) => c.body.includes(marker));
     },
-    async releaseUrl(repo, tag) {
+    async release(repo, tag) {
       noDash('release view', 'tag', tag);
-      const r = await exec(bin, ['release', 'view', '--repo', repo, '--json', 'url', '--', tag], { env: GH_ENV });
+      const r = await exec(bin, ['release', 'view', '--repo', repo, '--json', 'url,body', '--', tag], { env: GH_ENV });
       if (r.code !== 0) {
         if (/release not found/i.test(r.stderr)) return undefined;
         throw new GhError('release view', r.stderr.trim().slice(0, 500));
       }
-      const j = parseJson('release view', r.stdout) as { url?: unknown } | null;
-      return j?.url ? String(j.url) : undefined;
+      const j = parseJson('release view', r.stdout) as { url?: unknown; body?: unknown } | null;
+      return j?.url ? { url: String(j.url), body: String(j.body ?? '') } : undefined;
     },
     async createRelease(repo, p) {
       noDash('release create', 'tag', p.tag);
@@ -221,6 +224,9 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
       if (!j?.full_name || !j.clone_url) throw new Error(`gh api advisory fork returned no full_name or clone_url for ${ghsa}`);
       return { fullName: String(j.full_name), cloneUrl: String(j.clone_url) };
     },
+    // the watcher's lists are capped (100 issues, 100 PRs, 20 failed runs) and not paginated: they are
+    // polled every interval and gh lists the newest first, so a new one is always seen; an older one past
+    // the cap is seen only once enough newer ones are closed (or, for failed runs, superseded)
     async listIssues(repo, p) {
       noDash('issue list', 'label', p.label);
       const out = await call('issue list', [

@@ -37,12 +37,19 @@ export function githubRelease(o: {
       const tag = (await latestOutput(ctx, o.runDir, 'tag'))?.trim() || (o.inputs['tag'] ?? '').trim();
       if (!TAG.test(tag)) return escalate(`tag "${tag}" is not a valid tag name`);
       await (o.push ?? defaultPush)(o.worktree, o.branch);
-      // a crash after createRelease leaves the release but no saved release_url: look it up first
-      let url = await o.gh.releaseUrl(o.repo, tag);
+      // a crash after createRelease leaves the release but no saved release_url: look it up first,
+      // and take it only when its notes carry this run's marker
+      const marker = `<!-- percolator:release run=${ctx.state.runId} -->`;
+      const existing = await o.gh.release(o.repo, tag);
+      if (existing !== undefined && !existing.body.includes(marker)) {
+        return escalate(`tag "${tag}" already has a release (${existing.url}); pick another tag and resume`);
+      }
+      let url = existing?.url;
       if (url === undefined) {
         const target = await (o.head ?? defaultHead)(o.worktree);
         const notesFile = path.join(io.stepDir, 'release-notes.md');
-        await writeFileAtomic(notesFile, (await latestOutput(ctx, o.runDir, 'release_notes')) ?? '');
+        const notes = ((await latestOutput(ctx, o.runDir, 'release_notes')) ?? '').trimEnd();
+        await writeFileAtomic(notesFile, `${notes === '' ? '' : `${notes}\n\n`}${marker}\n`);
         url = await o.gh.createRelease(o.repo, { tag, target, notesFile });
       }
       await fs.mkdir(io.outputsDir, { recursive: true });

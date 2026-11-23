@@ -5,7 +5,7 @@ import type {
 
 export type FakeGhMethod =
   | 'issue' | 'comment' | 'editComment' | 'user' | 'findPr' | 'createPr' | 'editPr'
-  | 'createIssue' | 'findIssues' | 'findComment' | 'releaseUrl' | 'createRelease' | 'prReviews' | 'postReview' | 'advisoryFork'
+  | 'createIssue' | 'myIssues' | 'findComment' | 'release' | 'createRelease' | 'prReviews' | 'postReview' | 'advisoryFork'
   | 'listIssues' | 'listPrs' | 'failedRuns';
 export type FakePr = {
   number: number; url: string; repo: string; base: string; head: string; title: string; body: string;
@@ -165,9 +165,13 @@ export class FakeGh implements Gh {
     return this.addIssue(repo, Math.max(0, ...taken) + 1, { title: o.title, body, author: this.userLogin }).url;
   }
 
-  async findIssues(repo: string, text: string): Promise<IssueHit[]> {
-    this.enter('findIssues', [repo, text]);
-    return this.inRepo(repo).filter((i) => i.body.includes(text)).map((i) => ({ number: i.number, url: i.url, body: i.body }));
+  async myIssues(repo: string): Promise<IssueHit[]> {
+    this.enter('myIssues', [repo]);
+    return this.inRepo(repo)
+      .filter((i) => i.author === this.userLogin)
+      .sort((a, b) => b.number - a.number)
+      .slice(0, 50)
+      .map((i) => ({ number: i.number, url: i.url, body: i.body }));
   }
 
   async findComment(repo: string, n: number, marker: string): Promise<IssueComment | undefined> {
@@ -178,9 +182,10 @@ export class FakeGh implements Gh {
     return c ? structuredClone(c) : undefined;
   }
 
-  async releaseUrl(repo: string, tag: string): Promise<string | undefined> {
-    this.enter('releaseUrl', [repo, tag]);
-    return this.releases.find((r) => r.repo === repo && r.tag === tag)?.url;
+  async release(repo: string, tag: string): Promise<{ url: string; body: string } | undefined> {
+    this.enter('release', [repo, tag]);
+    const r = this.releases.find((x) => x.repo === repo && x.tag === tag);
+    return r ? { url: r.url, body: r.notes } : undefined;
   }
 
   async createRelease(repo: string, o: { tag: string; target: string; notesFile: string }): Promise<string> {
