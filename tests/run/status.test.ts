@@ -9,7 +9,7 @@ import { listRuns, writeRunMeta } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
-import { attentionNext, driverAlive, runStatusJson, statusJson, yourTurn } from '../../src/run/status.ts';
+import { attentionNext, driverAlive, runAgain, runStatusJson, statusJson, yourTurn } from '../../src/run/status.ts';
 import type { RunStatusJson, TimelineJson } from '../../src/run/status.ts';
 import { NOW, setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
@@ -1117,6 +1117,46 @@ test('a broken fanout.json leaves the parent readable with its listed children',
   }
 });
 
+test('a failed fan-out slice says to delete it and resume its parent, never to start a new run', async () => {
+  const e = await setup();
+  try {
+    const parent = await e.prepare();
+    e.clock.t += 1000;
+    const c = await e.prepare('#6');
+    const fanOut = { parent: parent.runId, slice: 2, from: 'implement', title: 'Panel rows' };
+    const slice = await rewriteMeta(e, c, { pipeline: 'epic', parent: parent.runId, fanOut });
+    await e.edit(slice, (s) => {
+      s.status = 'failed';
+      s.currentStep = 'implement';
+      s.history.push(rec('implement', 1, 'fail'));
+    });
+    const r = (await e.status(slice)) as Readable;
+    assert.equal(r.attention?.detail, `Delete this slice (its branch stays), then resume ${parent.runId} to run it again`);
+    assert.equal(r.attention?.commands, undefined);
+    assert.deepEqual(attentionNext(r.attention!, r), [`perc delete ${slice.runId}`, `perc resume ${parent.runId}`]);
+    // a routed child (a parent, no fanOut) still starts a new run
+    const routed = await rewriteMeta(e, slice, { pipeline: 'hotfix' }, ['fanOut']);
+    const rr = (await e.status(routed)) as Readable;
+    assert.deepEqual(rr.attention?.commands, [`perc run ${REPO}#6 --pipeline hotfix --repo ${routed.repoRoot}`]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a child with run.json but no state.json yet is listed as running', async () => {
+  const e = await setup();
+  try {
+    const parent = await e.prepare();
+    e.clock.t += 1000;
+    const c = await rewriteMeta(e, await e.prepare('#6'), { parent: parent.runId });
+    await fs.rm(path.join(e.dir(c), 'state.json'));
+    const r = (await e.status(parent)) as Readable;
+    assert.deepEqual(r.children, [{ id: c.runId, pipeline: 'feature', status: 'running' }]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 const driverOf = (r: RunStatusJson) => (r as Extract<RunStatusJson, { driver: unknown }>).driver;
 
 test('driver.shown is true when the owned driver carries the run\'s space', async () => {
@@ -1385,6 +1425,28 @@ test('a pick-pipeline gate without a valid suggestion only asks you to pick', as
   } finally {
     await e.cleanup();
   }
+});
+
+test('perc status on a pick-pipeline gate names --pipeline for each choice, then reject', async () => {
+  const e = await setup();
+  try {
+    const m = await waitAtPick(e, '');
+    const r = (await e.status(m)) as Readable;
+    assert.deepEqual(attentionNext(r.attention!, r), [
+      `perc approve ${m.runId} --pipeline hotfix`,
+      `perc approve ${m.runId} --pipeline feature`,
+      `perc reject ${m.runId} "<what to change>"`,
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('runAgain double-quotes a repo or input with a blank and keeps Windows backslashes single', () => {
+  assert.equal(
+    runAgain({ ticket: 'o/r#1', pipeline: 'hotfix', inputs: { path: 'C:\\a b\\c' }, repoRoot: 'C:\\My Repos\\r' }),
+    'perc run o/r#1 --pipeline hotfix --input path="C:\\a b\\c" --repo "C:\\My Repos\\r"',
+  );
 });
 
 /** Writes `~/.percolator/watch/watch.json` as perc watch does. */

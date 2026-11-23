@@ -251,16 +251,21 @@ export type YourTurnInput = {
   decision?: 'approve' | 'reject';
   terminal?: string;
   agentState?: string;
+  /** a failed fan-out slice: its parent run, which starts the slice again once it is deleted */
+  sliceOf?: string;
+  /** a pick-pipeline gate: the pipelines `perc approve --pipeline` may name */
+  choices?: string[];
 };
 
-/** An input value as typed after `--input k=`: quoted when it holds a blank or a quote. */
-const typed = (v: string): string => (/[\s"']/.test(v) ? JSON.stringify(v) : v);
+/** A value as typed (the repo, an input after `--input k=`): double-quoted when it holds a blank or a quote, its `"`
+ *  escaped and its backslashes kept as they are, like the panel's commandLine. */
+const quoted = (v: string): string => (/[\s"']/.test(v) ? `"${v.replace(/"/g, '\\"')}"` : v);
 
 /** The `perc run` that starts the same kind of run again: its ticket, its pipeline (unless feature) and its inputs. */
 export function runAgain(a: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs' | 'repoRoot'>): string {
   const pipeline = a.pipeline !== undefined && a.pipeline !== 'feature' ? [`--pipeline ${a.pipeline}`] : [];
-  const inputs = Object.entries(a.inputs ?? {}).map(([k, v]) => `--input ${k}=${typed(v)}`);
-  return ['perc run', ...(a.ticket ? [a.ticket] : []), ...pipeline, ...inputs, `--repo ${a.repoRoot}`].join(' ');
+  const inputs = Object.entries(a.inputs ?? {}).map(([k, v]) => `--input ${k}=${quoted(v)}`);
+  return ['perc run', ...(a.ticket ? [a.ticket] : []), ...pipeline, ...inputs, `--repo ${quoted(a.repoRoot)}`].join(' ');
 }
 
 /** What the owner has to do next, as one sentence plus the exact commands to type. Shared by `perc status` and the JSON. */
@@ -271,7 +276,10 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
       return {
         // a ticketless run has no issue for the gate to comment on
         message: a.ticket ? `${a.step} is waiting for approval` : 'approve or reject here (no issue to comment on)',
-        next: [`perc approve ${a.runId}`, `perc reject ${a.runId} "<what to change>"`],
+        next: [
+          ...(a.choices !== undefined ? a.choices.map((c) => `perc approve ${a.runId} --pipeline ${c}`) : [`perc approve ${a.runId}`]),
+          `perc reject ${a.runId} "<what to change>"`,
+        ],
       };
     case 'cap':
       return {
@@ -282,6 +290,13 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
     case 'paused':
       return { message: `${a.step} paused: ${a.reason}`, next: resume };
     case 'failed':
+      if (a.sliceOf !== undefined) {
+        return {
+          message: `${a.step} failed`,
+          detail: `Delete this slice (its branch stays), then resume ${a.sliceOf} to run it again`,
+          next: [`perc delete ${a.runId}`, `perc resume ${a.sliceOf}`],
+        };
+      }
       return {
         message: `${a.step} failed`,
         detail: "A failed run can't be resumed. Start a new run for the ticket, then delete this one (or clean it up to keep its record).",
@@ -299,13 +314,18 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
   }
 }
 
-/** The commands `yourTurn` gives for an attention record (they depend on its kind and the run, not on its reason). */
+/**
+ * The commands `yourTurn` gives for an attention record (they depend on its kind and the run, not on its reason).
+ * A failed run with a parent and no `commands` is a fan-out slice (attentionOf gives a slice none).
+ */
 export function attentionNext(
   a: AttentionJson,
-  run: { id: string; ticket: { ref: string } | null; pipeline: string; inputs: Record<string, string>; repo: string },
+  run: { id: string; ticket: { ref: string } | null; pipeline: string; inputs: Record<string, string>; repo: string; parent?: string | null },
 ): string[] {
   const again = { ticket: run.ticket?.ref, pipeline: run.pipeline, inputs: run.inputs, repoRoot: run.repo };
-  return yourTurn({ kind: a.kind, runId: run.id, step: '', ...again }).next;
+  const slice = a.kind === 'failed' && a.commands === undefined && typeof run.parent === 'string' ? { sliceOf: run.parent } : {};
+  const choices = a.choices !== undefined ? { choices: a.choices } : {};
+  return yourTurn({ kind: a.kind, runId: run.id, step: '', ...again, ...slice, ...choices }).next;
 }
 
 const PICK_GATE = 'pick-pipeline';
@@ -373,13 +393,15 @@ async function attentionOf(o: {
   // after `perc clean` (no worktree) there is nothing left to do for a failed run
   if (state.status === 'failed') {
     if (!(await exists(meta.worktree))) return undefined;
+    // a slice is started again by its parent, not by a new run
+    const sliceOf = meta.fanOut?.parent;
     return {
       kind: 'failed',
       since: lastEnd,
-      ...turn('failed', state.currentStep),
+      ...turn('failed', state.currentStep, sliceOf !== undefined ? { sliceOf } : {}),
       review: failing(state.currentStep),
       actions: ['clean'],
-      commands: [runAgain(again)],
+      ...(sliceOf === undefined ? { commands: [runAgain(again)] } : {}),
     };
   }
   if (state.status !== 'running') return undefined;
@@ -464,7 +486,9 @@ async function timelineOf(o: {
 
 /** A listed run's status as its status JSON gives it, read cheaply (no hc, no graph); `unreadable` on any error. */
 async function listedStatus(l: RunListing): Promise<RunStatusJson['status']> {
-  if (l.error !== undefined || l.meta === undefined || l.state === undefined) return 'unreadable';
+  if (l.error !== undefined || l.meta === undefined) return 'unreadable';
+  // run.json written, state.json not yet: the run is being started
+  if (l.state === undefined) return 'running';
   const s = l.state.status;
   try {
     return (s === 'running' || s === 'paused') && (await readWaiting(l.dir)) !== undefined ? 'waiting' : s;

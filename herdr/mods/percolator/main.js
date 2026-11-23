@@ -91,6 +91,7 @@ export default class Percolator extends View {
     this.fixture = null;
     this.runs = [];
     this.watcher = null; // watcherState of the last status: the header's indicator and its Start/Stop
+    this.watchStartedAt = null; // when Start watcher succeeded, until the first heartbeat (starting… meanwhile)
     this.loaded = false;
     this.error = null;
     this.filter = 'active';
@@ -211,7 +212,8 @@ export default class Percolator extends View {
       const got = await fetchStatus(this);
       if (got.ok) {
         this.runs = sortRuns(got.data.runs);
-        this.watcher = watcherState(got.data);
+        this.watcher = watcherState(got.data, { startedAt: this.watchStartedAt, now: Date.now(), live: terminals() });
+        if (this.watcher.alive) this.watchStartedAt = null;
         this.notice = finishedNotice(this.notice, this.runs, false);
         this.error = null;
         this.loaded = true;
@@ -665,6 +667,8 @@ export default class Percolator extends View {
       }));
       this.busy = null;
       if (res.code !== 0) this.notice = firstLine(res.stderr) || `perc ${argv.join(' ')} exited ${res.code}`;
+      // a started watcher beats only after its first poll: until then the chip says starting…, not Start again
+      this.watchStartedAt = res.code === 0 && argv[1] !== 'stop' ? Date.now() : null;
       this.refresh(cx);
       cx.notify();
     });
@@ -674,7 +678,7 @@ export default class Percolator extends View {
   watcherChip(t, narrow) {
     const w = this.watcher;
     if (!w) return null;
-    const action = w.argv === null ? '' : w.alive ? 'Stop' : 'Start watcher';
+    const action = w.argv === null ? '' : w.argv[1] === 'stop' ? 'Stop' : 'Start watcher';
     const dot = div().flex_none().size(7).rounded(4).bg(w.alive ? t.working : t.dim);
     const run = (_e, cx) => this.toggleWatcher(cx);
     if (narrow) {

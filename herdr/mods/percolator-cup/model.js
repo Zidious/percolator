@@ -63,7 +63,13 @@ export function rowState(run) {
   }
   if (run.status === 'completed') {
     const pr = run.pr?.url.split('/').pop();
-    return { tone: 'dim', text: pr ? `delivered · PR #${pr}` : 'delivered' };
+    if (pr) return { tone: 'dim', text: `delivered · PR #${pr}` };
+    if ((run.steps ?? []).some((s) => s.stage === 'route')) {
+      const to = (run.children ?? []).find((c) => !c.slice)?.pipeline;
+      return { tone: 'dim', text: to ? `routed → ${to}` : 'routed' };
+    }
+    // a ticketless run with no PR and no opened issues delivered nothing to a tracker (report, none)
+    return { tone: 'dim', text: run.ticket === null && (run.opened ?? []).length === 0 ? 'done' : 'delivered' };
   }
   if (run.status === 'unreadable') return { tone: 'muted', text: `unreadable · ${run.error}` };
   return { tone: 'muted', text: run.status };
@@ -703,31 +709,60 @@ export function pipelineChip(run) {
   return typeof run.pipeline === 'string' && run.pipeline !== 'feature' ? run.pipeline : null;
 }
 
-/** The line under a linked run's title, and the run clicking it selects (null when that run is not listed): a child
- *  says where it came from (the parent's ticket, or its pipeline when the ticket is the child's own or it has none), a
- *  parent how many runs it started. Null for a run with neither. */
+/** Where a child came from: a slice its index, its parent's ticket (else pipeline) and its title; another child the
+ *  parent's ticket, or its pipeline when the ticket is the child's own or it has none. Null for a run with no parent. */
+function fromLine(run, runs) {
+  if (!run.parent) return null;
+  const p = runs.find((r) => r.id === run.parent && r.status !== 'unreadable');
+  if (!p) return { text: `↳ from ${run.parent}`, run: null };
+  const slice = (p.children ?? []).find((c) => c.id === run.id && c.slice)?.slice;
+  if (slice) return { text: `↳ slice ${slice.index} of ${p.ticket ? `#${p.ticket.number}` : p.pipeline}: ${slice.title}`, run: p.id };
+  const own = p.ticket && run.ticket && p.ticket.ref === run.ticket.ref;
+  return { text: `↳ from ${p.ticket && !own ? `#${p.ticket.number}` : p.pipeline}`, run: p.id };
+}
+
+/** What a parent started: its slices and how many started (all started: just the count), else how many runs; clicking
+ *  selects the first child still listed (null when none is). Null for a run with no children. */
+function startedLine(run, runs) {
+  const children = run.children ?? [];
+  if (children.length === 0) return null;
+  const first = children.find((c) => runs.some((r) => r.id === c.id && r.status !== 'unreadable'))?.id ?? null;
+  const slices = children.filter((c) => c.slice);
+  if (slices.length === 0) return { text: `→ ${children.length} run${children.length === 1 ? '' : 's'}`, run: first };
+  const n = slices.length;
+  const k = slices.filter((c) => c.status !== 'pending').length;
+  return { text: `→ ${n} slice${n === 1 ? '' : 's'}${k < n ? ` · ${k} started` : ''}`, run: first };
+}
+
+/** The line under a linked run's title, and the run clicking it selects (null when that run is not listed): where a
+ *  child came from, what a parent started, both for a child that started runs (clicking then selects its parent).
+ *  Null for a run with neither. */
 export function linkedLine(run, runs) {
   if (run.status === 'unreadable') return null;
-  if (run.parent) {
-    const p = runs.find((r) => r.id === run.parent && r.status !== 'unreadable');
-    if (!p) return { text: `↳ from ${run.parent}`, run: null };
-    const own = p.ticket && run.ticket && p.ticket.ref === run.ticket.ref;
-    return { text: `↳ from ${p.ticket && !own ? `#${p.ticket.number}` : p.pipeline}`, run: p.id };
-  }
-  const n = (run.children ?? []).length;
-  return n === 0 ? null : { text: `→ ${n} run${n === 1 ? '' : 's'}`, run: run.children[0].id };
+  const from = fromLine(run, runs);
+  const started = startedLine(run, runs);
+  if (from && started) return { text: `${from.text} · ${started.text}`, run: from.run };
+  return from ?? started;
 }
 
 // ── the watcher (`perc watch`) ──
 
-/** The header's watcher indicator and its one button: Stop while it watches, else Start over every repo earlier runs
- *  ran in (`argv` null, no button, when there is none). A perc that sends no `watcher` reads as not watching. */
-export function watcherState(status) {
+/** How long after Start the panel waits for the watcher's first heartbeat, saying starting… meanwhile. */
+const STARTING_MS = 60_000;
+const WATCH_TERMINAL = 'percolator-watch';
+
+/** The header's watcher indicator and its one button: Stop while it watches; none while it starts (Start succeeded
+ *  `o.startedAt` ms ago, under a minute, no heartbeat yet); Stop when its heartbeat is stale but its terminal is among
+ *  the live ones (`o.live`); else Start over every repo earlier runs ran in (`argv` null, no button, when there is
+ *  none). A perc that sends no `watcher` reads as not watching. */
+export function watcherState(status, o = { startedAt: null, now: 0, live: [] }) {
   const w = status.watcher;
   if (w?.alive) {
     const n = w.repos.length;
     return { alive: true, label: `watching ${n} repo${n === 1 ? '' : 's'}`, argv: ['watch', 'stop'] };
   }
+  if (o.startedAt !== null && o.now - o.startedAt < STARTING_MS) return { alive: false, label: 'starting…', argv: null };
+  if (o.live.some((t) => t.name === WATCH_TERMINAL)) return { alive: false, label: 'watcher not responding', argv: ['watch', 'stop'] };
   const repos = knownRepos(status.runs ?? []);
   return { alive: false, label: 'not watching', argv: repos.length === 0 ? null : ['watch', ...repos.flatMap((r) => ['--repo', r])] };
 }
@@ -835,6 +870,7 @@ export function readPipelines(stdout) {
 
 /** In fixtures mode, the pipelines come from pipelines.json beside the status fixture. */
 export function pipelinesFixture(statusFixture) {
+  if (!/[\\/]/.test(statusFixture)) return 'pipelines.json';
   return `${statusFixture.replace(/[\\/][^\\/]*$/, '')}/pipelines.json`;
 }
 
@@ -894,6 +930,8 @@ export function commandLine(argv) {
 export function canStart(o) {
   if (blank(o.repo)) return { ok: false, why: 'Pick a repo' };
   if (o.pipeline.ticket === 'required' && blank(o.ticket)) return { ok: false, why: 'Enter a ticket' };
+  // perc run would read it as a flag
+  if (!blank(o.ticket) && o.ticket.trim().startsWith('-')) return { ok: false, why: 'A ticket cannot start with -' };
   const missing = o.pipeline.inputs.find((i) => i.required && blank(o.inputs[i.name]));
   return missing ? { ok: false, why: `Enter ${missing.name}` } : { ok: true };
 }
