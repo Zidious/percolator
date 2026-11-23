@@ -18,7 +18,7 @@ Percolator is a deterministic software factory. Point `perc` at a GitHub issue a
 - **Node 24** or later, and **git**. Windows, Linux and macOS all work.
 - **[`gh`](https://cli.github.com)**, logged in (`gh auth login`). Intake reads the issue, the gate posts to it and the exit acts through it: it opens the PR, or posts the comment, opens the issues, publishes the release, posts the review or opens the PR in an advisory's private fork (see [Exits](docs/pipelines.md#exits)). `perc watch` polls issues, pull requests and workflow runs through it.
 - **`hc`**, Herdr's terminal CLI. Every step runs in a terminal it starts.
-- **The agent CLIs your config names:** `claude` for the example config, `codex`, or any command.
+- **The agent CLIs your config names:** `claude` for the [example config](docs/configuration.md#example-config), `codex`, or any command.
 
 **Optional**
 
@@ -48,7 +48,7 @@ A run walks the stages of its pipeline in order. You choose what runs at each st
   <img alt="The feature pipeline's run train (other pipelines run their own stages, from intake to an exit): intake, groom, the approve-groom gate, plan, implement, an optional hook, review looping back to implement up to three times, the pr-description hook, then deliver opens a pull request." src="assets/diagram-run-light.svg" width="100%">
 </picture>
 
-The diagram shows the example config mid-run: intake and groom are done, and the run waits at the `approve-groom` gate. Rejecting with feedback re-runs groom. Review can send work back to implement for up to 3 rounds; after the third, it delivers anyway. Hooks, like the one after implement, are optional nodes you add `before` or `after` any stage, or `all`. The `pr-description` hook before deliver writes the pull request text.
+The diagram shows the [example config](docs/configuration.md#example-config) mid-run: intake and groom are done, and the run waits at the `approve-groom` gate. Rejecting with feedback re-runs groom. Review can send work back to implement for up to 3 rounds; after the third, it delivers anyway. Hooks, like the one after implement, are optional nodes you add `before` or `after` any stage, or `all`. The `pr-description` hook before deliver writes the pull request text.
 
 | Stop | What can run there | Done when |
 |---|---|---|
