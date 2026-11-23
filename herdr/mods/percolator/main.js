@@ -510,10 +510,12 @@ export default class Percolator extends View {
   /** Lists the picked repo's pipelines once (a failed listing is asked again), then settles the pick and tickets. */
   loadPipelines(cx) {
     const s = this.start;
-    if (!s?.repo) return this.settleStart();
-    const repo = s.repo;
-    const have = this.pipes[repo];
-    if (have && (have === 'loading' || have.ok)) return this.settleStart();
+    const repo = s?.repo;
+    const have = repo ? this.pipes[repo] : null;
+    if (!repo || (have && (have === 'loading' || have.ok))) {
+      this.settleStart();
+      return cx.notify(); // nothing to fetch: draw the picker now
+    }
     this.pipes[repo] = 'loading';
     cx.spawn(async (cx) => {
       const got = await fetchPipelines(this, repo).catch((e) => ({ ok: false, error: String(e?.message ?? e) }));
