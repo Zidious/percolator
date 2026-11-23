@@ -95,6 +95,12 @@ export function fanOut(o: {
             `percolator.fan_out: ${fan.slices.from} wrote no slices (## <title> sections in ${fan.slices.output}.md); fix the output and resume`,
           );
         }
+        const untitled = sections.findIndex((s) => s.title === '');
+        if (untitled >= 0) {
+          return escalate(
+            `percolator.fan_out: slice ${untitled + 1} in ${fan.slices.output}.md has no title (a bare "## " heading); give it a title and resume`,
+          );
+        }
         file = { children: sections.map((s, i) => ({ index: i + 1, id: `${runId}-s${i + 1}`, title: s.title })) };
         await writeFileAtomic(fanOutFile(runDir), `${JSON.stringify(file, null, 2)}\n`);
       }
