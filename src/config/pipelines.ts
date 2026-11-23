@@ -149,17 +149,42 @@ function checkTrigger(spec: PipelineSpec, t: Trigger, at: (key: string) => Where
     } catch (err) {
       throw fail(`schedule trigger: ${(err as Error).message}`, at('.inputs'));
     }
-  } else if ('label' in t) {
+    return;
+  }
+  if ('label' in t) {
     if (spec.ticket === 'none') {
       throw fail(`a label trigger starts runs on issues, but pipeline "${p}" has ticket: none; set ticket: required or optional`, at(''));
     }
-  } else if ('pr_opened' in t || 'dependabot' in t) {
-    const kind = 'pr_opened' in t ? 'pr_opened' : 'dependabot';
+    passes('label', []);
+    return;
+  }
+  const kind = 'pr_opened' in t ? 'pr_opened' : 'dependabot' in t ? 'dependabot' : 'check_failed';
+  if (spec.ticket === 'required') {
+    throw fail(`a ${kind} trigger starts runs without a ticket; set ticket: none or ticket: optional`, at(''));
+  }
+  if (kind === 'check_failed') {
+    if (!has('branch') || !has('run_url')) {
+      throw fail(`trigger check_failed passes inputs branch and run_url; declare them under pipelines.${p}.inputs`, at(''));
+    }
+    passes(kind, ['branch', 'run_url']);
+  } else {
     if (!has('pr')) throw fail(`trigger ${kind} passes input pr; declare it under pipelines.${p}.inputs`, at(''));
-  } else if (!has('branch') || !has('run_url')) {
-    throw fail(`trigger check_failed passes inputs branch and run_url; declare them under pipelines.${p}.inputs`, at(''));
+    passes(kind, ['pr']);
+  }
+
+  /** The run request a firing makes fits the pipeline: every required input is one the trigger passes. */
+  function passes(kind: string, given: string[]): void {
+    try {
+      checkRequest(spec, kind === 'label' ? '#0' : undefined, Object.fromEntries(given.map((k) => [k, ''])));
+    } catch {
+      const missing = requiredInputs(spec).find((k) => !given.includes(k))!;
+      const what = given.length === 0 ? 'no inputs' : `only ${given.length === 1 ? 'input' : 'inputs'} ${given.join(' and ')}`;
+      throw fail(`a ${kind} trigger passes ${what}, but pipeline "${p}" needs input ${missing}; make it optional or drop the trigger`, at(''));
+    }
   }
 }
+
+const requiredInputs = (spec: PipelineSpec): string[] => Object.entries(spec.inputs).filter(([, d]) => d.required).map(([k]) => k);
 
 /**
  * Checks that span pipelines: where a router may hand its ticket. Every routes `to`, choose `from` entry
@@ -183,9 +208,19 @@ export function checkPipelines(merged: Record<string, MergedPipeline>, specs: Re
         const self = spec.router === true ? 'router' : 'pipeline';
         throw fail(`${self} "${p}" routes tickets, but pipeline "${x}" has ticket: none; route to a pipeline that takes a ticket`, where);
       }
+      // a handoff passes the ticket only
+      if (requiredInputs(t).length > 0) {
+        const by = spec.router === true ? 'router' : 'next';
+        throw fail(`pipeline "${x}" takes required inputs a ${by} cannot pass; make them optional or route elsewhere`, where);
+      }
     };
     if (spec.next !== undefined) {
       if (exitKind(spec, merged[p]!) !== 'issue') throw fail('next only applies to an issue exit; remove it or set exit: issue', at('.next'));
+      const chain = [p];
+      for (let x: string | undefined = spec.next; x !== undefined && !chain.slice(1).includes(x); x = specs[x]?.next) {
+        chain.push(x);
+        if (x === p) throw fail(`next of pipeline "${p}" leads back to it (${chain.join(' → ')}); remove next from one of them`, at('.next'));
+      }
       target(spec.next, at('.next'));
     }
     (spec.triggers ?? []).forEach((t, i) => checkTrigger(spec, t, (key) => at(`.triggers.${i}${key}`)));
