@@ -239,6 +239,16 @@ test('rowState for a completed run without a PR says delivered', () => {
   assert.deepEqual(rowState({ ...readable('t3'), pr: null }), { tone: 'dim', text: 'delivered' });
 });
 
+test('rowState for a completed router says where it routed; a ticketless run that opened nothing says done', () => {
+  const triage = runs().find((r) => r.id === TRIAGE) as Readable;
+  assert.deepEqual(rowState(triage), { tone: 'dim', text: 'routed → hotfix' });
+  assert.deepEqual(rowState({ ...triage, children: [] }), { tone: 'dim', text: 'routed' });
+  const dd = { ...readable('dd'), status: 'completed', attention: undefined, currentStep: undefined } as Readable;
+  assert.deepEqual(rowState(dd), { tone: 'dim', text: 'done' });
+  // a ticketless run whose exit opened issues delivered them
+  assert.deepEqual(rowState(readable('audit')), { tone: 'dim', text: 'delivered' });
+});
+
 test('newlyNeeding is empty on the first load', () => {
   assert.deepEqual(newlyNeeding(null, runs()), []);
 });
@@ -1253,6 +1263,10 @@ test('pipelinesFixture is pipelines.json beside the status fixture', () => {
   assert.equal(pipelinesFixture('C:\\fx\\status.json'), 'C:\\fx/pipelines.json');
 });
 
+test('pipelinesFixture of a bare file name is pipelines.json beside it', () => {
+  assert.equal(pipelinesFixture('status.json'), 'pipelines.json');
+});
+
 test('startFields: the ticket field (hidden when the pipeline takes none) and each input with its description', () => {
   assert.deepEqual(startFields(pipe('feature')), { ticket: 'required', inputs: [] });
   assert.deepEqual(startFields(pipe('dd-alert')), {
@@ -1334,6 +1348,11 @@ test('canStart says what is missing: the repo, then the ticket, then the first e
   assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: '  ', inputs: {}, repo: '/r' }), { ok: false, why: 'Enter a ticket' });
   assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: 'o/r#3', inputs: {}, repo: '/r' }), { ok: true });
   assert.deepEqual(canStart({ pipeline: pipe('spike'), inputs: {}, repo: '/r' }), { ok: true });
+});
+
+test('canStart refuses a ticket starting with -, which perc run would read as a flag', () => {
+  assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: ' --help', inputs: {}, repo: '/r' }), { ok: false, why: 'A ticket cannot start with -' });
+  assert.deepEqual(canStart({ pipeline: pipe('spike'), ticket: '-x', inputs: {}, repo: '/r' }), { ok: false, why: 'A ticket cannot start with -' });
 });
 
 test('startPick keeps the wanted pipeline while it is listed and pickable, else the default, else the first pickable', () => {
@@ -1474,10 +1493,38 @@ test('linkedLine names a parent on another ticket by its number, a ticketless on
   assert.deepEqual(linkedLine(child, [child, parent({ ticket: null, pipeline: 'spike' })]), { text: '↳ from spike', run: 'p1' });
   assert.deepEqual(linkedLine(child, [child]), { text: '↳ from p1', run: null });
   const two = parent({ children: [{ id: 'c1', pipeline: 'hotfix', status: 'running' }, { id: 'c2', pipeline: 'hotfix', status: 'completed' }] });
-  assert.deepEqual(linkedLine(two, [two]), { text: '→ 2 runs', run: 'c1' });
+  // neither child is listed: nothing to select
+  assert.deepEqual(linkedLine(two, [two]), { text: '→ 2 runs', run: null });
 });
 
 const EPIC = 't23-epic-20261121-090000-7c2a';
+
+test('linkedLine on a fan-out parent counts its slices and how many started; clicking it picks the first listed child', () => {
+  const rs = runs();
+  const of = (id: string) => rs.find((r) => r.id === id)!;
+  assert.deepEqual(linkedLine(of(EPIC), rs), { text: '→ 3 slices · 2 started', run: `${EPIC}-s1` });
+  // slice 1 deleted: the first listed child is slice 2
+  const gone = rs.filter((r) => r.id !== `${EPIC}-s1`);
+  assert.deepEqual(linkedLine(of(EPIC), gone), { text: '→ 3 slices · 2 started', run: `${EPIC}-s2` });
+  // none listed: nothing to select
+  assert.deepEqual(linkedLine(of(EPIC), [of(EPIC)]), { text: '→ 3 slices · 2 started', run: null });
+  const all = { ...(of(EPIC) as Readable), children: (of(EPIC) as Readable).children.map((c) => ({ ...c, status: 'running' as const })) };
+  assert.deepEqual(linkedLine(all, rs), { text: '→ 3 slices', run: `${EPIC}-s1` });
+});
+
+test('linkedLine on a slice names its index, the parent ticket and its title', () => {
+  const rs = runs();
+  const s2 = rs.find((r) => r.id === `${EPIC}-s2`)!;
+  assert.deepEqual(linkedLine(s2, rs), { text: '↳ slice 2 of #23: Panel rows', run: EPIC });
+  const parent = { ...(rs.find((r) => r.id === EPIC) as Readable), ticket: null };
+  assert.deepEqual(linkedLine(s2, [s2, parent]), { text: '↳ slice 2 of epic: Panel rows', run: EPIC });
+});
+
+test('linkedLine on a routed fan-out parent says where it came from and its slices', () => {
+  const rs = runs();
+  const epic = { ...(rs.find((r) => r.id === EPIC) as Readable), parent: TRIAGE };
+  assert.deepEqual(linkedLine(epic, [...rs.filter((r) => r.id !== EPIC), epic]), { text: '↳ from #21 · → 3 slices · 2 started', run: TRIAGE });
+});
 
 test("sliceRows shows each slice's step and PR", () => {
   const rs = runs();
@@ -1526,4 +1573,23 @@ test('watcherState labels and argv', () => {
   // a perc without the watcher field reads as not watching
   const { watcher: _w, ...older } = st;
   assert.equal(watcherState(older as StatusJson).label, 'not watching');
+});
+
+test('watcherState says starting… after Start until the heartbeat appears, and offers nothing meanwhile', () => {
+  const off = { ...load(), watcher: { alive: false, repos: [] } };
+  const now = Date.parse('2026-11-21T10:00:00.000Z');
+  const live = [{ address: 'w:1', name: 'percolator-watch' }];
+  assert.deepEqual(watcherState(off, { startedAt: now - 5_000, now, live }), { alive: false, label: 'starting…', argv: null });
+  assert.deepEqual(watcherState(off, { startedAt: now - 5_000, now, live: [] }), { alive: false, label: 'starting…', argv: null });
+  // the heartbeat came: watching
+  assert.equal(watcherState(load(), { startedAt: now - 5_000, now, live }).label, 'watching 1 repo');
+  // a minute without a heartbeat: starting is over
+  assert.equal(watcherState(off, { startedAt: now - 61_000, now, live: [] }).label, 'not watching');
+});
+
+test('watcherState offers Stop when the heartbeat is stale but the percolator-watch terminal is live', () => {
+  const off = { ...load(), watcher: { alive: false, repos: ['/r'] } };
+  const live = [{ address: 'w:1', name: 'percolator-watch' }];
+  assert.deepEqual(watcherState(off, { startedAt: null, now: 0, live }), { alive: false, label: 'watcher not responding', argv: ['watch', 'stop'] });
+  assert.equal(watcherState(off, { startedAt: null, now: 0, live: [{ address: 'x', name: 'other' }] }).label, 'not watching');
 });
