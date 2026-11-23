@@ -1,6 +1,7 @@
-import { FEATURE } from '../graph/core.ts';
+import { CORE_GROOM_GATE, FEATURE } from '../graph/core.ts';
 import type { PipelineHeader } from '../graph/core.ts';
 import type { MergedPipeline } from '../graph/merge.ts';
+import { appliesTo } from '../graph/rules.ts';
 import type { Violation } from '../graph/rules.ts';
 import { EXITS, EXIT_KINDS } from '../tracker/index.ts';
 import type { ExitKind } from '../tracker/index.ts';
@@ -62,6 +63,28 @@ export function checkGlobalStages(merged: Record<string, MergedPipeline>, specs:
         target: `rules.require_skills.${k}`,
         message: `names stage "${req.stage}", which no pipeline in profile "${profile}" has; use one of their stages or *`,
         where: locate(locator, source, `rules.require_skills.${k}.stage`),
+      });
+    }
+    // checkRules skips an entry a pipeline cannot have; one that concerns none of them is a mistake
+    for (const [k, req] of (value.required_nodes ?? []).entries()) {
+      const name = typeof req === 'string' ? req : req.name;
+      const concerned = Object.values(specs).some(
+        (s) => merged[s.name]?.nodes[name] !== undefined || appliesTo(req, s.stages ?? FEATURE.stages ?? []),
+      );
+      if (concerned) continue;
+      // the core gate's entry is wrong whatever its stage; another entry's stage is what no pipeline has
+      const positioned = typeof req !== 'string' && name !== CORE_GROOM_GATE.name;
+      const point = positioned && req.before !== undefined ? 'before' : 'after';
+      const at = positioned ? (req.before ?? req.after) : undefined;
+      out.push({
+        rule: 'required_nodes',
+        source,
+        target: `rules.required_nodes.${k}`,
+        message:
+          at !== undefined
+            ? `names stage "${at}", which no pipeline in profile "${profile}" has; use one of their stages or all`
+            : `node "${name}" is required by required_nodes, but no pipeline in profile "${profile}" has it; remove this required_nodes entry`,
+        where: locate(locator, source, `rules.required_nodes.${k}${at !== undefined ? `.${point}` : ''}`),
       });
     }
   }

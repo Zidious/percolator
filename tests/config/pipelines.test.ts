@@ -127,6 +127,45 @@ test('a top-level require_skills stage must belong to some pipeline of the profi
   ]);
 });
 
+test('a top-level required_nodes entry that concerns no pipeline of the profile is reported once', () => {
+  const locator = {
+    file: 'c.yaml',
+    lines: { 'profiles.work.rules.required_nodes.1': 9, 'profiles.work.rules.required_nodes.2.after': 10 },
+    prefix: 'profiles.work',
+  };
+  const merged = mergePipelines([
+    {
+      source: 'profile:work',
+      locator,
+      fragment: {
+        rules: {
+          required_nodes: [
+            { name: 'audit', after: 'triage' },
+            'approve-groom',
+            { name: 'scan', after: 'tirage' },
+          ],
+        },
+        pipelines: { alert: { stages: ['intake', 'triage', 'deliver'], exit: 'comment', default: true } },
+      },
+    },
+  ]);
+  assert.deepEqual(
+    checkGlobalStages(merged, pipelineSpecs(merged, 'work', where), 'work').map((v) => [v.target, v.message, v.where]),
+    [
+      [
+        'rules.required_nodes.1',
+        'node "approve-groom" is required by required_nodes, but no pipeline in profile "work" has it; remove this required_nodes entry',
+        { file: 'c.yaml', line: 9, path: 'profiles.work.rules.required_nodes.1' },
+      ],
+      [
+        'rules.required_nodes.2',
+        'names stage "tirage", which no pipeline in profile "work" has; use one of their stages or all',
+        { file: 'c.yaml', line: 10, path: 'profiles.work.rules.required_nodes.2.after' },
+      ],
+    ],
+  );
+});
+
 // cross-pipeline checks: a profile `work` at c.yaml, its pipeline keys indexed at known lines
 const lines: Record<string, number> = {
   'profiles.work.pipelines': 3,
