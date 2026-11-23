@@ -72,8 +72,12 @@ export function routeRules(o: { gh: Gh; runDir: string; spec: PipelineSpec; spec
         defaultName: o.spec.name,
         profile: o.profile,
       });
-      // a router never routes to a router (itself included: its own label is how it was started)
-      if (named.by !== 'default' && o.specs[named.name]?.router !== true) {
+      // a router never routes to a router (itself included: its own label is how it was started), nor
+      // to a pipeline its handoff cannot start: one without a ticket, or one needing inputs it cannot pass
+      const t = o.specs[named.name];
+      const routable =
+        t !== undefined && t.router !== true && t.ticket !== 'none' && !Object.values(t.inputs).some((d) => d.required);
+      if (named.by !== 'default' && routable) {
         const detail = named.by === 'label' ? `label pipeline:${named.name}` : `comment /percolator run ${named.name}`;
         await writeRoute(o.runDir, { pipeline: named.name, by: 'named', detail });
         return { status: 'pass', outputs: {} };
