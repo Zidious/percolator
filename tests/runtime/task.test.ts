@@ -200,3 +200,11 @@ test('{{input_alert_url}} and {{pipeline}} render', () => {
   );
   assert.ok(t.includes('## Task\n\nLook at https://x for dd-alert'));
 });
+
+test('a declared input the run was not given renders empty; an undeclared one is still unknown', () => {
+  const t = buildTask(input({ prompt: 'n={{input_note}} u={{input_url}}', inputs: { url: 'https://x' }, declaredInputs: ['note', 'url'] }));
+  assert.ok(t.includes('## Task\n\nn= u=https://x\n'));
+  assert.throws(() => buildTask(input({ prompt: '{{input_other}}', declaredInputs: ['note'] })), {
+    message: 'unknown template variable(s): input_other',
+  });
+});

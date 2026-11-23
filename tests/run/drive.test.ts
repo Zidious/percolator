@@ -530,6 +530,34 @@ test('a ticketless run drives to its PR', async () => {
   }
 });
 
+test("an agent prompt naming a declared optional input the run was not given renders it empty", async () => {
+  const e = await setup(
+    DD_ALERT.replace('          alert_url: { required: true }', '          alert_url: { required: true }\n          note: { required: false }').replace(
+      "          triage: { command: [triage-script, '{outputs_dir}'] }",
+      "          triage: { agent: command, command: [triage-agent], prompt: 'note={{input_note}}.' }",
+    ),
+  );
+  e.onWait.fn = async (t) => {
+    if (t.labels['percolator.step'] !== 'triage') return false;
+    const dir = path.dirname(e.deps.hc.taskFileOf(t));
+    await fs.mkdir(path.join(dir, 'outputs'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'outputs', 'triage.md'), 'Triaged.\n');
+    await fs.writeFile(path.join(dir, 'done.json'), JSON.stringify({ status: 'pass' }));
+    return true;
+  };
+  try {
+    const meta = await prepareRun(
+      { pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x' }, repoDir: e.root, configFile: e.configFile, profile: 'work' },
+      e.deps,
+    );
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed', JSON.stringify(state));
+    assert.match(await fs.readFile(path.join(e.runDir(meta), 'steps', 'triage', '1', 'task.md'), 'utf8'), /## Task\n\nnote=\./);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('a gate on a ticketless run waits locally and says how to answer it', async () => {
   const e = await setup(DD_ALERT.replace("          triage: { command: [triage-script, '{outputs_dir}'] }", "          triage: { command: [triage-script, '{outputs_dir}'] }\n        nodes:\n          sign-off: { kind: gate, after: triage }"));
   try {
