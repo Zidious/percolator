@@ -65,8 +65,8 @@ async function withYaml(text: string, fn: (file: string) => Promise<void>): Prom
   }
 }
 
-test('unknown stage in a hook lists the valid values', async () => {
-  await withYaml('nodes:\n  x:\n    agent: a\n    before: foo\n', async (file) => {
+test('a malformed stage name in a hook lists the valid values', async () => {
+  await withYaml('nodes:\n  x:\n    agent: a\n    before: foo bar\n', async (file) => {
     const err = await loadFragment(file).catch((e) => e);
     assert.ok(err instanceof ConfigError);
     assert.equal(err.path, 'nodes.x.before');
@@ -105,7 +105,7 @@ test('ordinary ground names are accepted', async () => {
 });
 
 test('every schema issue appears in the message, first one in line/path', async () => {
-  await withYaml('nodes:\n  a:\n    agent: x\n    before: foo\n  b:\n    agent: y\n    after: bar\n', async (file) => {
+  await withYaml('nodes:\n  a:\n    agent: x\n    before: foo bar\n  b:\n    agent: y\n    after: bar baz\n', async (file) => {
     const err = await loadFragment(file).catch((e) => e);
     assert.equal(err.path, 'nodes.a.before');
     assert.equal(err.line, 4);
@@ -167,6 +167,16 @@ test('a script node may not set agent, model, effort, skill or skills', async ()
       ]);
     },
   );
+});
+
+test('only a gate node may set when_output', async () => {
+  await withYaml('nodes:\n  a:\n    command: [x]\n    when_output: issues\n    after: plan\n  g:\n    kind: gate\n    when_output: issues\n    after: plan\n', async (file) => {
+    const err = await loadFragment(file).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.deepEqual(err.message.split('\n'), [
+      `${file}:4: nodes.a.when_output: "when_output" only applies to gate nodes (this node is kind "script")`,
+    ]);
+  });
 });
 
 test('inferred builtin and explicit gate nodes may not set model or skills', async () => {
@@ -247,4 +257,175 @@ test('loadLocated returns data and the line index', async () => {
   assert.deepEqual(data, await loadUserConfig(fx('valid.yaml')));
   assert.equal(lines['profiles.work'], 3);
   assert.equal(lines['profiles.work.bindings.implement'], 9);
+});
+
+test('a profile with pipelines loads', async () => {
+  await withYaml(
+    [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    pipelines:',
+      '      hotfix:',
+      '        stages: [intake, reproduce, fix, review, deliver]',
+      '        outputs: { reproduce: [failing_test] }',
+      '        bindings: { reproduce: { agent: claude } }',
+      '        exit: pr',
+      '',
+    ].join('\n'),
+    async (file) => {
+      const data = await loadUserConfig(file);
+      assert.deepEqual(data.profiles.default!.pipelines!.hotfix!.stages, ['intake', 'reproduce', 'fix', 'review', 'deliver']);
+    },
+  );
+});
+
+test('a router pipeline loads', async () => {
+  await withYaml(
+    [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    pipelines:',
+      '      triage:',
+      '        router: true',
+      '        stages: [intake, route]',
+      '        routes: [{ label: bug, to: hotfix }]',
+      '        choose: { agent: claude, effort: high, from: [hotfix, feature], confirm: always }',
+      '        fallback: feature',
+      '',
+    ].join('\n'),
+    async (file) => {
+      const t = (await loadUserConfig(file)).profiles.default!.pipelines!.triage!;
+      assert.deepEqual(t.routes, [{ label: 'bug', to: 'hotfix' }]);
+      assert.deepEqual(t.choose, { agent: 'claude', effort: 'high', from: ['hotfix', 'feature'], confirm: 'always' });
+      assert.equal(t.fallback, 'feature');
+    },
+  );
+});
+
+test('a pipeline may name the next pipeline for its issues', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      split:\n        stages: [intake, deliver]\n        exit: issue\n        next: hotfix\n',
+    async (file) => {
+      assert.equal((await loadUserConfig(file)).profiles.default!.pipelines!.split!.next, 'hotfix');
+    },
+  );
+});
+
+test('a valid trigger list loads', async () => {
+  await withYaml(
+    [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    pipelines:',
+      '      nightly:',
+      '        triggers:',
+      '          - { schedule: "0 3 * * 1-5", timezone: Europe/London, inputs: { area: deps } }',
+      '          - { label: needs-triage }',
+      '          - { pr_opened: true }',
+      '          - { pr_opened: { not_author: [dependabot] } }',
+      '          - { dependabot: true }',
+      '          - { check_failed: { branch: main, workflow: ci.yml } }',
+      '',
+    ].join('\n'),
+    async (file) => {
+      assert.deepEqual((await loadUserConfig(file)).profiles.default!.pipelines!.nightly!.triggers, [
+        { schedule: '0 3 * * 1-5', timezone: 'Europe/London', inputs: { area: 'deps' } },
+        { label: 'needs-triage' },
+        { pr_opened: true },
+        { pr_opened: { not_author: ['dependabot'] } },
+        { dependabot: true },
+        { check_failed: { branch: 'main', workflow: 'ci.yml' } },
+      ]);
+    },
+  );
+});
+
+test('a malformed trigger is reported at its key', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      p:\n        triggers:\n          - check_failed: { workflow: ci.yml }\n',
+    async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.p.triggers.0.check_failed.branch');
+    },
+  );
+});
+
+test('a fan_out loads', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      epic:\n        fan_out: { stage: implement, slices: { from: plan, output: slices }, max_parallel: 2 }\n',
+    async (file) => {
+      assert.deepEqual((await loadUserConfig(file)).profiles.default!.pipelines!.epic!.fan_out, {
+        stage: 'implement',
+        slices: { from: 'plan', output: 'slices' },
+        max_parallel: 2,
+      });
+    },
+  );
+});
+
+test('fan_out.max_parallel is at least 1', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      epic:\n        fan_out: { stage: implement, slices: { from: plan, output: slices }, max_parallel: 0 }\n',
+    async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.epic.fan_out.max_parallel');
+    },
+  );
+});
+
+test('choose.confirm is unsure or always', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      triage:\n        choose: { agent: claude, from: [a], confirm: never }\n',
+    async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.triage.choose.confirm');
+    },
+  );
+});
+
+test('pipeline names must be lower-case identifiers', async () => {
+  await withYaml('version: 1\nprofiles:\n  default:\n    pipelines:\n      Hot_Fix:\n        stages: [intake, deliver]\n', async (file) => {
+    const err = await loadUserConfig(file).catch((e) => e);
+    assert.ok(err instanceof ConfigError);
+    assert.equal(err.path, 'profiles.default.pipelines.Hot_Fix');
+    assert.equal(
+      err.message,
+      `${file}:6: profiles.default.pipelines.Hot_Fix: pipeline names must start with a lower-case letter and contain only a-z, 0-9 and "-" (at most 24 characters)`,
+    );
+  });
+});
+
+test('stage names all, before-all and after-all are reserved', async () => {
+  for (const name of ['all', 'before-all', 'after-all']) {
+    await withYaml(`version: 1\nprofiles:\n  default:\n    pipelines:\n      p:\n        stages: [intake, ${name}, deliver]\n`, async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.p.stages.1');
+      assert.equal(
+        err.message,
+        `${file}:6: profiles.default.pipelines.p.stages.1: stage name "${name}" is reserved (all, before-all and after-all name hook positions); pick another name`,
+      );
+    });
+  }
+});
+
+test('input names must be identifiers', async () => {
+  await withYaml(
+    'version: 1\nprofiles:\n  default:\n    pipelines:\n      dd:\n        inputs:\n          alert-url: {}\n',
+    async (file) => {
+      const err = await loadUserConfig(file).catch((e) => e);
+      assert.ok(err instanceof ConfigError);
+      assert.equal(err.path, 'profiles.default.pipelines.dd.inputs.alert-url');
+      assert.equal(
+        err.message,
+        `${file}:7: profiles.default.pipelines.dd.inputs.alert-url: input names must start with a lower-case letter and contain only a-z, 0-9 and "_"`,
+      );
+    },
+  );
 });

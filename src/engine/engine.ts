@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import type { BackEdge, Graph, Step } from '../graph/build.ts';
-import { STAGE_CONTRACTS } from '../graph/core.ts';
 import type { NodeOutcome, RunContext, Runtime } from './runtime.ts';
 import type { RunState } from './state.ts';
 
@@ -72,7 +71,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
     const endedAt = now();
     const attempt = (state.executed[step.id] ?? 0) + 1;
     state.executed[step.id] = attempt;
-    const missing = missingOutputs(step, outcome);
+    const missing = missingOutputs(step, outcome, graph);
     state.history.push({
       stepId: step.id,
       attempt,
@@ -116,7 +115,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
         state.cursor = i + 1;
       }
     } else {
-      if (step.slotLast && step.stage === 'review') delete state.unresolvedFindings;
+      if (step.slotLast && graph.loopStages.includes(step.stage)) delete state.unresolvedFindings;
       state.cursor = i + 1;
     }
     settle(i);
@@ -200,12 +199,12 @@ export function graphFingerprint(graph: Graph): string {
     .digest('hex');
 }
 
-/** Required outputs absent from a stage's last slot node (on pass; review also on fail; escalate is exempt). */
-function missingOutputs(step: Step, outcome: NodeOutcome): string[] {
+/** Required outputs absent from a stage's last slot node (on pass; loop stages also on fail; escalate is exempt). */
+function missingOutputs(step: Step, outcome: NodeOutcome, graph: Graph): string[] {
   if (!step.slotLast || step.stage === 'before-all' || step.stage === 'after-all') return [];
   if (outcome.status === 'escalate') return [];
-  if (outcome.status === 'fail' && step.stage !== 'review') return [];
-  return STAGE_CONTRACTS[step.stage].requiredOutputs.filter((k) => typeof outcome.outputs[k] !== 'string');
+  if (outcome.status === 'fail' && !graph.loopStages.includes(step.stage)) return [];
+  return (graph.contracts[step.stage] ?? []).filter((k) => typeof outcome.outputs[k] !== 'string');
 }
 
 /** Copies of each step's latest valid (non-contract_error) outputs: a runtime cannot alter history. */

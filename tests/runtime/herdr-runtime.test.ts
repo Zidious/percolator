@@ -8,7 +8,8 @@ import type { GraphFragment } from '../../src/config/schema.ts';
 import { runGraph } from '../../src/engine/engine.ts';
 import type { RunContext } from '../../src/engine/runtime.ts';
 import { newState } from '../../src/engine/state.ts';
-import { buildGraph } from '../../src/graph/build.ts';
+import { buildGraph, contractsFor } from '../../src/graph/build.ts';
+import { FEATURE } from '../../src/graph/core.ts';
 import type { Step } from '../../src/graph/build.ts';
 import { mergeLayers } from '../../src/graph/merge.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
@@ -53,7 +54,8 @@ function step(over: Partial<Step> = {}): Step {
 function ctx(executed: Record<string, number> = {}): RunContext {
   const state = newState({ runId: RUN_ID, ticket: '#123', profile: 'default', groundVersions: {} });
   state.executed = executed;
-  return { state, graph: { steps: [step()] } as RunContext['graph'], round: 1, maxRounds: 1, previousOutputs: {} };
+  const graph = { pipeline: 'feature', contracts: contractsFor(FEATURE, 'feature'), steps: [step()] } as unknown as RunContext['graph'];
+  return { state, graph, round: 1, maxRounds: 1, previousOutputs: {} };
 }
 
 type Env = { root: string; runDir: string; worktree: string; hc: FakeHc; sleeps: number[]; attention: Attention[] };
@@ -407,6 +409,30 @@ test('template error escalates before any terminal starts', async () => {
   const out = await runtime(e).executeStep(step({ def: { agent: 'claude', prompt: 'do {{ nope }}' } as Step['def'] }), ctx());
   assert.deepEqual(out, { status: 'escalate', outputs: {}, reason: 'unknown template variable(s): nope' });
   assert.equal(e.hc.calls.length, 0);
+});
+
+test("the task renders the run's pipeline and inputs, defaulting to the graph's pipeline", async () => {
+  const e = await env(async (t, n) => {
+    if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+  });
+  const prompt = step({ def: { agent: 'claude', prompt: 'See {{input_alert_url}} for {{pipeline}}' } as Step['def'] });
+  const out = await runtime(e, { pipeline: 'dd-alert', inputs: { alert_url: 'https://x' } }).executeStep(prompt, ctx());
+  assert.equal(out.status, 'pass');
+  assert.match(await fs.readFile(path.join(e.runDir, 'steps', 'plan', '1', 'task.md'), 'utf8'), /## Task\n\nSee https:\/\/x for dd-alert/);
+
+  const bare = step({ def: { agent: 'claude', prompt: 'Run {{pipeline}}' } as Step['def'] });
+  assert.equal((await runtime(e).executeStep(bare, ctx({ plan: 1 }))).status, 'pass');
+  assert.match(await fs.readFile(path.join(e.runDir, 'steps', 'plan', '2', 'task.md'), 'utf8'), /## Task\n\nRun feature/);
+});
+
+test('a declared input the run was not given renders empty in the task', async () => {
+  const e = await env(async (t, n) => {
+    if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+  });
+  const prompt = step({ def: { agent: 'claude', prompt: 'note={{input_note}}.' } as Step['def'] });
+  const out = await runtime(e, { inputs: {}, declaredInputs: ['note'] }).executeStep(prompt, ctx());
+  assert.equal(out.status, 'pass');
+  assert.match(await fs.readFile(path.join(e.runDir, 'steps', 'plan', '1', 'task.md'), 'utf8'), /## Task\n\nnote=\./);
 });
 
 test('a prompt file is read from its ground; a missing one escalates', async () => {

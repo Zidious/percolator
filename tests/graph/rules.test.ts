@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkRules, RuleViolationError } from '../../src/graph/rules.ts';
-import { mergeLayers } from '../../src/graph/merge.ts';
+import { mergeLayers, mergePipelines } from '../../src/graph/merge.ts';
+import { buildGraph } from '../../src/graph/build.ts';
 import type { Merged } from '../../src/graph/merge.ts';
-import type { GraphFragment, Rules } from '../../src/config/schema.ts';
+import type { GraphFragment, Pipeline, Rules } from '../../src/config/schema.ts';
 
 function m(bindings: NonNullable<GraphFragment['bindings']>, rules: Rules[], nodes: GraphFragment['nodes'] = {}): Merged {
   return mergeLayers([
@@ -286,4 +287,160 @@ test('a one-item list binding is located at its item', () => {
   const v = checkRules(merged);
   assert.equal(v[0]!.target, 'bindings.implement.0');
   assert.deepEqual(v[0]!.where, { file: 'n.yaml', line: 4, path: 'bindings.implement.0' });
+});
+
+const HOTFIX: Pipeline = {
+  stages: ['intake', 'reproduce', 'fix', 'review', 'deliver'],
+  bindings: { reproduce: { agent: 'claude' }, fix: { agent: 'claude' }, review: { agent: 'claude' } },
+  exit: 'pr',
+};
+/** hotfix (with pipeline rules `own`) and feature, from one profile layer with top-level rules `global`. */
+function pipelines(own: Rules | undefined, global?: Rules) {
+  return mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: {
+        bindings: { groom: { agent: 'claude' } },
+        ...(global ? { rules: global } : {}),
+        pipelines: { hotfix: { ...HOTFIX, ...(own ? { rules: own } : {}) } },
+      },
+    },
+  ]);
+}
+
+test('require_skills checks a custom stage', () => {
+  const hotfix = pipelines({ require_skills: [{ stage: 'fix', skills: ['tdd'] }] }).hotfix!;
+  const v = checkRules(hotfix, buildGraph(hotfix).stages);
+  assert.deepEqual(
+    v.map((x) => [x.rule, x.target, x.message]),
+    [['require_skills', 'bindings.fix', 'missing required skill(s) tdd, required by require_skills (from profile:default); add them to its skills:']],
+  );
+});
+
+test('a pipeline rule naming a stage it lacks is a violation', () => {
+  const hotfix = pipelines({ require_skills: [{ stage: 'groom', skills: ['tdd'] }] }).hotfix!;
+  const v = checkRules(hotfix, buildGraph(hotfix).stages);
+  assert.deepEqual(
+    v.map((x) => [x.rule, x.message]),
+    [
+      [
+        'require_skills',
+        'names stage "groom", which pipeline "hotfix" does not have (stages: intake, reproduce, fix, review, deliver); use one of those or *',
+      ],
+    ],
+  );
+});
+
+test('a global rule for a stage some pipelines lack is skipped there', () => {
+  const r = pipelines(undefined, { require_skills: [{ stage: 'groom', skills: ['tdd'] }] });
+  assert.deepEqual(checkRules(r.hotfix!, buildGraph(r.hotfix!).stages), []);
+  // the pipeline that has the stage still gets the rule
+  assert.deepEqual(
+    checkRules(r.feature!).map((x) => x.target),
+    ['bindings.groom'],
+  );
+});
+
+test('max_rounds_ceiling applies to any loop stage, not only review', () => {
+  const r = mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: {
+        rules: { max_rounds_ceiling: 2 },
+        pipelines: { fix: { stages: ['intake', 'fix', 'deliver'], exit: 'pr', bindings: { fix: { agent: 'claude', max_rounds: 50 } } } },
+      },
+    },
+  ]);
+  const v = checkRules(r.fix!, buildGraph(r.fix!).stages);
+  assert.deepEqual(
+    v.map((x) => [x.rule, x.target, x.message]),
+    [['max_rounds_ceiling', 'bindings.fix', 'allows 50 fix rounds, over max_rounds_ceiling 2 (from profile:default); set max_rounds to 2 or less']],
+  );
+});
+
+test('max_rounds_ceiling on a loop stage checks its last slot node only', () => {
+  const r = mergePipelines([
+    {
+      source: 'p',
+      fragment: {
+        rules: { max_rounds_ceiling: 2 },
+        pipelines: {
+          fix: { stages: ['intake', 'fix', 'deliver'], exit: 'pr', bindings: { fix: [{ agent: 'claude', max_rounds: 9 }, { agent: 'claude', max_rounds: 2 }] } },
+        },
+      },
+    },
+  ]);
+  assert.deepEqual(checkRules(r.fix!, buildGraph(r.fix!).stages), []);
+});
+
+/** A router whose choose agent is codex, with top-level rules `rules`. */
+function router(rules: Rules) {
+  return mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: {
+        rules,
+        pipelines: {
+          triage: { router: true, stages: ['intake', 'route'], choose: { agent: 'codex', from: ['feature'] } },
+        },
+      },
+    },
+  ]).triage!;
+}
+
+test('allowed_agents covers the choose agent of a router', () => {
+  const v = checkRules(router({ allowed_agents: ['claude'] }), ['intake', 'route']);
+  assert.deepEqual(
+    v.map((x) => [x.rule, x.target, x.message]),
+    [['allowed_agents', 'pipelines.triage.choose', 'uses agent "codex", but allowed_agents (from profile:default) allows: claude; use one of those']],
+  );
+});
+
+test("allowed_models and require_skills '*' cover the choose agent of a router", () => {
+  const v = checkRules(router({ allowed_models: ['opus'], require_skills: [{ stage: '*', skills: ['triage'] }] }), ['intake', 'route']);
+  assert.deepEqual(
+    v.map((x) => [x.rule, x.target]),
+    [
+      ['require_skills', 'pipelines.triage.choose'],
+      ['allowed_models', 'pipelines.triage.choose'],
+    ],
+  );
+});
+
+test('a global required_nodes entry for the core groom gate is skipped in pipelines without it', () => {
+  const r = mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: {
+        rules: { required_nodes: [{ name: 'approve-groom', after: 'groom' }] },
+        pipelines: { docs: { stages: ['intake', 'deliver'], exit: 'comment' } },
+      },
+    },
+  ]);
+  assert.deepEqual(checkRules(r.docs!, ['intake', 'deliver']), []);
+  assert.deepEqual(checkRules(r.feature!), []);
+});
+
+test('a global required_nodes entry attached to a stage a pipeline lacks is skipped there', () => {
+  const r = mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: {
+        rules: { required_nodes: [{ name: 'audit', after: 'review' }] },
+        nodes: { audit: { command: ['x'], after: 'review' } },
+        pipelines: { docs: { stages: ['intake', 'deliver'], exit: 'comment' } },
+      },
+    },
+  ]);
+  assert.deepEqual(checkRules(r.docs!, ['intake', 'deliver']), []);
+});
+
+test('a pipeline required_nodes entry is still checked', () => {
+  const r = mergePipelines([
+    { source: 'p', fragment: { pipelines: { docs: { stages: ['intake', 'deliver'], exit: 'comment', rules: { required_nodes: ['approve-groom'] } } } } },
+  ]);
+  assert.deepEqual(
+    checkRules(r.docs!, ['intake', 'deliver']).map((x) => x.message),
+    ['node "approve-groom" is required by required_nodes but is not defined; add it under nodes:'],
+  );
 });

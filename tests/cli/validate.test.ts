@@ -5,7 +5,8 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { ConfigError } from '../../src/config/load.ts';
 import { RuleViolationError } from '../../src/graph/rules.ts';
-import { groundVersion, validate } from '../../src/validate.ts';
+import { EXIT_KINDS, EXITS } from '../../src/tracker/index.ts';
+import { groundVersion, validate, validateAll } from '../../src/validate.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
 import { FakeGit } from '../helpers/fake-git.ts';
 
@@ -65,6 +66,20 @@ test('unbound stages propagate as an error', async () => {
     line: 4,
     message: `${fx('e2e/unbound.yaml')}:4: profile "work" leaves stages unbound: groom, plan, implement, review, deliver; bind each under bindings:`,
   });
+});
+
+test('a profile with no bindings and no pipelines is told its stages are unbound', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-empty-'));
+  try {
+    const configFile = path.join(dir, 'config.yaml');
+    await fs.writeFile(configFile, 'version: 1\nprofiles:\n  work:\n    tracker: { kind: github }\n');
+    await assert.rejects(validate({ ...opts(), configFile }), {
+      name: 'GraphError',
+      message: `${configFile}:3: profile "work" leaves stages unbound: intake, groom, plan, implement, review, deliver; bind each under bindings:`,
+    });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true, maxRetries: 5 });
+  }
 });
 
 test('a trusted repo layer is merged as the last layer', async () => {
@@ -534,4 +549,190 @@ test('a broken extends is reported even when another profile is selected', async
       message: `${cfg}:21: profiles.acme.extends: unknown profile "nope" (profiles: base, acme); extend one of those`,
     });
   });
+});
+
+// profile `default`: bare feature bindings plus a hotfix pipeline (and `more` lines after its bindings)
+const pipelinesConfig = (abs: (g: string) => string, more = '') => `version: 1
+grounds:
+  team: { path: ${abs('team')} }
+profiles:
+  default:
+    bindings:
+      intake: { builtin: github.intake }
+      groom: { agent: claude }
+      plan: { agent: claude }
+      implement: { agent: claude }
+      review: { agent: claude }
+      deliver: { builtin: github.open_pr }
+    pipelines:
+      hotfix:
+        stages: [intake, implement, deliver]
+        exit: pr
+        ticket: optional
+        inputs:
+          why: { required: true, description: what broke }
+        bindings:
+          implement: { agent: claude }
+${more}`;
+
+test('validate --pipeline hotfix builds the hotfix graph', async () => {
+  await withConfig(pipelinesConfig, async (cfg) => {
+    const r = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'hotfix' });
+    assert.equal(r.graph.pipeline, 'hotfix');
+    assert.equal(r.pipeline.name, 'hotfix');
+    assert.equal(r.pipeline.ticket, 'optional');
+    assert.deepEqual(r.pipeline.inputs, { why: { required: true, description: 'what broke' } });
+    assert.deepEqual(Object.keys(r.pipelines), ['feature', 'hotfix']);
+  });
+});
+
+test('validate without a pipeline builds the default one', async () => {
+  await withConfig(pipelinesConfig, async (cfg) => {
+    const r = await validate({ ...opts(), configFile: cfg, profile: 'default' });
+    assert.equal(r.graph.pipeline, 'feature');
+    assert.equal(r.pipeline.default, true);
+  });
+});
+
+test("validate of an unknown pipeline points at the profile's pipelines line", async () => {
+  await withConfig(pipelinesConfig, async (cfg) => {
+    await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'nope' }), {
+      name: 'ConfigError',
+      message: `${cfg}:13: unknown pipeline "nope" in profile "default" (pipelines: feature, hotfix); pass one of those to --pipeline`,
+    });
+  });
+});
+
+test('validate of an unknown pipeline points at the profile line when it has no pipelines', async () => {
+  await assert.rejects(validate({ ...opts(), pipeline: 'nope' }), {
+    message: `${fx('e2e/config.yaml')}:6: unknown pipeline "nope" in profile "work" (pipelines: feature); pass one of those to --pipeline`,
+  });
+});
+
+test('validateAll validates every pipeline of the profile, in order', async () => {
+  await withConfig(pipelinesConfig, async (cfg) => {
+    const all = await validateAll({ ...opts(), configFile: cfg, profile: 'default' });
+    assert.deepEqual(
+      all.map((r) => r.graph.pipeline),
+      ['feature', 'hotfix'],
+    );
+    assert.deepEqual(
+      all.map((r) => r.pipeline.default),
+      [true, false],
+    );
+  });
+});
+
+test('validateAll throws the first pipeline error', async () => {
+  await withConfig(
+    (abs) => pipelinesConfig(abs, '      broken:\n        stages: [intake, fix, deliver]\n'),
+    async (cfg) => {
+      await assert.rejects(validateAll({ ...opts(), configFile: cfg, profile: 'default' }), {
+        message: `${cfg}:22: profiles.default.pipelines.broken: pipeline "broken" has no exit: bind its last stage "deliver" to one of ${EXIT_KINDS.map((k) => EXITS[k].builtin).join(', ')} or set exit:`,
+      });
+    },
+  );
+});
+
+test("a pipeline's own use maps into that pipeline only", async () => {
+  await withConfig(
+    (abs) => pipelinesConfig(abs, '        use:\n          - { from: team, file: policies/sdlc.md, as: context }\n'),
+    async (cfg) => {
+      const hotfix = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'hotfix' });
+      assert.deepEqual(
+        hotfix.mappings.map((m) => m.as),
+        ['context'],
+      );
+      const feature = await validate({ ...opts(), configFile: cfg, profile: 'default' });
+      assert.deepEqual(feature.mappings, []);
+    },
+  );
+});
+
+test("a pipeline's rules are checked against that pipeline's stages", async () => {
+  await withConfig(
+    (abs) =>
+      pipelinesConfig(
+        abs,
+        [
+          '      alert:',
+          '        stages: [intake, triage, deliver]',
+          '        exit: pr',
+          '        bindings:',
+          '          triage: { agent: claude, skills: [ops] }',
+          '        rules:',
+          '          require_skills: [{ stage: triage, skills: [ops] }]',
+          '',
+        ].join('\n'),
+      ),
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'alert' });
+      assert.deepEqual(r.graph.stages, ['intake', 'triage', 'deliver']);
+    },
+  );
+});
+
+const triageLines = (from: string) =>
+  ['      triage:', '        router: true', '        stages: [intake, route]', `        choose: { agent: claude, from: [${from}] }`, ''].join('\n');
+/** hotfix's input why made optional: a router cannot pass a required one */
+const routable = (config: string) => config.replace('why: { required: true', 'why: { required: false');
+
+test('validate refuses a router that routes to an unknown pipeline, whichever pipeline is validated', async () => {
+  await withConfig(
+    (abs) => routable(pipelinesConfig(abs, triageLines('hotfix, nope'))),
+    async (cfg) => {
+      await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'hotfix' }), {
+        name: 'ConfigError',
+        message: `${cfg}:25: profiles.default.pipelines.triage.choose.from.1: route to "nope" names no pipeline in profile "default" (pipelines: feature, hotfix, triage); use one of those`,
+      });
+    },
+  );
+});
+
+const epicLines = [
+  '      epic:',
+  '        stages: [intake, plan, implement, deliver]',
+  '        exit: pr',
+  '        bindings:',
+  '          plan: { agent: claude }',
+  '          implement: { agent: claude }',
+  '        fan_out: { stage: implement, slices: { from: plan, output: slices } }',
+  '',
+].join('\n');
+
+test('validate with sliceFrom builds the slice child graph of a fan-out pipeline', async () => {
+  await withConfig(
+    (abs) => pipelinesConfig(abs, epicLines),
+    async (cfg) => {
+      const parent = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'epic' });
+      assert.deepEqual(parent.graph.steps.map((s) => s.id), ['intake', 'plan', 'implement']);
+      const child = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'epic', sliceFrom: 'implement' });
+      assert.deepEqual(child.graph.steps.map((s) => s.id), ['intake', 'implement', 'deliver']);
+      assert.deepEqual(child.graph.steps[0]!.def, { builtin: 'percolator.seed' });
+    },
+  );
+});
+
+test("a router's default choose prompt lists the pipelines' descriptions", async () => {
+  await withConfig(
+    (abs) => routable(pipelinesConfig(abs, triageLines('hotfix, feature'))).replace('        exit: pr\n        ticket: optional', '        exit: pr\n        description: fix a bug fast\n        ticket: optional'),
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'triage' });
+      const choose = r.graph.steps.find((s) => s.id === 'route.1')!;
+      assert.match(String(choose.def.prompt), /^Pick the pipeline for this ticket from: hotfix: fix a bug fast; feature\. Write pick\.md/);
+      assert.equal(r.pipeline.fallback, 'feature');
+    },
+  );
+});
+
+test('a top-level require_skills naming a stage no pipeline has is a violation', async () => {
+  await withConfig(
+    (abs) => pipelinesConfig(abs, '    rules:\n      require_skills: [{ stage: tirage, skills: [ops] }]\n'),
+    async (cfg) => {
+      await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'hotfix' }), {
+        name: 'RuleViolationError',
+        message: `${cfg}:23: profiles.default.rules.require_skills.0.stage: names stage "tirage", which no pipeline in profile "default" has; use one of their stages or *`,
+      });
+    },
+  );
 });

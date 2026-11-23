@@ -29,7 +29,7 @@ test('github.intake writes ticket.md, issue.json and passes with the collected o
     gh.addIssue(REPO, 7, { title: 'Fix it', body: 'It is broken.', author: 'alice' });
     gh.addComment(REPO, 7, 'bob', 'Seen it too.');
     gh.addComment(REPO, 7, 'perc-bot', `${GATE_MARKER} v1 -->\nApprove?`);
-    const h = githubIntake({ gh, runDir, ticket: { repo: REPO, number: 7 } });
+    const h = githubIntake({ gh, runDir, pipeline: 'feature', runId: 'r1', inputs: {}, ticket: { repo: REPO, number: 7 } });
     const out = await h(step, ctx, io);
     assert.equal(out.status, 'pass');
     const rel = path.relative(runDir, path.join(io.outputsDir, 'ticket.md')).split(path.sep).join('/');
@@ -58,12 +58,14 @@ test('github.intake writes ticket.md, issue.json and passes with the collected o
       number: 7,
       title: 'Fix it',
       url: `https://${REPO}/issues/7`,
+      labels: [],
     });
     assert.deepEqual(await readIssueMeta(runDir), {
       repo: REPO,
       number: 7,
       title: 'Fix it',
       url: `https://${REPO}/issues/7`,
+      labels: [],
     });
   } finally {
     await rm(runDir);
@@ -76,7 +78,7 @@ test('github.intake: empty body and no comments use placeholders', async () => {
     const gh = new FakeGh();
     gh.addIssue(REPO, 1, { title: 'T', author: 'a' });
     gh.addComment(REPO, 1, 'bot', `${GATE_MARKER} v1 -->`);
-    await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 1 } })(step, ctx, io);
+    await githubIntake({ gh, runDir, pipeline: 'feature', runId: 'r1', inputs: {}, ticket: { repo: REPO, number: 1 } })(step, ctx, io);
     const md = await fs.readFile(path.join(io.outputsDir, 'ticket.md'), 'utf8');
     assert.ok(md.includes('## Body\n\n_No description._\n\n## Comments\n\n_No comments._\n'));
     assert.ok(md.endsWith('_No comments._\n'));
@@ -90,7 +92,7 @@ test('github.intake escalates for a closed issue and writes nothing', async () =
   try {
     const gh = new FakeGh();
     gh.addIssue(REPO, 3, { state: 'CLOSED' });
-    const out = await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 3 } })(step, ctx, io);
+    const out = await githubIntake({ gh, runDir, pipeline: 'feature', runId: 'r1', inputs: {}, ticket: { repo: REPO, number: 3 } })(step, ctx, io);
     assert.deepEqual(out, {
       status: 'escalate',
       outputs: {},
@@ -107,7 +109,7 @@ test('github.intake escalates on a gh failure instead of throwing', async () => 
   try {
     const gh = new FakeGh();
     gh.fail('issue', 'network down');
-    const out = await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 3 } })(step, ctx, io);
+    const out = await githubIntake({ gh, runDir, pipeline: 'feature', runId: 'r1', inputs: {}, ticket: { repo: REPO, number: 3 } })(step, ctx, io);
     assert.deepEqual(out, { status: 'escalate', outputs: {}, reason: 'github.intake: gh issue failed: network down' });
   } finally {
     await rm(runDir);
@@ -142,7 +144,7 @@ test('github.intake: an unapproved earlier groomed ticket becomes the previous_g
     const gh = new FakeGh();
     gh.addIssue(REPO, 2, { title: 'T', author: 'a' });
     const g = gh.addComment(REPO, 2, 'perc-bot', groomGate('r1', '# Groomed\n\nold'));
-    const out = await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 2 } })(step, ctx, io);
+    const out = await githubIntake({ gh, runDir, pipeline: 'feature', runId: 'r1', inputs: {}, ticket: { repo: REPO, number: 2 } })(step, ctx, io);
     assert.equal(out.status, 'pass');
     const rel = (f: string) => path.relative(runDir, path.join(io.outputsDir, f)).split(path.sep).join('/');
     assert.deepEqual(out.outputs, { previous_groom: rel('previous_groom.md'), ticket: rel('ticket.md') });
@@ -163,7 +165,7 @@ test('github.intake: a rejected earlier groomed ticket carries the rejection fee
     gh.addIssue(REPO, 2, { title: 'T', author: 'a' });
     const g = gh.addComment(REPO, 2, 'perc-bot', groomGate('r1', 'old'));
     const no = gh.addComment(REPO, 2, 'alice', '/percolator reject split it in two');
-    await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 2 }, approvers: ['alice'] })(step, ctx, io);
+    await githubIntake({ gh, runDir, pipeline: 'feature', runId: 'r1', inputs: {}, ticket: { repo: REPO, number: 2 }, approvers: ['alice'] })(step, ctx, io);
     assert.equal(
       await fs.readFile(path.join(io.outputsDir, 'previous_groom.md'), 'utf8'),
       `An earlier run groomed this ticket (${g.url}); @alice rejected it (${no.url}): split it in two\n\nRefine it, don't start over.\n\nold\n`,
@@ -180,7 +182,7 @@ test('github.intake: an approved earlier groomed ticket is saved to prior-groom.
     gh.addIssue(REPO, 2, { title: 'T', author: 'a' });
     const g = gh.addComment(REPO, 2, 'perc-bot', groomGate('r1', 'the ticket'));
     const ok = gh.addComment(REPO, 2, 'alice', '/percolator approve');
-    const out = await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 2 }, approvers: ['alice'] })(step, ctx, io);
+    const out = await githubIntake({ gh, runDir, pipeline: 'feature', runId: 'r1', inputs: {}, ticket: { repo: REPO, number: 2 }, approvers: ['alice'] })(step, ctx, io);
     assert.deepEqual(Object.keys(out.outputs), ['ticket']);
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(runDir, 'prior-groom.json'), 'utf8')), {
       text: 'the ticket',
@@ -199,7 +201,7 @@ test('github.intake: approvers default to the gh user', async () => {
     gh.addIssue(REPO, 2, { title: 'T', author: 'a' });
     gh.addComment(REPO, 2, 'perc-bot', groomGate('r1', 'the ticket'));
     gh.addComment(REPO, 2, 'perc-bot', '/percolator approve');
-    await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 2 } })(step, ctx, io);
+    await githubIntake({ gh, runDir, pipeline: 'feature', runId: 'r1', inputs: {}, ticket: { repo: REPO, number: 2 } })(step, ctx, io);
     assert.equal(JSON.parse(await fs.readFile(path.join(runDir, 'prior-groom.json'), 'utf8')).text, 'the ticket');
   } finally {
     await rm(runDir);
@@ -212,8 +214,50 @@ test('github.intake leaves decision notes out of ticket.md', async () => {
     const gh = new FakeGh();
     gh.addIssue(REPO, 2, { title: 'T', author: 'a' });
     gh.addComment(REPO, 2, 'perc-bot', '<!-- percolator:decision run=r1 step=approve-groom round=1 decision=approve -->\nApproved locally by @x via `perc approve`.\n');
-    await githubIntake({ gh, runDir, ticket: { repo: REPO, number: 2 } })(step, ctx, io);
+    await githubIntake({ gh, runDir, pipeline: 'feature', runId: 'r1', inputs: {}, ticket: { repo: REPO, number: 2 } })(step, ctx, io);
     assert.ok((await fs.readFile(path.join(io.outputsDir, 'ticket.md'), 'utf8')).endsWith('_No comments._\n'));
+  } finally {
+    await rm(runDir);
+  }
+});
+
+test('ticketless intake renders inputs as the ticket', async () => {
+  const { runDir, io } = await setup();
+  try {
+    const gh = new FakeGh();
+    const h = githubIntake({ gh, runDir, pipeline: 'dd-alert', runId: 'dd-alert-20260304-050607-ab12', inputs: { service: 'api', alert_url: 'https://dd/x?a=b' } });
+    const out = await h(step, ctx, io);
+    assert.equal(out.status, 'pass');
+    assert.equal(
+      await fs.readFile(path.join(io.outputsDir, 'ticket.md'), 'utf8'),
+      '# dd-alert run dd-alert-20260304-050607-ab12\n\n## Inputs\n\n- alert_url: https://dd/x?a=b\n- service: api\n',
+    );
+    assert.equal(await fs.stat(path.join(runDir, 'issue.json')).then(() => true, () => false), false);
+    assert.deepEqual(gh.calls, []);
+  } finally {
+    await rm(runDir);
+  }
+});
+
+test('ticketless intake without inputs says so', async () => {
+  const { runDir, io } = await setup();
+  try {
+    await githubIntake({ gh: new FakeGh(), runDir, pipeline: 'sweep', runId: 'sweep-1', inputs: {} })(step, ctx, io);
+    assert.equal(await fs.readFile(path.join(io.outputsDir, 'ticket.md'), 'utf8'), '# sweep run sweep-1\n\n## Inputs\n\n_No inputs._\n');
+  } finally {
+    await rm(runDir);
+  }
+});
+
+test('intake appends inputs to a ticket', async () => {
+  const { runDir, io } = await setup();
+  try {
+    const gh = new FakeGh();
+    gh.addIssue(REPO, 1, { title: 'T', author: 'a', labels: ['bug', 'pipeline:hotfix'] });
+    await githubIntake({ gh, runDir, pipeline: 'hotfix', runId: 'r1', inputs: { tag: 'v1' }, ticket: { repo: REPO, number: 1 } })(step, ctx, io);
+    const md = await fs.readFile(path.join(io.outputsDir, 'ticket.md'), 'utf8');
+    assert.ok(md.endsWith('## Comments\n\n_No comments._\n\n## Inputs\n\n- tag: v1\n'), md);
+    assert.deepEqual((await readIssueMeta(runDir)).labels, ['bug', 'pipeline:hotfix']);
   } finally {
     await rm(runDir);
   }

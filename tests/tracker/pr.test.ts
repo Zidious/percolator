@@ -19,6 +19,11 @@ test('prBody is only the closing line without a description', () => {
   assert.equal(prBody(7, '  \n'), 'Closes #7\n');
 });
 
+test('prBody without an issue has no Closes line', () => {
+  assert.equal(prBody(undefined), '');
+  assert.equal(prBody(undefined, '\n## What\n\nDid it.\n\n'), '## What\n\nDid it.\n');
+});
+
 test('prBody puts the trimmed description after the closing line', () => {
   assert.equal(prBody(7, '\n## What\n\nDid it.\n\n'), 'Closes #7\n\n## What\n\nDid it.\n');
 });
@@ -214,6 +219,72 @@ test('open_pr escalates on a push failure', async () => {
     assert.equal(out.status, 'escalate');
     assert.equal(out.reason, 'github.open_pr: remote rejected');
     assert.equal(gh.calls.length, 0);
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('open_pr without an issue titles the PR <pipeline>: <runId> and closes nothing', async () => {
+  const s = await setup({ prBody: [{ step: 'pr-description', text: 'Adds X.\n' }] });
+  try {
+    await fs.rm(path.join(s.runDir, 'issue.json'));
+    const gh = new FakeGh({ readFile: readBody });
+    const h = githubOpenPr({
+      gh, runDir: s.runDir, worktree: '/wt', branch: 'percolator/r1', base: 'origin/main', push: async () => {},
+      repo: REPO, pipeline: 'dd-alert', runId: 'r1',
+    });
+    assert.equal((await h(step, s.ctx, s.io)).status, 'pass');
+    const pr = gh.prs[0]!;
+    assert.deepEqual({ repo: pr.repo, title: pr.title, body: pr.body }, { repo: REPO, title: 'dd-alert: r1', body: 'Adds X.\n' });
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('open_pr takes its title from the latest pr_title output', async () => {
+  const s = await setup();
+  try {
+    await fs.mkdir(path.join(s.runDir, 'steps', 'team-pr', 'outputs'), { recursive: true });
+    await fs.writeFile(path.join(s.runDir, 'steps', 'team-pr', 'outputs', 'pr_title.md'), '  Fix the alert  \n');
+    s.ctx.previousOutputs['team-pr'] = { pr_title: 'steps/team-pr/outputs/pr_title.md' };
+    const gh = new FakeGh({ readFile: readBody });
+    assert.equal((await mk(s, gh)(step, s.ctx, s.io)).status, 'pass');
+    assert.equal(gh.prs[0]!.title, 'Fix the alert');
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('prBody of a fan-out slice says Part of #<n>, which closes nothing', () => {
+  assert.equal(prBody(7, 'Adds X.\n', { slice: true }), 'Part of #7\n\nAdds X.\n');
+});
+
+test('open_pr of a fan-out slice titles the PR <issue title>: <slice title> and leaves the issue open', async () => {
+  const s = await setup({ prBody: [{ step: 'pr-description', text: 'Adds X.\n' }] });
+  try {
+    const gh = new FakeGh({ readFile: readBody });
+    const h = githubOpenPr({
+      gh, runDir: s.runDir, worktree: '/wt', branch: 'percolator/r1-s2', base: 'origin/main', push: async () => {},
+      slice: { title: 'Parser' },
+    });
+    assert.equal((await h(step, s.ctx, s.io)).status, 'pass');
+    assert.deepEqual({ title: gh.prs[0]!.title, body: gh.prs[0]!.body }, { title: 'Fix it: Parser', body: 'Part of #7\n\nAdds X.\n' });
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('open_pr of a fan-out slice without an issue titles the PR <pipeline>: <slice title>', async () => {
+  const s = await setup();
+  try {
+    await fs.rm(path.join(s.runDir, 'issue.json'));
+    const gh = new FakeGh({ readFile: readBody });
+    const h = githubOpenPr({
+      gh, runDir: s.runDir, worktree: '/wt', branch: 'percolator/r1-s2', base: 'origin/main', push: async () => {},
+      repo: REPO, pipeline: 'split', runId: 'r1-s2', slice: { title: 'Parser' },
+    });
+    assert.equal((await h(step, s.ctx, s.io)).status, 'pass');
+    assert.equal(gh.prs[0]!.title, 'split: Parser');
   } finally {
     await rm(s.runDir);
   }

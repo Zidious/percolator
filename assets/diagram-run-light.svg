@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1150 300" width="1150" height="300" role="img" aria-label="The run train: intake, groom, the approve-groom gate, plan, implement, an optional hook, review looping back to implement up to three times, the pr-description hook, then deliver opens a pull request.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1150 300" width="1150" height="300" role="img" aria-label="The feature pipeline's run train (other pipelines run their own stages, from intake to an exit): intake, groom, the approve-groom gate, plan, implement, an optional hook, review looping back to implement up to three times, the pr-description hook, then deliver opens a pull request.">
 <style>
 .ink{fill:#241914}.mut{fill:#6c5f56}.acc{fill:#c2661a}.wait{fill:#d94a33}.pass{fill:#3f74d8}.surf{fill:#faf7f4}
 .s-line{stroke:#d9d0c7}.s-mut{stroke:#6c5f56}.s-acc{stroke:#c2661a}.s-wait{stroke:#d94a33}.s-ink{stroke:#241914}.s-pass{stroke:#3f74d8}
@@ -10,6 +10,8 @@
 <marker id="aa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="acc"/></marker>
 <marker id="aw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="wait"/></marker>
 </defs>
+<text x="40" y="30" class="hd ink">feature pipeline</text>
+<text x="1110" y="30" class="t13 mut" text-anchor="end">other pipelines: your stages, intake first, an exit last</text>
 <line x1="70" y1="160" x2="1070" y2="160" class="s-line" stroke-width="6" stroke-linecap="round"/>
 <line x1="70" y1="160" x2="333" y2="160" stroke-width="6" stroke-linecap="round" class="s-pass"/>
 <path d="M840 144 C840 62 620 62 620 144" fill="none" class="s-acc" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#aa)"/>

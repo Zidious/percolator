@@ -94,9 +94,9 @@ test('skills mappings must use dir', async () => {
 test('an unknown builtin is reported with the known names, alongside other problems', async () => {
   const g = graphOf({ intake: { builtin: 'read-ticket' }, review: { agent: 'gemini' } }, { audit: { after: 'review', builtin: 'nope' } });
   assert.deepEqual(await problems(checkAgents(g, [], 'cfg.yaml')), [
-    'cfg.yaml: bindings.intake.builtin: unknown builtin "read-ticket" (known: github.intake, github.open_pr); use one of those',
+    'cfg.yaml: bindings.intake.builtin: unknown builtin "read-ticket" (known: github.intake, github.open_pr, github.comment, github.open_issues, percolator.report, github.release, github.pr_review, github.private_fork_pr, percolator.route_rules, percolator.route, percolator.fan_out, percolator.seed); use one of those',
     'cfg.yaml: bindings.review.agent: unknown agent "gemini" (known: claude, codex, command); use one of those',
-    'cfg.yaml: nodes.audit.builtin: unknown builtin "nope" (known: github.intake, github.open_pr); use one of those',
+    'cfg.yaml: nodes.audit.builtin: unknown builtin "nope" (known: github.intake, github.open_pr, github.comment, github.open_issues, percolator.report, github.release, github.pr_review, github.private_fork_pr, percolator.route_rules, percolator.route, percolator.fan_out, percolator.seed); use one of those',
   ]);
 });
 

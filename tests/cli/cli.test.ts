@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { main } from '../../src/cli.ts';
+import { FakeHc } from '../helpers/fake-hc.ts';
 
 const fx = (p: string) => path.resolve(import.meta.dirname, '..', 'fixtures', p);
 
@@ -152,6 +153,98 @@ test('validate prints rule violations and exits 1', async () => {
   );
 });
 
+async function pipelinesConfig(): Promise<string> {
+  const cfg = path.join(tmp, 'pipelines.yaml');
+  await fs.writeFile(
+    cfg,
+    [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    bindings:',
+      '      intake: { builtin: github.intake }',
+      '      groom: { agent: claude }',
+      '      plan: { agent: claude }',
+      '      implement: { agent: claude }',
+      '      review: { agent: claude }',
+      '      deliver: { builtin: github.open_pr }',
+      '    pipelines:',
+      '      hotfix:',
+      '        stages: [intake, implement, deliver]',
+      '        exit: pr',
+      '        bindings:',
+      '          implement: { agent: claude, model: opus }',
+      '',
+    ].join('\n'),
+  );
+  return cfg;
+}
+
+test('perc validate prints every pipeline', async () => {
+  const cfg = await pipelinesConfig();
+  const r = await run(['validate', '--config', cfg, '--profile', 'default']);
+  assert.equal(r.code, 0, r.err);
+  const blocks = r.out.split('\n\npipeline: ');
+  assert.equal(blocks.length, 2, r.out);
+  assert.ok(r.out.startsWith('pipeline: feature (default)\nprofile: default\n'), r.out);
+  assert.ok(blocks[0]!.includes('\n7. deliver: builtin github.open_pr\n'), r.out);
+  assert.ok(blocks[1]!.startsWith('hotfix\nprofile: default\n'), r.out);
+  assert.ok(blocks[1]!.includes('\n2. implement: claude, model opus\n'), r.out);
+  assert.ok(blocks[1]!.includes('\n3. deliver: builtin github.open_pr\n'), r.out);
+});
+
+test('perc validate --pipeline prints that pipeline only', async () => {
+  const cfg = await pipelinesConfig();
+  const r = await run(['validate', '--config', cfg, '--profile', 'default', '--pipeline', 'hotfix']);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(r.out.startsWith('pipeline: hotfix\nprofile: default\n'), r.out);
+  assert.ok(!r.out.includes('pipeline: feature'), r.out);
+  assert.ok(!r.out.includes('slice runs'), r.out);
+});
+
+test('perc validate of a fan-out pipeline prints its slice runs after the parent graph', async () => {
+  const template = await fs.readFile(path.resolve(import.meta.dirname, '..', '..', 'templates', 'config.yaml'), 'utf8');
+  const cfg = path.join(tmp, 'epic.yaml');
+  // the template's commented example pipelines, uncommented (as in tests/templates.test.ts)
+  await fs.writeFile(cfg, template.replace(/^(\s*)# ((?:[a-z][a-z0-9_-]*:|  ).*)$/gm, '$1$2'));
+  const r = await run(['validate', '--config', cfg, '--profile', 'default', '--pipeline', 'epic']);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(r.out.includes('\n3. implement: builtin percolator.fan_out\n\nback-edges:\n'), r.out);
+  assert.equal(
+    r.out.slice(r.out.indexOf('\n\nslice runs')),
+    [
+      '',
+      '',
+      'slice runs (fan-out of implement, at most 3 at a time):',
+      'steps:',
+      '1. intake: builtin percolator.seed',
+      '2. implement: claude, model opus, skills superpowers:executing-plans, superpowers:test-driven-development',
+      '3. review: claude, model opus, skills deep-dive-review',
+      '4. deliver: builtin github.open_pr',
+      '',
+      'back-edges:',
+      'review → implement (max 3, continue)',
+      '',
+    ].join('\n'),
+  );
+});
+
+test('perc validate --pipeline nope names the pipelines at the profile\'s pipelines line', async () => {
+  const cfg = await pipelinesConfig();
+  const r = await run(['validate', '--config', cfg, '--profile', 'default', '--pipeline', 'nope']);
+  assert.equal(r.code, 1);
+  assert.equal(r.out, '');
+  assert.equal(
+    r.err,
+    `${cfg}:11: unknown pipeline "nope" in profile "default" (pipelines: feature, hotfix); pass one of those to --pipeline\n`,
+  );
+});
+
+test('usage lists validate --pipeline', async () => {
+  const r = await run(['--help']);
+  assert.ok(r.out.includes('validate [--config <file>] [--profile <name>] [--pipeline <name>] [--update]'), r.out);
+});
+
 test('unknown command prints usage and exits 2', async () => {
   const r = await run(['frobnicate']);
   assert.equal(r.code, 2);
@@ -186,14 +279,15 @@ test('--help lists the run commands', async () => {
   assert.ok(
     r.out.includes(
       [
-        '  run <ticket> [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]',
-        '      start a run: groom, approval, plan, implement, review, PR (default: in its own hc terminal)',
+        '  run [<ticket>] [--pipeline <name>] [--input key=value]... [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]',
+        "      start a run of a pipeline (default: the profile's; feature: groom, approval, plan, implement, review, PR)",
+        '      in its own hc terminal (--foreground: in this one)',
         '  resume <run-id> [--foreground]',
         '      continue a paused or interrupted run (grants one more round at a cap)',
         '  status [<run-id>] [--json]',
         '      list runs, or show one (--json: the stable JSON contract)',
-        '  approve <run-id> | reject <run-id> <feedback>',
-        '      answer the approval gate a run is waiting at',
+        '  approve <run-id> [--pipeline <name>] | reject <run-id> <feedback>',
+        '      answer the approval gate a run is waiting at (--pipeline: the pipeline a pick-pipeline gate goes with)',
         '  clean <run-id> [--force]',
         "      remove a finished run's terminals and worktree (keeps the branch and the run record; perc delete removes it all)",
         '  delete <run-id>... [--yes] | delete --finished [--yes]',
@@ -209,10 +303,11 @@ test('--help lists the run commands', async () => {
   );
 });
 
-test('run with no ticket exits 2', async () => {
-  const r = await run(['run']);
+test('run with no ticket on a pipeline that needs one exits 2', async () => {
+  const cfg = await pipelinesConfig();
+  const r = await run(['run', '--repo', tmp, '--config', cfg, '--profile', 'default']);
   assert.equal(r.code, 2);
-  assert.match(r.err, /^run needs <ticket>\n\nusage: perc/);
+  assert.match(r.err, /^pipeline "feature" needs a ticket; pass one: perc run <ticket> --pipeline feature\n\nusage: perc/);
 });
 
 test('herdr link writes perc.json for the running cli and prints the path', async () => {
@@ -242,4 +337,117 @@ test('herdr with no or an unknown subcommand is a usage error', async () => {
     assert.match(r.err, /^herdr needs a subcommand: link/);
     assert.match(r.err, /usage/i);
   }
+});
+
+async function runWith(argv: string[], deps: Parameters<typeof main>[2]) {
+  let out = '';
+  let err = '';
+  const code = await main(argv, { stdout: (s) => (out += s), stderr: (s) => (err += s) }, deps);
+  return { code, out, err };
+}
+
+const WATCH_ENTRY = path.resolve('/opt/perc/cli.js');
+
+test('perc watch launches the watcher terminal', async () => {
+  const hc = new FakeHc();
+  const cfg = path.join(tmp, 'watch.yaml');
+  const r = await runWith(['watch', '--repo', tmp, '--repo', fx('.'), '--config', cfg, '--profile', 'work', '--interval', '30'], { hc, home: tmp, entry: WATCH_ENTRY });
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(hc.calls.filter((c) => c[0] === 'run'), [
+    [
+      'run',
+      {
+        name: 'percolator-watch',
+        cwd: tmp,
+        argv: [process.execPath, WATCH_ENTRY, 'watch', '--foreground', '--repo', tmp, '--repo', fx('.'), '--config', cfg, '--profile', 'work', '--interval', '30'],
+        labels: { 'percolator.role': 'watcher' },
+        outliveParent: true,
+      },
+    ],
+  ]);
+  assert.equal(r.out, `watcher started in terminal percolator-watch\n  repos ${tmp}, ${fx('.')}\n  stop with: perc watch stop\n`);
+});
+
+test('perc watch refuses a second watcher', async () => {
+  const hc = new FakeHc();
+  hc.add({ name: 'percolator-watch', labels: { 'percolator.role': 'watcher' } });
+  const r = await runWith(['watch', '--repo', tmp], { hc, home: tmp, entry: WATCH_ENTRY });
+  assert.equal(r.code, 1);
+  assert.equal(r.err, 'perc watch is already running in terminal percolator-watch; perc watch stop to stop it\n');
+  assert.deepEqual(hc.calls.filter((c) => c[0] === 'run'), []);
+});
+
+test('perc watch --foreground refuses while the watcher terminal is live in another terminal', async () => {
+  const hc = new FakeHc();
+  hc.add({ name: 'percolator-watch', labels: { 'percolator.role': 'watcher' } });
+  const r = await runWith(['watch', '--foreground', '--repo', tmp], { hc, home: tmp, entry: WATCH_ENTRY, selfTerminal: 'w9:p9' });
+  assert.equal(r.code, 1);
+  assert.equal(r.err, 'perc watch is already running in terminal percolator-watch; perc watch stop to stop it\n');
+});
+
+test('perc watch --foreground refuses while another watcher beats in watch.json', async () => {
+  const home = await fs.mkdtemp(path.join(tmp, 'home-'));
+  const file = path.join(home, '.percolator', 'watch', 'watch.json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const at = new Date().toISOString();
+  await fs.writeFile(file, JSON.stringify({ pid: 9, host: os.hostname(), startedAt: at, heartbeatAt: at, repos: [tmp], intervalS: 60 }));
+  const r = await runWith(['watch', '--foreground', '--repo', tmp], { hc: new FakeHc(), home, entry: WATCH_ENTRY, pid: 10, pidAlive: (pid) => pid === 9 });
+  assert.equal(r.code, 1);
+  assert.equal(r.err, 'perc watch is already running as pid 9; stop it first (perc watch stop, or end pid 9)\n');
+});
+
+test('perc watch replaces a finished watcher terminal and leaves a foreign one alone', async () => {
+  const hc = new FakeHc();
+  hc.add({ name: 'percolator-watch', labels: { 'percolator.role': 'watcher' }, state: 'finished' });
+  assert.equal((await runWith(['watch', '--repo', tmp], { hc, home: tmp, entry: WATCH_ENTRY })).code, 0);
+  assert.deepEqual(hc.calls.map((c) => c[0]), ['get', 'rm', 'run']);
+  const other = new FakeHc();
+  other.add({ name: 'percolator-watch', state: 'finished' });
+  const r = await runWith(['watch', '--repo', tmp], { hc: other, home: tmp, entry: WATCH_ENTRY });
+  assert.equal(r.code, 1);
+  assert.equal(r.err, 'terminal percolator-watch is not a Percolator watcher; close or rename it, then run perc watch again\n');
+  assert.deepEqual(other.calls.map((c) => c[0]), ['get']);
+});
+
+test('--interval below 15 is a usage error', async () => {
+  for (const v of ['14', '0']) {
+    const r = await runWith(['watch', '--interval', v], { hc: new FakeHc(), home: tmp, entry: WATCH_ENTRY });
+    assert.equal(r.code, 2);
+    assert.match(r.err, /^--interval must be at least 15 seconds\n\nusage: perc/);
+  }
+  const r = await runWith(['watch', '--interval', '1m'], { hc: new FakeHc(), home: tmp, entry: WATCH_ENTRY });
+  assert.equal(r.code, 2);
+  assert.match(r.err, /^--interval must be a whole number of seconds, got "1m"\n\nusage: perc/);
+});
+
+test('perc watch stop ends the watcher terminal and removes watch.json', async () => {
+  const home = await fs.mkdtemp(path.join(tmp, 'home-'));
+  const file = path.join(home, '.percolator', 'watch', 'watch.json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, '{}');
+  const hc = new FakeHc();
+  hc.add({ name: 'percolator-watch', labels: { 'percolator.role': 'watcher' } });
+  hc.add({ name: 'driver', labels: { 'percolator.run': 'r1', 'percolator.role': 'driver' } });
+  const r = await runWith(['watch', 'stop'], { hc, home, entry: WATCH_ENTRY });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, 'stopped the watcher in terminal percolator-watch\n');
+  assert.deepEqual([...hc.terminals.keys()], ['driver']);
+  assert.equal(await fs.stat(file).then(() => true, () => false), false);
+  const again = await runWith(['watch', 'stop'], { hc, home, entry: WATCH_ENTRY });
+  assert.equal(again.out, 'no watcher running\n');
+});
+
+test('usage lists perc watch', async () => {
+  const r = await run(['--help']);
+  assert.ok(
+    r.out.includes(
+      [
+        '  watch [--repo <dir>]... [--config <file>] [--profile <name>] [--interval <s>] [--foreground] | watch stop',
+        "      start runs from the pipelines' triggers, polling each repo every --interval seconds (default 60, at least 15)",
+        '      in hc terminal percolator-watch (--foreground: in this one); watch stop ends it',
+        '',
+      ].join('\n'),
+    ),
+    r.out,
+  );
 });

@@ -9,7 +9,7 @@ import { listRuns, writeRunMeta } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
-import { driverAlive, runStatusJson, statusJson, yourTurn } from '../../src/run/status.ts';
+import { attentionNext, driverAlive, runAgain, runStatusJson, statusJson, yourTurn } from '../../src/run/status.ts';
 import type { RunStatusJson, TimelineJson } from '../../src/run/status.ts';
 import { NOW, setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
@@ -31,7 +31,8 @@ const STALLED_PLAN = {
 type Env = RunEnv & {
   clock: { t: number };
   dir(m: RunMeta): string;
-  prepare(): Promise<RunMeta>;
+  /** prepares a run on `ticket` (default #5) */
+  prepare(ticket?: string): Promise<RunMeta>;
   edit(m: RunMeta, f: (s: RunState) => void): Promise<void>;
   liveDriver(m: RunMeta): void;
   /** `waiting.json` at approve-groom attempt 1, after a groom that produced `groomed_ticket` */
@@ -56,7 +57,7 @@ async function setup(): Promise<Env> {
     ...base,
     clock,
     dir,
-    prepare: () => prepareRun({ ticket: '#5', repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps),
+    prepare: (ticket = '#5') => prepareRun({ ticket, repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps),
     edit,
     liveDriver: (m) => {
       base.deps.hc.add({ name: m.driver, labels: { 'percolator.run': m.runId, 'percolator.role': 'driver' } });
@@ -132,7 +133,12 @@ function loops(rounds: Record<string, number> = {}) {
 function expected(m: RunMeta, over: Record<string, unknown>): Record<string, unknown> {
   return {
     id: m.runId,
+    pipeline: 'feature',
+    inputs: {},
     ticket: { ref: TICKET, number: 5 },
+    parent: null,
+    children: [],
+    opened: [],
     repo: m.repoRoot,
     branch: m.branch,
     worktree: m.worktree,
@@ -600,7 +606,7 @@ test('agent blocked', async () => {
     const m = await e.prepare();
     await e.edit(m, (s) => (s.currentStep = 'groom'));
     e.liveDriver(m);
-    const term = terminalName(m.runId, m.ticket, 'groom', 1);
+    const term = terminalName(m.runId, m.ticket!, 'groom', 1);
     e.deps.hc.add({ name: term, labels: { 'percolator.run': m.runId, 'percolator.step': 'groom' } });
     await writeJson(path.join(e.dir(m), 'attention.json'), { stepId: 'groom', terminal: term, kind: 'blocked', at: T1 });
     assert.deepEqual(
@@ -846,21 +852,22 @@ test('status json keeps going past a broken run', async () => {
   try {
     const good = await e.prepare();
     e.clock.t += 1000;
-    const badGraph = await e.prepare();
+    // one ticket each: a ticket has at most one live run
+    const badGraph = await e.prepare('#6');
     await fs.writeFile(path.join(e.dir(badGraph), 'graph.json'), '{"version": 2}');
     const broken = path.join(e.home, '.percolator', 'runs', 't9-broken');
     await fs.mkdir(broken, { recursive: true });
     const graphFile = path.join(e.dir(badGraph), 'graph.json');
     e.clock.t += 1000;
-    const noState = await e.prepare();
+    const noState = await e.prepare('#7');
     const noStateFile = path.join(e.dir(noState), 'state.json');
     await fs.rm(noStateFile);
     e.clock.t += 1000;
-    const badState = await e.prepare();
+    const badState = await e.prepare('#8');
     const badStateFile = path.join(e.dir(badState), 'state.json');
     await fs.writeFile(badStateFile, '{not json');
     assert.deepEqual(await statusJson(e.deps), {
-      schema: 1,
+      schema: 2,
       runs: [
         {
           id: noState.runId,
@@ -872,6 +879,7 @@ test('status json keeps going past a broken run', async () => {
         { id: badState.runId, status: 'unreadable', error: `Run state ${badStateFile} is not valid JSON` },
         { id: 't9-broken', status: 'unreadable', error: `Run metadata ${path.join(broken, 'run.json')} is missing or invalid: file not found` },
       ],
+      watcher: { alive: false, repos: [] },
     });
   } finally {
     await e.cleanup();
@@ -882,7 +890,7 @@ test('status json reads runs four at a time, in listRuns order', async () => {
   const e = await setup();
   try {
     for (let i = 0; i < 6; i++) {
-      await e.prepare();
+      await e.prepare(`#${5 + i}`);
       e.clock.t += 1000;
     }
     let inFlight = 0;
@@ -912,7 +920,238 @@ test('status json never loads config', async () => {
   try {
     const m = await e.prepare();
     await fs.rm(e.configFile);
-    assert.deepEqual(await statusJson(e.deps), { schema: 1, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(m) })] });
+    assert.deepEqual(await statusJson(e.deps), { schema: 2, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(m) })], watcher: { alive: false, repos: [] } });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+/** Rewrites `m`'s run.json with `over` merged in, dropping the keys in `drop`; returns the new meta. */
+async function rewriteMeta(e: Env, m: RunMeta, over: Partial<RunMeta>, drop: (keyof RunMeta)[] = []): Promise<RunMeta> {
+  const next = { ...m, ...over } as Record<string, unknown>;
+  for (const k of drop) delete next[k];
+  await writeRunMeta(e.dir(m), next as RunMeta);
+  return next as RunMeta;
+}
+
+/** A prepared run turned into a ticketless dd-alert run (run.json without ticket or issue). */
+async function ticketless(e: Env): Promise<RunMeta> {
+  const m = await e.prepare('#9');
+  return rewriteMeta(e, m, { pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x' } }, ['ticket', 'issue']);
+}
+
+test('statusJson is schema 2 with pipeline and inputs', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const hotfix = await rewriteMeta(e, m, { pipeline: 'hotfix', inputs: { service: 'api', note: 'a=b c' } });
+    const j = await statusJson(e.deps);
+    assert.equal(j.schema, 2);
+    const r = j.runs[0] as Readable;
+    assert.deepEqual([r.pipeline, r.inputs, r.ticket, r.parent, r.children], ['hotfix', hotfix.inputs, { ref: TICKET, number: 5 }, null, []]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a ticketless run has ticket null', async () => {
+  const e = await setup();
+  try {
+    const m = await ticketless(e);
+    const r = (await e.status(m)) as Readable;
+    assert.equal(r.ticket, null);
+    assert.equal(r.pipeline, 'dd-alert');
+    assert.deepEqual(r.inputs, { alert_url: 'https://dd/x' });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a ticketless gate is answered here: no commentUrl, its own message', async () => {
+  const e = await setup();
+  try {
+    const m = await ticketless(e);
+    await e.edit(m, (s) => {
+      s.currentStep = 'approve-groom';
+      s.history.push(rec('intake', 1, 'pass'), rec('groom', 1, 'pass', { groomed_ticket: rel('groom', 1, 'groomed_ticket') }));
+    });
+    await writeJson(path.join(e.dir(m), 'waiting.json'), {
+      stepId: 'approve-groom',
+      stepDir: path.join(e.dir(m), 'steps', 'approve-groom', '1'),
+      since: NOW.toISOString(),
+    });
+    e.liveDriver(m);
+    const r = (await e.status(m)) as Readable;
+    assert.deepEqual(r.attention, {
+      kind: 'gate',
+      since: NOW.toISOString(),
+      message: 'approve or reject here (no issue to comment on)',
+      review: groomReview(e, m),
+      actions: ['approve', 'reject'],
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a failed ticketless run says how to start it again with its pipeline and inputs', async () => {
+  const e = await setup();
+  try {
+    const m = await ticketless(e);
+    await e.edit(m, (s) => {
+      s.status = 'failed';
+      s.currentStep = 'implement';
+      s.history.push(rec('implement', 1, 'fail'));
+    });
+    const r = (await e.status(m)) as Readable;
+    const again = `perc run --pipeline dd-alert --input alert_url=https://dd/x --repo ${m.repoRoot}`;
+    assert.deepEqual(r.attention?.commands, [again]);
+    assert.deepEqual(attentionNext(r.attention!, r), [again, `perc delete ${m.runId}`, `perc clean ${m.runId}`]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status lists the issues a run opened', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const write = async (attempt: number, text: string) => {
+      const file = path.join(e.dir(m), rel('ship', attempt, 'issue_urls'));
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, text);
+    };
+    await write(1, `https://${REPO}/issues/40\n`);
+    // the latest issue_urls wins; a line that is not an issue url is skipped
+    await write(2, `https://${REPO}/issues/41\r\nnot a url\n\nhttps://github.com/O/Other/issues/7\n`);
+    await e.edit(m, (s) => {
+      s.status = 'completed';
+      s.history.push(rec('ship', 1, 'pass', { issue_urls: rel('ship', 1, 'issue_urls') }), rec('ship', 2, 'pass', { issue_urls: rel('ship', 2, 'issue_urls') }));
+    });
+    const r = (await e.status(m)) as Readable;
+    assert.deepEqual(r.opened, [
+      { ref: `${REPO}#41`, url: `https://${REPO}/issues/41` },
+      { ref: 'github.com/o/other#7', url: 'https://github.com/O/Other/issues/7' },
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a recorded issue_urls output whose file is gone opens nothing and keeps the run readable', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'completed';
+      s.history.push(rec('ship', 1, 'pass', { issue_urls: rel('ship', 1, 'issue_urls') }));
+    });
+    const r = (await e.status(m)) as Readable;
+    assert.equal(r.status, 'completed');
+    assert.deepEqual(r.opened, []);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('children list linked runs', async () => {
+  const e = await setup();
+  try {
+    const parent = await e.prepare();
+    e.clock.t += 1000;
+    const c = await e.prepare('#6');
+    const child = await rewriteMeta(e, c, { pipeline: 'hotfix', parent: parent.runId });
+    const j = await statusJson(e.deps);
+    const of = (id: string) => j.runs.find((r) => r.id === id) as Readable;
+    assert.deepEqual(of(parent.runId).children, [{ id: child.runId, pipeline: 'hotfix', status: 'running' }]);
+    assert.equal(of(child.runId).parent, parent.runId);
+    assert.deepEqual(of(child.runId).children, []);
+    // one run read alone lists its children too
+    assert.deepEqual(((await e.status(parent)) as Readable).children, [{ id: child.runId, pipeline: 'hotfix', status: 'running' }]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status orders slices by index with their titles', async () => {
+  const e = await setup();
+  try {
+    const parent = await e.prepare();
+    e.clock.t += 1000;
+    const a = await rewriteMeta(e, await e.prepare('#6'), { parent: parent.runId });
+    e.clock.t += 1000;
+    const b = await rewriteMeta(e, await e.prepare('#7'), { parent: parent.runId });
+    const pending = `${parent.runId}-s3`;
+    const fanout = {
+      children: [
+        { index: 2, id: a.runId, title: 'Panel rows' },
+        { index: 3, id: pending, title: 'Docs' },
+        { index: 1, id: b.runId, title: 'Status field' },
+      ],
+    };
+    await fs.writeFile(path.join(e.dir(parent), 'fanout.json'), JSON.stringify(fanout));
+    const j = await statusJson(e.deps);
+    const of = (id: string) => j.runs.find((r) => r.id === id) as Readable;
+    // a slice not started yet has no run dir: it is listed as pending, on the parent's pipeline
+    assert.deepEqual(of(parent.runId).children, [
+      { id: b.runId, pipeline: 'feature', status: 'running', slice: { index: 1, title: 'Status field' } },
+      { id: a.runId, pipeline: 'feature', status: 'running', slice: { index: 2, title: 'Panel rows' } },
+      { id: pending, pipeline: 'feature', status: 'pending', slice: { index: 3, title: 'Docs' } },
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a broken fanout.json leaves the parent readable with its listed children', async () => {
+  const e = await setup();
+  try {
+    const parent = await e.prepare();
+    e.clock.t += 1000;
+    const c = await rewriteMeta(e, await e.prepare('#6'), { parent: parent.runId });
+    await fs.writeFile(path.join(e.dir(parent), 'fanout.json'), '{ not json');
+    const r = (await e.status(parent)) as Readable;
+    assert.deepEqual(r.children, [{ id: c.runId, pipeline: 'feature', status: 'running' }]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a failed fan-out slice says to delete it and resume its parent, never to start a new run', async () => {
+  const e = await setup();
+  try {
+    const parent = await e.prepare();
+    e.clock.t += 1000;
+    const c = await e.prepare('#6');
+    const fanOut = { parent: parent.runId, slice: 2, from: 'implement', title: 'Panel rows' };
+    const slice = await rewriteMeta(e, c, { pipeline: 'epic', parent: parent.runId, fanOut });
+    await e.edit(slice, (s) => {
+      s.status = 'failed';
+      s.currentStep = 'implement';
+      s.history.push(rec('implement', 1, 'fail'));
+    });
+    const r = (await e.status(slice)) as Readable;
+    assert.equal(r.attention?.detail, `Delete this slice (its branch stays), then resume ${parent.runId} to run it again`);
+    assert.equal(r.attention?.commands, undefined);
+    assert.deepEqual(attentionNext(r.attention!, r), [`perc delete ${slice.runId}`, `perc resume ${parent.runId}`]);
+    // a routed child (a parent, no fanOut) still starts a new run
+    const routed = await rewriteMeta(e, slice, { pipeline: 'hotfix' }, ['fanOut']);
+    const rr = (await e.status(routed)) as Readable;
+    assert.deepEqual(rr.attention?.commands, [`perc run ${REPO}#6 --pipeline hotfix --repo ${routed.repoRoot}`]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a child with run.json but no state.json yet is listed as running', async () => {
+  const e = await setup();
+  try {
+    const parent = await e.prepare();
+    e.clock.t += 1000;
+    const c = await rewriteMeta(e, await e.prepare('#6'), { parent: parent.runId });
+    await fs.rm(path.join(e.dir(c), 'state.json'));
+    const r = (await e.status(parent)) as Readable;
+    assert.deepEqual(r.children, [{ id: c.runId, pipeline: 'feature', status: 'running' }]);
   } finally {
     await e.cleanup();
   }
@@ -1017,7 +1256,7 @@ test('terminals when hc ls returns no labels', async () => {
     const m = await e.prepare();
     await e.edit(m, (s) => (s.currentStep = 'groom'));
     e.liveDriver(m);
-    const term = terminalName(m.runId, m.ticket, 'groom', 1);
+    const term = terminalName(m.runId, m.ticket!, 'groom', 1);
     e.deps.hc.add({ name: term, labels: { 'percolator.run': m.runId, 'percolator.step': 'groom' } });
     const list = e.deps.hc.list.bind(e.deps.hc);
     // like the real hc ls: the label filter applies, but no labels come back
@@ -1089,6 +1328,19 @@ test('yourTurn failed', () => {
   });
 });
 
+test('yourTurn failed on another pipeline starts it again with its inputs, quoted when they hold a blank or a quote', () => {
+  const { ticket: _t, ...ticketless } = TURN;
+  const t = yourTurn({ ...ticketless, kind: 'failed', pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x', note: 'a b', q: 'say "hi"' } });
+  assert.equal(t.next[0], `perc run --pipeline dd-alert --input alert_url=https://dd/x --input note="a b" --input q='say "hi"' --repo /repo`);
+  assert.equal(yourTurn({ ...TURN, kind: 'failed', pipeline: 'hotfix', inputs: {} }).next[0], 'perc run github.com/o/r#5 --pipeline hotfix --repo /repo');
+  assert.equal(yourTurn({ ...TURN, kind: 'failed', pipeline: 'feature', inputs: {} }).next[0], 'perc run github.com/o/r#5 --repo /repo');
+});
+
+test('yourTurn gate on a ticketless run is answered here', () => {
+  const { ticket: _t, ...ticketless } = TURN;
+  assert.equal(yourTurn({ ...ticketless, kind: 'gate', step: 'sign-off' }).message, 'approve or reject here (no issue to comment on)');
+});
+
 test('yourTurn stalled after a decision', () => {
   assert.deepEqual(yourTurn({ ...TURN, kind: 'stalled', decision: 'approve' }), {
     message: 'approved; resume to continue',
@@ -1111,4 +1363,129 @@ test('yourTurn agent', () => {
     detail: "Attend the agent's terminal.",
     next: [],
   });
+});
+
+/** A prepared run turned into a triage router waiting at pick-pipeline, after a choose agent that wrote `pick`. */
+async function waitAtPick(e: Env, pick: string): Promise<RunMeta> {
+  const m = await rewriteMeta(e, await e.prepare(), { pipeline: 'triage' });
+  await writeJson(path.join(e.dir(m), 'graph.json'), {
+    version: 1,
+    steps: [
+      { id: 'intake', stage: 'intake', role: 'core', kind: 'builtin' },
+      { id: 'route.0', stage: 'route', role: 'core', kind: 'builtin' },
+      { id: 'route.1', stage: 'route', role: 'core', kind: 'agent' },
+      { id: 'pick-pipeline', stage: 'route', role: 'core', kind: 'gate', choices: ['hotfix', 'feature'] },
+      { id: 'route.3', stage: 'route', role: 'core', kind: 'builtin' },
+    ],
+    loops: [{ id: 'pick-pipeline', from: 'pick-pipeline', to: 'route.0', max: 3, atCap: 'escalate' }],
+  });
+  const pickRel = rel('route.1', 1, 'pick');
+  await fs.mkdir(path.dirname(path.join(e.dir(m), pickRel)), { recursive: true });
+  await fs.writeFile(path.join(e.dir(m), pickRel), pick);
+  await e.edit(m, (s) => {
+    s.currentStep = 'pick-pipeline';
+    s.history.push(rec('intake', 1, 'pass'), rec('route.0', 1, 'pass'), rec('route.1', 1, 'pass', { pick: pickRel }));
+  });
+  await writeJson(path.join(e.dir(m), 'waiting.json'), {
+    stepId: 'pick-pipeline',
+    stepDir: path.join(e.dir(m), 'steps', 'pick-pipeline', '1'),
+    since: NOW.toISOString(),
+    commentUrl: URL,
+  });
+  e.liveDriver(m);
+  return m;
+}
+
+test("a pick-pipeline gate asks you to pick from the router's pipelines, naming the agent's suggestion", async () => {
+  const e = await setup();
+  try {
+    const m = await waitAtPick(e, 'pipeline: hotfix\nunsure: true\nlooks like a bug\n');
+    const r = (await e.status(m)) as Readable;
+    assert.deepEqual(r.attention, {
+      kind: 'gate',
+      since: NOW.toISOString(),
+      message: 'pick the pipeline for this ticket (the agent suggests hotfix)',
+      commentUrl: URL,
+      review: [{ step: 'route.1', key: 'pick', path: path.join(e.dir(m), rel('route.1', 1, 'pick')) }],
+      actions: ['pick', 'reject'],
+      choices: ['hotfix', 'feature'],
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a pick-pipeline gate without a valid suggestion only asks you to pick', async () => {
+  const e = await setup();
+  try {
+    const m = await waitAtPick(e, 'pipeline: spike\nunsure: false\n');
+    const a = ((await e.status(m)) as Readable).attention!;
+    assert.equal(a.message, 'pick the pipeline for this ticket');
+    assert.deepEqual([a.actions, a.choices], [['pick', 'reject'], ['hotfix', 'feature']]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('perc status on a pick-pipeline gate names --pipeline for each choice, then reject', async () => {
+  const e = await setup();
+  try {
+    const m = await waitAtPick(e, '');
+    const r = (await e.status(m)) as Readable;
+    assert.deepEqual(attentionNext(r.attention!, r), [
+      `perc approve ${m.runId} --pipeline hotfix`,
+      `perc approve ${m.runId} --pipeline feature`,
+      `perc reject ${m.runId} "<what to change>"`,
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('runAgain double-quotes a repo or input with a blank and keeps Windows backslashes single', () => {
+  assert.equal(
+    runAgain({ ticket: 'o/r#1', pipeline: 'hotfix', inputs: { path: 'C:\\a b\\c' }, repoRoot: 'C:\\My Repos\\r' }),
+    'perc run o/r#1 --pipeline hotfix --input path="C:\\a b\\c" --repo "C:\\My Repos\\r"',
+  );
+});
+
+test('runAgain single-quotes a value with a double quote, $ or backtick, which PowerShell and sh then take as typed', () => {
+  const line = (v: string) => runAgain({ inputs: { q: v }, repoRoot: '/repo' });
+  assert.equal(line('say "hi"'), `perc run --input q='say "hi"' --repo /repo`);
+  assert.equal(line('cost $5'), `perc run --input q='cost $5' --repo /repo`);
+  assert.equal(line('a`b'), "perc run --input q='a`b' --repo /repo");
+  assert.equal(line("it's"), `perc run --input q="it's" --repo /repo`);
+  // both kinds of quote: PowerShell's '' escape (Windows is the owner's OS)
+  assert.equal(line(`it's "x"`), `perc run --input q='it''s "x"' --repo /repo`);
+});
+
+/** Writes `~/.percolator/watch/watch.json` as perc watch does. */
+async function writeWatch(e: Env, over: Record<string, unknown> = {}): Promise<void> {
+  await writeJson(path.join(e.home, '.percolator', 'watch', 'watch.json'), {
+    pid: 4242,
+    host: os.hostname(),
+    terminal: 'w1',
+    startedAt: T1,
+    heartbeatAt: new Date(e.clock.t - 30_000).toISOString(),
+    repos: ['/r/a', '/r/b'],
+    intervalS: 60,
+    ...over,
+  });
+}
+
+test('watcher alive from a fresh heartbeat; dead from a stale one', async () => {
+  const e = await setup();
+  try {
+    assert.deepEqual((await statusJson(e.deps)).watcher, { alive: false, repos: [] });
+    e.deps.pidAlive = (pid) => pid === 4242;
+    await writeWatch(e);
+    assert.deepEqual((await statusJson(e.deps)).watcher, { alive: true, since: T1, repos: ['/r/a', '/r/b'] });
+    await writeWatch(e, { heartbeatAt: new Date(e.clock.t - 181_000).toISOString() });
+    assert.deepEqual((await statusJson(e.deps)).watcher, { alive: false, repos: ['/r/a', '/r/b'] });
+    await writeWatch(e);
+    e.deps.pidAlive = () => false;
+    assert.deepEqual((await statusJson(e.deps)).watcher, { alive: false, repos: ['/r/a', '/r/b'] });
+  } finally {
+    await e.cleanup();
+  }
 });

@@ -1,4 +1,4 @@
-// The Percolator panel's pure logic: what `perc status --json` (schema 1) means for the board, the pipeline and the
+// The Percolator panel's pure logic: what `perc status --json` (schema 2) means for the board, the pipeline and the
 // actions. No `herdr` imports, so node:test covers it (tests/herdr/model.test.ts); model.d.ts declares it.
 
 export const STAGES = Object.freeze(['intake', 'groom', 'plan', 'implement', 'review', 'deliver']);
@@ -38,6 +38,9 @@ export function visibleRuns(runs, filter) {
   return runs.filter((r) => needsYou(r) || (r.status !== 'completed' && r.status !== 'failed'));
 }
 
+/** `text` with its first letter capitalised: the panel's labels are in sentence case. */
+const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
 /** The board row's state line and its tone. */
 export function rowState(run) {
   const a = run.attention;
@@ -46,27 +49,47 @@ export function rowState(run) {
     const blocked = (text) => ({ tone: 'blocked', text });
     switch (a.kind) {
       case 'gate':
-        return blocked(`your turn · ${step}`);
+        return blocked(`Your turn · ${step}`);
       case 'cap':
-        return blocked(`paused · ${step} at cap`);
+        return blocked(`Paused · ${step} at cap`);
       case 'paused':
-        return blocked(`paused · ${step}`);
+        return blocked(`Paused · ${step}`);
       case 'failed':
-        return blocked(`failed · ${step}`);
+        return blocked(`Failed · ${step}`);
       case 'stalled':
-        return blocked('stalled · driver stopped');
+        return blocked('Stalled · driver stopped');
     }
   }
   if (run.status === 'running') {
     const loop = (run.loops ?? []).find((l) => l.from === step && l.round > 0);
-    return loop ? { tone: 'working', text: `${step}`, round: `round ${roundOf(loop).n}/${loop.max}` } : { tone: 'working', text: `${step}` };
+    return loop ? { tone: 'working', text: `${step}`, round: `Round ${roundOf(loop).n}/${loop.max}` } : { tone: 'working', text: `${step}` };
   }
   if (run.status === 'completed') {
-    const pr = run.pr?.url.split('/').pop();
-    return { tone: 'dim', text: pr ? `delivered · PR #${pr}` : 'delivered' };
+    const end = completedAs(run);
+    if (end.kind === 'pr') return { tone: 'muted', text: `Delivered · PR #${end.pr.split('/').pop()}` };
+    if (end.kind === 'routed') return { tone: 'muted', text: end.to ? `Routed → ${end.to}` : 'Routed' };
+    return { tone: 'muted', text: sentence(end.kind) };
   }
-  if (run.status === 'unreadable') return { tone: 'muted', text: `unreadable · ${run.error}` };
-  return { tone: 'muted', text: run.status };
+  if (run.status === 'unreadable') return { tone: 'muted', text: `Unreadable · ${run.error}` };
+  return { tone: 'muted', text: sentence(run.status) };
+}
+
+/** How a completed run ended: its PR, where a router sent it, done (nothing delivered to a tracker), or delivered. */
+function completedAs(run) {
+  const pr = run.pr?.url;
+  if (pr) return { kind: 'pr', pr };
+  if ((run.steps ?? []).some((s) => s.stage === 'route')) return { kind: 'routed', to: (run.children ?? []).find((c) => !c.slice)?.pipeline };
+  // a ticketless run with no PR and no opened issues delivered nothing to a tracker (report, none)
+  return { kind: run.ticket === null && (run.opened ?? []).length === 0 ? 'done' : 'delivered' };
+}
+
+/** The outcome box of a completed run: its tag and the line beside it, from the same ending as rowState. */
+export function outcomeOf(run) {
+  const end = completedAs(run);
+  if (end.kind === 'pr') return { tag: 'DELIVERED', text: `Opened ${end.pr.replace(/^https:\/\/github\.com\//, '')}` };
+  if (end.kind === 'routed') return { tag: 'ROUTED', text: end.to ? `→ ${end.to}` : '' };
+  if (end.kind === 'done') return { tag: 'DONE', text: '' };
+  return { tag: 'DELIVERED', text: 'Done.' };
 }
 
 /** Runs in `next` that need you and did not in `prev` (or were not there); none on the first load (`prev` null). */
@@ -76,11 +99,15 @@ export function newlyNeeding(prev, next) {
   return next.filter((r) => needsYou(r) && !had.has(r.id));
 }
 
-/** The `perc` argv for an action, or null when it needs no perc call (open-pane). Feedback stays one element. */
+/** The `perc` argv for an action, or null when it needs no perc call (open-pane). Feedback stays one element; `pick`
+ *  takes the picked pipeline in its place. */
 export function actionArgv(action, run, feedback) {
   switch (action) {
     case 'approve':
       return ['approve', run.id];
+    case 'pick':
+      if (typeof feedback !== 'string' || feedback.trim() === '') throw new Error('Pick a pipeline');
+      return ['approve', run.id, '--pipeline', feedback.trim()];
     case 'reject':
       if (typeof feedback !== 'string' || feedback.trim() === '') throw new Error('Say what to change');
       return ['reject', run.id, '--', feedback];
@@ -107,7 +134,7 @@ export function runningCount(runs) {
 /** parseStatus, and refuses a schema this panel does not know. */
 export function readStatus(stdout) {
   const parsed = parseStatus(stdout);
-  if (parsed.ok && parsed.data.schema !== 1) {
+  if (parsed.ok && parsed.data.schema !== 2) {
     return { ok: false, error: `perc status --json returned schema ${parsed.data.schema}; update the Percolator panel` };
   }
   return parsed;
@@ -169,7 +196,7 @@ export function roundPill(run, stepId) {
   const loop = (run.loops ?? []).find((l) => l.from === stepId);
   if (!loop) return null;
   const r = roundOf(loop);
-  return { text: `round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r) };
+  return { text: `Round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r) };
 }
 
 /** The engine's round of a loop that goes back to `stepId`, past round 1; null otherwise. */
@@ -178,13 +205,13 @@ function roundAt(run, stepId) {
   return loop ? roundOf(loop).n : null;
 }
 
-/** Beside the step a loop goes back to, past round 1: "round N · <time>" (its latest attempt's), else "". */
+/** Beside the step a loop goes back to, past round 1: "Round N · <time>" (its latest attempt's), else "". */
 export function roundNote(run, stepId, now) {
   const n = roundAt(run, stepId);
   if (n === null) return '';
   const last = stepAttempts(run, stepId).at(-1);
   const time = last ? took(last, now) : '';
-  return time ? `round ${n} · ${time}` : `round ${n}`;
+  return time ? `Round ${n} · ${time}` : `Round ${n}`;
 }
 
 /** Every loop, taken or not, with its tone. */
@@ -290,7 +317,9 @@ export function hookNote(run, row, now) {
   const waited = s.status === 'waiting' && s.startedAt ? `waiting ${ago(s.startedAt, now)}` : '';
   const decision = decisionNote(stepAttempts(run, s.id).at(-1)?.decision);
   const n = roundAt(run, s.id);
-  return [row.where, n === null ? '' : `round ${n}`, decision, took(s, now) || waited].filter(Boolean).join(' · ');
+  // before and after are words, so they lead in sentence case; before-all and after-all are the stages' names
+  const where = SIDE[row.where] === row.where ? sentence(row.where) : row.where;
+  return [where, n === null ? '' : `round ${n}`, decision, took(s, now) || waited].filter(Boolean).join(' · ');
 }
 
 /** The stages to show unfolded after the selected stop moves from `from` to `to` (null closes it): a picked stage row
@@ -408,11 +437,11 @@ export function timelineRows(run, now) {
             mark: ROW_MARKS[e.status] ?? '✕',
             tone: stepTone(e.status),
             step: e.step,
-            round: `round ${e.attempt}`,
+            round: `Round ${e.attempt}`,
             status: e.status,
             started: clock(e.startedAt),
             took: took(e, now),
-            note: decisionNote(e.decision),
+            note: sentence(decisionNote(e.decision)),
           },
     )
     .reverse();
@@ -442,13 +471,14 @@ export function readRatio(stored) {
   return stored != null && n > 0 && n < 1 ? n : BOARD_RATIO;
 }
 
-/** How the title bar fits `width` design px with `needs` runs needing you: ⧉ and ✕ always stay; the "N need you" chip
- *  shortens to "N" first, then the Active/All tabs move to a row of their own. */
+/** How the title bar fits `width` design px with `needs` runs needing you: ⧉ and ✕ always stay; + New run is an icon
+ *  under 800px; the "N need you" chip shortens to "N" first, then the Active/All tabs move to a row of their own. */
 export function titleLayout(width, needs) {
-  if (needs === 0) return { tabs: width >= 300 ? 'inline' : 'below', chip: 'long' };
-  if (width >= 370) return { tabs: 'inline', chip: 'long' };
-  if (width >= 320) return { tabs: 'inline', chip: 'short' };
-  return { tabs: 'below', chip: width >= 270 ? 'long' : 'short' };
+  const newRun = width >= 800 ? 'text' : 'icon';
+  if (needs === 0) return { tabs: width >= 330 ? 'inline' : 'below', chip: 'long', newRun };
+  if (width >= 400) return { tabs: 'inline', chip: 'long', newRun };
+  if (width >= 350) return { tabs: 'inline', chip: 'short', newRun };
+  return { tabs: 'below', chip: width >= 270 ? 'long' : 'short', newRun };
 }
 
 // ── the cup (mods/percolator-cup carries a copy of this file) ──
@@ -465,7 +495,7 @@ export function cupLabel(runs) {
 /** The notification for a run that newly needs you; clicking it opens the run through the cup. */
 export function notice(run) {
   return {
-    title: `#${run.ticket?.number ?? '?'} needs you`,
+    title: `${runLabel(run)} needs you`,
     body: run.attention?.message ?? '',
     level: 'warning',
     action: { name: `percolator-cup.open/${run.id}` },
@@ -549,6 +579,12 @@ export function agentTone(status) {
   return status === 'blocked' || status === 'working' ? status : 'muted';
 }
 
+/** The theme colour for text in a model tone: dim (and no tone) read as muted, so text keeps its contrast; dim stays
+ *  for disabled controls, decorative glyphs and lines. */
+export function textTone(tone) {
+  return !tone || tone === 'dim' ? 'muted' : tone;
+}
+
 /** The live address of the current step's agent terminal (Open terminal ↗ focuses it), or null: then it is off. */
 export function agentAddress(run, live) {
   if (!run || run.status === 'unreadable') return null;
@@ -561,7 +597,7 @@ export function openAgentAt(run, live, fixtures) {
   if (!run || run.status === 'unreadable') return null;
   const name = agentTerminal(run);
   if (!name) return null;
-  if (fixtures) return { said: `fixtures: would open ${name}` };
+  if (fixtures) return { said: `Fixtures: would open ${name}` };
   const address = terminalAddress(live, name);
   return address ? { address } : { error: `${name} is not a live terminal; refresh the panel` };
 }
@@ -647,7 +683,7 @@ export function programInitial(program) {
 
 /** The line under an agent stop with no agent terminal yet, else null (the card shows). */
 export function agentNote(card) {
-  return card ? null : 'agent not started';
+  return card ? null : 'Agent not started';
 }
 
 /** The driver peek a failed or stalled box offers (its last screen often says why), else null. */
@@ -672,9 +708,88 @@ export function driverPeek(run) {
   return { terminal, label: 'Driver pane ↗' };
 }
 
-/** The run's title: the issue's, else its ref (no issue.json yet: before intake, or a run that failed in it). */
+const TITLE_INPUT_MAX = 40;
+
+/**
+ * The run's title: the issue's, else its ref (no issue.json yet: before intake, or a run that failed in it); a
+ * ticketless run's is `<pipeline> · <its first input value, cut to 40>`, or its pipeline when it has no inputs.
+ */
 export function ticketTitle(run) {
+  if (run.ticket === null && typeof run.pipeline === 'string') {
+    const first = Object.values(run.inputs ?? {})[0];
+    if (typeof first !== 'string' || first === '') return run.pipeline;
+    const cut = first.length > TITLE_INPUT_MAX ? `${first.slice(0, TITLE_INPUT_MAX - 1)}…` : first;
+    return `${run.pipeline} · ${cut}`;
+  }
   return run.ticket?.title ?? run.ticket?.ref ?? run.id;
+}
+
+/** How a run is named in a short line: `#<issue>`, else (ticketless) its pipeline. */
+export function runLabel(run) {
+  return run.ticket ? `#${run.ticket.number}` : (run.pipeline ?? '#?');
+}
+
+/** The pipeline chip a run shows: its pipeline, or null on `feature` (the default line, so boards look as before). */
+export function pipelineChip(run) {
+  return typeof run.pipeline === 'string' && run.pipeline !== 'feature' ? run.pipeline : null;
+}
+
+/** Where a child came from: a slice its index, its parent's ticket (else pipeline) and its title; another child the
+ *  parent's ticket, or its pipeline when the ticket is the child's own or it has none. Null for a run with no parent. */
+function fromLine(run, runs) {
+  if (!run.parent) return null;
+  const p = runs.find((r) => r.id === run.parent && r.status !== 'unreadable');
+  if (!p) return { text: `↳ from ${run.parent}`, run: null };
+  const slice = (p.children ?? []).find((c) => c.id === run.id && c.slice)?.slice;
+  if (slice) return { text: `↳ slice ${slice.index} of ${p.ticket ? `#${p.ticket.number}` : p.pipeline}: ${slice.title}`, run: p.id };
+  const own = p.ticket && run.ticket && p.ticket.ref === run.ticket.ref;
+  return { text: `↳ from ${p.ticket && !own ? `#${p.ticket.number}` : p.pipeline}`, run: p.id };
+}
+
+/** What a parent started: its slices and how many started (all started: just the count), else how many runs; clicking
+ *  selects the first child still listed (null when none is). Null for a run with no children. */
+function startedLine(run, runs) {
+  const children = run.children ?? [];
+  if (children.length === 0) return null;
+  const first = children.find((c) => runs.some((r) => r.id === c.id && r.status !== 'unreadable'))?.id ?? null;
+  const slices = children.filter((c) => c.slice);
+  if (slices.length === 0) return { text: `→ ${children.length} run${children.length === 1 ? '' : 's'}`, run: first };
+  const n = slices.length;
+  const k = slices.filter((c) => c.status !== 'pending').length;
+  return { text: `→ ${n} slice${n === 1 ? '' : 's'}${k < n ? ` · ${k} started` : ''}`, run: first };
+}
+
+/** The line under a linked run's title, and the run clicking it selects (null when that run is not listed): where a
+ *  child came from, what a parent started, both for a child that started runs (clicking then selects its parent).
+ *  Null for a run with neither. */
+export function linkedLine(run, runs) {
+  if (run.status === 'unreadable') return null;
+  const from = fromLine(run, runs);
+  const started = startedLine(run, runs);
+  if (from && started) return { text: `${from.text} · ${started.text}`, run: from.run };
+  return from ?? started;
+}
+
+// ── the watcher (`perc watch`) ──
+
+/** How long after Start the panel waits for the watcher's first heartbeat, saying Starting… meanwhile. */
+const STARTING_MS = 60_000;
+const WATCH_TERMINAL = 'percolator-watch';
+
+/** The header's watcher indicator and its one button: Stop while it watches; none while it starts (Start succeeded
+ *  `o.startedAt` ms ago, under a minute, no heartbeat yet); Stop when its heartbeat is stale but its terminal is among
+ *  the live ones (`o.live`); else Start over every repo earlier runs ran in (`argv` null, no button, when there is
+ *  none). A perc that sends no `watcher` reads as not watching. */
+export function watcherState(status, o = { startedAt: null, now: 0, live: [] }) {
+  const w = status.watcher;
+  if (w?.alive) {
+    const n = w.repos.length;
+    return { alive: true, label: `Watching ${n} repo${n === 1 ? '' : 's'}`, argv: ['watch', 'stop'] };
+  }
+  if (o.startedAt !== null && o.now - o.startedAt < STARTING_MS) return { alive: false, label: 'Starting…', argv: null };
+  if (o.live.some((t) => t.name === WATCH_TERMINAL)) return { alive: false, label: 'Watcher not responding', argv: ['watch', 'stop'] };
+  const repos = knownRepos(status.runs ?? []);
+  return { alive: false, label: 'Not watching', argv: repos.length === 0 ? null : ['watch', ...repos.flatMap((r) => ['--repo', r])] };
 }
 
 // ── delete ──
@@ -710,8 +825,8 @@ export function deleteConfirm(run) {
   }
   const stopped = ACTIVE.has(run.status) ? ' The run is stopped first.' : '';
   return {
-    title: `Delete #${run.ticket.number}?`,
-    detail: `Deletes run ${run.id} (${run.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${run.branch} is kept.${stopped}`,
+    title: `Delete ${runLabel(run)}?`,
+    detail: `Deletes run ${run.id}${run.ticket ? ` (${run.ticket.ref})` : ''}: its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${run.branch} is kept.${stopped}`,
   };
 }
 
@@ -721,7 +836,7 @@ export function deleteFinishedConfirm(runs) {
   if (done.length === 0) return null;
   return {
     title: `Delete ${done.length} finished run(s)?`,
-    detail: `Deletes ${done.map((r) => `${r.id} (#${r.ticket.number})`).join(', ')}: their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    detail: `Deletes ${done.map((r) => `${r.id} (${runLabel(r)})`).join(', ')}: their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
     ids: done.map((r) => r.id),
   };
 }
@@ -759,4 +874,167 @@ export function selectAfterRefresh(runs, rows, selId, pending) {
   if (runs.some((r) => r.id === selId)) return selId;
   if (pending && rows.some((r) => r.id === pending.next)) return pending.next;
   return rows[0]?.id ?? null;
+}
+
+// ── starting a run (`perc pipelines --json`, schema 1) ──
+
+const INVALID_PIPELINES = 'perc pipelines --json returned invalid JSON';
+
+/** `perc pipelines --json` stdout → `{ ok: true, data }`, or `{ ok: false, error }` when it is not one this panel knows. */
+export function readPipelines(stdout) {
+  let data;
+  try {
+    data = JSON.parse(stdout);
+  } catch {
+    return { ok: false, error: INVALID_PIPELINES };
+  }
+  if (data === null || typeof data !== 'object' || !Array.isArray(data.pipelines)) return { ok: false, error: INVALID_PIPELINES };
+  if (data.schema !== 1) return { ok: false, error: `perc pipelines --json returned schema ${data.schema}; update the Percolator panel` };
+  return { ok: true, data };
+}
+
+/** In fixtures mode, the pipelines come from pipelines.json beside the status fixture. */
+export function pipelinesFixture(statusFixture) {
+  if (!/[\\/]/.test(statusFixture)) return 'pipelines.json';
+  return `${statusFixture.replace(/[\\/][^\\/]*$/, '')}/pipelines.json`;
+}
+
+/** What the start dialog asks for a pipeline: its ticket field (hidden when it takes none) and its inputs. */
+export function startFields(pipeline) {
+  return {
+    ticket: pipeline.ticket === 'none' ? 'hidden' : pipeline.ticket,
+    inputs: pipeline.inputs.map((i) => ({ name: i.name, required: i.required, description: i.description ?? '' })),
+  };
+}
+
+const newestFirst = (runs) =>
+  runs.filter((r) => r.status !== 'unreadable' && typeof r.repo === 'string').sort((a, b) => created(b) - created(a));
+
+/** The repos earlier runs ran in, each once, most recent first. */
+export function knownRepos(runs) {
+  return [...new Set(newestFirst(runs).map((r) => r.repo))];
+}
+
+const TICKET_URL = /^https?:\/\/([^/\s]+)\/([^/\s]+)\/([^/\s#]+)\/(?:issues|pull)\/\d+\/?$/i;
+const TICKET_REF = /^(?:([^/\s#]+)\/)?([^/\s#]+)\/([^/\s#]+)#\d+$/;
+
+/** The lower-cased `host/owner/repo` of a ticket URL, `owner/repo#n` (github.com) or `host/owner/repo#n`; else null. */
+export function ticketRepo(text) {
+  const t = String(text ?? '').trim();
+  const m = TICKET_URL.exec(t) ?? TICKET_REF.exec(t);
+  if (!m) return null;
+  return `${m[1] ?? 'github.com'}/${m[2]}/${m[3]}`.toLowerCase();
+}
+
+/** The repo of the most recent run on the ticket's GitHub repo, to preselect; null when none ran there. */
+export function guessRepo(ticketText, runs) {
+  const repo = ticketRepo(ticketText);
+  if (repo === null) return null;
+  return newestFirst(runs).find((r) => r.ticket?.ref?.toLowerCase().startsWith(`${repo}#`))?.repo ?? null;
+}
+
+const blank = (v) => typeof v !== 'string' || v.trim() === '';
+
+/** The `perc run` argv for the dialog's choices: inputs in the pipeline's declared order, empty optional ones left out. */
+export function startArgv(o) {
+  const ticket = blank(o.ticket) ? null : o.ticket.trim();
+  const inputs = o.pipeline.inputs.flatMap((i) => {
+    const v = o.inputs[i.name] ?? '';
+    return !i.required && blank(v) ? [] : [['--input', `${i.name}=${v}`]];
+  });
+  return ['run', ...(ticket ? [ticket] : []), '--repo', o.repo, '--pipeline', o.pipeline.name, ...inputs.flat()];
+}
+
+/** The argv as one `perc …` line to show: an argument holding whitespace or `"` is double-quoted, its `"` escaped. */
+export function commandLine(argv) {
+  const quote = (a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
+  return ['perc', ...argv.map(quote)].join(' ');
+}
+
+/** Whether Start can run, else why not: the repo, then the ticket, then the first empty required input. */
+export function canStart(o) {
+  if (blank(o.repo)) return { ok: false, why: 'Pick a repo' };
+  if (o.pipeline.ticket === 'required' && blank(o.ticket)) return { ok: false, why: 'Enter a ticket' };
+  // perc run would read it as a flag
+  if (!blank(o.ticket) && o.ticket.trim().startsWith('-')) return { ok: false, why: 'A ticket cannot start with -' };
+  const missing = o.pipeline.inputs.find((i) => i.required && blank(o.inputs[i.name]));
+  return missing ? { ok: false, why: `Enter ${missing.name}` } : { ok: true };
+}
+
+/** The pipeline the picker shows picked: `want` while it is listed (among `names`, when given) and not broken, else
+ *  the default, else the first one that can be picked; null when none can. */
+export function startPick(pipelines, want, names = null) {
+  const ok = pipelines.filter((p) => !p.error && (names === null || names.includes(p.name)));
+  return (ok.find((p) => p.name === want) ?? ok.find((p) => p.default) ?? ok[0])?.name ?? null;
+}
+
+/** A pipeline's row in the picker: its name, its tags (default, how it takes a ticket) and the line under it. */
+export function pipelineOption(p) {
+  if (p.error) return { name: p.name, tags: [], note: p.error, error: true };
+  const ticket = p.ticket === 'none' ? ['No ticket'] : p.ticket === 'optional' ? ['Ticket optional'] : [];
+  return { name: p.name, tags: [...(p.default ? ['Default'] : []), ...ticket], note: p.description ?? `Ends with ${p.exit}`, error: false };
+}
+
+/** The run id `perc run` prints (`run <id> started`), so the panel can select the new run; else null. */
+export function startedRun(stdout) {
+  return /^run (\S+) started$/m.exec(String(stdout ?? ''))?.[1] ?? null;
+}
+
+/** What Start says in fixtures mode instead of running perc. */
+export function wouldStart(argv) {
+  return `Fixture: would run ${commandLine(argv)}`;
+}
+
+/** What "Run next…" offers on a finished run: its ticket and the issues its exit opened, and the pipelines that take a
+ *  ticket; null while a run on its ticket is live, or when it has no ticket to offer. */
+export function runNextChoices(run, pipelines, runs) {
+  if (!isFinished(run)) return null;
+  const ref = run.ticket?.ref;
+  if (ref && runs.some((r) => r.ticket?.ref === ref && ACTIVE.has(r.status))) return null;
+  const tickets = [...(ref ? [ref] : []), ...(run.opened ?? []).map((o) => o.ref)];
+  if (tickets.length === 0) return null;
+  return { tickets, pipelines: pipelines.filter((p) => !p.error && p.ticket !== 'none').map((p) => p.name) };
+}
+
+/** A pipeline as a run that has not started, so pipelineRows, pipelineSpans and pipelineMarks draw its preview. */
+export function previewRun(pipeline) {
+  return {
+    id: 'preview',
+    status: 'pending',
+    steps: pipeline.steps.map((s) => ({ ...s, status: 'pending', attempts: 0, outputs: {} })),
+    loops: pipeline.loops.map((l) => ({ ...l, round: 0 })),
+    timeline: [],
+    ticket: null,
+    pipeline: pipeline.name,
+  };
+}
+
+/** Where the pipeline preview sits beside the start picker: below it under 720px wide, else to its right. */
+export function previewSide(width) {
+  return width < 720 ? 'below' : 'right';
+}
+
+// ── fan-out slices ──
+
+/** A fan-out parent's slices, by index, each with its child's status, the step it is at (`Done` once completed, `Not
+ *  started` before its run exists, else its status) and its PR. Read from the child's own run when it is listed, else from the parent's
+ *  child entry. Empty for a run without slices. */
+export function sliceRows(run, runs) {
+  if (run.status === 'unreadable') return [];
+  return (run.children ?? [])
+    .filter((c) => c.slice)
+    .sort((a, b) => a.slice.index - b.slice.index)
+    .map((c) => {
+      const r = runs.find((x) => x.id === c.id && x.status !== 'unreadable');
+      const status = r?.status ?? c.status;
+      const stepLabel = status === 'completed' ? 'Done' : (r?.currentStep ?? (status === 'pending' ? 'Not started' : sentence(status)));
+      const prUrl = r?.pr?.url;
+      return { index: c.slice.index, title: c.slice.title, id: c.id, status, stepLabel, ...(prUrl ? { prUrl } : {}) };
+    });
+}
+
+/** The pipeline row a fan-out parent's slices hang under: its last stage row, where the fan-out step sits (-1 when
+ *  there is none). */
+export function fanOutRow(rows) {
+  return rows.findLastIndex((r) => r.type === 'stage');
 }

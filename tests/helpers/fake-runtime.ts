@@ -1,5 +1,4 @@
 import type { Step } from '../../src/graph/build.ts';
-import { STAGE_CONTRACTS } from '../../src/graph/core.ts';
 import type { NodeOutcome, RunContext, Runtime } from '../../src/engine/runtime.ts';
 
 export const pass = (outputs: Record<string, string> = {}): NodeOutcome => ({ status: 'pass', outputs });
@@ -28,7 +27,7 @@ export class FakeRuntime implements Runtime {
     this.#used.set(step.id, n + 1);
     const scripted = this.#script[step.id]?.[n];
     if (scripted) return structuredClone(scripted);
-    return pass(defaultOutputs(step));
+    return pass(defaultOutputs(step, ctx));
   }
 
   /** ctx.round seen by each call of `stepId`, in order */
@@ -42,9 +41,9 @@ export class FakeRuntime implements Runtime {
   }
 }
 
-function defaultOutputs(step: Step): Record<string, string> {
+function defaultOutputs(step: Step, ctx: RunContext): Record<string, string> {
   if (!step.slotLast || step.stage === 'before-all' || step.stage === 'after-all') return {};
   // an explicit review pass reports no findings
   if (step.stage === 'review') return { findings: '' };
-  return Object.fromEntries(STAGE_CONTRACTS[step.stage].requiredOutputs.map((k) => [k, 'x']));
+  return Object.fromEntries((ctx.graph.contracts[step.stage] ?? []).map((k) => [k, 'x']));
 }

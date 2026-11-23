@@ -17,8 +17,10 @@ import { deleteRun, isFinished, planDelete } from './run/delete.ts';
 import type { DeletePlan } from './run/delete.ts';
 import { checkResumable, drive, prUrl } from './run/drive.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
+import { pipelinesJson, pipelinesText } from './run/pipelines-json.ts';
 import type { RunMeta } from './run/meta.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
+import { InputError, parseInputs } from './run/request.ts';
 import type { DriverDeps } from './run/prepare.ts';
 import { attentionNext, driverLiveness, readAttention, runStatusJson, statusJson } from './run/status.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
@@ -26,7 +28,10 @@ import { deciderLogin, readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
 import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
-import { validate } from './validate.ts';
+import { validate, validateAll } from './validate.ts';
+import { pidAlive } from './run/lock.ts';
+import { otherWatcher, WATCH_TERMINAL, WATCHER_LABELS, watchFile, watchLoop } from './watch/watch.ts';
+import type { Graph } from './graph/build.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
 import { removeWorktree } from './workspace/worktree.ts';
@@ -38,19 +43,26 @@ const USAGE = `usage: perc <command> [options]
 commands:
   init [--config <file>] [--force]
       write the recommended config (default: ~/.percolator/config.yaml)
-  validate [--config <file>] [--profile <name>] [--update]
-      load the config, resolve grounds and mappings, and check the graph
+  validate [--config <file>] [--profile <name>] [--pipeline <name>] [--update]
+      load the config, resolve grounds and mappings, and check the graph of each pipeline
+      (--pipeline: that one only)
       (default config: ~/.percolator/config.yaml)
   schema [--out <file>]
       write the JSON schema for the config (default: schema/percolator.schema.json)
-  run <ticket> [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]
-      start a run: groom, approval, plan, implement, review, PR (default: in its own hc terminal)
+  pipelines [--repo <dir>] [--config <file>] [--profile <name>] [--json]
+      list the pipelines a run in the repo can use, one line each (--json: the panel's contract)
+  watch [--repo <dir>]... [--config <file>] [--profile <name>] [--interval <s>] [--foreground] | watch stop
+      start runs from the pipelines' triggers, polling each repo every --interval seconds (default 60, at least 15)
+      in hc terminal percolator-watch (--foreground: in this one); watch stop ends it
+  run [<ticket>] [--pipeline <name>] [--input key=value]... [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]
+      start a run of a pipeline (default: the profile's; feature: groom, approval, plan, implement, review, PR)
+      in its own hc terminal (--foreground: in this one)
   resume <run-id> [--foreground]
       continue a paused or interrupted run (grants one more round at a cap)
   status [<run-id>] [--json]
       list runs, or show one (--json: the stable JSON contract)
-  approve <run-id> | reject <run-id> <feedback>
-      answer the approval gate a run is waiting at
+  approve <run-id> [--pipeline <name>] | reject <run-id> <feedback>
+      answer the approval gate a run is waiting at (--pipeline: the pipeline a pick-pipeline gate goes with)
   clean <run-id> [--force]
       remove a finished run's terminals and worktree (keeps the branch and the run record; perc delete removes it all)
   delete <run-id>... [--yes] | delete --finished [--yes]
@@ -66,7 +78,7 @@ options:
 
 class UsageError extends Error {}
 
-type Options = Record<string, { type: 'string' | 'boolean' }>;
+type Options = Record<string, { type: 'string' | 'boolean'; multiple?: boolean }>;
 
 function parse<T extends Options>(args: string[], options: T, allowPositionals = false) {
   try {
@@ -119,7 +131,7 @@ function describe(r: ValidateResult): string {
       : approvers.length === 0
         ? 'none on GitHub (only local perc approve/reject)'
         : approvers.join(', ');
-  const lines = [`profile: ${r.profile}`, `approvers: ${who}`];
+  const lines = [`pipeline: ${r.pipeline.name}${r.pipeline.default ? ' (default)' : ''}`, `profile: ${r.profile}`, `approvers: ${who}`];
   const runtime = Object.entries(r.runtime ?? {});
   if (runtime.length > 0) lines.push(`runtime: ${runtime.map(([k, v]) => `${k} ${String(v)}`).join(', ')}`);
   for (const [name, version] of Object.entries(r.groundVersions)) lines.push(`ground ${name} ${version}`);
@@ -127,17 +139,27 @@ function describe(r: ValidateResult): string {
     const scope = m.applies_to.includes('*') ? '' : ` (applies to ${m.applies_to.join(', ')})`;
     lines.push(`${m.as} ${m.absPath}${scope}`);
   }
-  lines.push('', 'steps:');
-  r.graph.steps.forEach((s, i) => {
+  lines.push('', ...graphLines(r.graph));
+  const fan = r.pipeline.fan_out;
+  if (fan !== undefined && r.slice !== undefined) {
+    lines.push('', `slice runs (fan-out of ${fan.stage}, at most ${fan.max_parallel ?? 3} at a time):`, ...graphLines(r.slice));
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/** A graph's numbered steps, then its back-edges. */
+function graphLines(g: Graph): string[] {
+  const lines = ['steps:'];
+  g.steps.forEach((s, i) => {
     const pos = s.role === 'hook' ? ` (${s.def.before !== undefined ? `before ${s.def.before}` : `after ${s.def.after}`})` : '';
     lines.push(`${i + 1}. ${s.id}${pos}: ${runsWith(s.def)}`);
   });
   lines.push('', 'back-edges:');
-  for (const e of Object.values(r.graph.backEdges)) {
-    const target = r.graph.steps[e.toStepIndex]!.stage;
+  for (const e of Object.values(g.backEdges)) {
+    const target = g.steps[e.toStepIndex]!.stage;
     lines.push(`${e.fromStepId} → ${target} (max ${e.maxRounds}, ${e.onCap})`);
   }
-  return `${lines.join('\n')}\n`;
+  return lines;
 }
 
 async function runInit(args: string[], io: Io): Promise<number> {
@@ -151,15 +173,22 @@ next: perc validate --config ${file} --profile default
 }
 
 async function runValidate(args: string[], io: Io): Promise<number> {
-  const { values } = parse(args, { config: { type: 'string' }, profile: { type: 'string' }, update: { type: 'boolean' } });
+  const { values } = parse(args, {
+    config: { type: 'string' },
+    profile: { type: 'string' },
+    pipeline: { type: 'string' },
+    update: { type: 'boolean' },
+  });
   const configFile = path.resolve(values.config ?? defaultConfig());
-  const r = await validate({
+  const opts = {
     configFile,
     cwd: process.cwd(),
     ...(values.profile !== undefined ? { profile: values.profile } : {}),
     ...(values.update ? { update: true } : {}),
-  });
-  io.stdout(describe(r));
+  };
+  const results = values.pipeline !== undefined ? [await validate({ ...opts, pipeline: values.pipeline })] : await validateAll(opts);
+  // one block per pipeline, a blank line between them
+  io.stdout(results.map(describe).join('\n'));
   return 0;
 }
 
@@ -178,12 +207,17 @@ async function runRun(args: string[], deps: DriverDeps): Promise<number> {
     repo: { type: 'string' },
     config: { type: 'string' },
     profile: { type: 'string' },
+    pipeline: { type: 'string' },
+    input: { type: 'string', multiple: true },
     foreground: { type: 'boolean' },
   });
-  if (positionals.length !== 1) throw new UsageError('run needs <ticket>');
+  if (positionals.length > 1) throw new UsageError('run takes at most one <ticket>');
+  const inputs = parseInputs(values.input ?? []);
   const meta = await prepareRun(
     {
-      ticket: positionals[0]!,
+      ...(positionals[0] !== undefined ? { ticket: positionals[0] } : {}),
+      ...(values.pipeline !== undefined ? { pipeline: values.pipeline } : {}),
+      inputs,
       repoDir: path.resolve(values.repo ?? process.cwd()),
       configFile: values.config ?? defaultConfig(),
       ...(values.profile !== undefined ? { profile: values.profile } : {}),
@@ -206,6 +240,23 @@ async function runRun(args: string[], deps: DriverDeps): Promise<number> {
   return 0;
 }
 
+async function runPipelines(args: string[], io: Io, home: string): Promise<number> {
+  const { values } = parse(args, {
+    repo: { type: 'string' },
+    config: { type: 'string' },
+    profile: { type: 'string' },
+    json: { type: 'boolean' },
+  });
+  const j = await pipelinesJson({
+    repoDir: path.resolve(values.repo ?? process.cwd()),
+    configFile: values.config ?? defaultConfig(),
+    ...(values.profile !== undefined ? { profile: values.profile } : {}),
+    home,
+  });
+  io.stdout(values.json ? `${JSON.stringify(j, null, 2)}\n` : pipelinesText(j));
+  return 0;
+}
+
 async function runResume(args: string[], deps: DriverDeps): Promise<number> {
   const { values, positionals } = parseWith(args, { foreground: { type: 'boolean' } });
   const runId = onlyRunId('resume', positionals);
@@ -222,7 +273,9 @@ async function runResume(args: string[], deps: DriverDeps): Promise<number> {
 /** What a run is doing or waiting for, in one line; an hc failure is reported, never thrown. */
 async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: DriverDeps): Promise<string> {
   const waiting = await readWaiting(dir).catch(() => undefined);
-  const waitingText = waiting && `waiting for approval: ${waiting.commentUrl}`;
+  // a gate on a ticketless run posts nothing: it is answered only from here
+  const answer = waiting?.commentUrl ?? `perc approve ${meta.runId} | perc reject ${meta.runId} <feedback>`;
+  const waitingText = waiting && `waiting for approval: ${answer}`;
   if (state.status === 'running') {
     // a killed driver leaves waiting.json and attention.json behind, so liveness is always reported
     const a = await readAttention(dir);
@@ -263,7 +316,8 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
       return 0;
     }
     deps.out(`run ${runId}`);
-    deps.out(`  ticket ${meta.ticket}`);
+    if (meta.ticket !== undefined) deps.out(`  ticket ${meta.ticket}`);
+    if (meta.pipeline !== 'feature') deps.out(`  pipeline ${meta.pipeline}`);
     deps.out(`  profile ${meta.profile}`);
     deps.out(`  worktree ${meta.worktree}`);
     deps.out(`  branch ${meta.branch}`);
@@ -288,7 +342,8 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
   }
   for (const l of await listRuns(deps.home)) {
     const id = l.meta?.runId ?? path.basename(l.dir);
-    const ticket = l.meta?.ticket ?? '-';
+    // a ticketless run is known by its pipeline
+    const ticket = l.meta?.ticket ?? l.meta?.pipeline ?? '-';
     if (l.error !== undefined || l.meta === undefined) {
       deps.out(`${id}  broken  -  ${ticket}  error: ${l.error}`);
       continue;
@@ -300,7 +355,7 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
 }
 
 async function runDecide(decision: 'approve' | 'reject', args: string[], deps: DriverDeps): Promise<number> {
-  const { positionals } = parseWith(args, {});
+  const { values, positionals } = parseWith(args, decision === 'approve' ? { pipeline: { type: 'string' } } : {});
   let runId: string;
   let feedback: string | undefined;
   if (decision === 'approve') {
@@ -311,10 +366,24 @@ async function runDecide(decision: 'approve' | 'reject', args: string[], deps: D
     runId = runIdArg(positionals[0]!);
   }
   const dir = runDir(deps.home, runId);
-  await readRunMeta(dir);
+  const meta = await readRunMeta(dir);
+  const pipeline = values.pipeline as string | undefined;
+  const waiting = await readWaiting(dir);
+  if (waiting === undefined) throw new Error(`run ${runId} is not waiting at a gate; see where it is with perc status ${runId}`);
+  if (pipeline !== undefined) {
+    if (waiting.stepId !== 'pick-pipeline') {
+      throw new Error(`--pipeline only answers a pick-pipeline gate; run ${runId} is waiting at ${waiting.stepId}`);
+    }
+    const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile, pipeline: meta.pipeline });
+    const from = v.pipeline.choose?.from ?? [];
+    if (!from.includes(pipeline)) {
+      throw new Error(`pipeline "${pipeline}" is not one ${meta.pipeline} may pick (from: ${from.join(', ')})`);
+    }
+  }
   const w = await writeDecision(dir, {
     decision,
     ...(feedback !== undefined ? { feedback } : {}),
+    ...(pipeline !== undefined ? { pipeline } : {}),
     by: await deciderLogin(deps.gh),
   });
   deps.out(`${decision === 'approve' ? 'approved' : 'rejected'} ${w.stepId} of run ${runId}`);
@@ -357,6 +426,7 @@ async function confirmed(deps: DriverDeps, question: string): Promise<void> {
 function deleteSummary(p: DeletePlan, deps: DriverDeps): void {
   deps.out(`perc delete will remove run ${p.id}`);
   if (p.ticket !== undefined) deps.out(`  ticket ${p.ticket.ref}${p.ticket.title !== undefined ? ` ${p.ticket.title}` : ''}`);
+  if (p.meta !== undefined && p.meta.pipeline !== 'feature') deps.out(`  pipeline ${p.meta.pipeline}`);
   deps.out(`  status ${p.status}`);
   const wt = p.worktree ?? { path: `<repo>/.worktrees/${p.id}`, state: 'unknown' as const };
   deps.out(`  worktree ${wt.path} (${WORKTREE_STATE[wt.state]})`);
@@ -396,7 +466,7 @@ async function deleteFinished(yes: boolean, deps: DriverDeps, io: Io): Promise<n
   }
   if (!yes) {
     deps.out(`perc delete will remove ${plans.length} finished run(s)`);
-    for (const p of plans) deps.out(`  ${p.id}  ${p.ticket?.ref ?? '-'}  ${p.status}  worktree ${p.worktree?.state ?? 'unknown'}`);
+    for (const p of plans) deps.out(`  ${p.id}  ${p.ticket?.ref ?? p.meta?.pipeline ?? '-'}  ${p.status}  worktree ${p.worktree?.state ?? 'unknown'}`);
     deps.out('  keeps their branches');
     await confirmed(deps, `delete ${plans.length} run(s)? [y/N] `);
   }
@@ -463,6 +533,87 @@ async function runDrive(args: string[], deps: DriverDeps): Promise<number> {
   return exitOf(await drive(onlyRunId('drive', positionals), deps));
 }
 
+/** The `--interval` of perc watch, in whole seconds, at least 15. */
+function intervalArg(v: string | undefined): number {
+  if (v === undefined) return 60;
+  if (!/^\d+$/.test(v)) throw new UsageError(`--interval must be a whole number of seconds, got "${v}"`);
+  const s = Number(v);
+  if (s < 15) throw new UsageError('--interval must be at least 15 seconds');
+  return s;
+}
+
+async function runWatch(args: string[], deps: DriverDeps): Promise<number> {
+  const { values, positionals } = parseWith(args, {
+    repo: { type: 'string', multiple: true },
+    config: { type: 'string' },
+    profile: { type: 'string' },
+    interval: { type: 'string' },
+    foreground: { type: 'boolean' },
+  });
+  if (positionals.length > 0 && !(positionals.length === 1 && positionals[0] === 'stop')) {
+    throw new UsageError(`watch takes no arguments other than stop, got "${positionals.join(' ')}"`);
+  }
+  if (positionals[0] === 'stop') return stopWatch(deps);
+  const intervalS = intervalArg(values.interval);
+  const repos = (values.repo ?? [process.cwd()]).map((r) => path.resolve(r));
+  const configFile = path.resolve(values.config ?? defaultConfig());
+  const o = { repos, configFile, ...(values.profile !== undefined ? { profile: values.profile } : {}), intervalS };
+  if (values.foreground) {
+    const watcher = await deps.hc.get(WATCH_TERMINAL);
+    if (watcher?.state === 'live' && watcher.labels['percolator.role'] === WATCHER_LABELS['percolator.role'] && watcher.address !== deps.selfTerminal) {
+      throw new Error(`perc watch is already running in terminal ${WATCH_TERMINAL}; perc watch stop to stop it`);
+    }
+    const other = await otherWatcher(deps.home, (deps.now ?? (() => new Date()))(), deps.pidAlive ?? pidAlive, deps.pid ?? process.pid);
+    if (other !== undefined) throw new Error(`perc watch is already running as pid ${other}; stop it first (perc watch stop, or end pid ${other})`);
+    deps.out(`watching ${repos.join(', ')} every ${intervalS}s`);
+    await watchLoop(o, deps);
+    return 0;
+  }
+  const existing = await deps.hc.get(WATCH_TERMINAL);
+  if (existing) {
+    if (existing.labels['percolator.role'] !== WATCHER_LABELS['percolator.role']) {
+      throw new Error(`terminal ${WATCH_TERMINAL} is not a Percolator watcher; close or rename it, then run perc watch again`);
+    }
+    if (existing.state === 'live') throw new Error(`perc watch is already running in terminal ${WATCH_TERMINAL}; perc watch stop to stop it`);
+    await deps.hc.rm(WATCH_TERMINAL);
+  }
+  await deps.hc.run({
+    name: WATCH_TERMINAL,
+    cwd: repos[0]!,
+    argv: [
+      process.execPath,
+      deps.entry,
+      'watch',
+      '--foreground',
+      ...repos.flatMap((r) => ['--repo', r]),
+      '--config',
+      configFile,
+      ...(o.profile !== undefined ? ['--profile', o.profile] : []),
+      '--interval',
+      String(intervalS),
+    ],
+    labels: { ...WATCHER_LABELS },
+    outliveParent: true,
+  });
+  deps.out(`watcher started in terminal ${WATCH_TERMINAL}`);
+  deps.out(`  repos ${repos.join(', ')}`);
+  deps.out('  stop with: perc watch stop');
+  return 0;
+}
+
+/** Ends every terminal labelled as the watcher (and only those), then forgets its heartbeat. */
+async function stopWatch(deps: DriverDeps): Promise<number> {
+  const watchers = await deps.hc.list({ labels: { ...WATCHER_LABELS }, all: true });
+  for (const t of watchers) {
+    const id = t.name ?? t.address;
+    if (t.state === 'live') await deps.hc.kill(id);
+    await deps.hc.rm(id);
+  }
+  await fs.rm(watchFile(deps.home), { force: true });
+  deps.out(watchers.length === 0 ? 'no watcher running' : `stopped the watcher in terminal ${watchers.map((t) => t.name ?? t.address).join(', ')}`);
+  return 0;
+}
+
 const ttyAsk = (question: string) => askLine(question, { input: process.stdin, output: process.stdout });
 
 /** Fills in the real clients for missing deps; `out` always writes lines to `io.stdout`. */
@@ -499,6 +650,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     if (command === 'init') return await runInit(rest, io);
     if (command === 'validate') return await runValidate(rest, io);
     if (command === 'schema') return await runSchema(rest, io);
+    if (command === 'pipelines') return await runPipelines(rest, io, deps.home ?? os.homedir());
     if (command === 'herdr') return await runHerdr(rest, io, deps.home ?? os.homedir());
     const d = () => driverDeps(io, deps);
     if (command === 'run') return await runRun(rest, d());
@@ -508,10 +660,11 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     if (command === 'clean') return await runClean(rest, d());
     if (command === 'delete') return await runDelete(rest, d(), io);
     if (command === 'drive') return await runDrive(rest, d());
+    if (command === 'watch') return await runWatch(rest, d());
     io.stderr(`unknown command: ${command}\n\n${USAGE}`);
     return 2;
   } catch (err) {
-    if (err instanceof UsageError) {
+    if (err instanceof UsageError || err instanceof InputError) {
       io.stderr(`${err.message}\n\n${USAGE}`);
       return 2;
     }

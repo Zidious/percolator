@@ -62,6 +62,7 @@ import {
   agentAddress,
   openAgentAt,
   agentTone,
+  textTone,
   boxActions,
   boxOutside,
   columns,
@@ -78,6 +79,9 @@ import {
   historyLabel,
   readFullShown,
   ticketTitle,
+  outcomeOf,
+  pipelineChip,
+  runLabel,
   sortRuns,
   stepTone,
   took,
@@ -87,6 +91,29 @@ import type { RunStatusJson, StatusJson } from '../../src/run/status.ts';
 import type { Loop, PipeRow } from '../../herdr/mods/percolator/model.d.ts';
 import { driverName } from '../../src/run/meta.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
+import {
+  canStart,
+  commandLine,
+  guessRepo,
+  knownRepos,
+  linkedLine,
+  pipelineOption,
+  startedRun,
+  startPick,
+  sliceRows,
+  fanOutRow,
+  watcherState,
+  wouldStart,
+  pipelinesFixture,
+  previewRun,
+  previewSide,
+  readPipelines,
+  runNextChoices,
+  startArgv,
+  startFields,
+  ticketRepo,
+} from '../../herdr/mods/percolator/model.js';
+import type { Pipeline } from '../../herdr/mods/percolator/model.d.ts';
 
 const FIXTURE = path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'status.json');
 const RAW = fs.readFileSync(FIXTURE, 'utf8');
@@ -107,7 +134,7 @@ test('the fixture covers every attention kind, a running run, a completed run an
 
 test('the fixture has a run before intake wrote its title and url, one read from history, and a cleaned failed run', () => {
   const rs = runs().filter((r): r is Readable => r.status !== 'unreadable');
-  assert.ok(rs.some((r) => r.ticket.title === undefined && r.ticket.url === undefined));
+  assert.ok(rs.some((r) => r.ticket !== null && r.ticket.title === undefined && r.ticket.url === undefined));
   assert.ok(rs.some((r) => r.graph === 'history'));
   assert.ok(rs.some((r) => r.status === 'failed' && r.attention === undefined));
 });
@@ -115,13 +142,15 @@ test('the fixture has a run before intake wrote its title and url, one read from
 test("the fixture's terminals are named as perc names them (names, not Herdr addresses)", () => {
   for (const r of runs()) {
     if (r.status === 'unreadable') continue;
-    assert.equal(r.driver.terminal, driverName(r.id, r.ticket.ref), r.id);
+    // a ticketless run's terminals are named after its pipeline
+    const ticket = r.ticket?.ref ?? r.pipeline;
+    assert.equal(r.driver.terminal, driverName(r.id, ticket), r.id);
     for (const [step, name] of Object.entries(r.terminals)) {
       const st = r.steps.find((s) => s.id === step);
       // without a timeline, `attempts` counts finished records, so a live step runs attempt `attempts + 1`
       const live = !Array.isArray(r.timeline) && (st?.status === 'running' || st?.status === 'waiting');
       const attempts: number = (st?.attempts ?? 0) + (live ? 1 : 0);
-      assert.equal(name, step === 'driver' ? driverName(r.id, r.ticket.ref) : terminalName(r.id, r.ticket.ref, step, attempts), `${r.id} ${step}`);
+      assert.equal(name, step === 'driver' ? driverName(r.id, ticket) : terminalName(r.id, ticket, step, attempts), `${r.id} ${step}`);
     }
     if (r.attention?.terminal !== undefined) assert.equal(r.attention.terminal, r.terminals[r.currentStep!], r.id);
   }
@@ -174,7 +203,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t12', 't2', 't11', 't9', 't4', 't17', 't16', 't14', 't13', 't8', 't15', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t22', 'dd', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 'audit', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -182,7 +211,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -191,17 +220,34 @@ test('visibleRuns "all" keeps everything in order', () => {
 
 test('rowState gives the tone and the board text for each kind of run', () => {
   const cases: [string, string, string, string?][] = [
-    ['t2', 'blocked', 'your turn · approve-groom'],
-    ['t4', 'blocked', 'paused · review at cap'],
-    ['t12', 'blocked', 'paused · plan'],
-    ['t9', 'blocked', 'failed · implement'],
-    ['t11', 'blocked', 'stalled · driver stopped'],
+    ['t2', 'blocked', 'Your turn · approve-groom'],
+    ['t4', 'blocked', 'Paused · review at cap'],
+    ['t12', 'blocked', 'Paused · plan'],
+    ['t9', 'blocked', 'Failed · implement'],
+    ['t11', 'blocked', 'Stalled · driver stopped'],
     ['t13', 'working', 'groom'],
-    ['t8', 'working', 'review', 'round 3/3'],
-    ['t3', 'dim', 'delivered · PR #7'],
-    ['t5', 'muted', 'unreadable · state.json: Unexpected end of JSON input'],
+    ['t8', 'working', 'review', 'Round 3/3'],
+    ['t3', 'muted', 'Delivered · PR #7'],
+    ['t5', 'muted', 'Unreadable · state.json: Unexpected end of JSON input'],
   ];
   for (const [id, tone, text, round] of cases) assert.deepEqual(rowState(byId(id)), { tone, text, ...(round ? { round } : {}) }, id);
+});
+
+test('rowState capitalises a bare status: a run with nothing more to say', () => {
+  const failed = { ...readable('t3'), status: 'failed', attention: undefined } as Readable;
+  assert.deepEqual(rowState(failed), { tone: 'muted', text: 'Failed' });
+});
+
+test('textTone gives text a readable colour: dim (and no tone) read as muted, other tones stay', () => {
+  assert.deepEqual(['dim', null, undefined, 'muted', 'working', 'blocked', 'done'].map(textTone), [
+    'muted',
+    'muted',
+    'muted',
+    'muted',
+    'working',
+    'blocked',
+    'done',
+  ]);
 });
 
 test('rowState for a running step outside a loop shows only the step', () => {
@@ -209,7 +255,28 @@ test('rowState for a running step outside a loop shows only the step', () => {
 });
 
 test('rowState for a completed run without a PR says delivered', () => {
-  assert.deepEqual(rowState({ ...readable('t3'), pr: null }), { tone: 'dim', text: 'delivered' });
+  assert.deepEqual(rowState({ ...readable('t3'), pr: null }), { tone: 'muted', text: 'Delivered' });
+});
+
+test('rowState for a completed router says where it routed; a ticketless run that opened nothing says done', () => {
+  const triage = runs().find((r) => r.id === TRIAGE) as Readable;
+  assert.deepEqual(rowState(triage), { tone: 'muted', text: 'Routed → hotfix' });
+  assert.deepEqual(rowState({ ...triage, children: [] }), { tone: 'muted', text: 'Routed' });
+  const dd = { ...readable('dd'), status: 'completed', attention: undefined, currentStep: undefined } as Readable;
+  assert.deepEqual(rowState(dd), { tone: 'muted', text: 'Done' });
+  // a ticketless run whose exit opened issues delivered them
+  assert.deepEqual(rowState(readable('audit')), { tone: 'muted', text: 'Delivered' });
+});
+
+test("a completed run's outcome box says what rowState says: delivered, routed or done", () => {
+  assert.deepEqual(outcomeOf(readable('t3')), { tag: 'DELIVERED', text: 'Opened Zidious/percolator/pull/7' });
+  assert.deepEqual(outcomeOf({ ...readable('t3'), pr: null }), { tag: 'DELIVERED', text: 'Done.' });
+  const triage = runs().find((r) => r.id === TRIAGE) as Readable;
+  assert.deepEqual(outcomeOf(triage), { tag: 'ROUTED', text: '→ hotfix' });
+  assert.deepEqual(outcomeOf({ ...triage, children: [] }), { tag: 'ROUTED', text: '' });
+  const dd = { ...readable('dd'), status: 'completed', attention: undefined, currentStep: undefined } as Readable;
+  assert.deepEqual(outcomeOf(dd), { tag: 'DONE', text: '' });
+  assert.deepEqual(outcomeOf(readable('audit')), { tag: 'DELIVERED', text: 'Done.' });
 });
 
 test('newlyNeeding is empty on the first load', () => {
@@ -262,21 +329,63 @@ test('actionArgv refuses a reject without feedback', () => {
 });
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
-  assert.equal(needsCount(runs()), 5);
-  assert.equal(runningCount(runs()), 5);
+  assert.equal(needsCount(runs()), 7);
+  assert.equal(runningCount(runs()), 8);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
 });
 
-test('readStatus accepts schema 1', () => {
+test('readStatus accepts schema 2', () => {
   assert.deepEqual(readStatus(RAW), { ok: true, data: load() });
 });
 
-test('readStatus refuses another schema and says to update the panel', () => {
-  assert.deepEqual(readStatus('{"schema":2,"runs":[]}'), {
+test('readStatus refuses schema 1', () => {
+  assert.deepEqual(readStatus('{"schema":1,"runs":[]}'), {
     ok: false,
-    error: 'perc status --json returned schema 2; update the Percolator panel',
+    error: 'perc status --json returned schema 1; update the Percolator panel',
   });
+});
+
+test('readStatus refuses another schema and says to update the panel', () => {
+  assert.deepEqual(readStatus('{"schema":3,"runs":[]}'), {
+    ok: false,
+    error: 'perc status --json returned schema 3; update the Percolator panel',
+  });
+});
+
+test('status and model functions handle ticket: null', () => {
+  const dd = readable('dd-alert');
+  assert.equal(dd.ticket, null);
+  assert.deepEqual(rowState(dd), { tone: 'blocked', text: 'Your turn · sign-off' });
+  assert.equal(ticketTitle(dd), 'dd-alert · https://app.datadoghq.com/monitors/1234…');
+  assert.equal(ticketTitle(dd).length, 'dd-alert · '.length + 40);
+  assert.deepEqual(notice(dd), {
+    title: 'dd-alert needs you',
+    body: 'approve or reject here (no issue to comment on)',
+    level: 'warning',
+    action: { name: `percolator-cup.open/${dd.id}` },
+  });
+  assert.deepEqual(cupLabel([dd]), { text: '1 needs you', tone: 'blocked' });
+  assert.equal(runLabel(dd), 'dd-alert');
+  assert.equal(runLabel(readable('t2')), '#2');
+  assert.deepEqual(deleteConfirm(dd), {
+    title: 'Delete dd-alert?',
+    detail: `Deletes run ${dd.id}: its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${dd.branch} is kept. The run is stopped first.`,
+  });
+  assert.equal(deleteFinishedConfirm([{ ...dd, status: 'completed' }])!.detail.startsWith(`Deletes ${dd.id} (dd-alert): `), true);
+  assert.equal(guessRepo('github.com/zidious/percolator#99', [dd]), null);
+  assert.equal(runNextChoices({ ...dd, status: 'completed' }, [], [dd]), null);
+});
+
+test('ticketTitle of a ticketless run without inputs is its pipeline', () => {
+  assert.equal(ticketTitle({ ...readable('dd-alert'), inputs: {} }), 'dd-alert');
+  assert.equal(ticketTitle({ ...readable('dd-alert'), inputs: { alert_url: 'short' } }), 'dd-alert · short');
+});
+
+test('pipelineChip is null on feature and the name otherwise', () => {
+  assert.equal(pipelineChip(readable('t2')), null);
+  assert.equal(pipelineChip(readable('t21')), 'hotfix');
+  assert.equal(pipelineChip(readable('dd-alert')), 'dd-alert');
 });
 
 test('readStatus passes on parseStatus errors', () => {
@@ -360,8 +469,8 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
   assert.equal(moveRow([], 'gone', 1), null);
 });
 
-test('the fixture has timelines for t8, t3, t2, t4, t16 and t17, and none for the rest (an older perc)', () => {
-  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17']);
+test('the fixture has timelines for t8, t3, t2, t4, t16, t17, dd-alert, t21 (hotfix and triage), t22, t23 (epic and two slices) and audit, and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17', 'dd', 't21', 't21', 't22', 't23', 't23', 't23', 'audit']);
 });
 
 test('roundView defaults to the latest round and marks it running', () => {
@@ -407,7 +516,7 @@ test('stepAttempts is one step attempts in order', () => {
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
-  assert.deepEqual(cupLabel(runs()), { text: '5 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel(runs()), { text: '7 need you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
   assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
@@ -486,13 +595,16 @@ test('readRatio: a stored ratio between 0 and 1, else the default', () => {
 });
 
 test('titleLayout: the buttons always fit; the needs chip shortens, then the tabs move to a second row', () => {
-  assert.deepEqual(titleLayout(380, 2), { tabs: 'inline', chip: 'long' }, 'the default 380px panel');
-  assert.deepEqual(titleLayout(370, 2), { tabs: 'inline', chip: 'long' });
-  assert.deepEqual(titleLayout(340, 2), { tabs: 'inline', chip: 'short' });
-  assert.deepEqual(titleLayout(300, 2), { tabs: 'below', chip: 'long' });
-  assert.deepEqual(titleLayout(260, 2), { tabs: 'below', chip: 'short' });
-  assert.deepEqual(titleLayout(300, 0), { tabs: 'inline', chip: 'long' }, 'no chip: the tabs fit inline longer');
-  assert.deepEqual(titleLayout(280, 0), { tabs: 'below', chip: 'long' });
+  // + New run is an icon under 800px (text from there): it takes ~30px, so the chip shortens and the tabs move sooner
+  assert.deepEqual(titleLayout(400, 2), { tabs: 'inline', chip: 'long', newRun: 'icon' });
+  assert.deepEqual(titleLayout(380, 2), { tabs: 'inline', chip: 'short', newRun: 'icon' }, 'the default 380px panel');
+  assert.deepEqual(titleLayout(350, 2), { tabs: 'inline', chip: 'short', newRun: 'icon' });
+  assert.deepEqual(titleLayout(340, 2), { tabs: 'below', chip: 'long', newRun: 'icon' });
+  assert.deepEqual(titleLayout(260, 2), { tabs: 'below', chip: 'short', newRun: 'icon' });
+  assert.deepEqual(titleLayout(330, 0), { tabs: 'inline', chip: 'long', newRun: 'icon' }, 'no chip: the tabs fit inline longer');
+  assert.deepEqual(titleLayout(320, 0), { tabs: 'below', chip: 'long', newRun: 'icon' });
+  assert.deepEqual(titleLayout(720, 2).newRun, 'icon');
+  assert.deepEqual(titleLayout(800, 2), { tabs: 'inline', chip: 'long', newRun: 'text' }, 'the window');
 });
 
 const hhmm = (iso: string) => {
@@ -512,13 +624,13 @@ test('timelineRows lists every attempt newest first, with round, start, duration
     mark: '●',
     tone: 'working',
     step: 'review',
-    round: 'round 3',
+    round: 'Round 3',
     status: 'running',
     started: hhmm('2026-11-21T00:41:10.000Z'),
     took: '2m',
     note: '',
   });
-  assert.equal(rows.find((r) => r.key === 'approve-groom#1')!.note, 'approved by @zidious');
+  assert.equal(rows.find((r) => r.key === 'approve-groom#1')!.note, 'Approved by @zidious');
   assert.equal(rows.at(-1)!.step, 'setup');
 });
 
@@ -533,7 +645,7 @@ test('timelineRows without a timeline lists the steps that ran, newest first', (
 
 test('timelineRows without a timeline counts a live step as the attempt in progress', () => {
   const first = timelineRows(readable('t14'), 0).find((r) => r.key === 'intake#1');
-  assert.equal(first?.round, 'round 1');
+  assert.equal(first?.round, 'Round 1');
   assert.equal(stepAttempts(readable('t11'), 'implement').at(-1)!.attempt, 1);
   assert.equal(stepAttempts(readable('t11'), 'plan').at(-1)!.attempt, 1, 'a finished step keeps its attempts');
 });
@@ -541,7 +653,7 @@ test('timelineRows without a timeline counts a live step as the attempt in progr
 test('rowState keeps the round apart from a long step name, so it is never cut', () => {
   const r = readable('t8');
   const long = { ...r, currentStep: 'security-scan-extended', loops: [{ ...r.loops[0]!, from: 'security-scan-extended' }] };
-  assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'round 3/3' });
+  assert.deepEqual(rowState(long), { tone: 'working', text: 'security-scan-extended', round: 'Round 3/3' });
 });
 
 const T8_DRIVER = 't8_driver_a0_b65d';
@@ -591,7 +703,7 @@ test('deleteCommand carries the confirmed ids, and deleteCommandIds reads them b
 test('isFinished is true for completed and failed runs only', () => {
   assert.deepEqual(
     runs().filter(isFinished).map((r) => r.id.split('-')[0]),
-    ['t3', 't9', 't15'],
+    ['t3', 't9', 't15', 't21', 't23', 'audit'],
   );
 });
 
@@ -599,13 +711,13 @@ test('deleteConfirm names the run, says what is lost and kept, and that an activ
   const done = readable('t3');
   assert.deepEqual(deleteConfirm(done), {
     title: 'Delete #3?',
-    detail: `Deletes run ${done.id} (${done.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${done.branch} is kept.`,
+    detail: `Deletes run ${done.id} (${done.ticket!.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${done.branch} is kept.`,
   });
   for (const id of ['t8', 't2', 't4']) {
     const r = readable(id);
     assert.equal(
       deleteConfirm(r).detail,
-      `Deletes run ${r.id} (${r.ticket.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${r.branch} is kept. The run is stopped first.`,
+      `Deletes run ${r.id} (${r.ticket!.ref}): its terminals, worktree and record. Uncommitted changes in the worktree are lost. The branch ${r.branch} is kept. The run is stopped first.`,
       id,
     );
   }
@@ -618,10 +730,13 @@ test('deleteConfirm names the run, says what is lost and kept, and that an activ
 
 test('deleteFinishedConfirm lists the finished runs, or is null when there are none', () => {
   const [a, b, c] = ['t3', 't9', 't15'].map((id) => byId(id).id);
+  const d = 't21-triage-20261121-065800-9e3a';
+  const s = 't23-epic-20261121-090000-7c2a-s1';
+  const e = 'audit-20261120-180000-2d7c';
   assert.deepEqual(deleteFinishedConfirm(runs()), {
-    title: 'Delete 3 finished run(s)?',
-    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
-    ids: [a, b, c],
+    title: 'Delete 6 finished run(s)?',
+    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15), ${d} (#21), ${s} (#23), ${e} (audit): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    ids: [a, b, c, d, s, e],
   });
   assert.equal(deleteFinishedConfirm(runs().filter((r) => !isFinished(r))), null);
 });
@@ -672,9 +787,9 @@ test('roundOf counts the round the engine is in', () => {
 });
 
 test('roundPill sits on the loop from step', () => {
-  assert.deepEqual(roundPill(byId('t2'), 'review'), { text: 'round 1/3', tone: 'dim' });
-  assert.deepEqual(roundPill(byId('t16'), 'review'), { text: 'round 2/3', tone: 'working' });
-  assert.deepEqual(roundPill(byId('t4'), 'review'), { text: 'round 3/3 · cap', tone: 'blocked' });
+  assert.deepEqual(roundPill(byId('t2'), 'review'), { text: 'Round 1/3', tone: 'dim' });
+  assert.deepEqual(roundPill(byId('t16'), 'review'), { text: 'Round 2/3', tone: 'working' });
+  assert.deepEqual(roundPill(byId('t4'), 'review'), { text: 'Round 3/3 · cap', tone: 'blocked' });
   assert.equal(roundPill(byId('t4'), 'implement'), null);
 });
 
@@ -685,7 +800,7 @@ test('loopSpans lists every loop with its tone', () => {
 });
 
 test('rowState gives the round the engine is in', () => {
-  assert.equal(rowState({ ...readable('t16'), currentStep: 'review' }).round, 'round 2/3');
+  assert.equal(rowState({ ...readable('t16'), currentStep: 'review' }).round, 'Round 2/3');
 });
 
 test('an agent-blocked run is a running run to the panel', () => {
@@ -725,7 +840,7 @@ test('pipelineRows gives each row its state, gate and the round pill on stage ro
   );
   assert.deepEqual(rows.filter((r) => r.gate).map((r) => r.step.id), ['approve-groom']);
   const review = row(rows, 'review');
-  assert.equal(review.type === 'stage' && review.round?.text, 'round 3/3');
+  assert.equal(review.type === 'stage' && review.round?.text, 'Round 3/3');
   const plan = row(rows, 'plan');
   assert.equal(plan.type === 'stage' && plan.round, null);
   assert.deepEqual(foldedOf(plan), []);
@@ -805,7 +920,7 @@ test('pipelineRows places a stage at its first core step, not at a node listed e
 
 test('pipelineRows of the t4 run carries the capped round on review', () => {
   const review = row(pipelineRows(byId('t4'), WIDE), 'review');
-  assert.deepEqual(review.type === 'stage' && review.round, { text: 'round 3/3 · cap', tone: 'blocked' });
+  assert.deepEqual(review.type === 'stage' && review.round, { text: 'Round 3/3 · cap', tone: 'blocked' });
   assert.equal(review.state, 'active');
 });
 
@@ -926,30 +1041,30 @@ test('agentCard and agentAddress fall back to the attention terminal when the st
 test('hookNote says where a hook runs, the gate decision and its time', () => {
   const now = Date.parse('2026-11-21T03:54:45.575Z');
   const t8 = pipelineRows(byId('t8'), WIDE);
-  assert.equal(hookNote(byId('t8'), row(t8, 'approve-groom'), now), 'after · approved by @zidious');
-  assert.equal(hookNote(byId('t8'), row(t8, 'security-scan'), now), 'after · 34s');
+  assert.equal(hookNote(byId('t8'), row(t8, 'approve-groom'), now), 'After · approved by @zidious');
+  assert.equal(hookNote(byId('t8'), row(t8, 'security-scan'), now), 'After · 34s');
   assert.equal(hookNote(byId('t8'), row(t8, 'notify'), now), 'after-all');
   const t2 = pipelineRows(byId('t2'), WIDE);
-  assert.equal(hookNote(byId('t2'), row(t2, 'approve-groom'), Date.parse('2026-11-21T03:54:45.575Z')), 'after · waiting 3h');
+  assert.equal(hookNote(byId('t2'), row(t2, 'approve-groom'), Date.parse('2026-11-21T03:54:45.575Z')), 'After · waiting 3h');
 });
 
 test('roundNote gives a loop target past round 1 its round and its latest attempt time', () => {
   const now = Date.parse('2026-11-21T05:00:00.000Z');
-  assert.equal(roundNote(byId('t4'), 'implement', now), 'round 3 · 4m'); // its third attempt took 3m50s
-  assert.equal(roundNote(byId('t16'), 'lint-baseline', now), 'round 2 · 4s');
+  assert.equal(roundNote(byId('t4'), 'implement', now), 'Round 3 · 4m'); // its third attempt took 3m50s
+  assert.equal(roundNote(byId('t16'), 'lint-baseline', now), 'Round 2 · 4s');
   assert.equal(roundNote(byId('t3'), 'implement', now), '', 'round 1');
   assert.equal(roundNote(byId('t4'), 'review', now), '', 'a loop start, not its target');
   const t4 = readable('t4');
   const untimed = { ...t4, timeline: [] } as RunStatusJson;
-  assert.equal(roundNote(untimed, 'implement', now), 'round 3', 'no time to show');
+  assert.equal(roundNote(untimed, 'implement', now), 'Round 3', 'no time to show');
 });
 
 test('hookNote carries the round of a hook a loop goes back to', () => {
   const now = Date.parse('2026-11-21T05:00:00.000Z');
   const r = byId('t16');
   const open = pipelineRows(r, { narrow: false, unfolded: ['implement'] });
-  assert.equal(hookNote(r, row(open, 'lint-baseline'), now), 'before · round 2 · 4s');
-  assert.equal(hookNote(r, row(open, 'deps-audit'), now), 'before · 15s');
+  assert.equal(hookNote(r, row(open, 'lint-baseline'), now), 'Before · round 2 · 4s');
+  assert.equal(hookNote(r, row(open, 'deps-audit'), now), 'Before · 15s');
 });
 
 test('unfoldAfterPick opens a picked stage that holds folded hooks, and folds it again when it is closed', () => {
@@ -996,7 +1111,7 @@ test('openAgentAt focuses a live agent terminal, else says why it did not', () =
   const live = [{ address: 'w1:7', name }];
   assert.deepEqual(openAgentAt(byId('t16'), live, false), { address: 'w1:7' });
   assert.deepEqual(openAgentAt(byId('t16'), [], false), { error: `${name} is not a live terminal; refresh the panel` });
-  assert.deepEqual(openAgentAt(byId('t16'), live, true), { said: `fixtures: would open ${name}` });
+  assert.deepEqual(openAgentAt(byId('t16'), live, true), { said: `Fixtures: would open ${name}` });
   assert.equal(openAgentAt(byId('t11'), live, false), null, 'the step has no terminal');
   assert.equal(openAgentAt(byId('t5'), live, true), null, 'unreadable');
 });
@@ -1085,7 +1200,7 @@ test('programInitial is the badge letter of the agent program', () => {
 });
 
 test('agentNote says the agent has not started when the active stop has no agent terminal', () => {
-  assert.equal(agentNote(null), 'agent not started');
+  assert.equal(agentNote(null), 'Agent not started');
   assert.equal(agentNote({ address: null, name: 'x', status: 'not open', program: 'Agent', since: '' }), null);
 });
 
@@ -1152,4 +1267,359 @@ test('detailParts: one column keeps the box and strip under their rows; two colu
   assert.deepEqual(detailParts(byId('t3'), two('review')), { under: false, side: ['outcome', 'strip'] });
   assert.deepEqual(detailParts(byId('t3'), two('gone')), { under: false, side: ['outcome'] }, 'a stop not in the run');
   assert.deepEqual(detailParts(byId('t5'), two(null)), { under: false, side: ['outcome'] }, 'unreadable');
+});
+
+// ── the start dialog (perc pipelines --json) ──
+
+const PIPES_RAW = fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'pipelines.json'), 'utf8');
+const pipe = (name: string) => (JSON.parse(PIPES_RAW).pipelines as Pipeline[]).find((p) => p.name === name)!;
+const started = (o: { id: string; repo: string; createdAt: string; ref?: string }) =>
+  ({ ...readable('t3'), id: o.id, repo: o.repo, createdAt: o.createdAt, ticket: o.ref ? { ref: o.ref, number: 1 } : null }) as unknown as Readable;
+
+test('readPipelines reads perc pipelines --json and refuses what it does not know', () => {
+  const read = readPipelines(PIPES_RAW);
+  assert.ok(read.ok);
+  assert.equal(read.data.pipelines.length, 4);
+  assert.deepEqual(readPipelines('nope'), { ok: false, error: 'perc pipelines --json returned invalid JSON' });
+  assert.deepEqual(readPipelines('{"schema":1}'), { ok: false, error: 'perc pipelines --json returned invalid JSON' });
+  assert.deepEqual(readPipelines('{"schema":2,"pipelines":[]}'), {
+    ok: false,
+    error: 'perc pipelines --json returned schema 2; update the Percolator panel',
+  });
+});
+
+test('pipelinesFixture is pipelines.json beside the status fixture', () => {
+  assert.equal(pipelinesFixture('/home/me/fx/status.json'), '/home/me/fx/pipelines.json');
+  assert.equal(pipelinesFixture('C:\\fx\\status.json'), 'C:\\fx/pipelines.json');
+});
+
+test('pipelinesFixture of a bare file name is pipelines.json beside it', () => {
+  assert.equal(pipelinesFixture('status.json'), 'pipelines.json');
+});
+
+test('startFields: the ticket field (hidden when the pipeline takes none) and each input with its description', () => {
+  assert.deepEqual(startFields(pipe('feature')), { ticket: 'required', inputs: [] });
+  assert.deepEqual(startFields(pipe('dd-alert')), {
+    ticket: 'hidden',
+    inputs: [{ name: 'alert_url', required: true, description: 'Datadog alert URL' }],
+  });
+  assert.deepEqual(startFields(pipe('spike')), {
+    ticket: 'optional',
+    inputs: [
+      { name: 'question', required: false, description: 'What to find out' },
+      { name: 'depth', required: false, description: '' },
+    ],
+  });
+});
+
+test('knownRepos lists each repo once, most recent run first, and skips unreadable runs', () => {
+  const rs = [
+    started({ id: 'a', repo: '/src/a', createdAt: '2026-11-01T00:00:00.000Z' }),
+    started({ id: 'b', repo: '/src/b', createdAt: '2026-11-10T00:00:00.000Z' }),
+    started({ id: 'c', repo: '/src/a', createdAt: '2026-11-20T00:00:00.000Z' }),
+    { id: 'd', status: 'unreadable', error: 'bad' } as RunStatusJson,
+  ];
+  assert.deepEqual(knownRepos(rs), ['/src/a', '/src/b']);
+  assert.deepEqual(knownRepos(runs()), ['/home/me/src/percolator']);
+  assert.deepEqual(knownRepos([]), []);
+});
+
+test('ticketRepo is the lower-cased host/owner/repo of a ticket URL or ref, else null', () => {
+  assert.equal(ticketRepo('https://github.com/O/R/issues/3'), 'github.com/o/r');
+  assert.equal(ticketRepo('  https://ghe.example.com/a/b/pull/2 '), 'ghe.example.com/a/b');
+  assert.equal(ticketRepo('o/r#3'), 'github.com/o/r');
+  assert.equal(ticketRepo('github.com/Zidious/percolator#16'), 'github.com/zidious/percolator');
+  for (const t of ['', '#3', '3', 'not a ticket', 'https://github.com/o']) assert.equal(ticketRepo(t), null, t);
+});
+
+test('guessRepo is the repo of the most recent run on the same GitHub repo, else null', () => {
+  const rs = [
+    started({ id: 'old', repo: '/src/r-old', createdAt: '2026-11-01T00:00:00.000Z', ref: 'github.com/o/r#1' }),
+    started({ id: 'new', repo: '/src/r', createdAt: '2026-11-10T00:00:00.000Z', ref: 'github.com/o/r#2' }),
+    started({ id: 'rx', repo: '/src/rx', createdAt: '2026-11-20T00:00:00.000Z', ref: 'github.com/o/rx#5' }),
+    started({ id: 'none', repo: '/src/x', createdAt: '2026-11-21T00:00:00.000Z' }),
+    { id: 'bad', status: 'unreadable', error: 'bad' } as RunStatusJson,
+  ];
+  assert.equal(guessRepo('https://github.com/o/r/issues/3', rs), '/src/r');
+  assert.equal(guessRepo('o/rx#9', rs), '/src/rx');
+  assert.equal(guessRepo('https://github.com/o/q/issues/3', rs), null);
+  assert.equal(guessRepo('nonsense', rs), null);
+  assert.equal(guessRepo('zidious/percolator#99', runs()), '/home/me/src/percolator');
+});
+
+test('startArgv: the ticket if any, repo, pipeline, then inputs in declared order without empty optional ones', () => {
+  assert.deepEqual(startArgv({ pipeline: pipe('dd-alert'), inputs: { alert_url: 'https://x/a b' }, repo: '/src/r' }), [
+    'run', '--repo', '/src/r', '--pipeline', 'dd-alert', '--input', 'alert_url=https://x/a b',
+  ]);
+  assert.deepEqual(startArgv({ pipeline: pipe('feature'), ticket: ' o/r#3 ', inputs: {}, repo: '/src/r' }), [
+    'run', 'o/r#3', '--repo', '/src/r', '--pipeline', 'feature',
+  ]);
+  assert.deepEqual(startArgv({ pipeline: pipe('spike'), ticket: '', inputs: { depth: '2', question: 'why q' }, repo: '/r' }), [
+    'run', '--repo', '/r', '--pipeline', 'spike', '--input', 'question=why q', '--input', 'depth=2',
+  ]);
+  assert.deepEqual(startArgv({ pipeline: pipe('spike'), inputs: { depth: '2', question: '  ' }, repo: '/r' }), [
+    'run', '--repo', '/r', '--pipeline', 'spike', '--input', 'depth=2',
+  ]);
+});
+
+test('commandLine quotes an argument holding whitespace or a double quote', () => {
+  assert.equal(commandLine(['run', '--input', 'q=a b']), 'perc run --input "q=a b"');
+  assert.equal(commandLine(['run', '--input', 'q=say "hi"']), 'perc run --input "q=say \\"hi\\""');
+  assert.equal(commandLine(['run', '--repo', 'C:\\My Repos\\r']), 'perc run --repo "C:\\My Repos\\r"');
+  assert.equal(commandLine(['run', 'o/r#3', '--pipeline', 'feature']), 'perc run o/r#3 --pipeline feature');
+});
+
+test('canStart says what is missing: the repo, then the ticket, then the first empty required input', () => {
+  assert.deepEqual(canStart({ pipeline: pipe('dd-alert'), inputs: {}, repo: '/r' }), { ok: false, why: 'Enter alert_url' });
+  assert.deepEqual(canStart({ pipeline: pipe('dd-alert'), inputs: { alert_url: ' ' }, repo: '/r' }), { ok: false, why: 'Enter alert_url' });
+  assert.deepEqual(canStart({ pipeline: pipe('dd-alert'), inputs: { alert_url: 'https://x' }, repo: '/r' }), { ok: true });
+  assert.deepEqual(canStart({ pipeline: pipe('dd-alert'), inputs: {}, repo: null }), { ok: false, why: 'Pick a repo' });
+  assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: '', inputs: {}, repo: '' }), { ok: false, why: 'Pick a repo' });
+  assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: '  ', inputs: {}, repo: '/r' }), { ok: false, why: 'Enter a ticket' });
+  assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: 'o/r#3', inputs: {}, repo: '/r' }), { ok: true });
+  assert.deepEqual(canStart({ pipeline: pipe('spike'), inputs: {}, repo: '/r' }), { ok: true });
+});
+
+test('canStart refuses a ticket starting with -, which perc run would read as a flag', () => {
+  assert.deepEqual(canStart({ pipeline: pipe('feature'), ticket: ' --help', inputs: {}, repo: '/r' }), { ok: false, why: 'A ticket cannot start with -' });
+  assert.deepEqual(canStart({ pipeline: pipe('spike'), ticket: '-x', inputs: {}, repo: '/r' }), { ok: false, why: 'A ticket cannot start with -' });
+});
+
+test('startPick keeps the wanted pipeline while it is listed and pickable, else the default, else the first pickable', () => {
+  const all = ALL_PIPES_START();
+  assert.equal(startPick(all, 'hotfix'), 'hotfix');
+  assert.equal(startPick(all, 'gone'), 'feature', 'a pipeline the repo no longer has falls back to the default');
+  assert.equal(startPick(all, 'broken'), 'feature', 'a broken pipeline cannot be picked');
+  assert.equal(startPick(all, null), 'feature');
+  const noDefault = all.map((p) => ('error' in p ? p : { ...p, default: false }));
+  assert.equal(startPick(noDefault.slice(1), null), 'hotfix');
+  assert.equal(startPick([{ name: 'broken', error: 'x' }], null), null);
+  // run next: only the names it offers
+  assert.equal(startPick(all, null, ['hotfix', 'spike']), 'hotfix');
+  assert.equal(startPick(all, 'spike', ['hotfix', 'spike']), 'spike');
+  assert.equal(startPick(all, 'dd-alert', ['hotfix', 'spike']), 'hotfix');
+});
+
+test('pipelineOption gives a picker row its tags and its note: the description, else the exit, else the error', () => {
+  assert.deepEqual(pipelineOption(pipe('feature')), {
+    name: 'feature',
+    tags: ['Default'],
+    note: 'Groom, plan, implement and review a ticket, then open a PR',
+    error: false,
+  });
+  assert.deepEqual(pipelineOption(pipe('dd-alert')).tags, ['No ticket']);
+  assert.deepEqual(pipelineOption(pipe('spike')), { name: 'spike', tags: ['Ticket optional'], note: 'Ends with none', error: false });
+  assert.deepEqual(pipelineOption({ name: 'broken', error: 'pipelines.broken: no exit' }), {
+    name: 'broken',
+    tags: [],
+    note: 'pipelines.broken: no exit',
+    error: true,
+  });
+});
+
+test('startedRun reads the run id perc run prints, else null', () => {
+  assert.equal(startedRun('run t3-hotfix-20261122-101500-ab12 started\n  terminal t3_driver\n'),'t3-hotfix-20261122-101500-ab12');
+  assert.equal(startedRun('something else'), null);
+  assert.equal(startedRun(''), null);
+});
+
+test('wouldStart says what a fixture-mode Start would run', () => {
+  assert.equal(
+    wouldStart(['run', '--repo', '/r', '--pipeline', 'dd-alert', '--input', 'alert_url=a b']),
+    'Fixture: would run perc run --repo /r --pipeline dd-alert --input "alert_url=a b"',
+  );
+});
+
+const ALL_PIPES_START = () => [...(JSON.parse(PIPES_RAW).pipelines as Pipeline[]), { name: 'broken', error: 'pipelines.broken: no exit' }];
+
+// ── run next and the pipeline preview ──
+
+const ALL_PIPES = () => [...(JSON.parse(PIPES_RAW).pipelines as Pipeline[]), { name: 'broken', error: 'pipelines.broken: no exit' }];
+const T3 = 'github.com/zidious/percolator#3';
+
+test('run next is hidden while the ticket has a live run', () => {
+  const done = readable('t3');
+  for (const status of ['running', 'waiting', 'paused'] as const) {
+    const live = { ...readable('t8'), id: `t3-${status}`, status, ticket: { ref: T3, number: 3 } } as Readable;
+    assert.equal(runNextChoices(done, ALL_PIPES(), [...runs(), live]), null, status);
+  }
+  assert.equal(runNextChoices(readable('t8'), ALL_PIPES(), runs()), null, 'a running run offers no run next');
+  assert.equal(runNextChoices(byId('t5'), ALL_PIPES(), runs()), null, 'an unreadable run offers none');
+  const old = { ...readable('t9'), id: 't3-old', ticket: { ref: T3, number: 3 } } as Readable;
+  assert.notEqual(runNextChoices(done, ALL_PIPES(), [...runs(), old]), null, 'a failed run on the ticket is not live');
+});
+
+test('run next lists only pipelines that take a ticket', () => {
+  assert.deepEqual(runNextChoices(readable('t3'), ALL_PIPES(), runs()), { tickets: [T3], pipelines: ['feature', 'hotfix', 'spike'] });
+  assert.deepEqual(runNextChoices(readable('t9'), ALL_PIPES(), runs()), {
+    tickets: ['github.com/zidious/percolator#9'],
+    pipelines: ['feature', 'hotfix', 'spike'],
+  });
+});
+
+test('run next offers the issues an issue exit opened', () => {
+  const opened = [
+    { ref: 'github.com/o/r#40', url: 'https://github.com/o/r/issues/40' },
+    { ref: 'github.com/o/r#41', url: 'https://github.com/o/r/issues/41' },
+  ];
+  const withIssues = { ...readable('t3'), opened } as unknown as Readable;
+  assert.deepEqual(runNextChoices(withIssues, ALL_PIPES(), runs())?.tickets, [T3, 'github.com/o/r#40', 'github.com/o/r#41']);
+  const ticketless = { ...readable('t3'), ticket: null, opened } as unknown as Readable;
+  assert.deepEqual(runNextChoices(ticketless, ALL_PIPES(), runs())?.tickets, ['github.com/o/r#40', 'github.com/o/r#41']);
+  assert.equal(runNextChoices({ ...ticketless, opened: [] } as unknown as Readable, ALL_PIPES(), runs()), null);
+  assert.equal(runNextChoices({ ...readable('t3'), ticket: null } as unknown as Readable, ALL_PIPES(), runs()), null);
+});
+
+test('previewRun draws through pipelineRows', () => {
+  const run = previewRun(pipe('hotfix'));
+  assert.deepEqual(
+    { id: run.id, status: run.status, ticket: run.ticket, pipeline: (run as any).pipeline, timeline: run.timeline },
+    { id: 'preview', status: 'pending', ticket: null, pipeline: 'hotfix', timeline: [] },
+  );
+  assert.deepEqual(run.steps[1], { id: 'reproduce', stage: 'reproduce', role: 'core', kind: 'agent', status: 'pending', attempts: 0, outputs: {} });
+  assert.deepEqual(run.loops, [{ id: 'review', from: 'review', to: 'fix', max: 3, atCap: 'continue', round: 0 }]);
+  const rows = pipelineRows(run, { narrow: false, unfolded: [] });
+  const shown = rows.map((r) => r.step.id);
+  for (const id of ['reproduce', 'fix', 'deliver']) assert.ok(shown.includes(id), id);
+  assert.deepEqual(shown, ['intake', 'reproduce', 'fix', 'review', 'deliver']);
+  assert.ok(rows.every((r) => r.state === 'future'));
+  assert.deepEqual(pipelineSpans(rows, run), [{ from: 3, to: 2, tone: 'dim' }]);
+  assert.deepEqual(pipelineMarks(rows, null), { active: -1, reached: -1, stripAt: -1 });
+  const feature = pipelineRows(previewRun(pipe('feature')), { narrow: false, unfolded: [] });
+  assert.deepEqual(feature.map((r) => [r.type, r.step.id]).slice(1, 3), [['stage', 'groom'], ['hook', 'approve-groom']]);
+});
+
+test('previewSide is below at 280 and 380 and right at 720', () => {
+  assert.equal(previewSide(280), 'below');
+  assert.equal(previewSide(380), 'below');
+  assert.equal(previewSide(719), 'below');
+  assert.equal(previewSide(720), 'right');
+  assert.equal(previewSide(1200), 'right');
+});
+
+test('actionArgv pick approves the gate with the picked pipeline', () => {
+  const r = byId('t22');
+  assert.deepEqual(actionArgv('pick', r, 'hotfix'), ['approve', r.id, '--pipeline', 'hotfix']);
+  for (const name of [undefined, '', '  ']) assert.throws(() => actionArgv('pick', r, name), { message: 'Pick a pipeline' });
+});
+
+const HOTFIX = 't21-hotfix-20261121-070000-4b5c';
+const TRIAGE = 't21-triage-20261121-065800-9e3a';
+
+test('linkedLine for a child and for a parent', () => {
+  const rs = runs();
+  const of = (id: string) => rs.find((r) => r.id === id)!;
+  // the parent is on the child's own ticket, so the line names its pipeline
+  assert.deepEqual(linkedLine(of(HOTFIX), rs), { text: '↳ from triage', run: TRIAGE });
+  assert.deepEqual(linkedLine(of(TRIAGE), rs), { text: '→ 1 run', run: HOTFIX });
+  assert.equal(linkedLine(readable('t8'), rs), null);
+  assert.equal(linkedLine(byId('t5'), rs), null);
+});
+
+test('linkedLine names a parent on another ticket by its number, a ticketless one by its pipeline, a gone one by its id', () => {
+  const child = { ...readable('t8'), parent: 'p1' } as Readable;
+  const parent = (over: Partial<Readable>) => ({ ...readable('t3'), id: 'p1', children: [], ...over }) as Readable;
+  assert.deepEqual(linkedLine(child, [child, parent({})]), { text: '↳ from #3', run: 'p1' });
+  assert.deepEqual(linkedLine(child, [child, parent({ ticket: null, pipeline: 'spike' })]), { text: '↳ from spike', run: 'p1' });
+  assert.deepEqual(linkedLine(child, [child]), { text: '↳ from p1', run: null });
+  const two = parent({ children: [{ id: 'c1', pipeline: 'hotfix', status: 'running' }, { id: 'c2', pipeline: 'hotfix', status: 'completed' }] });
+  // neither child is listed: nothing to select
+  assert.deepEqual(linkedLine(two, [two]), { text: '→ 2 runs', run: null });
+});
+
+const EPIC = 't23-epic-20261121-090000-7c2a';
+
+test('linkedLine on a fan-out parent counts its slices and how many started; clicking it picks the first listed child', () => {
+  const rs = runs();
+  const of = (id: string) => rs.find((r) => r.id === id)!;
+  assert.deepEqual(linkedLine(of(EPIC), rs), { text: '→ 3 slices · 2 started', run: `${EPIC}-s1` });
+  // slice 1 deleted: the first listed child is slice 2
+  const gone = rs.filter((r) => r.id !== `${EPIC}-s1`);
+  assert.deepEqual(linkedLine(of(EPIC), gone), { text: '→ 3 slices · 2 started', run: `${EPIC}-s2` });
+  // none listed: nothing to select
+  assert.deepEqual(linkedLine(of(EPIC), [of(EPIC)]), { text: '→ 3 slices · 2 started', run: null });
+  const all = { ...(of(EPIC) as Readable), children: (of(EPIC) as Readable).children.map((c) => ({ ...c, status: 'running' as const })) };
+  assert.deepEqual(linkedLine(all, rs), { text: '→ 3 slices', run: `${EPIC}-s1` });
+});
+
+test('linkedLine on a slice names its index, the parent ticket and its title', () => {
+  const rs = runs();
+  const s2 = rs.find((r) => r.id === `${EPIC}-s2`)!;
+  assert.deepEqual(linkedLine(s2, rs), { text: '↳ slice 2 of #23: Panel rows', run: EPIC });
+  const parent = { ...(rs.find((r) => r.id === EPIC) as Readable), ticket: null };
+  assert.deepEqual(linkedLine(s2, [s2, parent]), { text: '↳ slice 2 of epic: Panel rows', run: EPIC });
+});
+
+test('linkedLine on a routed fan-out parent says where it came from and its slices', () => {
+  const rs = runs();
+  const epic = { ...(rs.find((r) => r.id === EPIC) as Readable), parent: TRIAGE };
+  assert.deepEqual(linkedLine(epic, [...rs.filter((r) => r.id !== EPIC), epic]), { text: '↳ from #21 · → 3 slices · 2 started', run: TRIAGE });
+});
+
+test("sliceRows shows each slice's step and PR", () => {
+  const rs = runs();
+  const of = (id: string) => rs.find((r) => r.id === id)!;
+  assert.deepEqual(sliceRows(of(EPIC), rs), [
+    { index: 1, title: 'Status field', id: `${EPIC}-s1`, status: 'completed', stepLabel: 'Done', prUrl: 'https://github.com/Zidious/percolator/pull/31' },
+    { index: 2, title: 'Panel rows', id: `${EPIC}-s2`, status: 'running', stepLabel: 'review' },
+    { index: 3, title: 'Docs', id: `${EPIC}-s3`, status: 'pending', stepLabel: 'Not started' },
+  ]);
+  // a linked run that is not a slice, a run with no children and an unreadable one have none
+  assert.deepEqual(sliceRows(of(TRIAGE), rs), []);
+  assert.deepEqual(sliceRows(readable('t8'), rs), []);
+  assert.deepEqual(sliceRows(byId('t5'), rs), []);
+});
+
+test('sliceRows reads a slice no longer listed from its child entry', () => {
+  const parent = {
+    ...readable('t3'),
+    children: [
+      { id: 'p-s1', pipeline: 'feature', status: 'completed', slice: { index: 1, title: 'A' } },
+      { id: 'p-s2', pipeline: 'feature', status: 'failed', slice: { index: 2, title: 'B' } },
+    ],
+  } as Readable;
+  assert.deepEqual(sliceRows(parent, [parent]), [
+    { index: 1, title: 'A', id: 'p-s1', status: 'completed', stepLabel: 'Done' },
+    { index: 2, title: 'B', id: 'p-s2', status: 'failed', stepLabel: 'Failed' },
+  ]);
+});
+
+test('fanOutRow is the row of the last stage, where the fan-out step sits; -1 without one', () => {
+  const epic = runs().find((r) => r.id === EPIC)!;
+  const rows = pipelineRows(epic, { narrow: false, unfolded: [] });
+  assert.equal(rows[fanOutRow(rows)]!.step.id, 'implement');
+  assert.equal(fanOutRow([]), -1);
+});
+
+test('watcherState labels and argv', () => {
+  const st = load();
+  assert.deepEqual(watcherState(st), { alive: true, label: 'Watching 1 repo', argv: ['watch', 'stop'] });
+  const two = { ...st, watcher: { alive: true, since: 'x', repos: ['/a', '/b'] } };
+  assert.equal(watcherState(two).label, 'Watching 2 repos');
+  const off = { ...st, watcher: { alive: false, repos: [] } };
+  assert.deepEqual(watcherState(off), { alive: false, label: 'Not watching', argv: ['watch', '--repo', '/home/me/src/percolator'] });
+  // with no earlier runs there is no repo to watch: no Start button
+  assert.deepEqual(watcherState({ schema: 2, runs: [], watcher: { alive: false, repos: [] } }), { alive: false, label: 'Not watching', argv: null });
+  // a perc without the watcher field reads as not watching
+  const { watcher: _w, ...older } = st;
+  assert.equal(watcherState(older as StatusJson).label, 'Not watching');
+});
+
+test('watcherState says starting… after Start until the heartbeat appears, and offers nothing meanwhile', () => {
+  const off = { ...load(), watcher: { alive: false, repos: [] } };
+  const now = Date.parse('2026-11-21T10:00:00.000Z');
+  const live = [{ address: 'w:1', name: 'percolator-watch' }];
+  assert.deepEqual(watcherState(off, { startedAt: now - 5_000, now, live }), { alive: false, label: 'Starting…', argv: null });
+  assert.deepEqual(watcherState(off, { startedAt: now - 5_000, now, live: [] }), { alive: false, label: 'Starting…', argv: null });
+  // the heartbeat came: watching
+  assert.equal(watcherState(load(), { startedAt: now - 5_000, now, live }).label, 'Watching 1 repo');
+  // a minute without a heartbeat: starting is over
+  assert.equal(watcherState(off, { startedAt: now - 61_000, now, live: [] }).label, 'Not watching');
+});
+
+test('watcherState offers Stop when the heartbeat is stale but the percolator-watch terminal is live', () => {
+  const off = { ...load(), watcher: { alive: false, repos: ['/r'] } };
+  const live = [{ address: 'w:1', name: 'percolator-watch' }];
+  assert.deepEqual(watcherState(off, { startedAt: null, now: 0, live }), { alive: false, label: 'Watcher not responding', argv: ['watch', 'stop'] });
+  assert.equal(watcherState(off, { startedAt: null, now: 0, live: [{ address: 'x', name: 'other' }] }).label, 'Not watching');
 });

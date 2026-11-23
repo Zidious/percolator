@@ -74,10 +74,13 @@ export async function planDelete(runId: string, deps: DriverDeps): Promise<Delet
     listing = { dir, error: (err as Error).message };
   }
   const run = await runStatusJson(listing, deps);
+  // a ticketless run has none: the summary names its pipeline instead
   const ticket =
     run.status !== 'unreadable'
-      ? { ref: run.ticket.ref, ...(run.ticket.title !== undefined ? { title: run.ticket.title } : {}) }
-      : meta !== undefined
+      ? run.ticket === null
+        ? undefined
+        : { ref: run.ticket.ref, ...(run.ticket.title !== undefined ? { title: run.ticket.title } : {}) }
+      : meta?.ticket !== undefined
         ? { ref: meta.ticket }
         : undefined;
   return {

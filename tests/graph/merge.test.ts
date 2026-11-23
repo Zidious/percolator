@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeLayers, LockViolation } from '../../src/graph/merge.ts';
+import { mergeLayers, mergePipelines, LockViolation } from '../../src/graph/merge.ts';
 import { CORE_STAGES, STAGE_CONTRACTS, CORE_GROOM_GATE } from '../../src/graph/core.ts';
 import type { Layer } from '../../src/grounds/mappings.ts';
+import { buildGraph } from '../../src/graph/build.ts';
 
 const L = (source: string, fragment: Layer['fragment']): Layer => ({ source, fragment });
 
@@ -228,4 +229,185 @@ test('an identical restatement from another file still passes', () => {
   ]);
   assert.equal(m.bindings.review!.source, 'ground:co');
   assert.deepEqual(m.bindings.review!.value, [LOCKED]);
+});
+
+test('top-level bindings merge into feature', () => {
+  const r = mergePipelines([L('a', { bindings: { plan: { agent: 'claude' } } })]);
+  assert.equal(r.feature!.bindings.plan!.value[0]!.agent, 'claude');
+  assert.equal(r.feature!.name, 'feature');
+});
+
+test('pipelines merge per pipeline across layers', () => {
+  const r = mergePipelines([
+    L('a', { pipelines: { hotfix: { bindings: { fix: { agent: 'claude' } } } } }),
+    L('b', { pipelines: { hotfix: { bindings: { fix: { agent: 'codex' } } } } }),
+  ]);
+  assert.equal(r.hotfix!.bindings.fix!.value[0]!.agent, 'codex');
+  assert.equal(r.hotfix!.bindings.fix!.source, 'b');
+});
+
+test('top-level rules apply to every pipeline', () => {
+  const r = mergePipelines([
+    L('a', { rules: { allowed_agents: ['claude'] } }),
+    L('b', { pipelines: { hotfix: { stages: ['intake', 'deliver'] } } }),
+  ]);
+  assert.deepEqual(r.hotfix!.rules.map((x) => x.source), ['a']);
+  assert.deepEqual(r.feature!.rules.map((x) => x.source), ['a']);
+});
+
+test('rules are marked global or pipeline', () => {
+  const r = mergePipelines([
+    L('a', { rules: { allowed_agents: ['claude'] } }),
+    L('b', { pipelines: { hotfix: { stages: ['intake', 'deliver'], rules: { allowed_models: ['m'] } } } }),
+  ]);
+  assert.deepEqual(r.hotfix!.rules.map((x) => [x.source, x.scope]), [
+    ['a', 'global'],
+    ['b', 'pipeline'],
+  ]);
+  assert.deepEqual(r.feature!.rules.map((x) => [x.source, x.scope]), [['a', 'global']]);
+});
+
+test('the groom gate is only in feature', () => {
+  const r = mergePipelines([L('a', { pipelines: { hotfix: { stages: ['intake', 'groom', 'deliver'] } } })]);
+  assert.equal('approve-groom' in r.feature!.nodes, true);
+  assert.equal('approve-groom' in r.hotfix!.nodes, false);
+});
+
+test('pipeline headers merge with their sources', () => {
+  const r = mergePipelines([
+    L('a', { pipelines: { hotfix: { stages: ['intake', 'fix', 'deliver'], exit: 'pr' } } }),
+    L('b', { pipelines: { hotfix: { ticket: 'optional' } } }),
+  ]);
+  assert.deepEqual(r.hotfix!.header.value, { stages: ['intake', 'fix', 'deliver'], exit: 'pr', ticket: 'optional' });
+  assert.equal(r.hotfix!.header.source, 'b');
+  assert.deepEqual(r.feature!.header.value.stages, [...CORE_STAGES]);
+});
+
+test('router keys are part of the pipeline header', () => {
+  const r = mergePipelines([
+    L('a', { pipelines: { triage: { router: true, stages: ['intake', 'route'], routes: [{ label: 'bug', to: 'hotfix' }] } } }),
+    L('b', { pipelines: { triage: { choose: { agent: 'claude', from: ['hotfix'] }, fallback: 'hotfix' } } }),
+  ]);
+  assert.deepEqual(r.triage!.header.value, {
+    router: true,
+    stages: ['intake', 'route'],
+    routes: [{ label: 'bug', to: 'hotfix' }],
+    choose: { agent: 'claude', from: ['hotfix'] },
+    fallback: 'hotfix',
+  });
+});
+
+test('triggers are part of the pipeline header', () => {
+  const r = mergePipelines([L('a', { pipelines: { p: { stages: ['intake', 'deliver'], triggers: [{ label: 'x' }] } } })]);
+  assert.deepEqual(r.p!.header.value.triggers, [{ label: 'x' }]);
+});
+
+test('fan_out is part of the pipeline header', () => {
+  const fan_out = { stage: 'implement', slices: { from: 'plan', output: 'slices' } };
+  const r = mergePipelines([L('a', { pipelines: { p: { stages: ['intake', 'deliver'], fan_out } } })]);
+  assert.deepEqual(r.p!.header.value.fan_out, fan_out);
+});
+
+test('next is part of the pipeline header', () => {
+  const r = mergePipelines([L('a', { pipelines: { split: { stages: ['intake', 'deliver'], exit: 'issue', next: 'hotfix' } } })]);
+  assert.equal(r.split!.header.value.next, 'hotfix');
+});
+
+const LOCKED_HOTFIX = { required: true, stages: ['intake', 'fix', 'deliver'], exit: 'pr' as const };
+const groundLayer: Layer = {
+  source: 'ground:co/p.yaml',
+  fragment: { pipelines: { hotfix: LOCKED_HOTFIX } },
+  locator: { file: 'p.yaml', lines: { 'pipelines.hotfix': 3 } },
+};
+
+test('a locked pipeline header may only be restated', () => {
+  assert.throws(
+    () =>
+      mergePipelines([
+        groundLayer,
+        {
+          source: 'profile:default',
+          fragment: { pipelines: { hotfix: { stages: ['intake', 'deliver'] } } },
+          locator: { file: 'c.yaml', lines: { 'profiles.default.pipelines.hotfix': 7 }, prefix: 'profiles.default' },
+        },
+      ]),
+    (err: unknown) => {
+      assert.ok(err instanceof LockViolation);
+      assert.equal(err.path, 'profiles.default.pipelines.hotfix');
+      assert.equal(
+        err.message,
+        'c.yaml:7: profiles.default.pipelines.hotfix: locked by p.yaml:3 (required: true); remove this pipeline or restate it exactly',
+      );
+      return true;
+    },
+  );
+});
+
+test('restating a locked header exactly is allowed', () => {
+  const r = mergePipelines([groundLayer, L('profile:default', { pipelines: { hotfix: { ...LOCKED_HOTFIX } } })]);
+  assert.equal(r.hotfix!.header.source, 'ground:co/p.yaml');
+});
+
+test('bindings inside a pipeline locate under pipelines.<p>', () => {
+  const r = mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: { pipelines: { hotfix: { bindings: { fix: { agent: 'claude' } } } } },
+      locator: { file: 'c.yaml', lines: {}, prefix: 'profiles.default' },
+    },
+  ]);
+  assert.equal(r.hotfix!.bindings.fix!.locator!.prefix, 'profiles.default.pipelines.hotfix');
+});
+
+const SIX = {
+  intake: { agent: 'claude' },
+  groom: { agent: 'claude' },
+  plan: { agent: 'claude' },
+  implement: { agent: 'claude' },
+  review: { agent: 'claude' },
+  deliver: { builtin: 'github.open_pr' },
+};
+
+test('locking feature with required: true alone keeps the approve-groom gate', () => {
+  const m = mergePipelines([L('p', { bindings: SIX, pipelines: { feature: { required: true } } })]);
+  assert.ok('approve-groom' in m.feature!.nodes);
+  assert.deepEqual(m.feature!.header.value.stages, CORE_STAGES);
+  assert.ok(buildGraph(m.feature!).steps.some((s) => s.id === 'approve-groom'));
+});
+
+test('locking feature with required + description keeps the core stages and the gate', () => {
+  const m = mergePipelines([L('p', { bindings: SIX, pipelines: { feature: { required: true, description: 'Features' } } })]);
+  assert.ok('approve-groom' in m.feature!.nodes);
+  assert.equal(m.feature!.header.value.description, 'Features');
+  assert.deepEqual(m.feature!.header.value.stages, CORE_STAGES);
+});
+
+test('a header lock keeps the header keys of earlier layers', () => {
+  const m = mergePipelines([
+    L('ground:co', { pipelines: { docs: { stages: ['intake', 'deliver'], exit: 'comment' } } }),
+    L('profile:w', { pipelines: { docs: { required: true, description: 'Docs' } } }),
+  ]);
+  assert.deepEqual(m.docs!.header.value, { stages: ['intake', 'deliver'], exit: 'comment', description: 'Docs' });
+  assert.equal(m.docs!.header.locked, true);
+});
+
+test('after a merged header lock, a later layer may restate some of its keys', () => {
+  const m = mergePipelines([
+    L('ground:co', { pipelines: { docs: { stages: ['intake', 'deliver'], exit: 'comment' } } }),
+    L('profile:w', { pipelines: { docs: { required: true, description: 'Docs' } } }),
+    L('repo', { pipelines: { docs: { exit: 'comment' } } }),
+  ]);
+  assert.equal(m.docs!.header.source, 'profile:w');
+});
+
+test('after a merged header lock, changing an earlier layer key is a lock violation', () => {
+  assert.throws(
+    () =>
+      mergePipelines([
+        L('ground:co', { pipelines: { docs: { stages: ['intake', 'deliver'], exit: 'comment' } } }),
+        L('profile:w', { pipelines: { docs: { required: true, description: 'Docs' } } }),
+        L('repo', { pipelines: { docs: { exit: 'issue' } } }),
+      ]),
+    { message: 'repo: pipelines.docs: locked by profile:w (required: true); remove this pipeline or restate it exactly' },
+  );
 });

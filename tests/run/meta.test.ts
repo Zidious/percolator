@@ -4,13 +4,15 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
-import { driverName, detectBase, listRuns, newRunId, readRunMeta, writeRunMeta } from '../../src/run/meta.ts';
+import { driverName, detectBase, listRuns, newRunId, readRunMeta, spaceName, writeRunMeta } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { makeRepo, git } from '../helpers/git-repo.ts';
 
 const meta = (runId: string, createdAt: string): RunMeta => ({
-  version: 1,
+  version: 2,
   runId,
+  pipeline: 'feature',
+  inputs: {},
   ticket: 'o/r#7',
   repo: 'github.com/o/r',
   issue: 7,
@@ -63,8 +65,98 @@ test('readRunMeta reports a missing file', async () => {
 });
 
 test('newRunId is t<issue>-<YYYYMMDD>-<HHMMSS>-<rand> in UTC', () => {
-  assert.equal(newRunId(42, new Date('2026-03-04T05:06:07Z'), 'ab12'), 't42-20260304-050607-ab12');
-  assert.match(newRunId(1, new Date()), /^t1-\d{8}-\d{6}-[0-9a-f]{4}$/);
+  assert.equal(newRunId({ issue: 42, pipeline: 'feature' }, new Date('2026-03-04T05:06:07Z'), 'ab12'), 't42-20260304-050607-ab12');
+  assert.match(newRunId({ issue: 1, pipeline: 'feature' }, new Date()), /^t1-\d{8}-\d{6}-[0-9a-f]{4}$/);
+});
+
+const AT = new Date('2026-03-04T05:06:07Z');
+
+test('newRunId for feature on a ticket is unchanged', () => {
+  assert.equal(newRunId({ issue: 12, pipeline: 'feature' }, AT, 'ab12'), 't12-20260304-050607-ab12');
+});
+
+test('newRunId for another pipeline on a ticket', () => {
+  assert.equal(newRunId({ issue: 12, pipeline: 'hotfix' }, AT, 'ab12'), 't12-hotfix-20260304-050607-ab12');
+});
+
+test('newRunId for a ticketless run', () => {
+  assert.equal(newRunId({ pipeline: 'dd-alert' }, AT, 'ab12'), 'dd-alert-20260304-050607-ab12');
+});
+
+test('spaceName for a ticketed run keeps the issue number', () => {
+  assert.equal(spaceName({ repo: 'github.com/o/repo', issue: 7, pipeline: 'feature', runId: 't7-20260304-050607-ab12' }), 'repo #7 · ab12');
+});
+
+test('spaceName for a ticketless run', () => {
+  assert.equal(spaceName({ repo: 'github.com/o/repo', pipeline: 'dd-alert', runId: 'dd-alert-20260304-050607-ab12' }), 'repo dd-alert · ab12');
+});
+
+test('readRunMeta accepts version 1 as pipeline feature', async () => {
+  const { dir, cleanup } = await tmp();
+  try {
+    const { pipeline: _p, inputs: _i, ...v2 } = meta('r1', '2026-01-01T00:00:00.000Z');
+    const v1 = { ...v2, version: 1 };
+    const text = JSON.stringify(v1, null, 2);
+    await fs.writeFile(path.join(dir, 'run.json'), text);
+    assert.deepEqual(await readRunMeta(dir), { ...v1, pipeline: 'feature', inputs: {} });
+    // never rewritten
+    assert.equal(await fs.readFile(path.join(dir, 'run.json'), 'utf8'), text);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('a ticketless v2 run.json round-trips without ticket or issue', async () => {
+  const { dir, cleanup } = await tmp();
+  try {
+    const { ticket: _t, issue: _n, ...rest } = meta('dd-alert-20260304-050607-ab12', '2026-01-01T00:00:00.000Z');
+    const m: RunMeta = { ...rest, pipeline: 'dd-alert', inputs: { service: 'api' }, parent: 'p1' };
+    await writeRunMeta(dir, m);
+    assert.deepEqual(await readRunMeta(dir), m);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('readRunMeta refuses a v2 run.json without a pipeline', async () => {
+  const { dir, cleanup } = await tmp();
+  try {
+    const { pipeline: _p, ...rest } = meta('r1', 'x');
+    await fs.writeFile(path.join(dir, 'run.json'), JSON.stringify(rest));
+    await assert.rejects(readRunMeta(dir), {
+      message: `Run metadata ${path.join(dir, 'run.json')} is missing or invalid: pipeline`,
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
+test('fanOut round-trips in run.json', async () => {
+  const { dir, cleanup } = await tmp();
+  try {
+    const m: RunMeta = {
+      ...meta('p1-s2', '2026-01-01T00:00:00.000Z'),
+      parent: 'p1',
+      fanOut: { parent: 'p1', slice: 2, from: 'implement', title: 'Second slice' },
+    };
+    await writeRunMeta(dir, m);
+    assert.deepEqual(await readRunMeta(dir), m);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('readRunMeta refuses a fanOut without a slice number', async () => {
+  const { dir, cleanup } = await tmp();
+  try {
+    const bad = { ...meta('p1-s2', 'x'), parent: 'p1', fanOut: { parent: 'p1', slice: 'two', from: 'implement', title: 't' } };
+    await fs.writeFile(path.join(dir, 'run.json'), JSON.stringify(bad));
+    await assert.rejects(readRunMeta(dir), {
+      message: `Run metadata ${path.join(dir, 'run.json')} is missing or invalid: fanOut`,
+    });
+  } finally {
+    await cleanup();
+  }
 });
 
 test('driverName uses terminalName with @driver, attempt 0', () => {

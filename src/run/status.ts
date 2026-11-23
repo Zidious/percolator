@@ -4,19 +4,24 @@ import path from 'node:path';
 import { STAGES } from '../config/schema.ts';
 import type { RunState, StepRecord } from '../engine/state.ts';
 import { loadState } from '../engine/state.ts';
+import { openedIssues } from '../tracker/exits/issues.ts';
 import { readWaiting } from '../tracker/gate.ts';
 import type { Waiting } from '../tracker/gate.ts';
 import { liveness, prUrl } from './drive.ts';
 import { readRunGraph } from './graph-file.ts';
 import type { RunGraphLoop, RunGraphStep } from './graph-file.ts';
-import { lockIsLive, readDriverLock } from './lock.ts';
+import { lockIsLive, pidAlive, readDriverLock } from './lock.ts';
 import type { DriverLock } from './lock.ts';
+import { readFanOut } from './fan-out.ts';
+import type { FanOutFile } from './fan-out.ts';
 import { listRuns } from './meta.ts';
 import type { RunListing, RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
+import { parsePick } from './route.ts';
+import { watcherStatus } from '../watch/watch.ts';
 
 export type AttentionKind = 'gate' | 'cap' | 'paused' | 'failed' | 'stalled' | 'agent';
-export type Action = 'approve' | 'reject' | 'grant' | 'resume' | 'clean' | 'open-pane';
+export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'clean' | 'open-pane';
 export type ReviewItem = { step: string; key: string; path: string };
 export type AttentionJson = {
   kind: AttentionKind;
@@ -29,6 +34,8 @@ export type AttentionJson = {
   commands?: string[];
   terminal?: string;
   agentState?: string;
+  /** a pick-pipeline gate only: the pipelines `pick` may name (`perc approve <id> --pipeline <name>`) */
+  choices?: string[];
 };
 export type StepJson = RunGraphStep & {
   status: 'pending' | 'running' | 'waiting' | StepRecord['status'];
@@ -54,10 +61,24 @@ export type AttemptJson = {
 export type CapJson = { kind: 'cap'; loop: string; from: string; to: string; max: number; at: string };
 export type TimelineJson = AttemptJson | CapJson;
 export type LoopJson = RunGraphLoop & { round: number };
+export type TicketJson = { ref: string; number: number; title?: string; url?: string };
+/** A run this one started (route or fan-out child); `slice` only on a fan-out child. */
+export type ChildJson = { id: string; pipeline: string; status: RunStatusJson['status'] | 'pending'; slice?: { index: number; title: string } };
 export type RunStatusJson =
   | {
       id: string;
-      ticket: { ref: string; number: number; title?: string; url?: string };
+      /** the pipeline the run was started on (`feature` for a run from before pipelines) */
+      pipeline: string;
+      /** the `--input` values the run was started with */
+      inputs: Record<string, string>;
+      /** null on a ticketless run */
+      ticket: TicketJson | null;
+      /** the run that started this one, else null */
+      parent: string | null;
+      /** fan-out slices by index (pending until started), then listed runs whose parent is this run, in listing order */
+      children: ChildJson[];
+      /** the issues the run's exit opened, from its latest `issue_urls` output */
+      opened: { ref: string; url: string }[];
       repo: string;
       branch: string;
       worktree: string;
@@ -75,7 +96,9 @@ export type RunStatusJson =
       graph: 'full' | 'history';
     }
   | { id: string; status: 'unreadable'; error: string };
-export type StatusJson = { schema: 1; runs: RunStatusJson[] };
+/** Whether `perc watch` runs (same host, live pid, fresh heartbeat), since when, and the repos it watches. */
+export type WatcherJson = { alive: boolean; since?: string; repos: string[] };
+export type StatusJson = { schema: 2; runs: RunStatusJson[]; watcher: WatcherJson };
 
 /** How the driver was judged: its hc terminal, its `driver.json` lock, or neither (`hcError` when hc failed). */
 export type DriverLiveness = { alive: boolean | null; lock?: DriverLock; hcError?: string };
@@ -124,8 +147,9 @@ async function readDecision(stepDir: string): Promise<'approve' | 'reject' | und
 
 const exists = (p: string) => fs.stat(p).then(() => true, () => false);
 
-async function readTicket(dir: string, meta: RunMeta): Promise<{ ref: string; number: number; title?: string; url?: string }> {
-  const ticket = { ref: meta.ticket, number: meta.issue };
+async function readTicket(dir: string, meta: RunMeta): Promise<TicketJson | null> {
+  if (meta.ticket === undefined) return null;
+  const ticket = { ref: meta.ticket, number: meta.issue ?? 0 };
   try {
     const i = JSON.parse(await fs.readFile(path.join(dir, 'issue.json'), 'utf8')) as { title?: unknown; url?: unknown };
     return {
@@ -217,20 +241,54 @@ export type YourTurnInput = {
   kind: AttentionKind;
   runId: string;
   step: string;
-  ticket: string;
+  /** absent on a ticketless run */
+  ticket?: string;
+  /** the run's pipeline and inputs, so "start it again" starts the same kind of run */
+  pipeline?: string;
+  inputs?: Record<string, string>;
   repoRoot: string;
   reason?: string;
   decision?: 'approve' | 'reject';
   terminal?: string;
   agentState?: string;
+  /** a failed fan-out slice: its parent run, which starts the slice again once it is deleted */
+  sliceOf?: string;
+  /** a pick-pipeline gate: the pipelines `perc approve --pipeline` may name */
+  choices?: string[];
 };
+
+/**
+ * A value as typed (the repo, an input after `--input k=`), backslashes kept as they are. A blank or a `'`:
+ * double-quoted, which sh, PowerShell and cmd read alike. A `"`, `$` or backtick: single-quoted, which sh and
+ * PowerShell take as typed (no shell reads a `\"` escape alike). Both kinds of quote: PowerShell's `''`, as
+ * Windows is the owner's OS.
+ */
+const quoted = (v: string): string => {
+  if (!/[\s"'$`]/.test(v)) return v;
+  if (!/["$`]/.test(v)) return `"${v}"`;
+  return `'${v.replace(/'/g, "''")}'`;
+};
+
+/** The `perc run` that starts the same kind of run again: its ticket, its pipeline (unless feature) and its inputs. */
+export function runAgain(a: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs' | 'repoRoot'>): string {
+  const pipeline = a.pipeline !== undefined && a.pipeline !== 'feature' ? [`--pipeline ${a.pipeline}`] : [];
+  const inputs = Object.entries(a.inputs ?? {}).map(([k, v]) => `--input ${k}=${quoted(v)}`);
+  return ['perc run', ...(a.ticket ? [a.ticket] : []), ...pipeline, ...inputs, `--repo ${quoted(a.repoRoot)}`].join(' ');
+}
 
 /** What the owner has to do next, as one sentence plus the exact commands to type. Shared by `perc status` and the JSON. */
 export function yourTurn(a: YourTurnInput): { message: string; detail?: string; next: string[] } {
   const resume = [`perc resume ${a.runId}`];
   switch (a.kind) {
     case 'gate':
-      return { message: `${a.step} is waiting for approval`, next: [`perc approve ${a.runId}`, `perc reject ${a.runId} "<what to change>"`] };
+      return {
+        // a ticketless run has no issue for the gate to comment on
+        message: a.ticket ? `${a.step} is waiting for approval` : 'approve or reject here (no issue to comment on)',
+        next: [
+          ...(a.choices !== undefined ? a.choices.map((c) => `perc approve ${a.runId} --pipeline ${c}`) : [`perc approve ${a.runId}`]),
+          `perc reject ${a.runId} "<what to change>"`,
+        ],
+      };
     case 'cap':
       return {
         message: `${a.step} hit its cap (${a.reason})`,
@@ -240,10 +298,17 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
     case 'paused':
       return { message: `${a.step} paused: ${a.reason}`, next: resume };
     case 'failed':
+      if (a.sliceOf !== undefined) {
+        return {
+          message: `${a.step} failed`,
+          detail: `Delete this slice (its branch stays), then resume ${a.sliceOf} to run it again`,
+          next: [`perc delete ${a.runId}`, `perc resume ${a.sliceOf}`],
+        };
+      }
       return {
         message: `${a.step} failed`,
         detail: "A failed run can't be resumed. Start a new run for the ticket, then delete this one (or clean it up to keep its record).",
-        next: [`perc run ${a.ticket} --repo ${a.repoRoot}`, `perc delete ${a.runId}`, `perc clean ${a.runId}`],
+        next: [runAgain(a), `perc delete ${a.runId}`, `perc clean ${a.runId}`],
       };
     case 'stalled':
       if (a.decision !== undefined) return { message: `${a.decision === 'approve' ? 'approved' : 'rejected'}; resume to continue`, next: resume };
@@ -257,9 +322,28 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
   }
 }
 
-/** The commands `yourTurn` gives for an attention record (they depend on its kind and the run, not on its reason). */
-export function attentionNext(a: AttentionJson, run: { id: string; ticket: { ref: string }; repo: string }): string[] {
-  return yourTurn({ kind: a.kind, runId: run.id, step: '', ticket: run.ticket.ref, repoRoot: run.repo }).next;
+/**
+ * The commands `yourTurn` gives for an attention record (they depend on its kind and the run, not on its reason).
+ * A failed run with a parent and no `commands` is a fan-out slice (attentionOf gives a slice none).
+ */
+export function attentionNext(
+  a: AttentionJson,
+  run: { id: string; ticket: { ref: string } | null; pipeline: string; inputs: Record<string, string>; repo: string; parent?: string | null },
+): string[] {
+  const again = { ticket: run.ticket?.ref, pipeline: run.pipeline, inputs: run.inputs, repoRoot: run.repo };
+  const slice = a.kind === 'failed' && a.commands === undefined && typeof run.parent === 'string' ? { sliceOf: run.parent } : {};
+  const choices = a.choices !== undefined ? { choices: a.choices } : {};
+  return yourTurn({ kind: a.kind, runId: run.id, step: '', ...again, ...slice, ...choices }).next;
+}
+
+const PICK_GATE = 'pick-pipeline';
+
+/** The choose agent's latest valid pick among `choices`, if it made one (sure or not). */
+async function suggestion(dir: string, state: RunState, choices: string[]): Promise<string | undefined> {
+  const rel = latest(state, 'route.1')?.outputs['pick'];
+  if (rel === undefined) return undefined;
+  const text = await fs.readFile(path.join(dir, rel), 'utf8').catch(() => '');
+  return parsePick(text, choices).pipeline;
 }
 
 async function attentionOf(o: {
@@ -273,8 +357,9 @@ async function attentionOf(o: {
 }): Promise<AttentionJson | undefined> {
   const { dir, meta, state, waiting, alive } = o;
   const lastEnd = state.history.at(-1)?.endedAt || meta.createdAt;
+  const again = { ticket: meta.ticket, pipeline: meta.pipeline, inputs: meta.inputs, repoRoot: meta.repoRoot };
   const turn = (kind: AttentionKind, step: string | undefined, x: Partial<YourTurnInput> = {}) => {
-    const t = yourTurn({ kind, runId: meta.runId, step: step ?? STAGES[0], ticket: meta.ticket, repoRoot: meta.repoRoot, ...x });
+    const t = yourTurn({ kind, runId: meta.runId, step: step ?? STAGES[0], ...again, ...x });
     return { message: t.message, ...(t.detail !== undefined ? { detail: t.detail } : {}) };
   };
   const failing = (step: string | undefined) => (step === undefined ? [] : review(dir, step, latest(state, step)?.outputs));
@@ -283,11 +368,24 @@ async function attentionOf(o: {
       const d = await readDecision(waiting.stepDir);
       return { kind: 'stalled', since: waiting.since, ...turn('stalled', waiting.stepId, d !== undefined ? { decision: d } : {}), actions: ['resume'] };
     }
+    const choices = o.steps.find((s) => s.id === waiting.stepId && s.id === PICK_GATE)?.choices;
+    if (choices !== undefined) {
+      const suggests = await suggestion(dir, state, choices);
+      return {
+        kind: 'gate',
+        since: waiting.since,
+        message: suggests === undefined ? 'pick the pipeline for this ticket' : `pick the pipeline for this ticket (the agent suggests ${suggests})`,
+        ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
+        review: gateReview(dir, waiting.stepId, o.steps, state),
+        actions: ['pick', 'reject'],
+        choices,
+      };
+    }
     return {
       kind: 'gate',
       since: waiting.since,
       ...turn('gate', waiting.stepId),
-      commentUrl: waiting.commentUrl,
+      ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
       review: gateReview(dir, waiting.stepId, o.steps, state),
       actions: ['approve', 'reject'],
     };
@@ -303,13 +401,15 @@ async function attentionOf(o: {
   // after `perc clean` (no worktree) there is nothing left to do for a failed run
   if (state.status === 'failed') {
     if (!(await exists(meta.worktree))) return undefined;
+    // a slice is started again by its parent, not by a new run
+    const sliceOf = meta.fanOut?.parent;
     return {
       kind: 'failed',
       since: lastEnd,
-      ...turn('failed', state.currentStep),
+      ...turn('failed', state.currentStep, sliceOf !== undefined ? { sliceOf } : {}),
       review: failing(state.currentStep),
       actions: ['clean'],
-      commands: [`perc run ${meta.ticket} --repo ${meta.repoRoot}`],
+      ...(sliceOf === undefined ? { commands: [runAgain(again)] } : {}),
     };
   }
   if (state.status !== 'running') return undefined;
@@ -392,7 +492,60 @@ async function timelineOf(o: {
   return out;
 }
 
-async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps): Promise<RunStatusJson> {
+/** A listed run's status as its status JSON gives it, read cheaply (no hc, no graph); `unreadable` on any error. */
+async function listedStatus(l: RunListing): Promise<RunStatusJson['status']> {
+  if (l.error !== undefined || l.meta === undefined) return 'unreadable';
+  // run.json written, state.json not yet: the run is being started
+  if (l.state === undefined) return 'running';
+  const s = l.state.status;
+  try {
+    return (s === 'running' || s === 'paused') && (await readWaiting(l.dir)) !== undefined ? 'waiting' : s;
+  } catch {
+    return 'unreadable';
+  }
+}
+
+/** A fan-out's slices from `fanout.json`, by index; none when there is none or it can't be read (status never throws on it). */
+async function slicesOf(dir: string): Promise<FanOutFile['children']> {
+  try {
+    const f = await readFanOut(dir);
+    return Array.isArray(f?.children) ? [...f.children].sort((a, b) => a.index - b.index) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The runs this one started: its fan-out slices first, by index (a slice not started yet is `pending`, on this run's
+ * pipeline), then the other listed runs whose `run.json` names it as their parent, in listing order.
+ */
+async function childrenOf(dir: string, meta: RunMeta, listed: RunListing[]): Promise<ChildJson[]> {
+  const linked = listed.filter((l) => l.meta?.parent === meta.runId);
+  const statusOf = async (l: RunListing) => ({ id: l.meta!.runId, pipeline: l.meta!.pipeline, status: await listedStatus(l) });
+  const slices = await slicesOf(dir);
+  const out: ChildJson[] = [];
+  for (const s of slices) {
+    const l = linked.find((x) => x.meta!.runId === s.id);
+    const base = l ? await statusOf(l) : { id: s.id, pipeline: meta.pipeline, status: 'pending' as const };
+    out.push({ ...base, slice: { index: s.index, title: s.title } });
+  }
+  for (const l of linked) if (!slices.some((s) => s.id === l.meta!.runId)) out.push(await statusOf(l));
+  return out;
+}
+
+/** The issues parsed from the latest history record with an `issue_urls` output; none when there is none. */
+async function openedOf(dir: string, state: RunState): Promise<{ ref: string; url: string }[]> {
+  const rel = state.history.findLast((h) => h.outputs['issue_urls'] !== undefined)?.outputs['issue_urls'];
+  if (rel === undefined) return [];
+  try {
+    return openedIssues(await fs.readFile(path.join(dir, rel), 'utf8'));
+  } catch {
+    // a removed output file only means nothing to list
+    return [];
+  }
+}
+
+async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, listed: RunListing[]): Promise<RunStatusJson> {
   const { dir, meta } = l;
   const state = l.state ?? (await loadState(dir));
   const graph = await readRunGraph(dir);
@@ -424,7 +577,12 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps): Pro
   const url = await prUrl(dir, state);
   return {
     id: meta.runId,
+    pipeline: meta.pipeline,
+    inputs: meta.inputs,
     ticket: await readTicket(dir, meta),
+    parent: meta.parent ?? null,
+    children: await childrenOf(dir, meta, listed),
+    opened: await openedOf(dir, state),
     repo: meta.repoRoot,
     branch: meta.branch,
     worktree: meta.worktree,
@@ -447,12 +605,15 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps): Pro
   };
 }
 
-/** One run as the `perc status --json` contract describes it; a run that can't be read is `unreadable`, never thrown. */
-export async function runStatusJson(l: RunListing, deps: DriverDeps): Promise<RunStatusJson> {
+/**
+ * One run as the `perc status --json` contract describes it; a run that can't be read is `unreadable`, never thrown.
+ * `listed` (default: every run under `deps.home`) is where its children are looked for.
+ */
+export async function runStatusJson(l: RunListing, deps: DriverDeps, listed?: RunListing[]): Promise<RunStatusJson> {
   const id = l.meta?.runId ?? path.basename(l.dir);
   if (l.error !== undefined || l.meta === undefined) return { id, status: 'unreadable', error: l.error ?? 'run.json missing' };
   try {
-    return await readRun({ ...l, meta: l.meta }, deps);
+    return await readRun({ ...l, meta: l.meta }, deps, listed ?? (await listRuns(deps.home)));
   } catch (err) {
     return { id, status: 'unreadable', error: (err as Error).message.split('\n')[0]! };
   }
@@ -468,9 +629,10 @@ export async function statusJson(deps: DriverDeps): Promise<StatusJson> {
   const worker = async () => {
     while (next < listed.length) {
       const i = next++;
-      runs[i] = await runStatusJson(listed[i]!, deps);
+      runs[i] = await runStatusJson(listed[i]!, deps, listed);
     }
   };
   await Promise.all(Array.from({ length: Math.min(READ_AT_ONCE, listed.length) }, worker));
-  return { schema: 1, runs };
+  const now = (deps.now ?? (() => new Date()))();
+  return { schema: 2, runs, watcher: await watcherStatus(deps.home, now, deps.pidAlive ?? pidAlive) };
 }

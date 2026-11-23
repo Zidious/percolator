@@ -4,13 +4,17 @@ import path from 'node:path';
 import { ConfigError, loadLocated } from './config/load.ts';
 import type { Located } from './config/load.ts';
 import { locate } from './config/locate.ts';
+import type { Where } from './config/locate.ts';
+import { checkGlobalStages, checkPipelines, pickPipeline, pipelineSpecs } from './config/pipelines.ts';
+import type { PipelineSpec } from './config/pipelines.ts';
 import { GraphFragmentSchema, UserConfigSchema } from './config/schema.ts';
 import type { GraphFragment, GroundSpec, Profile, UserConfig } from './config/schema.ts';
 import type { LineIndex } from './config/locate.ts';
 import { selectProfile } from './config/profile.ts';
 import { buildGraph } from './graph/build.ts';
 import type { Graph } from './graph/build.ts';
-import { mergeLayers } from './graph/merge.ts';
+import { CORE_STAGES } from './graph/core.ts';
+import { mergePipelines } from './graph/merge.ts';
 import { checkRules, RuleViolationError } from './graph/rules.ts';
 import { cliGit } from './grounds/git.ts';
 import type { Git } from './grounds/git.ts';
@@ -18,7 +22,7 @@ import { checkAgents } from './adapters/check.ts';
 import { collectLayers } from './grounds/layers.ts';
 import type { LayerRoot } from './grounds/layers.ts';
 import { checkGraphReferences } from './grounds/mappings.ts';
-import type { ResolvedMapping } from './grounds/mappings.ts';
+import type { Layer, ResolvedMapping } from './grounds/mappings.ts';
 import type { ResolvedGround } from './grounds/resolve.ts';
 import { resolveGrounds } from './grounds/resolve.ts';
 
@@ -26,6 +30,10 @@ export type ValidateOptions = {
   configFile: string;
   cwd: string;
   profile?: string;
+  /** The pipeline to validate (default: the profile's default pipeline). */
+  pipeline?: string;
+  /** Build one fan-out slice's graph, from this stage on (a fan-out child run); default the whole (or parent) graph. */
+  sliceFrom?: string;
   update?: boolean;
   home?: string;
   git?: Git;
@@ -38,15 +46,114 @@ export type ValidateOptions = {
 export type ValidateResult = {
   profile: string;
   graph: Graph;
+  /** A fan-out pipeline's slice-run graph (from fan_out.stage on), beside the parent's `graph`; else undefined. */
+  slice?: Graph;
   mappings: ResolvedMapping[];
   grounds: Record<string, ResolvedGround>;
   groundVersions: Record<string, string>;
   /** The selected profile's blocks as written (undefined when absent). */
   runtime: Profile['runtime'];
   tracker: Profile['tracker'];
+  /** The validated pipeline. */
+  pipeline: PipelineSpec;
+  /** Every pipeline of the profile. */
+  pipelines: Record<string, PipelineSpec>;
 };
 
+/** Validates one pipeline of the selected profile: `opts.pipeline`, or the profile's default. */
 export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
+  const l = await load(opts);
+  return validatePipeline(l, pickPipeline(l.specs, opts.pipeline, l.name, l.pipelinesWhere).name, opts.sliceFrom);
+}
+
+/** Validates every pipeline of the selected profile in order (grounds resolved once); throws the first error. */
+export async function validateAll(opts: ValidateOptions): Promise<ValidateResult[]> {
+  const l = await load(opts);
+  const out: ValidateResult[] = [];
+  for (const name of Object.keys(l.specs)) out.push(await validatePipeline(l, name));
+  return out;
+}
+
+/**
+ * Validates every pipeline of the selected profile, keeping each pipeline's own error instead of throwing it.
+ * A config-level error (loading, profile, grounds, default pipeline) still throws.
+ */
+export async function validateEach(
+  opts: ValidateOptions,
+): Promise<{ profile: string; pipelines: Record<string, PipelineSpec>; results: Record<string, ValidateResult | Error> }> {
+  const l = await load(opts);
+  const results: Record<string, ValidateResult | Error> = {};
+  for (const name of Object.keys(l.specs)) {
+    try {
+      results[name] = await validatePipeline(l, name);
+    } catch (err) {
+      results[name] = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+  return { profile: l.name, pipelines: l.specs, results };
+}
+
+type Loaded = {
+  configFile: string;
+  name: string;
+  profile: Profile;
+  parent: { name: string; profile: Profile } | undefined;
+  grounds: Record<string, ResolvedGround>;
+  roots: LayerRoot[];
+  profileLocator: { file: string; lines: LineIndex; prefix: string };
+  /** Where errors about the profile's pipelines point: its `pipelines:` line, else the profile's. */
+  pipelinesWhere: Where;
+  /** The layers and mappings without any pipeline's own `use`. */
+  base: { layers: Layer[]; mappings: ResolvedMapping[] };
+  specs: Record<string, PipelineSpec>;
+};
+
+async function validatePipeline(l: Loaded, pipelineName: string, sliceFrom?: string): Promise<ValidateResult> {
+  // a pipeline's own use maps like its layer's use, located under pipelines.<p>, just before that layer
+  const roots = l.roots.flatMap((r): LayerRoot[] => {
+    const use = r.fragment.pipelines?.[pipelineName]?.use ?? [];
+    if (use.length === 0) return [r];
+    const prefix = [r.locator?.prefix, 'pipelines', pipelineName].filter((x) => x !== undefined && x !== '').join('.');
+    return [{ source: r.source, use, fragment: {}, ...(r.locator ? { locator: { ...r.locator, prefix } } : {}) }, r];
+  });
+  const { layers, mappings } =
+    roots.length === l.roots.length ? l.base : await collectLayers({ roots, grounds: l.grounds, configFile: l.configFile });
+  const merged = mergePipelines(layers);
+  const pipelines = pipelineSpecs(merged, l.name, l.pipelinesWhere);
+  const pipeline = pickPipeline(pipelines, pipelineName, l.name, l.pipelinesWhere);
+  const selected = merged[pipelineName]!;
+  // the header's stages are the graph's; rules are checked first, as before pipelines
+  const violations = [...checkGlobalStages(merged, pipelines, l.name), ...checkRules(selected, pipeline.stages ?? CORE_STAGES)];
+  if (violations.length > 0) throw new RuleViolationError(violations, l.configFile);
+  checkPipelines(merged, pipelines, l.name);
+  const descriptions = Object.fromEntries(Object.values(pipelines).map((s) => [s.name, s.description]));
+  const graph = buildGraph(
+    selected,
+    { profile: l.name, locator: l.profileLocator },
+    { descriptions, ...(sliceFrom !== undefined ? { part: { sliceFrom } } : {}) },
+  );
+  await checkGraphReferences(graph, mappings, l.grounds, l.configFile);
+  await checkAgents(graph, mappings, l.configFile);
+  const fan = pipeline.fan_out;
+  const slice =
+    fan !== undefined && sliceFrom === undefined
+      ? buildGraph(selected, { profile: l.name, locator: l.profileLocator }, { descriptions, part: { sliceFrom: fan.stage } })
+      : undefined;
+  return {
+    profile: l.name,
+    graph,
+    ...(slice !== undefined ? { slice } : {}),
+    mappings,
+    grounds: l.grounds,
+    groundVersions: Object.fromEntries(Object.values(l.grounds).map((g) => [g.name, groundVersion(g)])),
+    runtime: l.profile.runtime ?? l.parent?.profile.runtime,
+    tracker: l.profile.tracker ?? l.parent?.profile.tracker,
+    pipeline,
+    pipelines,
+  };
+}
+
+async function load(opts: ValidateOptions): Promise<Loaded> {
   const git = opts.git ?? cliGit;
   const { data: config, lines } = await loadLocated(opts.configFile, UserConfigSchema);
   const remoteUrl = opts.profile === undefined ? await git.remoteUrl(opts.cwd) : undefined;
@@ -87,6 +194,7 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
       ...(p.bindings ? { bindings: p.bindings } : {}),
       ...(p.nodes ? { nodes: p.nodes } : {}),
       ...(p.rules ? { rules: p.rules } : {}),
+      ...(p.pipelines ? { pipelines: p.pipelines } : {}),
     },
   });
   // every profile's extends is checked, so a broken one shows up whichever profile is selected
@@ -129,22 +237,19 @@ export async function validate(opts: ValidateOptions): Promise<ValidateResult> {
       locator: { file: repoFile, lines: repoLayer.lines },
     });
   }
-  const { layers, mappings } = await collectLayers({ roots, grounds, configFile: opts.configFile });
-
-  const merged = mergeLayers(layers);
-  const violations = checkRules(merged);
-  if (violations.length > 0) throw new RuleViolationError(violations, opts.configFile);
-  const graph = buildGraph(merged, { profile: name, locator: profileLocator });
-  await checkGraphReferences(graph, mappings, grounds, opts.configFile);
-  await checkAgents(graph, mappings, opts.configFile);
+  const base = await collectLayers({ roots, grounds, configFile: opts.configFile });
+  const { path: _path, ...pipelinesWhere } = locate({ file: opts.configFile, lines }, opts.configFile, `profiles.${name}.pipelines`);
   return {
-    profile: name,
-    graph,
-    mappings,
+    configFile: opts.configFile,
+    name,
+    profile,
+    parent,
     grounds,
-    groundVersions: Object.fromEntries(Object.values(grounds).map((g) => [g.name, groundVersion(g)])),
-    runtime: profile.runtime ?? parent?.profile.runtime,
-    tracker: profile.tracker ?? parent?.profile.tracker,
+    roots,
+    profileLocator,
+    pipelinesWhere,
+    base,
+    specs: pipelineSpecs(mergePipelines(base.layers), name, pipelinesWhere),
   };
 }
 

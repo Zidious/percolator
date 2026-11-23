@@ -145,7 +145,8 @@ async function zoomTo(target: number): Promise<void> {
   throw new Error(`could not get the zoom back to ${target}; set it in Herdr's settings`);
 }
 
-const shortId = (id: string): string => id.split('-')[0] ?? id;
+// t23-epic-20261121-090000-7c2a-s1 → t23-epic-s1: unique per run (the slices and the triage pair share a ticket)
+const shortId = (id: string): string => id.replace(/-\d{8}-\d{6}-[0-9a-f]{4}/, '');
 
 // ── back up ──
 const backup = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-panel-shots-backup-'));
@@ -223,6 +224,27 @@ try {
     await shot(`${theme}-720-t2-reject-picked`);
     await key('escape');
     await key('escape');
+    // the start picker: + New run per pipeline, Start in fixtures mode (spike: nothing required), ▸ Run next… on a
+    // finished run (t3: its ticket; audit: the issues it opened, a select); docked at each width, then in the window
+    for (const place of [...WIDTHS.map(String), 'window']) {
+      if (place === 'window') await run('percolator.place');
+      else await resize(Number(place));
+      for (const p of ['feature', 'hotfix', 'dd-alert', 'spike']) {
+        await run(`percolator.new/${p}`);
+        await shot(`${theme}-${place}-new-${p}`, place === 'window' && p === 'feature' ? 1200 : 600);
+      }
+      await run('percolator.start');
+      await shot(`${theme}-${place}-new-spike-started`);
+      await key('escape');
+      for (const id of ['t3-20261120-142211-e012', 'audit-20261120-180000-2d7c']) {
+        await open(id);
+        await sleep(300); // the panel selects the run on its next frame
+        await run('percolator.next');
+        await shot(`${theme}-${place}-next-${shortId(id)}`);
+        await key('escape');
+      }
+      if (place === 'window') await run('percolator.place');
+    }
   }
 
   for (const z of (values.zooms ?? '').split(',').filter(Boolean).map(Number)) {

@@ -37,7 +37,8 @@ type Env = RunEnv & {
   clock: { t: number };
   onWait: { fn: (t: FakeTerminal) => boolean | Promise<boolean> };
   dir(id: string): string;
-  prepare(): Promise<RunMeta>;
+  /** prepares a run on `ticket` (default #5) */
+  prepare(ticket?: string): Promise<RunMeta>;
   perc(argv: string[], deps?: Partial<DriverDeps>): Promise<{ code: number; out: string; err: string }>;
 };
 
@@ -75,7 +76,7 @@ async function setup(): Promise<Env> {
     clock,
     onWait,
     dir,
-    prepare: () => prepareRun({ ticket: '#5', repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps),
+    prepare: (ticket = '#5') => prepareRun({ ticket, repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps),
     perc: async (argv, deps = base.deps) => {
       let out = '';
       let err = '';
@@ -168,7 +169,8 @@ test('status lists runs with details', async () => {
     const metas: RunMeta[] = [];
     for (let i = 0; i < 8; i++) {
       e.clock.t = NOW.getTime() + i * 1000;
-      metas.push(await e.prepare());
+      // one ticket each: a ticket has at most one live run
+      metas.push(await e.prepare(`#${5 + i}`));
     }
     const [waiting, paused, dead, done, live, attended, waitingLive, attendedDead] = metas as RunMeta[] as [
       RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta, RunMeta,
@@ -182,7 +184,7 @@ test('status lists runs with details', async () => {
     };
     const attend = async (m: RunMeta) => {
       await edit(m, (s) => (s.currentStep = 'groom'));
-      const term = terminalName(m.runId, m.ticket, 'groom', 1);
+      const term = terminalName(m.runId, m.ticket!, 'groom', 1);
       await writeJson(path.join(e.dir(m.runId), 'attention.json'), { stepId: 'groom', terminal: term, kind: 'blocked', at: NOW.toISOString() });
       return term;
     };
@@ -218,19 +220,18 @@ test('status lists runs with details', async () => {
     const r = await e.perc(['status']);
     assert.equal(r.err, '');
     assert.equal(r.code, 0);
-    const t = `${REPO}#5`;
     const runFile = path.join(e.dir('t9-broken'), 'run.json');
     assert.equal(
       r.out,
       [
-        `${attendedDead.runId}  running  groom  ${t}  blocked: attend terminal ${deadGroomTerm}; driver not running; perc resume ${attendedDead.runId}`,
-        `${waitingLive.runId}  running  approve-groom  ${t}  waiting for approval: ${url}`,
-        `${attended.runId}  running  groom  ${t}  blocked: attend terminal ${groomTerm}`,
-        `${live.runId}  running  implement  ${t}  driver ${live.driver}`,
-        `${done.runId}  completed  -  ${t}  https://${REPO}/pull/3`,
-        `${dead.runId}  running  plan  ${t}  driver not running; perc resume ${dead.runId}`,
-        `${paused.runId}  paused  approve-groom  ${t}  cap: approve-groom reached 3 rounds`,
-        `${waiting.runId}  running  approve-groom  ${t}  waiting for approval: ${url}; driver not running; perc resume ${waiting.runId}`,
+        `${attendedDead.runId}  running  groom  ${attendedDead.ticket}  blocked: attend terminal ${deadGroomTerm}; driver not running; perc resume ${attendedDead.runId}`,
+        `${waitingLive.runId}  running  approve-groom  ${waitingLive.ticket}  waiting for approval: ${url}`,
+        `${attended.runId}  running  groom  ${attended.ticket}  blocked: attend terminal ${groomTerm}`,
+        `${live.runId}  running  implement  ${live.ticket}  driver ${live.driver}`,
+        `${done.runId}  completed  -  ${done.ticket}  https://${REPO}/pull/3`,
+        `${dead.runId}  running  plan  ${dead.ticket}  driver not running; perc resume ${dead.runId}`,
+        `${paused.runId}  paused  approve-groom  ${paused.ticket}  cap: approve-groom reached 3 rounds`,
+        `${waiting.runId}  running  approve-groom  ${waiting.ticket}  waiting for approval: ${url}; driver not running; perc resume ${waiting.runId}`,
         `t9-broken  broken  -  -  error: Run metadata ${runFile} is missing or invalid: file not found`,
         '',
       ].join('\n'),
@@ -353,6 +354,20 @@ test('status <id> of a run waiting at a gate whose driver died says so', async (
   }
 });
 
+test('status <id> of a gate that waits only locally says how to answer it', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'sign-off', stepDir: e.dir(meta.runId), since: NOW.toISOString() });
+    const r = await e.perc(['status', meta.runId]);
+    assert.equal(r.code, 0, r.err);
+    const id = meta.runId;
+    assert.equal(r.out.split('\n')[7], `  detail waiting for approval: perc approve ${id} | perc reject ${id} <feedback>; driver not running; perc resume ${id}`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('status during a foreground drive reports the driver pid, not a dead driver', async () => {
   const e = await setup();
   try {
@@ -416,7 +431,7 @@ test('status --json lists runs', async () => {
     assert.equal(r.code, 0);
     assert.ok(r.out.endsWith('}\n'));
     const j = JSON.parse(r.out) as { schema: number; runs: { id: string; status: string; attention?: { kind: string } }[] };
-    assert.equal(j.schema, 1);
+    assert.equal(j.schema, 2);
     assert.deepEqual(j.runs.map((x) => [x.id, x.status, x.attention?.kind]), [[meta.runId, 'waiting', 'gate']]);
   } finally {
     await e.cleanup();
@@ -633,14 +648,85 @@ test('reject takes the feedback after -- as one value, even when it starts with 
   }
 });
 
+const TRIAGE = [
+  TRACKER,
+  '    pipelines:',
+  '      hotfix:',
+  '        stages: [intake, implement, deliver]',
+  '        exit: pr',
+  '        bindings:',
+  '          implement: { command: [echo, implement] }',
+  '      triage:',
+  '        router: true',
+  '        stages: [intake, route]',
+  '        choose: { agent: claude, from: [hotfix, feature] }',
+].join(NL);
+
+/** A triage run waiting at its pick-pipeline gate. */
+async function waitingPick(e: Env): Promise<{ meta: RunMeta; stepDir: string }> {
+  await e.writeConfig(TRIAGE, BINDINGS);
+  const meta = await prepareRun({ ticket: '#5', pipeline: 'triage', repoDir: e.root, configFile: e.configFile, profile: 'work' }, e.deps);
+  const stepDir = path.join(e.dir(meta.runId), 'steps', 'pick-pipeline', '1');
+  await fs.mkdir(stepDir, { recursive: true });
+  await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'pick-pipeline', stepDir, since: NOW.toISOString(), commentUrl: 'u' });
+  return { meta, stepDir };
+}
+
+test('approve --pipeline records the pipeline a pick-pipeline gate goes with', async () => {
+  const e = await setup();
+  try {
+    const { meta, stepDir } = await waitingPick(e);
+    const r = await e.perc(['approve', meta.runId, '--pipeline', 'hotfix']);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    assert.equal(r.out, `approved pick-pipeline of run ${meta.runId}\n`);
+    const d = JSON.parse(await fs.readFile(path.join(stepDir, 'decision.json'), 'utf8'));
+    assert.deepEqual(d, { decision: 'approve', pipeline: 'hotfix', by: 'perc-bot', via: 'local' });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('approve --pipeline refuses a pipeline the router may not pick', async () => {
+  const e = await setup();
+  try {
+    const { meta, stepDir } = await waitingPick(e);
+    const r = await e.perc(['approve', meta.runId, '--pipeline', 'triage']);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, 'pipeline "triage" is not one triage may pick (from: hotfix, feature)\n');
+    assert.equal(await exists(path.join(stepDir, 'decision.json')), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('approve --pipeline refuses a gate other than pick-pipeline', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const stepDir = path.join(e.dir(meta.runId), 'steps', 'approve-groom', '1');
+    await fs.mkdir(stepDir, { recursive: true });
+    await writeJson(path.join(e.dir(meta.runId), 'waiting.json'), { stepId: 'approve-groom', stepDir, since: NOW.toISOString(), commentUrl: 'u' });
+    const r = await e.perc(['approve', meta.runId, '--pipeline', 'hotfix']);
+    assert.equal(r.code, 1);
+    assert.equal(r.err, `--pipeline only answers a pick-pipeline gate; run ${meta.runId} is waiting at approve-groom\n`);
+    assert.equal(await exists(path.join(stepDir, 'decision.json')), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('approve when not waiting', async () => {
   const e = await setup();
   try {
     const meta = await e.prepare();
+    const want = `run ${meta.runId} is not waiting at a gate; see where it is with perc status ${meta.runId}\n`;
     const r = await e.perc(['approve', meta.runId]);
     assert.equal(r.code, 1);
-    assert.equal(r.err, 'run is not waiting at a gate\n');
+    assert.equal(r.err, want);
     assert.equal(r.out, '');
+    assert.equal((await e.perc(['approve', meta.runId, '--pipeline', 'hotfix'])).err, want);
+    assert.equal((await e.perc(['reject', meta.runId, 'no'])).err, want);
   } finally {
     await e.cleanup();
   }
@@ -869,6 +955,107 @@ test('approve of an unknown run names the missing run record', async () => {
     const r = await e.perc(['approve', 't1-nope']);
     assert.equal(r.code, 1);
     assert.equal(r.err, `Run metadata ${path.join(e.dir('t1-nope'), 'run.json')} is missing or invalid: file not found\n`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+const PIPELINES = [
+  TRACKER,
+  '    pipelines:',
+  '      dd-alert:',
+  '        stages: [intake, triage, deliver]',
+  '        exit: pr',
+  '        ticket: none',
+  '        inputs:',
+  '          alert_url: { required: true }',
+  '        bindings:',
+  '          triage: { command: [echo, triage] }',
+  '      hotfix:',
+  '        stages: [intake, implement, deliver]',
+  '        exit: pr',
+  '        ticket: optional',
+  '        bindings:',
+  '          implement: { command: [echo, implement] }',
+].join('\n');
+
+/** `perc run` with `args` against a config with the dd-alert and hotfix pipelines; asserts nothing was created. */
+async function runPipelines(args: string[]): Promise<{ code: number; out: string; err: string }> {
+  const e = await setup();
+  try {
+    await e.writeConfig(PIPELINES, BINDINGS);
+    const r = await e.perc(['run', ...args, '--repo', e.root, '--config', e.configFile, '--profile', 'work']);
+    assert.equal(await exists(path.join(e.home, '.percolator', 'runs')), false);
+    assert.equal(await exists(path.join(e.root, '.worktrees')), false);
+    assert.equal(runCalls(e.deps.hc).length, 0);
+    return r;
+  } finally {
+    await e.cleanup();
+  }
+}
+
+test('perc run --pipeline dd-alert without alert_url exits 2', async () => {
+  const r = await runPipelines(['--pipeline', 'dd-alert']);
+  assert.equal(r.code, 2);
+  assert.ok(r.err.startsWith('pipeline "dd-alert" needs input alert_url; pass --input alert_url=<value>\n\nusage: perc'), r.err);
+});
+
+test('perc run with a ticket on a ticket: none pipeline exits 2', async () => {
+  const r = await runPipelines(['#5', '--pipeline', 'dd-alert', '--input', 'alert_url=https://dd/x?a=b']);
+  assert.equal(r.code, 2);
+  assert.ok(
+    r.err.startsWith(
+      'pipeline "dd-alert" takes no ticket (ticket: none); drop the ticket or pick another pipeline with --pipeline\n\nusage: perc',
+    ),
+    r.err,
+  );
+});
+
+test('perc run --input that is not key=value exits 2', async () => {
+  const r = await runPipelines(['#5', '--input', 'oops']);
+  assert.equal(r.code, 2);
+  assert.ok(r.err.startsWith('--input needs key=value, got "oops"\n\nusage: perc'), r.err);
+});
+
+test('perc run takes at most one ticket', async () => {
+  const r = await runPipelines(['#5', '#6']);
+  assert.equal(r.code, 2);
+  assert.ok(r.err.startsWith('run takes at most one <ticket>\n\nusage: perc'), r.err);
+});
+
+test('perc run of an unknown pipeline names the pipelines', async () => {
+  const r = await runPipelines(['#5', '--pipeline', 'nope']);
+  assert.equal(r.code, 1);
+  assert.match(r.err, /: unknown pipeline "nope" in profile "work" \(pipelines: feature, dd-alert, hotfix\); pass one of those to --pipeline\n$/);
+});
+
+test('a valid ticketless request starts a run named after its pipeline', async () => {
+  const e = await setup();
+  try {
+    await e.writeConfig(PIPELINES, BINDINGS);
+    const r = await e.perc(['run', '--pipeline', 'dd-alert', '--input', 'alert_url=u', '--repo', e.root, '--config', e.configFile, '--profile', 'work']);
+    assert.equal(r.err, '');
+    assert.equal(r.code, 0);
+    const id = await onlyRun(e);
+    assert.match(id, /^dd-alert-20260304-050607-[0-9a-f]{4}$/);
+    assert.ok(r.out.includes(`  terminal ${terminalName(id, 'dd-alert', '@driver', 0)}\n`), r.out);
+    assert.ok(r.out.includes(`  space "r dd-alert · ${id.slice(-4)}"`), r.out);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status of a ticketless run shows its pipeline instead of a ticket', async () => {
+  const e = await setup();
+  try {
+    await e.writeConfig(PIPELINES, BINDINGS);
+    await e.perc(['run', '--pipeline', 'dd-alert', '--input', 'alert_url=u', '--repo', e.root, '--config', e.configFile, '--profile', 'work']);
+    const id = await onlyRun(e);
+    const one = await e.perc(['status', id]);
+    assert.equal(one.err, '');
+    assert.deepEqual(one.out.split('\n').slice(0, 3), [`run ${id}`, '  pipeline dd-alert', '  profile work']);
+    const list = await e.perc(['status']);
+    assert.match(list.out, new RegExp(`^${id}  running  -  dd-alert  `));
   } finally {
     await e.cleanup();
   }

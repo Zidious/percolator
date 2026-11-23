@@ -4,7 +4,6 @@ import path from 'node:path';
 import { ConfigError } from '../config/load.ts';
 import { formatIssue, locate } from '../config/locate.ts';
 import type { Locator, Problem, Where } from '../config/locate.ts';
-import { STAGES } from '../config/schema.ts';
 import type { GraphFragment, Mapping } from '../config/schema.ts';
 import { stepKey } from '../graph/build.ts';
 import type { Graph, Step } from '../graph/build.ts';
@@ -168,7 +167,7 @@ export async function checkGraphReferences(
     const r = await resolveInGround(ground, prompt.file, 'file');
     if ('problem' in r) problems.push({ ...at('file'), message: `${r.problem}; ${r.fix}` });
   }
-  const known = new Set<string>(['*', ...STAGES, ...graph.steps.flatMap((s) => [s.name, s.id])]);
+  const known = new Set<string>(['*', ...graph.stages, ...graph.steps.flatMap((s) => [s.name, s.id])]);
   for (const m of mappings) {
     m.applies_to.forEach((entry, i) => {
       if (known.has(entry)) return;

@@ -2,12 +2,12 @@
 
 import { div } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
-import { activeBox, ago, needsYou, rowState, ticketTitle } from './model.js';
+import { activeBox, ago, linkedLine, needsYou, pipelineChip, rowState, ticketTitle } from './model.js';
 import { mark } from './mark.js';
-import { SPIN, own, scrollY } from './ui.js';
+import { SPIN, chip, own, scrollY } from './ui.js';
 
 const title = (r) => (r.status === 'unreadable' ? r.id : ticketTitle(r));
-const number = (r) => (r.status === 'unreadable' ? '?' : `#${r.ticket.number}`);
+const number = (r) => (r.status === 'unreadable' ? '?' : r.ticket ? `#${r.ticket.number}` : '');
 const age = (r, now) => (r.status === 'unreadable' ? '' : ago((needsYou(r) && r.attention.since) || r.createdAt, now));
 
 // the state text truncates alone; the round (when there is one) is a separate child, so it is never cut.
@@ -21,6 +21,25 @@ function stateCell(s, width, size, t) {
     .text_color(t[s.tone])
     .child(div().min_w(0).truncate().child(s.text))
     .when(Boolean(s.round), (el) => el.child(div().flex_none().child(`· ${s.round}`)));
+}
+
+/** The linked run's line under the title; clicking it selects that run (when it is listed). */
+function linked(p, t, r, rows, size) {
+  const l = linkedLine(r, p.runs);
+  if (!l) return null;
+  const el = div().id(`linked-${r.id}`).min_w(0).truncate().text_size(size).text_color(t.muted).child(l.text);
+  if (l.run === null) return el;
+  return own(
+    el
+      .cursor_pointer()
+      .hover((s) => s.text_color(t.foreground))
+      .on_click((_e, cx) => {
+        // a linked run the Active tab hides shows on All
+        if (!rows.some((x) => x.id === l.run)) p.filter = 'all';
+        p.select(l.run, cx);
+        cx.notify();
+      }),
+  );
 }
 
 function icon(t, r) {
@@ -51,7 +70,7 @@ function empty(t, filter) {
         .text_color(t.muted)
         .child(filter === 'all' ? 'No runs yet' : 'Nothing running, nothing waiting on you'),
     )
-    .child(div().text_size(11.5).text_color(t.dim).child('perc run <owner/repo#issue>'));
+    .child(div().text_size(11.5).text_color(t.muted).child('perc run <ticket> [--pipeline <name>]'));
 }
 
 /** The run list; its frame in main.js takes the divider's height; it scrolls, and ↑/↓ bring the selected row into view. */
@@ -96,8 +115,10 @@ export function board(p, t, narrow, rows) {
                 .child(icon(t, r))
                 .child(div().flex_none().font_semibold().child(number(r)))
                 .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(title(r)))
-                .child(div().flex_none().text_size(10.5).text_color(t.dim).child(age(r, now))),
+                .when(Boolean(pipelineChip(r)), (el) => el.child(chip(t, pipelineChip(r))))
+                .child(div().flex_none().text_size(10.5).text_color(t.muted).child(age(r, now))),
             )
+            .when(Boolean(linkedLine(r, p.runs)), (el) => el.child(h_flex().pl(20).min_w(0).child(linked(p, t, r, rows, 10.5))))
             .child(h_flex().pl(20).items_center().child(stateCell(s, null, 10.5, t)));
         }),
       );
@@ -122,16 +143,22 @@ export function board(p, t, narrow, rows) {
                 .gap(12)
                 .child(icon(t, r))
                 .child(
-                  h_flex()
+                  v_flex()
                     .flex_1()
                     .min_w(0)
-                    .gap(6)
-                    .text_size(12)
-                    .child(div().flex_none().font_semibold().text_color(t.foreground).child(number(r)))
-                    .child(div().min_w(0).truncate().text_color(t.muted).child(title(r))),
+                    .child(
+                      h_flex()
+                        .min_w(0)
+                        .gap(6)
+                        .text_size(12)
+                        .child(div().flex_none().font_semibold().text_color(t.foreground).child(number(r)))
+                        .child(div().min_w(0).truncate().text_color(t.muted).child(title(r)))
+                        .when(Boolean(pipelineChip(r)), (el) => el.child(chip(t, pipelineChip(r)))),
+                    )
+                    .when(Boolean(linkedLine(r, p.runs)), (el) => el.child(linked(p, t, r, rows, 11))),
                 )
                 .child(stateCell(s, 240, 11.5, t))
-                .child(div().w(34).flex_none().text_size(11).text_color(t.dim).child(age(r, now)));
+                .child(div().w(34).flex_none().text_size(11).text_color(t.muted).child(age(r, now)));
             }),
           ),
       ),

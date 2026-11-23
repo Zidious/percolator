@@ -7,15 +7,25 @@ export type Step = Readable['steps'][number];
 export type Stage = 'intake' | 'groom' | 'plan' | 'implement' | 'review' | 'deliver';
 export type TimelineEntry = Readable['timeline'][number];
 export type Attempt = Extract<TimelineEntry, { kind: 'attempt' }>;
-export type Tone = 'blocked' | 'working' | 'dim' | 'muted';
+export type Tone = 'blocked' | 'working' | 'muted';
 
 export declare const STAGES: readonly Stage[];
 export declare function parseStatus(stdout: string): { ok: true; data: StatusJson } | { ok: false; error: string };
 export declare function sortRuns(runs: RunStatusJson[]): RunStatusJson[];
 export declare function visibleRuns(runs: RunStatusJson[], filter: 'active' | 'all'): RunStatusJson[];
 export declare function rowState(run: RunStatusJson): { tone: Tone; text: string; round?: string };
+export declare function outcomeOf(run: RunStatusJson): { tag: 'DELIVERED' | 'ROUTED' | 'DONE'; text: string };
 export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
+/** `feedback` is the reject feedback, or the picked pipeline for `pick`. */
 export declare function actionArgv(action: Action, run: { id: string }, feedback?: string): string[] | null;
+export declare function linkedLine(run: RunStatusJson, runs: RunStatusJson[]): { text: string; run: string | null } | null;
+export type SliceRow = { index: number; title: string; id: string; status: RunStatusJson['status'] | 'pending'; stepLabel: string; prUrl?: string };
+export declare function sliceRows(run: RunStatusJson, runs: RunStatusJson[]): SliceRow[];
+export declare function fanOutRow(rows: PipeRow[]): number;
+export declare function watcherState(
+  status: StatusJson,
+  o?: { startedAt: number | null; now: number; live: { address: string; name?: string }[] },
+): { alive: boolean; label: string; argv: string[] | null };
 export declare function needsYou(run: RunStatusJson): boolean;
 export declare function nowTone(run: RunStatusJson): 'blocked' | 'working';
 export declare function needsCount(runs: RunStatusJson[]): number;
@@ -87,7 +97,7 @@ export declare const BOARD_RATIO: number;
 export declare function boardHeight(ratio: number, area: number, min: number): number;
 export declare function dragBoard(startPx: number, dy: number, area: number, min: number): number;
 export declare function readRatio(stored: unknown): number;
-export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short' };
+export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short'; newRun: 'icon' | 'text' };
 export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
 export declare function terminalAddress(live: { address: string; name?: string | null }[], term: string | null | undefined): string | null;
 export declare function activeBox(run: RunStatusJson): 'agent' | 'gate' | 'cap' | 'paused' | 'failed' | 'stalled' | null;
@@ -99,6 +109,8 @@ export declare function agentCard(
 ): { address: string | null; name: string; status: string; program: string; since: string } | null;
 export declare function driverPeek(run: RunStatusJson | null | undefined): { terminal: string; label: 'Driver pane ↗' } | null;
 export declare function ticketTitle(run: Readable): string;
+export declare function runLabel(run: RunStatusJson): string;
+export declare function pipelineChip(run: { pipeline?: string }): string | null;
 export declare function deleteArgv(ids: string[]): string[];
 export declare function deleteCommand(ids: string[]): string;
 export declare function deleteCommandIds(command: string): string[] | null;
@@ -115,6 +127,8 @@ export declare function selectAfterRefresh(
   pending: { ids: string[]; next: string | null } | null,
 ): string | null;
 export declare function agentTone(status: string): 'blocked' | 'working' | 'muted';
+/** The theme colour for text in a model tone: dim (and no tone) read as muted; any other tone stays. */
+export declare function textTone<T extends string>(tone: T | null | undefined): Exclude<T, 'dim'> | 'muted';
 export declare function agentAddress(run: RunStatusJson, live: { address: string; name?: string | null }[]): string | null;
 export declare function openAgentAt(
   run: RunStatusJson | null | undefined,
@@ -145,3 +159,44 @@ export declare function detailParts(
   run: RunStatusJson,
   o: { cols: Columns; narrow: boolean; unfolded: string[]; stopSel: string | null },
 ): { under: boolean; side: ('box' | 'outcome' | 'strip')[] };
+
+// `perc pipelines --json` (schema 1): steps and loops as a run's, minus the per-run fields.
+export type PipelineInput = { name: string; required: boolean; description?: string };
+export type Pipeline = {
+  name: string;
+  default: boolean;
+  router: boolean;
+  ticket: 'required' | 'optional' | 'none';
+  inputs: PipelineInput[];
+  exit: string;
+  description?: string;
+  steps: { id: string; stage: string; role: 'core' | 'node'; kind: 'agent' | 'builtin' | 'script' | 'gate' }[];
+  loops: Omit<Loop, 'round'>[];
+};
+export type BrokenPipeline = { name: string; error: string };
+export type PipelinesJson = { schema: 1; repo: string; profile: string; pipelines: (Pipeline | BrokenPipeline)[] };
+export type StartChoice = { pipeline: Pipeline; ticket?: string; inputs: Record<string, string>; repo: string | null };
+export declare function readPipelines(stdout: string): { ok: true; data: PipelinesJson } | { ok: false; error: string };
+export declare function pipelinesFixture(statusFixture: string): string;
+export declare function startFields(pipeline: Pipeline): {
+  ticket: 'required' | 'optional' | 'hidden';
+  inputs: { name: string; required: boolean; description: string }[];
+};
+export declare function knownRepos(runs: RunStatusJson[]): string[];
+export declare function ticketRepo(text: string): string | null;
+export declare function guessRepo(ticketText: string, runs: RunStatusJson[]): string | null;
+export declare function startArgv(o: StartChoice & { repo: string }): string[];
+export declare function commandLine(argv: string[]): string;
+export declare function canStart(o: StartChoice): { ok: true } | { ok: false; why: string };
+export declare function startPick(pipelines: (Pipeline | BrokenPipeline)[], want: string | null, names?: string[] | null): string | null;
+export declare function pipelineOption(p: Pipeline | BrokenPipeline): { name: string; tags: string[]; note: string; error: boolean };
+export declare function startedRun(stdout: string): string | null;
+export declare function wouldStart(argv: string[]): string;
+export declare function runNextChoices(
+  run: RunStatusJson,
+  pipelines: (Pipeline | BrokenPipeline)[],
+  runs: RunStatusJson[],
+): { tickets: string[]; pipelines: string[] } | null;
+/** Run-shaped (status 'pending', ticket null, plus `pipeline`) so the pipeline functions draw it. */
+export declare function previewRun(pipeline: Pipeline): Readable;
+export declare function previewSide(width: number): 'below' | 'right';

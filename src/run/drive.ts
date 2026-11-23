@@ -7,6 +7,12 @@ import type { Runtime } from '../engine/runtime.ts';
 import { mappingKeys, mappingsFingerprint } from '../grounds/mappings.ts';
 import { HerdrRuntime, sweepTerminals } from '../runtime/herdr-runtime.ts';
 import type { Attention } from '../runtime/herdr-runtime.ts';
+import { githubComment } from '../tracker/exits/comment.ts';
+import { githubOpenIssues } from '../tracker/exits/issues.ts';
+import { githubPrivateForkPr } from '../tracker/exits/private-fork.ts';
+import { githubRelease } from '../tracker/exits/release.ts';
+import { percolatorReport } from '../tracker/exits/report.ts';
+import { githubPrReview } from '../tracker/exits/review.ts';
 import { githubGate } from '../tracker/gate.ts';
 import { githubIntake } from '../tracker/intake.ts';
 import { githubOpenPr } from '../tracker/pr.ts';
@@ -18,10 +24,13 @@ import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
 import { ensureWorktree } from '../workspace/worktree.ts';
 import { acquireDriverLock, drivenByProcess, otherLiveLock } from './lock.ts';
 import type { Liveness } from './lock.ts';
-import { readRunMeta } from './meta.ts';
+import { startLinkedRun } from './child.ts';
+import { fanOut, percolatorSeed } from './fan-out.ts';
+import { newRunId, readRunMeta } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 import { reusePriorGroom } from './reuse-groom.ts';
+import { routeHandoff, routeRules, skipDecidedRoute } from './route.ts';
 
 /** The PR url the deliver step recorded, if any. */
 export async function prUrl(dir: string, state: RunState): Promise<string | undefined> {
@@ -76,7 +85,15 @@ export async function checkResumable(
   const lock = await otherLiveLock(dir, liveness(deps));
   if (lock !== undefined) throw new Error(drivenByProcess(runId, lock));
 
-  const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile });
+  const v = await validate({
+    configFile: meta.configFile,
+    cwd: meta.repoRoot,
+    home: deps.home,
+    profile: meta.profile,
+    pipeline: meta.pipeline,
+    // a fan-out slice runs its slice's graph
+    ...(meta.fanOut !== undefined ? { sliceFrom: meta.fanOut.from } : {}),
+  });
   if (state.graphFingerprint !== undefined && state.graphFingerprint !== graphFingerprint(v.graph)) {
     throw new Error(`run ${runId} was started with a different graph (config changed since); start a new run`);
   }
@@ -138,11 +155,25 @@ async function driveHeld(
     const body = `${JSON.stringify({ ...a, at: now().toISOString() }, null, 2)}\n`;
     attentionWrite = attentionWrite.then(() => writeFileAtomic(attentionFile, body)).catch(() => {});
   };
-  const ticket = parseTicket(meta.ticket);
+  const ticket = meta.ticket === undefined ? undefined : parseTicket(meta.ticket);
+  // an issue exit's `next`: one linked run of that pipeline per issue it opened
+  const nextRuns = (next: string | undefined) =>
+    next === undefined
+      ? {}
+      : {
+          next: {
+            newId: (url: string) => newRunId({ issue: parseTicket(url).number, pipeline: next }, now()),
+            start: (url: string, child: string) => startLinkedRun({ parent: meta, pipeline: next, ticket: url, runId: child }, deps),
+          },
+        };
   const runtime = new HerdrRuntime({
     hc: deps.hc,
     runId,
-    ticket: meta.ticket,
+    // a ticketless run names its terminals after its pipeline
+    ticket: meta.ticket ?? meta.pipeline,
+    pipeline: meta.pipeline,
+    inputs: meta.inputs,
+    declaredInputs: Object.keys(v.pipeline.inputs),
     runDir: dir,
     worktree: meta.worktree,
     branch: meta.branch,
@@ -156,10 +187,57 @@ async function driveHeld(
       'github.intake': githubIntake({
         gh: deps.gh,
         runDir: dir,
-        ticket,
+        ...(ticket !== undefined ? { ticket } : {}),
+        pipeline: meta.pipeline,
+        runId,
+        inputs: meta.inputs,
         ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
       }),
-      'github.open_pr': githubOpenPr({ gh: deps.gh, runDir: dir, worktree: meta.worktree, branch: meta.branch, base: meta.base }),
+      'github.open_pr': githubOpenPr({
+        gh: deps.gh,
+        runDir: dir,
+        worktree: meta.worktree,
+        branch: meta.branch,
+        base: meta.base,
+        repo: meta.repo,
+        pipeline: meta.pipeline,
+        runId,
+        ...(meta.fanOut !== undefined ? { slice: { title: meta.fanOut.title } } : {}),
+      }),
+      'github.comment': githubComment({ gh: deps.gh, runDir: dir, runId }),
+      'percolator.report': percolatorReport(),
+      'github.open_issues': githubOpenIssues({ gh: deps.gh, runDir: dir, runId, repo: meta.repo, ...nextRuns(v.pipeline.next) }),
+      'github.release': githubRelease({
+        gh: deps.gh,
+        runDir: dir,
+        worktree: meta.worktree,
+        branch: meta.branch,
+        repo: meta.repo,
+        inputs: meta.inputs,
+      }),
+      'github.pr_review': githubPrReview({ gh: deps.gh, runDir: dir, runId, inputs: meta.inputs, repo: meta.repo }),
+      'percolator.route_rules': routeRules({
+        gh: deps.gh,
+        runDir: dir,
+        spec: v.pipeline,
+        specs: v.pipelines,
+        profile: v.profile,
+        ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
+      }),
+      'percolator.route': routeHandoff({ deps, meta, spec: v.pipeline, specs: v.pipelines }),
+      'percolator.fan_out': fanOut({ deps, meta, spec: v.pipeline }),
+      ...(v.pipeline.fan_out !== undefined
+        ? { 'percolator.seed': percolatorSeed({ runDir: dir, meta, home: deps.home, output: v.pipeline.fan_out.slices.output }) }
+        : {}),
+      'github.private_fork_pr': githubPrivateForkPr({
+        gh: deps.gh,
+        runDir: dir,
+        worktree: meta.worktree,
+        branch: meta.branch,
+        base: meta.base,
+        repo: meta.repo,
+        inputs: meta.inputs,
+      }),
     },
     gate: githubGate({
       gh: deps.gh,
@@ -168,7 +246,8 @@ async function driveHeld(
       ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
       ...(sleep !== undefined ? { sleep } : {}),
       now: nowMs,
-      onWaiting: (stepId, url) => deps.out(`${stepId}: waiting for approval: ${url}`),
+      onWaiting: (stepId, url) =>
+        deps.out(`${stepId}: waiting for approval: ${url ?? `perc approve ${runId} | perc reject ${runId} <feedback>`}`),
     }),
     onAttention,
     ...(sleep !== undefined ? { sleep } : {}),
@@ -185,7 +264,8 @@ async function driveHeld(
   };
   await save(state);
   // one line per step start and end, so the driver's terminal shows where the run is
-  const reusing = reusePriorGroom(runtime, dir);
+  // each wrapper answers only its own steps (groom; the router's choose agent and pick gate) and passes the rest on
+  const reusing = reusePriorGroom(skipDecidedRoute(runtime, dir, v.pipeline), dir);
   const logged: Runtime = {
     executeStep: async (step, ctx) => {
       deps.out(`${step.id}: started`);

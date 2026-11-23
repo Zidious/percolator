@@ -12,22 +12,26 @@ import { commentIdOf } from './gh.ts';
 import type { Gh, IssueComment } from './gh.ts';
 import { parseGateComment, renderGateComment, withRejection } from './gate-comment.ts';
 import type { GateComment } from './gate-comment.ts';
-import { readIssueMeta } from './intake.ts';
+import { issueMetaIfAny } from './intake.ts';
 import { parseCommand } from './prior-groom.ts';
 
 export type Decision = {
   decision: 'approve' | 'reject';
   feedback?: string;
+  /** a pick-pipeline gate's answer: `perc approve <run-id> --pipeline <name>` */
+  pipeline?: string;
   by: string;
   via: 'comment' | 'local';
   url?: string;
 };
-export type Waiting = { stepId: string; stepDir: string; since: string; commentUrl: string };
+/** `commentUrl` is absent when the run has no issue: the gate then waits only for `perc approve`/`perc reject`. */
+export type Waiting = { stepId: string; stepDir: string; since: string; commentUrl?: string };
 
 const DecisionSchema = z
   .object({
     decision: z.enum(['approve', 'reject']),
     feedback: z.string().optional(),
+    pipeline: z.string().optional(),
     by: z.string(),
     via: z.enum(['comment', 'local']),
     url: z.string().optional(),
@@ -38,7 +42,7 @@ const WaitingSchema = z.object({
   stepId: z.string(),
   stepDir: z.string(),
   since: z.string(),
-  commentUrl: z.string(),
+  commentUrl: z.string().optional(),
 });
 
 const OUTPUT_CAP = 60000;
@@ -89,7 +93,7 @@ export async function deciderLogin(gh: Gh, username: () => string = () => os.use
 
 export async function writeDecision(
   runDir: string,
-  d: { decision: 'approve' | 'reject'; feedback?: string; by: string },
+  d: { decision: 'approve' | 'reject'; feedback?: string; pipeline?: string; by: string },
 ): Promise<Waiting> {
   const waiting = await readWaiting(runDir);
   if (!waiting) throw new Error('run is not waiting at a gate');
@@ -183,19 +187,65 @@ export function githubGate(o: {
   trackerPollMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
-  /** called once the gate is waiting, with its comment url */
-  onWaiting?: (stepId: string, commentUrl: string) => void;
+  /** called once the gate is waiting, with its comment url (undefined when it waits only locally) */
+  onWaiting?: (stepId: string, commentUrl: string | undefined) => void;
 }): StepHandler {
   const pollMs = o.pollMs ?? 2000;
   const trackerPollMs = o.trackerPollMs ?? 30000;
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const now = o.now ?? Date.now;
 
+  /** A gate on a run without an issue: nothing is posted, only a local decision.json ends the wait. */
+  const waitLocally = async (step: Step, io: { stepDir: string; outputsDir: string }): Promise<NodeOutcome> => {
+    const waitingPath = waitingFile(o.runDir);
+    const waiting: Waiting = { stepId: step.id, stepDir: io.stepDir, since: new Date(now()).toISOString() };
+    await writeFileAtomic(waitingPath, `${JSON.stringify(waiting, null, 2)}\n`);
+    try {
+      o.onWaiting?.(step.id, undefined);
+      const decisionFile = path.join(io.stepDir, 'decision.json');
+      while (!(await exists(decisionFile))) {
+        await sleep(pollMs).catch((err: unknown) => {
+          throw new Aborted(err);
+        });
+      }
+      const parsed = DecisionSchema.safeParse(await readJson(decisionFile).catch((e) => `unreadable: ${msg(e)}`));
+      if (!parsed.success) {
+        return escalate(`${decisionFile} is invalid: ${parsed.error.issues.map((i) => `${i.path.join('.') || 'value'}: ${i.message}`).join('; ')}`);
+      }
+      await fs.rm(waitingPath, { force: true });
+      return await decided(step, io, parsed.data as Decision);
+    } finally {
+      await fs.rm(waitingPath, { force: true }).catch(() => {});
+    }
+  };
+
+  /** approval.md on approve (pass), findings.md with the feedback on reject (fail). */
+  const decided = async (step: Step, io: { outputsDir: string }, decision: Decision): Promise<NodeOutcome> => {
+    await fs.mkdir(io.outputsDir, { recursive: true });
+    let status: 'pass' | 'fail';
+    if (decision.decision === 'approve') {
+      const via = decision.via === 'comment' ? `comment ${decision.url}` : 'perc approve';
+      await writeFileAtomic(path.join(io.outputsDir, 'approval.md'), `Approved by @${decision.by} via ${via}.\n`);
+      status = 'pass';
+    } else {
+      const why = decision.feedback && decision.feedback !== '' ? decision.feedback : '(no feedback given)';
+      await writeFileAtomic(path.join(io.outputsDir, 'findings.md'), `Rejected by @${decision.by}: ${why}\n`);
+      status = 'fail';
+    }
+    const collected = await collectOutputs(io.outputsDir, o.runDir);
+    if ('error' in collected) return escalate(`gate ${step.id}: ${collected.error}`);
+    return { status, outputs: collected.outputs };
+  };
+
   return async (step, ctx, io) => {
+    // a conditional gate (when_output: issues) stops only when there is something to approve
+    const when = step.def?.when_output;
+    if (when !== undefined && !ctx.graph.steps.some((s) => ctx.previousOutputs[s.id]?.[when])) return { status: 'pass', outputs: {} };
     const waitingPath = waitingFile(o.runDir);
     let wroteWaiting = false;
     try {
-      const meta = await readIssueMeta(o.runDir);
+      const meta = await issueMetaIfAny(o.runDir);
+      if (meta === undefined) return await waitLocally(step, io);
       const approvers = (o.approvers ?? [await o.gh.user()]).map((a) => a.toLowerCase());
       // keyed on the round, not the attempt: an escalation after posting re-runs the gate in a new
       // attempt dir, and that attempt must find (not re-post) this round's comment
@@ -325,20 +375,7 @@ export function githubGate(o: {
 
       await fs.rm(waitingPath, { force: true });
       wroteWaiting = false;
-      await fs.mkdir(io.outputsDir, { recursive: true });
-      let status: 'pass' | 'fail';
-      if (decision.decision === 'approve') {
-        const via = decision.via === 'comment' ? `comment ${decision.url}` : 'perc approve';
-        await writeFileAtomic(path.join(io.outputsDir, 'approval.md'), `Approved by @${decision.by} via ${via}.\n`);
-        status = 'pass';
-      } else {
-        const why = decision.feedback && decision.feedback !== '' ? decision.feedback : '(no feedback given)';
-        await writeFileAtomic(path.join(io.outputsDir, 'findings.md'), `Rejected by @${decision.by}: ${why}\n`);
-        status = 'fail';
-      }
-      const collected = await collectOutputs(io.outputsDir, o.runDir);
-      if ('error' in collected) return escalate(`gate ${step.id}: ${collected.error}`);
-      return { status, outputs: collected.outputs };
+      return await decided(step, io, decision);
     } catch (err) {
       if (err instanceof Aborted) throw err.cause;
       return escalate(`gate ${step.id}: ${msg(err)}`);
