@@ -1,12 +1,12 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { normalizeRemote } from '../config/profile.ts';
 import { loadState } from '../engine/state.ts';
 import { cliGit } from '../grounds/git.ts';
 import { liveRunOn, newRunId, readRunMeta } from '../run/meta.ts';
 import { launchDriver, prepareRun } from '../run/prepare.ts';
 import type { DriverDeps } from '../run/prepare.ts';
+import { ghRepo, sshHostname } from '../tracker/remote.ts';
 import { formatTicket, parseTicket } from '../tracker/ticket.ts';
 import { writeFileAtomic } from '../util/fs.ts';
 import { validate } from '../validate.ts';
@@ -97,7 +97,7 @@ async function pollRepo(repoDir: string, o: WatchOptions, deps: DriverDeps, ledg
     const root = await cliGit.toplevel(repoDir);
     const origin = root === undefined ? undefined : await cliGit.remoteUrl(root);
     if (origin === undefined) throw new Error(`${root ?? repoDir} has no origin to watch; add one (git remote add origin <url>)`);
-    repo = normalizeRemote(origin);
+    repo = await ghRepo(origin, deps.sshHostname ?? sshHostname());
   } catch (err) {
     log(`${repoDir}: ${messageOf(err)}`);
     return;

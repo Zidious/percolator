@@ -4,6 +4,8 @@ import { normalizeRemote } from '../config/profile.ts';
 import { graphFingerprint } from '../engine/engine.ts';
 import { newState, saveState } from '../engine/state.ts';
 import { cliGit, runGit } from '../grounds/git.ts';
+import { ghRepo, sshHostname } from '../tracker/remote.ts';
+import type { SshHostname } from '../tracker/remote.ts';
 import { mappingKeys, mappingsFingerprint } from '../grounds/mappings.ts';
 import type { HerdrApp } from '../herdr/app.ts';
 import type { Hc } from '../herdr/hc.ts';
@@ -37,6 +39,8 @@ export type DriverDeps = {
   pidAlive?: (pid: number) => boolean;
   /** asks the owner one question and returns the answer; `null` when stdin is not a terminal */
   ask?: ((question: string) => Promise<string>) | null;
+  /** the host an ssh origin's host or alias connects to (default `ssh -G`); injectable for tests */
+  sshHostname?: SshHostname;
 };
 
 const SPACE_FAILED = 'herdr-app space.new failed: ';
@@ -93,7 +97,9 @@ export async function prepareRun(
   const repoRoot = await cliGit.toplevel(o.repoDir);
   if (repoRoot === undefined) throw new Error(`${o.repoDir} is not inside a git repository`);
   const origin = await cliGit.remoteUrl(repoRoot);
-  const ref = o.ticket === undefined ? undefined : parseTicket(o.ticket, origin === undefined ? undefined : normalizeRemote(origin));
+  // the repository as gh knows it: an ssh host alias in origin names its real host
+  const originRepo = origin === undefined ? undefined : await ghRepo(origin, deps.sshHostname ?? sshHostname());
+  const ref = o.ticket === undefined ? undefined : parseTicket(o.ticket, originRepo);
   const ticket = ref === undefined ? undefined : formatTicket(ref);
   if (ref !== undefined && origin !== undefined) {
     // owner/repo only: an ssh host alias (`git@gh-work:o/r`) still names the same repository
@@ -137,7 +143,7 @@ export async function prepareRun(
       `pipeline "${pipeline}" runs without a ticket, so it names its repository from the origin, and ${repoRoot} has none; add one (git remote add origin <url>)`,
     );
   }
-  const repo = ref?.repo ?? normalizeRemote(origin!);
+  const repo = ref?.repo ?? originRepo!;
   const repoName = repo.split('/').at(-1)!;
 
   const now = (deps.now ?? (() => new Date()))();

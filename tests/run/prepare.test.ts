@@ -368,6 +368,25 @@ test('a ticketless run is prepared from inputs', async () => {
   }
 });
 
+test("a clone whose origin is an ssh host alias names the repository on the alias's real host", async () => {
+  const e = await setup();
+  try {
+    await e.writeConfig(PIPELINES);
+    await git(e.root, 'remote', 'set-url', 'origin', 'git@gh-work:o/r.git');
+    const asked: string[] = [];
+    const deps = { ...e.deps, sshHostname: async (h: string) => (asked.push(h), h === 'gh-work' ? 'github.com' : undefined) };
+    const at = { repoDir: e.root, configFile: e.configFile, profile: 'work', base: 'main' };
+    const ticketless = await prepareRun({ ...at, pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x' } }, deps);
+    assert.equal(ticketless.repo, 'github.com/o/r');
+    const bare = await prepareRun({ ...at, pipeline: 'hotfix', ticket: '#5' }, deps);
+    assert.equal(bare.repo, 'github.com/o/r');
+    assert.equal(bare.ticket, 'github.com/o/r#5');
+    assert.deepEqual([...new Set(asked)], ['gh-work']);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('a ticket on a profile with several pipelines picks the pipeline its label names', async () => {
   const e = await setup();
   try {

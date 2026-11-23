@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
 import { loadState } from '../../src/engine/state.ts';
+import { runGit } from '../../src/grounds/git.ts';
 import { readRunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { validate } from '../../src/validate.ts';
@@ -81,6 +82,24 @@ test('one poll starts a run for a label trigger', async () => {
     const driver = e.deps.hc.terminals.get(meta.driver);
     assert.deepEqual(driver?.argv.slice(-2), ['drive', runId]);
     assert.equal(driver?.labels['percolator.role'], 'driver');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test("a clone whose origin is an ssh host alias is watched on the alias's real host", async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    await runGit(['remote', 'set-url', 'origin', 'git@gh-work:o/r.git'], e.root);
+    e.deps.sshHostname = async (h) => (h === 'gh-work' ? 'github.com' : undefined);
+    e.deps.gh.addIssue(REPO, 7, { labels: ['triage'] });
+    await loop(e);
+    assert.deepEqual(
+      e.deps.gh.calls.filter((c) => c.method === 'listIssues').map((c) => c.args[0]),
+      [REPO],
+    );
+    assert.deepEqual(Object.keys((await loadLedger(pdir(e))).fired), [`label:${REPO}:triage:7`]);
   } finally {
     await e.cleanup();
   }
