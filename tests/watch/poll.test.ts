@@ -194,6 +194,22 @@ test('the first poll of a check_failed trigger records every current failure as 
   assert.deepEqual(later.map((f) => f.key), [`check:${REPO}:ci-fix:${next.databaseId}`]);
 });
 
+test('a failed run re-run that fails again fires once more, keyed by its attempt', async (t) => {
+  const h = await home(t);
+  const gh = new FakeGh();
+  const run = gh.addFailedRun(REPO, { branch: 'main', workflowName: 'CI' });
+  const specs = spec('ci-fix', [{ check_failed: { branch: 'main' } }]);
+  const ledger = polled('ci-fix');
+  const first = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:00:00Z') });
+  assert.deepEqual(first.map((f) => f.key), [`check:${REPO}:ci-fix:${run.databaseId}`]);
+  await fireAll(h, ledger, first);
+  gh.rerun(run.databaseId);
+  const again = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z') });
+  assert.deepEqual(again, [
+    { key: `check:${REPO}:ci-fix:${run.databaseId}.2`, pipeline: 'ci-fix', inputs: { branch: 'main', run_url: run.url } },
+  ]);
+});
+
 test("a restarted watcher's first poll records PRs and failures that appeared while it was stopped as seen", async (t) => {
   const h = await home(t);
   const gh = new FakeGh();

@@ -238,10 +238,17 @@ export class FakeGh implements Gh {
   /** Seed a failed workflow run; `workflow` is the file name `--workflow` may also match. */
   addFailedRun(repo: string, r: { branch: string; workflowName: string; workflow?: string }): FailedRun {
     const databaseId = this.nextRun++;
-    const run: FakeRun = { databaseId, url: `https://${repo}/actions/runs/${databaseId}`, workflowName: r.workflowName, repo, branch: r.branch };
+    const run: FakeRun = { databaseId, attempt: 1, url: `https://${repo}/actions/runs/${databaseId}`, workflowName: r.workflowName, repo, branch: r.branch };
     if (r.workflow !== undefined) run.workflow = r.workflow;
     this.runs.push(run);
-    return { databaseId, url: run.url, workflowName: run.workflowName };
+    return { databaseId, attempt: 1, url: run.url, workflowName: run.workflowName };
+  }
+
+  /** Re-run a seeded failed run, which fails again: same id, next attempt. */
+  rerun(databaseId: number): void {
+    const run = this.runs.find((r) => r.databaseId === databaseId);
+    if (run === undefined) throw new Error(`FakeGh: no run ${databaseId}`);
+    run.attempt++;
   }
 
   async listIssues(repo: string, o: { label: string }): Promise<IssueRef[]> {
@@ -261,6 +268,6 @@ export class FakeGh implements Gh {
     return this.runs
       .filter((r) => r.repo === repo && r.branch === o.branch)
       .filter((r) => o.workflow === undefined || r.workflow === o.workflow || r.workflowName === o.workflow)
-      .map((r) => ({ databaseId: r.databaseId, url: r.url, workflowName: r.workflowName }));
+      .map((r) => ({ databaseId: r.databaseId, attempt: r.attempt, url: r.url, workflowName: r.workflowName }));
   }
 }

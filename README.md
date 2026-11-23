@@ -502,7 +502,7 @@ pipelines:                # only the keys triggers need; stages, bindings and ex
 | `label: <name>` | Once for each open issue with the label, unless the issue already has a live run. | The issue as its ticket. | A ticket (`required` or `optional`). |
 | `pr_opened: true` or `{ not_author: [<login>…] }` | On each open pull request (skipping those authors). | Input `pr`: the PR's URL. | `ticket: none` or `optional`, and input `pr`. |
 | `dependabot: true` | On each open Dependabot pull request. | Input `pr`. | `ticket: none` or `optional`, and input `pr`. |
-| `check_failed: { branch, workflow? }` | On each failed workflow run on the branch (of that workflow file only, when set). | Inputs `branch` and `run_url`. | `ticket: none` or `optional`, and inputs `branch` and `run_url`. |
+| `check_failed: { branch, workflow? }` | On each failed workflow run on the branch (of that workflow file only, when set), and again when a re-run of it fails. | Inputs `branch` and `run_url`. | `ticket: none` or `optional`, and inputs `branch` and `run_url`. |
 
 `perc validate` refuses a pull request or check trigger on a pipeline that needs a ticket, for example:
 

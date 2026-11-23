@@ -246,7 +246,7 @@ pipelines:                # only the keys triggers need; stages, bindings and ex
     ticket: none
     inputs: { branch: { required: true }, run_url: { required: true } }
     triggers:
-      - { check_failed: { branch: main, workflow: ci.yml } }   # each failed workflow run on the branch
+      - { check_failed: { branch: main, workflow: ci.yml } }   # each failed workflow run on the branch, and each failed re-run
 ```
 
 What `perc validate` requires: `schedule` needs `ticket: none` or `optional`, a cron of five numeric fields (no names) and a known IANA `timezone` (default: the watching machine's), and its `inputs` must cover the pipeline's required inputs. `label` needs a pipeline that takes a ticket. `pr_opened`, `dependabot` and `check_failed` start runs without a ticket, so they need `ticket: none` or `optional`; validate refuses one on a pipeline that requires a ticket with `a <kind> trigger starts runs without a ticket; set ticket: none or ticket: optional`. `pr_opened` and `dependabot` pass input `pr`, and `check_failed` passes inputs `branch` and `run_url`, so the pipeline must declare them.

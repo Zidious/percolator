@@ -81,7 +81,9 @@ export async function pollTriggers(o: {
         const { branch, workflow } = trigger.check_failed;
         const runs = await gh.failedRuns(repo, workflow === undefined ? { branch } : { branch, workflow });
         for (const run of runs) {
-          seen({ key: `check:${repo}:${pipeline}:${run.databaseId}`, pipeline, inputs: { branch, run_url: run.url } });
+          // a re-run keeps its id: a later attempt that fails again is a new failure (attempt 1 keeps the bare id)
+          const id = run.attempt > 1 ? `${run.databaseId}.${run.attempt}` : `${run.databaseId}`;
+          seen({ key: `check:${repo}:${pipeline}:${id}`, pipeline, inputs: { branch, run_url: run.url } });
         }
         ledger.lastPoll[mark] = o.now.toISOString();
       }

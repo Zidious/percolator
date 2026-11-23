@@ -285,11 +285,14 @@ test('listPrs lists open pull requests with their author login', async () => {
 
 test('failedRuns lists failed workflow runs on a branch', async () => {
   const rec = new ExecRecorder();
-  rec.respond(() => true, { stdout: '[{"databaseId":77,"url":"ru","workflowName":"CI"}]' });
+  rec.respond(() => true, { stdout: '[{"databaseId":77,"attempt":2,"url":"ru","workflowName":"CI"},{"databaseId":78,"url":"rv","workflowName":"CI"}]' });
   const gh = cliGh({ exec: rec.exec });
-  assert.deepEqual(await gh.failedRuns(R, { branch: 'main' }), [{ databaseId: 77, url: 'ru', workflowName: 'CI' }]);
+  assert.deepEqual(await gh.failedRuns(R, { branch: 'main' }), [
+    { databaseId: 77, attempt: 2, url: 'ru', workflowName: 'CI' },
+    { databaseId: 78, attempt: 1, url: 'rv', workflowName: 'CI' },
+  ]);
   assert.deepEqual(rec.calls[0]!.args, [
-    'run', 'list', '--repo', R, '--branch', 'main', '--status', 'failure', '--json', 'databaseId,url,workflowName', '--limit', '20',
+    'run', 'list', '--repo', R, '--branch', 'main', '--status', 'failure', '--json', 'databaseId,attempt,url,workflowName', '--limit', '20',
   ]);
   await gh.failedRuns(R, { branch: 'main', workflow: 'ci.yml' });
   assert.deepEqual(rec.calls[1]!.args.slice(-2), ['--workflow', 'ci.yml']);

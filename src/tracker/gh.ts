@@ -17,7 +17,8 @@ export type PrReview = { body: string; url: string };
 export type AdvisoryFork = { fullName: string; cloneUrl: string };
 export type IssueRef = { number: number; url: string };
 export type PrRef = { number: number; url: string; author: string };
-export type FailedRun = { databaseId: number; url: string; workflowName: string };
+/** `attempt` counts re-runs of the same run (1 for the first). */
+export type FailedRun = { databaseId: number; attempt: number; url: string; workflowName: string };
 
 export interface Gh {
   issue(repo: string, n: number): Promise<Issue>;
@@ -244,11 +245,11 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
       noDash('run list', 'branch', p.branch);
       if (p.workflow !== undefined) noDash('run list', 'workflow', p.workflow);
       const out = await call('run list', [
-        'run', 'list', '--repo', repo, '--branch', p.branch, '--status', 'failure', '--json', 'databaseId,url,workflowName', '--limit', '20',
+        'run', 'list', '--repo', repo, '--branch', p.branch, '--status', 'failure', '--json', 'databaseId,attempt,url,workflowName', '--limit', '20',
         ...(p.workflow === undefined ? [] : ['--workflow', p.workflow]),
       ]);
       return list(parseJson('run list', out)).map((r) => ({
-        databaseId: Number(r['databaseId']), url: String(r['url'] ?? ''), workflowName: String(r['workflowName'] ?? ''),
+        databaseId: Number(r['databaseId']), attempt: Number(r['attempt'] ?? 1), url: String(r['url'] ?? ''), workflowName: String(r['workflowName'] ?? ''),
       }));
     },
   };
