@@ -2,7 +2,7 @@
 // the lower half under the pipeline: how a finished run ended, and the history fold.
 
 import { div } from 'gpui-kit';
-import { v_flex, h_flex, Textarea } from 'gpui-base';
+import { v_flex, h_flex, Input, Textarea } from 'gpui-base';
 import { agents, terminals } from 'herdr';
 import {
   activeBox,
@@ -11,6 +11,7 @@ import {
   agentNote,
   agentTone,
   ago,
+  askOf,
   attentionTag,
   boxActions,
   boxAsks,
@@ -29,8 +30,77 @@ const LABELS = {
   reject: ['Reject…', 'no'],
   grant: ['Grant a round & resume', 'ok'],
   resume: ['Resume', 'ok'],
+  answer: ['Submit', 'ok'],
   clean: ['Clean up', ''],
 };
+
+/** A tick box and its label, a click toggles it (`on`). */
+function tick(t, id, on, label, onClick, disabled) {
+  return own(
+    h_flex()
+      .id(id)
+      .gap(8)
+      .items_start()
+      .text_size(12)
+      .text_color(disabled ? t.dim : t.foreground)
+      .when(!disabled, (el) => el.cursor_pointer().hover((s) => s.opacity(0.85)).on_click(onClick))
+      .child(div().flex_none().text_color(on ? t.working : t.muted).child(on ? '☑' : '☐'))
+      .child(div().flex_1().min_w(0).child(label)),
+  );
+}
+
+/** The form of a run asking questions (a field and an N/A tick each) or about findings (a tick each, all off to start). */
+function askForm(p, t, r) {
+  const ask = askOf(r);
+  const form = ask && p.asks?.[ask.key];
+  if (!form) return div();
+  const busy = Boolean(p.busy);
+  const toggle = (list, i) => (_e, cx) => {
+    list[i] = !list[i];
+    p.actError = null;
+    cx.notify();
+  };
+  if (ask.kind === 'findings') {
+    return v_flex()
+      .flex_none()
+      .gap(6)
+      .children(ask.items.map((it, i) => tick(t, `finding-${it.n}`, form.ticks[i], `${it.n}. ${it.label}`, toggle(form.ticks, i), busy)))
+      .child(div().text_size(11).text_color(t.muted).child('Ticked findings go back to implement for one more round; with none ticked, the run delivers.'));
+  }
+  return v_flex()
+    .flex_none()
+    .gap(10)
+    .children(
+      ask.items.map((it, i) =>
+        v_flex()
+          .gap(4)
+          .child(div().text_size(12).text_color(t.foreground).child(`${it.n}. ${it.text}`))
+          .child(
+            h_flex()
+              .gap(8)
+              .items_center()
+              .child(
+                own(
+                  div()
+                    .flex_1()
+                    .min_w(0)
+                    .px(8)
+                    .py(4)
+                    .rounded(6)
+                    .border(1)
+                    .border_color(t.border)
+                    .bg(t.surface)
+                    .text_size(12)
+                    .text_color(form.na[i] ? t.dim : t.foreground)
+                    .when(form.na[i], (el) => el.opacity(0.5))
+                    .child(Input.new(form.inputs[i]).w_full().disabled(form.na[i])),
+                ),
+              )
+              .child(div().flex_none().child(tick(t, `na-${it.n}`, form.na[i], 'N/A', toggle(form.na, i), busy))),
+          ),
+      ),
+    );
+}
 
 const tag = (label, c) =>
   div().flex_none().px(6).py(1).rounded(4).text_size(10).font_semibold().border(1).border_color(c).text_color(c).child(label);
@@ -223,7 +293,14 @@ function attentionBox(p, t, r, kind, narrow, fill) {
                 disabled: Boolean(p.busy),
               }),
             )
-          : [
+          : x === 'answer'
+            ? [
+                button(t, 'act-answer', LABELS.answer[0], LABELS.answer[1], (_e, cx) => p.submitAnswer(cx), {
+                  busy: p.busy === 'answer',
+                  disabled: Boolean(p.busy),
+                }),
+              ]
+            : [
               button(t, `act-${x}`, LABELS[x]?.[0] ?? x, LABELS[x]?.[1] ?? '', (_e, cx) => p.act(x, cx), {
                 busy: p.busy === x,
                 disabled: Boolean(p.busy) && p.busy !== x,
@@ -272,6 +349,7 @@ function attentionBox(p, t, r, kind, narrow, fill) {
       ),
     )
     .when(Boolean(p.boxFile), (el) => el.child(inlineReader(p, t, p.boxFile, 'box-reader', grow)))
+    .when(kind === 'questions' || kind === 'findings', (el) => el.child(askForm(p, t, r)))
     .when(acts.length > 0 || Boolean(a.commentUrl) || live || Boolean(drv), (el) => el.child(buttons))
     .when(p.rejecting, (el) => el.child(rejectBox(p, t)));
   return said(p, t, box);
