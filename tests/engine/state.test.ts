@@ -3,7 +3,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
-import { loadState, newState, saveState } from '../../src/engine/state.ts';
+import { answerFindings, answerQuestions, loadState, newState, saveState } from '../../src/engine/state.ts';
+import type { RunState } from '../../src/engine/state.ts';
+import type { Graph } from '../../src/graph/build.ts';
 
 let dir: string;
 beforeEach(async () => {
@@ -144,4 +146,72 @@ test('mappingsFingerprint and mappingKeys round-trip', async () => {
   const s = await loadState(dir);
   assert.equal(s.mappingsFingerprint, 'f');
   assert.deepEqual(s.mappingKeys, ['k']);
+});
+
+test('answerQuestions records the answers for the asking step and stops asking', () => {
+  const s = newState(init);
+  s.cursor = 3;
+  s.status = 'paused';
+  s.asking = { kind: 'questions', stepId: 'plan.0', attempt: 1, items: ['q'] };
+  answerQuestions(s, 'steps/plan.0/1/answers.md');
+  assert.deepEqual(s.answered, { 'plan.0': { answers: 'steps/plan.0/1/answers.md' } });
+  assert.ok(!('asking' in s));
+  assert.equal(s.cursor, 3);
+  assert.equal(s.status, 'paused');
+  assert.throws(() => answerQuestions(s, 'x'), { message: 'run state is not asking questions' });
+});
+
+const loopGraph = {
+  backEdges: { review: { id: 'review', fromStepId: 'review', toStepIndex: 5, jumpAfterIndex: 7, maxRounds: 3, onCap: 'continue' } },
+} as unknown as Graph;
+
+function askingFindings(findings?: string): RunState {
+  const s = newState(init);
+  s.cursor = 7;
+  s.status = 'paused';
+  s.rounds = { review: 3 };
+  s.asking = { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'review', ...(findings === undefined ? {} : { findings }) };
+  return s;
+}
+
+test('answerFindings with agreed findings grants one more round with only those', () => {
+  const s = askingFindings('steps/review/3/outputs/findings.md');
+  answerFindings(s, loopGraph, 'steps/review/3/agreed-findings.md');
+  assert.equal(s.rounds['review'], 2);
+  assert.equal(s.grantedRound, 'review');
+  assert.deepEqual(s.answered, { review: { findings: 'steps/review/3/agreed-findings.md' } });
+  assert.ok(!('asking' in s));
+});
+
+test('answerFindings with none moves past the loop and keeps the findings as unresolved', () => {
+  const s = askingFindings('steps/review/3/outputs/findings.md');
+  answerFindings(s, loopGraph, undefined);
+  assert.equal(s.cursor, 8);
+  assert.equal(s.unresolvedFindings, 'steps/review/3/outputs/findings.md');
+  assert.ok(!('asking' in s));
+  assert.ok(!('grantedRound' in s));
+  const t = askingFindings();
+  t.unresolvedFindings = 'stale';
+  answerFindings(t, loopGraph, undefined);
+  assert.ok(!('unresolvedFindings' in t));
+  assert.throws(() => answerFindings(t, loopGraph, undefined), { message: 'run state is not asking about findings' });
+});
+
+test('loadState rejects a bad asking or answered', async () => {
+  const file = path.join(dir, 'state.json');
+  await fs.writeFile(file, JSON.stringify({ ...newState(init), asking: { kind: 'maybe' } }));
+  await assert.rejects(loadState(dir), { message: `Run state ${file} has an invalid "asking": {"kind":"maybe"}` });
+  await fs.writeFile(file, JSON.stringify({ ...newState(init), answered: { plan: { answers: 1 } } }));
+  await assert.rejects(loadState(dir), { message: `Run state ${file} has an invalid "answered": {"plan":{"answers":1}}` });
+});
+
+test('asking and answered round-trip', async () => {
+  const s = askingFindings('f');
+  s.answered = { plan: { answers: 'steps/plan/1/answers.md' } };
+  await saveState(dir, s);
+  assert.deepEqual(await loadState(dir), s);
+  const q = newState(init);
+  q.asking = { kind: 'questions', stepId: 'plan', attempt: 2, items: ['a'] };
+  await saveState(dir, q);
+  assert.deepEqual(await loadState(dir), q);
 });

@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import type { Graph } from '../graph/build.ts';
 import { writeFileAtomic } from '../util/fs.ts';
 
 export type StepRecord = {
@@ -10,6 +11,12 @@ export type StepRecord = {
   status: 'pass' | 'fail' | 'escalate' | 'contract_error';
   outputs: Record<string, string>;
 };
+
+/** What a paused run asks the owner: a step's questions, or which findings left at a stage loop's cap to fix. */
+export type Asking =
+  | { kind: 'questions'; stepId: string; attempt: number; items: string[] }
+  /** `findings` is the run-dir-relative findings output, absent when the failing step wrote none; `items` is filled in by the driver */
+  | { kind: 'findings'; stepId: string; attempt: number; edgeId: string; findings?: string; items?: string[] };
 
 export type RunState = {
   version: 1;
@@ -42,6 +49,10 @@ export type RunState = {
   mappingsFingerprint?: string;
   /** sorted mapping keys (JSON `[as, ground, file ?? dir, required, applies_to]`) the run started on */
   mappingKeys?: string[];
+  /** set while the run is paused for the owner's answers (`perc answer`) */
+  asking?: Asking;
+  /** stepId → output key → run-dir-relative path: the owner's answers, which override that step's outputs until it runs again */
+  answered?: Record<string, Record<string, string>>;
 };
 
 const STATUSES: readonly string[] = ['running', 'paused', 'failed', 'completed'];
@@ -63,7 +74,52 @@ function invalidField(s: Record<string, unknown>): string | undefined {
   if (s['mappingsFingerprint'] !== undefined && typeof s['mappingsFingerprint'] !== 'string') return 'mappingsFingerprint';
   const keys = s['mappingKeys'];
   if (keys !== undefined && !(Array.isArray(keys) && keys.every((k) => typeof k === 'string'))) return 'mappingKeys';
+  if (s['asking'] !== undefined && !isAsking(s['asking'])) return 'asking';
+  const answered = s['answered'];
+  if (answered !== undefined && !(isRecord(answered) && Object.values(answered).every(isStringRecord))) return 'answered';
   return undefined;
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isStringRecord = (v: unknown) => isRecord(v) && Object.values(v).every((x) => typeof x === 'string');
+const isStrings = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === 'string');
+
+function isAsking(v: unknown): boolean {
+  if (!isRecord(v) || typeof v['stepId'] !== 'string' || !Number.isInteger(v['attempt'])) return false;
+  if (v['kind'] === 'questions') return isStrings(v['items']);
+  if (v['kind'] !== 'findings' || typeof v['edgeId'] !== 'string') return false;
+  if (v['findings'] !== undefined && typeof v['findings'] !== 'string') return false;
+  return v['items'] === undefined || isStrings(v['items']);
+}
+
+/** The owner answered the step's questions (file at `answersRel`): the step re-runs with them as input `answers`. Leaves `status` to the caller. */
+export function answerQuestions(state: RunState, answersRel: string): void {
+  const asking = state.asking;
+  if (asking?.kind !== 'questions') throw new Error('run state is not asking questions');
+  state.answered = { ...state.answered, [asking.stepId]: { ...state.answered?.[asking.stepId], answers: answersRel } };
+  delete state.asking;
+}
+
+/**
+ * The owner ticked findings at a stage loop's cap. With `agreedRel` (the agreed findings file), one more round runs
+ * and the loop start sees only those as the failing step's `findings`; without it, the run moves past the loop.
+ * Leaves `status` to the caller.
+ */
+export function answerFindings(state: RunState, graph: Graph, agreedRel: string | undefined): void {
+  const asking = state.asking;
+  if (asking?.kind !== 'findings') throw new Error('run state is not asking about findings');
+  const edge = graph.backEdges[asking.edgeId];
+  if (!edge) throw new Error(`run state asks about back-edge "${asking.edgeId}", which is not in this graph`);
+  if (agreedRel !== undefined) {
+    state.rounds[edge.id] = Math.max((state.rounds[edge.id] ?? 0) - 1, 0);
+    state.grantedRound = edge.id;
+    state.answered = { ...state.answered, [asking.stepId]: { ...state.answered?.[asking.stepId], findings: agreedRel } };
+  } else {
+    state.cursor = edge.jumpAfterIndex + 1;
+    if (asking.findings === undefined) delete state.unresolvedFindings;
+    else state.unresolvedFindings = asking.findings;
+  }
+  delete state.asking;
 }
 
 /**

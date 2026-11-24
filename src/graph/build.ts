@@ -40,6 +40,11 @@ export type BackEdge = {
   /** the engine performs the jump after running the step at this index */
   jumpAfterIndex: number;
   maxRounds: number;
+  /**
+   * `continue`: a stage loop (review, `max_rounds`); at its cap the run pauses and asks the owner which findings to fix.
+   * The name predates that and is kept so the graph fingerprints of runs in flight still match.
+   * `escalate`: an `on_fail` back-edge; at its cap the run pauses until the owner grants a round.
+   */
   onCap: 'continue' | 'escalate';
 };
 

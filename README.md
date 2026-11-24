@@ -48,7 +48,7 @@ A run walks the stages of its pipeline in order. You choose what runs at each st
   <img alt="The feature pipeline's run train (other pipelines run their own stages, from intake to an exit): intake, groom, the approve-groom gate, plan, implement, an optional hook, review looping back to implement up to three times, the pr-description hook, then deliver opens a pull request." src="assets/diagram-run-light.svg" width="100%">
 </picture>
 
-The diagram shows the example config mid-run: intake and groom are done, and the run waits at the `approve-groom` gate. Rejecting with feedback re-runs groom. Review can send work back to implement for up to 3 rounds; after the third, it delivers anyway. Hooks, like the one after implement, are optional nodes you add `before` or `after` any stage, or `all`. The `pr-description` hook before deliver writes the pull request text.
+The diagram shows the example config mid-run: intake and groom are done, and the run waits at the `approve-groom` gate. Rejecting with feedback re-runs groom. Review can send work back to implement for up to 3 rounds; after the third, the run pauses and lists the findings left; you tick the ones to fix, and it goes back for one more round with only those, or delivers when you tick none. Hooks, like the one after implement, are optional nodes you add `before` or `after` any stage, or `all`. The `pr-description` hook before deliver writes the pull request text.
 
 | Stop | What can run there | Done when |
 |---|---|---|
@@ -78,7 +78,7 @@ Each run works in its own git worktree at `<repo>/.worktrees/<run-id>`, on a bra
 
 **Bounded**
 
-- Every loop has a round cap. Review delivers at its cap, and a stage that loops through `max_rounds` on its binding moves on at its cap; an `on_fail` back-edge pauses the run and escalates to you.
+- Every loop has a round cap. Review and a stage that loops through `max_rounds` pause at their cap and ask you about the findings left (`perc answer`); an `on_fail` back-edge pauses the run and escalates to you.
 - `perc resume` on a run paused at a cap grants exactly one more round.
 
 ## Integrations

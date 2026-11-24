@@ -82,7 +82,7 @@ nodes:
     on_fail: { back_to: implement, max_rounds: 2 }
 ```
 
-The command runs in the run's worktree; a non-zero exit is a fail. `max_rounds` counts failed rounds, the first run included: `2` means one retry, then the run pauses and escalates to the owner. (The review loop is different: at its cap it delivers anyway.) Each time review sends the work back to implement, the command runs again and its round count starts fresh; add `once: true` if it should not re-run at all after it has passed. A hook sits on a stage's edge: `after: implement` and `before: review` both place a node between implement and review, so pick the one that reads best (several nodes on one hook point run in YAML order).
+The command runs in the run's worktree; a non-zero exit is a fail. `max_rounds` counts failed rounds, the first run included: `2` means one retry, then the run pauses and escalates to the owner. (The review loop is different: at its cap it asks the owner which findings to fix.) Each time review sends the work back to implement, the command runs again and its round count starts fresh; add `once: true` if it should not re-run at all after it has passed. A hook sits on a stage's edge: `after: implement` and `before: review` both place a node between implement and review, so pick the one that reads best (several nodes on one hook point run in YAML order).
 
 **A human sign-off after a stage**:
 

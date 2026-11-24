@@ -71,6 +71,11 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
     const endedAt = now();
     const attempt = (state.executed[step.id] ?? 0) + 1;
     state.executed[step.id] = attempt;
+    // the owner's answers to this step are spent once it records its next attempt
+    if (state.answered?.[step.id] !== undefined) {
+      delete state.answered[step.id];
+      if (Object.keys(state.answered).length === 0) delete state.answered;
+    }
     const missing = missingOutputs(step, outcome, graph);
     state.history.push({
       stepId: step.id,
@@ -97,7 +102,13 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
     if (outcome.status === 'escalate') {
       // cursor stays on the step: resume re-runs it
       state.status = 'paused';
-      state.pausedReason = outcome.reason ?? `escalate: ${step.id}`;
+      if (outcome.questions !== undefined) {
+        const reason = outcome.reason === undefined ? '' : `; ${outcome.reason}`;
+        state.pausedReason = `questions: ${step.id} asks ${outcome.questions.length}${reason}`;
+        state.asking = { kind: 'questions', stepId: step.id, attempt, items: outcome.questions };
+      } else {
+        state.pausedReason = outcome.reason ?? `escalate: ${step.id}`;
+      }
     } else if (outcome.status === 'fail') {
       const route = graph.failRoutes[step.id];
       const edge = route === undefined ? undefined : graph.backEdges[route];
@@ -107,7 +118,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
         // this fail decides the round; an earlier trigger on the same edge is folded into it
         if (state.pendingJump?.edgeId === edge.id) delete state.pendingJump;
         state.cursor = i + 1;
-        decide(edge, i, outcome.outputs['findings']);
+        decide(edge, i, outcome.outputs['findings'], step.id);
       } else {
         // triggered now, decided once the step at jumpAfterIndex has run (hooks run every round);
         // a later trigger on the same edge overwrites, so the latest findings win
@@ -119,6 +130,11 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       state.cursor = i + 1;
     }
     settle(i);
+    await persist();
+  }
+  // an answer that moves past a loop at the end of the graph leaves nothing to run
+  if (state.status === 'running' && state.cursor >= steps.length) {
+    state.status = 'completed';
     await persist();
   }
   return state;
@@ -146,7 +162,8 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
         const edge = graph.backEdges[pending.edgeId]!;
         if (edge.jumpAfterIndex === i) {
           delete state.pendingJump;
-          decide(edge, i, pending.findings);
+          // older states have no stepId: their trigger was the edge's own step
+          decide(edge, i, pending.findings, pending.stepId ?? edge.fromStepId);
         }
       }
     }
@@ -172,16 +189,25 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
     }
   }
 
-  /** Count a round on `edge` after the step at `i`: jump back, or apply the cap. */
-  function decide(edge: BackEdge, i: number, findings: string | undefined): void {
+  /** Count a round on `edge` after the step at `i` (`fromStep` failed with `findings`): jump back, or apply the cap. */
+  function decide(edge: BackEdge, i: number, findings: string | undefined, fromStep: string): void {
     // clamped: failing again after resuming at a cap does not count past it
     const n = Math.min((state.rounds[edge.id] ?? 0) + 1, edge.maxRounds);
     state.rounds[edge.id] = n;
     if (n < edge.maxRounds) {
       jumpBack(edge);
     } else if (edge.onCap === 'continue') {
-      state.unresolvedFindings = findings;
-      state.cursor = i + 1;
+      // a stage loop at its cap asks the owner which findings to fix; the cursor stays on the step that decided
+      state.cursor = i;
+      state.status = 'paused';
+      state.pausedReason = `findings: ${edge.id} reached ${edge.maxRounds} rounds`;
+      state.asking = {
+        kind: 'findings',
+        stepId: fromStep,
+        attempt: state.executed[fromStep] ?? 0,
+        edgeId: edge.id,
+        ...(findings === undefined ? {} : { findings }),
+      };
     } else {
       // cursor stays on the step: resume re-runs it
       state.cursor = i;
@@ -211,5 +237,7 @@ function missingOutputs(step: Step, outcome: NodeOutcome, graph: Graph): string[
 function latestOutputs(state: RunState): Record<string, Record<string, string>> {
   const out: Record<string, Record<string, string>> = {};
   for (const h of state.history) if (h.status !== 'contract_error') out[h.stepId] = h.outputs;
+  // the owner's answers override the outputs of the step they answer
+  for (const [stepId, answers] of Object.entries(state.answered ?? {})) out[stepId] = { ...out[stepId], ...answers };
   return structuredClone(out);
 }
