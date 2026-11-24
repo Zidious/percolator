@@ -1127,7 +1127,7 @@
         "kind": "findings",
         "since": "2026-11-20T23:58:02.000Z",
         "message": "review hit its cap with findings left",
-        "detail": "Tick the findings to fix: the run goes back for one more round with only those. With none ticked, it moves on.",
+        "detail": "Tick the findings to fix: the run goes back to implement for one more round with only those. With none ticked, it moves on.",
         "review": [
           {
             "step": "review",

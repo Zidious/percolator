@@ -60,9 +60,9 @@ test('findingItems: one item per ## section, the whole text without any, none wh
 test('checkAnswer refuses incomplete or malformed answers to questions', () => {
   const items = questions.kind === 'questions' ? questions.items : [];
   refuses(() => checkAnswer('r1', questions, items, flags()), 'run r1: answer every question or mark it N/A; unanswered: 1, 2, 3 (--answer <n>=<text>, --na <n>)');
-  refuses(() => checkAnswer('r1', questions, items, flags({ answer: ['4=x'] })), 'run r1: there is no question 4 (it asks 1–3)');
-  refuses(() => checkAnswer('r1', questions, items, flags({ na: ['0'] })), 'run r1: there is no question 0 (it asks 1–3)');
-  refuses(() => checkAnswer('r1', questions, items, flags({ answer: ['1=a'], na: ['1'] })), 'run r1: question 1 is answered twice');
+  refuses(() => checkAnswer('r1', questions, items, flags({ answer: ['4=x'] })), 'run r1: there is no question 4 (it asks 1–3); number them as perc status r1 lists them');
+  refuses(() => checkAnswer('r1', questions, items, flags({ na: ['0'] })), 'run r1: there is no question 0 (it asks 1–3); number them as perc status r1 lists them');
+  refuses(() => checkAnswer('r1', questions, items, flags({ answer: ['1=a'], na: ['1'] })), 'run r1: question 1 is answered twice; give each question once, with --answer or --na');
   refuses(() => checkAnswer('r1', questions, items, flags({ answer: ['1='] })), 'run r1: answer 1 is empty; give text or use --na 1');
   refuses(() => checkAnswer('r1', questions, items, flags({ answer: ['x=a'] })), 'run r1: --answer needs <n>=<text>, got "x=a"');
   refuses(() => checkAnswer('r1', questions, items, flags({ na: ['x'] })), 'run r1: --na needs a question number, got "x"');
@@ -84,13 +84,13 @@ test('checkAnswer for findings: ticked numbers sorted and unique, none by defaul
   const items = ['## A', '## B', '## C', '## D'];
   assert.deepEqual(checkAnswer('r1', findings, items, flags({ agree: ['3,1', '3'] })), { kind: 'findings', agree: [1, 3] });
   assert.deepEqual(checkAnswer('r1', findings, items, flags()), { kind: 'findings', agree: [] });
-  refuses(() => checkAnswer('r1', findings, items, flags({ agree: ['5'] })), 'run r1: there is no finding 5 (it lists 1–4)');
+  refuses(() => checkAnswer('r1', findings, items, flags({ agree: ['5'] })), 'run r1: there is no finding 5 (it lists 1–4); tick them by the numbers perc status r1 lists');
   refuses(() => checkAnswer('r1', findings, items, flags({ agree: ['a'] })), 'run r1: --agree needs finding numbers like 1,3, got "a"');
   refuses(
     () => checkAnswer('r1', findings, items, flags({ na: ['1'] })),
     'run r1 is asking about findings; tick them with --agree <n>[,<n>…]',
   );
-  refuses(() => checkAnswer('r1', findings, [], flags({ agree: ['1'] })), 'run r1: there is no finding 1 (it lists none)');
+  refuses(() => checkAnswer('r1', findings, [], flags({ agree: ['1'] })), 'run r1: review wrote no findings to tick; answer without --agree to move on past it');
 });
 
 function askingState(asking: Asking): RunState {

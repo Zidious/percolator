@@ -258,6 +258,10 @@ export type YourTurnInput = {
   sliceOf?: string;
   /** a pick-pipeline gate: the pipelines `perc approve --pipeline` may name */
   choices?: string[];
+  /** findings: the stage a granted round goes back to */
+  backTo?: string;
+  /** findings: the failing step wrote none, so the only answer is to move on */
+  nothingToTick?: boolean;
 };
 
 /**
@@ -307,9 +311,12 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
         next: [`perc answer ${a.runId} --answer <n>="<text>" --na <n> …`],
       };
     case 'findings':
+      if (a.nothingToTick === true) {
+        return { message: `${a.step} hit its cap and wrote no findings to tick`, detail: 'The only answer is to move on past it.', next: [`perc answer ${a.runId}`] };
+      }
       return {
         message: `${a.step} hit its cap with findings left`,
-        detail: 'Tick the findings to fix: the run goes back for one more round with only those. With none ticked, it moves on.',
+        detail: `Tick the findings to fix: the run goes back${a.backTo === undefined ? '' : ` to ${a.backTo}`} for one more round with only those. With none ticked, it moves on.`,
         next: [`perc answer ${a.runId} --agree <n>[,<n>…]`, `perc answer ${a.runId}`],
       };
     case 'failed':
@@ -348,7 +355,8 @@ export function attentionNext(
   const again = { ticket: run.ticket?.ref, pipeline: run.pipeline, inputs: run.inputs, repoRoot: run.repo };
   const slice = a.kind === 'failed' && a.commands === undefined && typeof run.parent === 'string' ? { sliceOf: run.parent } : {};
   const choices = a.choices !== undefined ? { choices: a.choices } : {};
-  return yourTurn({ kind: a.kind, runId: run.id, step: '', ...again, ...slice, ...choices }).next;
+  const none = a.kind === 'findings' && a.asked?.items.length === 0 ? { nothingToTick: true } : {};
+  return yourTurn({ kind: a.kind, runId: run.id, step: '', ...again, ...slice, ...choices, ...none }).next;
 }
 
 const PICK_GATE = 'pick-pipeline';
@@ -408,13 +416,21 @@ async function attentionOf(o: {
   if (state.status === 'paused') {
     const asking = state.asking;
     if (asking !== undefined) {
+      const items = await askedItems(dir, state);
+      const findings: Partial<YourTurnInput> = {};
+      if (asking.kind === 'findings') {
+        const to = o.loops.find((l) => l.id === asking.edgeId)?.to;
+        const backTo = o.steps.find((s) => s.id === to)?.stage;
+        if (backTo !== undefined) findings.backTo = backTo;
+        if (items.length === 0) findings.nothingToTick = true;
+      }
       return {
         kind: asking.kind,
         since: lastEnd,
-        ...turn(asking.kind, asking.stepId),
+        ...turn(asking.kind, asking.stepId, findings),
         review: failing(asking.stepId),
         actions: ['answer'],
-        asked: { step: asking.stepId, attempt: asking.attempt, items: await askedItems(dir, state) },
+        asked: { step: asking.stepId, attempt: asking.attempt, items },
       };
     }
     if (state.pausedCap !== undefined) {

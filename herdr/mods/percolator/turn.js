@@ -64,8 +64,7 @@ function askForm(p, t, r) {
     return v_flex()
       .flex_none()
       .gap(6)
-      .children(ask.items.map((it, i) => tick(t, `finding-${it.n}`, form.ticks[i], `${it.n}. ${it.label}`, toggle(form.ticks, i), busy)))
-      .child(div().text_size(11).text_color(t.muted).child('Ticked findings go back to implement for one more round; with none ticked, the run delivers.'));
+      .children(ask.items.map((it, i) => tick(t, `finding-${it.n}`, form.ticks[i], `${it.n}. ${it.label}`, toggle(form.ticks, i), busy)));
   }
   return v_flex()
     .flex_none()

@@ -1537,7 +1537,7 @@ test('paused on findings at a cap, split from the findings file when state has n
       kind: 'findings',
       since: T2,
       message: 'review hit its cap with findings left',
-      detail: 'Tick the findings to fix: the run goes back for one more round with only those. With none ticked, it moves on.',
+      detail: 'Tick the findings to fix: the run goes back to implement for one more round with only those. With none ticked, it moves on.',
       review: [{ step: 'review', key: 'findings', path: path.join(e.dir(m), findings) }],
       actions: ['answer'],
       asked: { step: 'review', attempt: 3, items: ['## Missing test\n\nwhy', '## Typo'] },
@@ -1545,6 +1545,20 @@ test('paused on findings at a cap, split from the findings file when state has n
   } finally {
     await e.cleanup();
   }
+});
+
+test('yourTurn findings with nothing to tick says the only answer is to move on, and attentionNext agrees', () => {
+  const f = yourTurn({ ...TURN, kind: 'findings', step: 'report', nothingToTick: true });
+  assert.deepEqual(f, {
+    message: 'report hit its cap and wrote no findings to tick',
+    detail: 'The only answer is to move on past it.',
+    next: ['perc answer r1'],
+  });
+  const run = { id: 'r1', ticket: null, pipeline: 'feature', inputs: {}, repo: '/repo' };
+  const a = { kind: 'findings' as const, since: T1, message: '', actions: ['answer' as const], asked: { step: 'report', attempt: 2, items: [] } };
+  assert.deepEqual(attentionNext(a, run), f.next);
+  const back = yourTurn({ ...TURN, kind: 'findings', step: 'review', backTo: 'fix' });
+  assert.equal(back.detail, 'Tick the findings to fix: the run goes back to fix for one more round with only those. With none ticked, it moves on.');
 });
 
 test('yourTurn questions and findings, and attentionNext gives the same', () => {

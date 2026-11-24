@@ -76,12 +76,12 @@ export function checkAnswer(runId: string, asking: Asking, items: readonly strin
     if (flags.agree.length > 0) refuse(`run ${runId} is asking questions; answer them with --answer <n>=<text> or --na <n>`);
     const n = items.length;
     const inRange = (q: number) => {
-      if (q < 1 || q > n) refuse(`run ${runId}: there is no question ${q} (it asks ${n === 1 ? '1' : `1–${n}`})`);
+      if (q < 1 || q > n) refuse(`run ${runId}: there is no question ${q} (it asks ${n === 1 ? '1' : `1–${n}`}); number them as perc status ${runId} lists them`);
     };
     const answers: (string | null | undefined)[] = items.map(() => undefined);
     const give = (q: number, value: string | null) => {
       inRange(q);
-      if (answers[q - 1] !== undefined) refuse(`run ${runId}: question ${q} is answered twice`);
+      if (answers[q - 1] !== undefined) refuse(`run ${runId}: question ${q} is answered twice; give each question once, with --answer or --na`);
       answers[q - 1] = value;
     };
     for (const raw of flags.answer) {
@@ -110,9 +110,10 @@ export function checkAnswer(runId: string, asking: Asking, items: readonly strin
     for (const part of raw.split(',')) {
       if (!/^\d+$/.test(part.trim())) refuse(`run ${runId}: --agree needs finding numbers like 1,3, got "${raw}"`);
       const f = Number(part.trim());
+      if (items.length === 0) refuse(`run ${runId}: ${asking.stepId} wrote no findings to tick; answer without --agree to move on past it`);
       if (f < 1 || f > items.length) {
-        const range = items.length === 0 ? 'none' : items.length === 1 ? '1' : `1–${items.length}`;
-        refuse(`run ${runId}: there is no finding ${f} (it lists ${range})`);
+        const range = items.length === 1 ? '1' : `1–${items.length}`;
+        refuse(`run ${runId}: there is no finding ${f} (it lists ${range}); tick them by the numbers perc status ${runId} lists`);
       }
       agree.add(f);
     }
@@ -139,7 +140,7 @@ export async function applyAnswer(dir: string, state: RunState, graph: Graph, a:
     summary = `answered ${items.length} questions of ${asking.stepId}`;
   } else if (asking.kind === 'findings' && a.kind === 'findings') {
     const edge = graph.backEdges[asking.edgeId];
-    if (!edge) throw new Error(`run ${state.runId} asks about back-edge "${asking.edgeId}", which is not in this graph`);
+    if (!edge) throw new Error(`run ${state.runId} asks about back-edge "${asking.edgeId}", which is not in this graph (config changed since this run started); start a new run`);
     const sources = [...(asking.also ?? []), asking];
     const of = `of ${items.length} findings of ${sources.map((x) => x.stepId).join(', ')}`;
     if (a.agree.length > 0) {

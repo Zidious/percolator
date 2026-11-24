@@ -197,6 +197,14 @@ test('answerFindings with none moves past the loop and keeps the findings as unr
   assert.throws(() => answerFindings(t, loopGraph, undefined), { message: 'run state is not asking about findings' });
 });
 
+test('answerFindings on a back-edge not in the graph says to start a new run', () => {
+  const s = askingFindings('f');
+  s.asking = { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'gone' };
+  assert.throws(() => answerFindings(s, loopGraph, undefined), {
+    message: 'run state asks about back-edge "gone", which is not in this graph (config changed since this run started); start a new run',
+  });
+});
+
 test('answerFindings with agreed findings per step overrides each of them', () => {
   const s = askingFindings('steps/review/3/outputs/findings.md');
   answerFindings(s, loopGraph, { review: 'steps/review/3/agreed-findings.md', other: 'steps/other/3/agreed-findings.md' });

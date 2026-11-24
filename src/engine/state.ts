@@ -132,7 +132,7 @@ export function answerFindings(state: RunState, graph: Graph, agreed: string | R
   const asking = state.asking;
   if (asking?.kind !== 'findings') throw new Error('run state is not asking about findings');
   const edge = graph.backEdges[asking.edgeId];
-  if (!edge) throw new Error(`run state asks about back-edge "${asking.edgeId}", which is not in this graph`);
+  if (!edge) throw new Error(`run state asks about back-edge "${asking.edgeId}", which is not in this graph (config changed since this run started); start a new run`);
   if (agreed !== undefined) {
     state.rounds[edge.id] = Math.max((state.rounds[edge.id] ?? 0) - 1, 0);
     state.grantedRound = edge.id;
