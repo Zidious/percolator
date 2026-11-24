@@ -17,6 +17,7 @@ node src/cli.ts <command> …           # run perc from a checkout; `perc --help
 node src/cli.ts validate [--pipeline <name>]        # check every pipeline of the profile, or one
 node src/cli.ts run [<ticket>] [--pipeline <name>] [--input key=value]...  # start a run of a pipeline (default: the profile's); no ticket for ticket: none
 node src/cli.ts approve <id> [--pipeline <name>]  # answer a gate; --pipeline answers a router's pick-pipeline gate
+node src/cli.ts answer <id> [--answer <n>=<text>]... [--na <n>]... [--agree <n>,…]  # answer a run paused on questions or findings at a cap
 node src/cli.ts pipelines [--repo <dir>] [--profile <name>] [--json]  # list the repo's pipelines (--json: the panel's contract)
 node src/cli.ts delete <id>...|--finished [--yes]  # remove runs; keeps branches
 node src/cli.ts watch [--repo <dir>]... [--interval <s>] [--foreground]  # start runs from triggers (hc terminal percolator-watch); `watch stop` ends it

@@ -284,6 +284,8 @@ test('--help lists the run commands', async () => {
         '      in its own hc terminal (--foreground: in this one)',
         '  resume <run-id> [--foreground]',
         '      continue a paused or interrupted run (grants one more round at a cap)',
+        "  answer <run-id> [--answer <n>=<text>]... [--na <n>]... [--agree <n>[,<n>…]]... [--foreground]",
+        '      answer the questions or the findings a paused run is asking about (perc status <run-id> lists them)',
         '  status [<run-id>] [--json]',
         '      list runs, or show one (--json: the stable JSON contract)',
         '  approve <run-id> [--pipeline <name>] | reject <run-id> <feedback>',

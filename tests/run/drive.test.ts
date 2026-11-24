@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { test } from 'node:test';
 import { loadState, saveState } from '../../src/engine/state.ts';
+import { main } from '../../src/cli.ts';
 import { checkResumable, drive } from '../../src/run/drive.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
@@ -960,6 +961,43 @@ test('drive fills in the findings items when review pauses at its cap', async ()
       `run ${meta.runId} paused at review: findings: review reached 3 rounds`,
       `answer with: perc answer ${meta.runId} (perc status ${meta.runId} lists them)`,
     ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a fan-out slice asking questions is answered by its own id, and its own driver is launched', async () => {
+  const { e, meta, sliceDir, unfinished } = await epicRun();
+  try {
+    const slice = `${meta.runId}-s1`;
+    let answered: { code: number; out: string; err: string } | undefined;
+    e.onSleep.fn = async () => {
+      if (answered === undefined && (await exists(path.join(sliceDir(1), 'state.json')))) {
+        const child = JSON.parse(await fs.readFile(path.join(sliceDir(1), 'run.json'), 'utf8')) as RunMeta;
+        e.deps.hc.terminals.get(child.driver)!.state = 'finished';
+        const s = await loadState(sliceDir(1));
+        await saveState(sliceDir(1), {
+          ...s,
+          status: 'paused',
+          currentStep: 'implement',
+          asking: { kind: 'questions', stepId: 'implement', attempt: 1, items: ['Which parser?'] },
+        });
+        let out = '';
+        let err = '';
+        const code = await main(['answer', slice, '--answer', '1=PEG'], { stdout: (x) => (out += x), stderr: (x) => (err += x) }, e.deps);
+        answered = { code, out, err };
+        return;
+      }
+      for (const i of await unfinished()) await saveState(sliceDir(i), { ...(await loadState(sliceDir(i))), status: 'completed' });
+    };
+    // the parent only polls: it treats the answered slice as it treats any slice its driver has yet to pick up
+    await drive(meta.runId, e.deps);
+    assert.equal(answered?.err, '');
+    assert.equal(answered?.code, 0);
+    assert.equal(answered?.out.split('\n')[1], `run ${slice} resumed`);
+    // started once by the parent, then again by perc answer
+    assert.deepEqual(driverRuns(e).filter((id) => id === slice).length, 2);
+    assert.deepEqual((await loadState(sliceDir(1))).answered, { implement: { answers: 'steps/implement/1/answers.md' } });
   } finally {
     await e.cleanup();
   }

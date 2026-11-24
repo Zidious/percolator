@@ -19,6 +19,7 @@ import { checkResumable, drive, prUrl } from './run/drive.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
 import { pipelinesJson, pipelinesText } from './run/pipelines-json.ts';
 import type { RunMeta } from './run/meta.ts';
+import { AnswerError, applyAnswer, askedItems, checkAnswer } from './run/answer.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
 import { InputError, parseInputs } from './run/request.ts';
 import type { DriverDeps } from './run/prepare.ts';
@@ -59,6 +60,8 @@ commands:
       in its own hc terminal (--foreground: in this one)
   resume <run-id> [--foreground]
       continue a paused or interrupted run (grants one more round at a cap)
+  answer <run-id> [--answer <n>=<text>]... [--na <n>]... [--agree <n>[,<n>…]]... [--foreground]
+      answer the questions or the findings a paused run is asking about (perc status <run-id> lists them)
   status [<run-id>] [--json]
       list runs, or show one (--json: the stable JSON contract)
   approve <run-id> [--pipeline <name>] | reject <run-id> <feedback>
@@ -270,6 +273,39 @@ async function runResume(args: string[], deps: DriverDeps): Promise<number> {
   return 0;
 }
 
+async function runAnswer(args: string[], deps: DriverDeps): Promise<number> {
+  const { values, positionals } = parseWith(args, {
+    answer: { type: 'string', multiple: true },
+    na: { type: 'string', multiple: true },
+    agree: { type: 'string', multiple: true },
+    foreground: { type: 'boolean' },
+  });
+  const runId = onlyRunId('answer', positionals);
+  const dir = runDir(deps.home, runId);
+  const asked = await loadState(dir);
+  if (asked.asking === undefined) {
+    throw new Error(`run ${runId} is not waiting for answers; see where it is with perc status ${runId}`);
+  }
+  const items = await askedItems(dir, asked);
+  const answer = checkAnswer(runId, asked.asking, items, {
+    answer: values.answer ?? [],
+    na: values.na ?? [],
+    agree: values.agree ?? [],
+  });
+  // drive's own checks before anything is written, so a refused answer changes nothing
+  const { meta, state, v } = await checkResumable(runId, deps, { answering: true });
+  deps.out(await applyAnswer(dir, state, v.graph, answer, items));
+  if (values.foreground) return exitOf(await drive(runId, deps));
+  const driver = await launchDriver(meta, deps);
+  deps.out(`run ${runId} resumed`);
+  deps.out(`  terminal ${driver}`);
+  deps.out(`  follow with: perc status ${runId}`);
+  return 0;
+}
+
+/** The first non-empty line of an asked item, without a leading heading marker. */
+const itemLine = (text: string): string => (text.split(/\r?\n/).find((l) => l.trim() !== '') ?? '').replace(/^#+\s*/, '').trim();
+
 /** What a run is doing or waiting for, in one line; an hc failure is reported, never thrown. */
 async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: DriverDeps): Promise<string> {
   const waiting = await readWaiting(dir).catch(() => undefined);
@@ -330,6 +366,7 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
       deps.out(`your turn: ${a.message}`);
       if (a.detail !== undefined) deps.out(`  ${a.detail}`);
       for (const r of a.review ?? []) deps.out(`  read: ${r.path}`);
+      for (const [i, item] of (a.asked?.items ?? []).entries()) deps.out(`  ${i + 1}. ${itemLine(item)}`);
       for (const n of attentionNext(a, run)) deps.out(`  next: ${n}`);
     }
     deps.out('history:');
@@ -655,6 +692,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     const d = () => driverDeps(io, deps);
     if (command === 'run') return await runRun(rest, d());
     if (command === 'resume') return await runResume(rest, d());
+    if (command === 'answer') return await runAnswer(rest, d());
     if (command === 'status') return await runStatus(rest, d());
     if (command === 'approve' || command === 'reject') return await runDecide(command, rest, d());
     if (command === 'clean') return await runClean(rest, d());
@@ -664,7 +702,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     io.stderr(`unknown command: ${command}\n\n${USAGE}`);
     return 2;
   } catch (err) {
-    if (err instanceof UsageError || err instanceof InputError) {
+    if (err instanceof UsageError || err instanceof InputError || err instanceof AnswerError) {
       io.stderr(`${err.message}\n\n${USAGE}`);
       return 2;
     }
