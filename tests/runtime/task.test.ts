@@ -87,7 +87,7 @@ test('buildTask for review lists policies with the compliance instruction, input
   assert.match(t, /Use these skills: a, b\./);
   assert.match(
     t,
-    /## Policies \(binding\)\n\nFollow every policy below\. Check the change against each one and add a "Policy compliance" section to findings\.md\.\n\n- \/run\/grounds\/g\/policy\.md/,
+    /## Policies \(binding\)\n\nFollow every policy below\. Check the change against each one: each breach is a finding, its own "## " section naming the policy; write nothing about the policies the change keeps\.\n\n- \/run\/grounds\/g\/policy\.md/,
   );
   assert.match(t, /## Context \(reference\)\n\n- \/run\/grounds\/g\/ctx\.md/);
   const planLine = `- plan (from plan): ${path.join(runDir, 'steps/plan/1/outputs/plan.md')}`;

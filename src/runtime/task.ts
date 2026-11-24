@@ -117,7 +117,7 @@ export function buildTask(t: TaskInput): string {
   if (policies.length > 0) {
     const check =
       step.stage === 'review' && isSlot
-        ? ' Check the change against each one and add a "Policy compliance" section to findings.md.'
+        ? ' Check the change against each one: each breach is a finding, its own "## " section naming the policy; write nothing about the policies the change keeps.'
         : '';
     sections.push(`## Policies (binding)\n\nFollow every policy below.${check}\n\n${bullets(policies)}`);
   }
