@@ -66,3 +66,36 @@ test('collectOutputs ignores symlinks', async (t) => {
     await rm(d);
   }
 });
+
+test('readDone: escalate with questions', async () => {
+  const d = await tmp();
+  try {
+    const f = path.join(d, 'done.json');
+    await fs.writeFile(f, '{"status":"escalate","questions":["Which DB?","Keep v1?"]}');
+    assert.deepEqual(await readDone(f), { kind: 'ok', status: 'escalate', questions: ['Which DB?', 'Keep v1?'] });
+    await fs.writeFile(f, '{"status":"escalate","reason":"r","questions":["q"]}');
+    assert.deepEqual(await readDone(f), { kind: 'ok', status: 'escalate', reason: 'r', questions: ['q'] });
+  } finally {
+    await rm(d);
+  }
+});
+
+test('readDone: bad questions are invalid', async () => {
+  const d = await tmp();
+  try {
+    const f = path.join(d, 'done.json');
+    const cases: [string, string][] = [
+      ['{"status":"escalate","questions":[]}', 'questions: must list at least one question'],
+      ['{"status":"escalate","questions":["ok","  "]}', 'questions.1: must be a non-empty string'],
+      ['{"status":"escalate","questions":"x"}', 'questions: must be an array of non-empty strings'],
+      ['{"status":"pass","questions":["q"]}', 'questions: only allowed with status "escalate"'],
+      ['{"status":"fail","questions":["q"]}', 'questions: only allowed with status "escalate"'],
+    ];
+    for (const [json, error] of cases) {
+      await fs.writeFile(f, json);
+      assert.deepEqual(await readDone(f), { kind: 'invalid', error }, json);
+    }
+  } finally {
+    await rm(d);
+  }
+});

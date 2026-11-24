@@ -324,6 +324,32 @@ test('invalid done.json after the turn ends escalates naming the file', async ()
   assert.ok(!subs(e.hc).includes('kill'));
 });
 
+test('done.json escalating with questions returns them', async () => {
+  const e = await env(async (t, n) => {
+    if (n === 1) {
+      t.status = 'idle';
+      await finishWith(e.hc, t, '{"status":"escalate","questions":["q1"]}');
+    }
+  });
+  const out = await runtime(e).executeStep(step(), ctx());
+  assert.equal(out.status, 'escalate');
+  assert.deepEqual(out.questions, ['q1']);
+});
+
+test('done.json passing with questions escalates naming the file', async () => {
+  const e = await env(async (t, n) => {
+    if (n === 1) {
+      t.status = 'idle';
+      await finishWith(e.hc, t, '{"status":"pass","questions":["q1"]}');
+    }
+  });
+  const out = await runtime(e).executeStep(step(), ctx());
+  const doneFile = path.join(e.runDir, 'steps', 'plan', '1', 'done.json');
+  assert.equal(out.status, 'escalate');
+  assert.ok(out.reason!.startsWith(`${doneFile} is invalid: questions: only allowed with status "escalate"`), out.reason);
+  assert.equal(out.questions, undefined);
+});
+
 test('timeout_s escalates and leaves the terminal live', async () => {
   const e = await env((t) => {
     t.status = 'working';
