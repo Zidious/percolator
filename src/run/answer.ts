@@ -16,14 +16,16 @@ export type AnswerFlags = { answer: string[]; na: string[]; agree: string[] };
 /** An answer that does not fit what the run asks: a usage error (exit 2). */
 export class AnswerError extends Error {}
 
-/** One item per `## ` section of a findings file (text before the first is dropped); the whole text when it has none. */
+/** One item per `## ` section of a findings file, after the text before the first one (when not blank); none when blank. */
 export function findingItems(md: string): string[] {
-  const sections = splitSections(md);
-  if (sections.length === 0) return md.trim() === '' ? [] : [md.trim()];
-  return sections.map((s) => {
+  // a bare heading put first turns the text before the file's first heading into a section of its own
+  const [preamble, ...sections] = splitSections(`##\n${md}`);
+  const items = preamble!.body === '' ? [] : [preamble!.body];
+  for (const s of sections) {
     const heading = s.title === '' ? '##' : `## ${s.title}`;
-    return s.body === '' ? heading : `${heading}\n\n${s.body}`;
-  });
+    items.push(s.body === '' ? heading : `${heading}\n\n${s.body}`);
+  }
+  return items;
 }
 
 type FindingsAsking = Extract<Asking, { kind: 'findings' }>;

@@ -50,7 +50,8 @@ function refuses(fn: () => unknown, message: string): void {
 
 test('findingItems: one item per ## section, the whole text without any, none when blank', () => {
   assert.deepEqual(findingItems('## A\n\nwhy\n\n## B\nmore'), ['## A\n\nwhy', '## B\n\nmore']);
-  assert.deepEqual(findingItems('intro\n## A\nx'), ['## A\n\nx']);
+  assert.deepEqual(findingItems('  \n## A\nx'), ['## A\n\nx']);
+  assert.deepEqual(findingItems('1. bug A\n2. bug B\n\n## Policy compliance\nok'), ['1. bug A\n2. bug B', '## Policy compliance\n\nok']);
   assert.deepEqual(findingItems('1. one\n2. two'), ['1. one\n2. two']);
   assert.deepEqual(findingItems('  \n'), []);
   assert.deepEqual(findingItems('## Policy compliance\n\nok\n## Bug\n'), ['## Policy compliance\n\nok', '## Bug']);
