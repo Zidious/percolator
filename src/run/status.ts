@@ -17,11 +17,12 @@ import type { FanOutFile } from './fan-out.ts';
 import { listRuns } from './meta.ts';
 import type { RunListing, RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
+import { askedItems } from './answer.ts';
 import { parsePick } from './route.ts';
 import { watcherStatus } from '../watch/watch.ts';
 
-export type AttentionKind = 'gate' | 'cap' | 'paused' | 'failed' | 'stalled' | 'agent';
-export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'clean' | 'open-pane';
+export type AttentionKind = 'gate' | 'cap' | 'paused' | 'questions' | 'findings' | 'failed' | 'stalled' | 'agent';
+export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'answer' | 'clean' | 'open-pane';
 export type ReviewItem = { step: string; key: string; path: string };
 export type AttentionJson = {
   kind: AttentionKind;
@@ -36,6 +37,8 @@ export type AttentionJson = {
   agentState?: string;
   /** a pick-pipeline gate only: the pipelines `pick` may name (`perc approve <id> --pipeline <name>`) */
   choices?: string[];
+  /** questions or findings only: what the run asks, item by item (`perc answer <id>` numbers them from 1) */
+  asked?: { step: string; attempt: number; items: string[] };
 };
 export type StepJson = RunGraphStep & {
   status: 'pending' | 'running' | 'waiting' | StepRecord['status'];
@@ -297,6 +300,18 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
       };
     case 'paused':
       return { message: `${a.step} paused: ${a.reason}`, next: resume };
+    case 'questions':
+      return {
+        message: `${a.step} has questions for you`,
+        detail: `Answer each one or mark it N/A; ${a.step} then runs again with your answers.`,
+        next: [`perc answer ${a.runId} --answer <n>="<text>" --na <n> …`],
+      };
+    case 'findings':
+      return {
+        message: `${a.step} hit its cap with findings left`,
+        detail: 'Tick the findings to fix: the run goes back for one more round with only those. With none ticked, it moves on.',
+        next: [`perc answer ${a.runId} --agree <n>[,<n>…]`, `perc answer ${a.runId}`],
+      };
     case 'failed':
       if (a.sliceOf !== undefined) {
         return {
@@ -391,6 +406,17 @@ async function attentionOf(o: {
     };
   }
   if (state.status === 'paused') {
+    const asking = state.asking;
+    if (asking !== undefined) {
+      return {
+        kind: asking.kind,
+        since: lastEnd,
+        ...turn(asking.kind, asking.stepId),
+        review: failing(asking.stepId),
+        actions: ['answer'],
+        asked: { step: asking.stepId, attempt: asking.attempt, items: await askedItems(dir, state) },
+      };
+    }
     if (state.pausedCap !== undefined) {
       const from = o.loops.find((l) => l.id === state.pausedCap)?.from ?? state.currentStep;
       const reason = (state.pausedReason ?? '').replace(/^cap: /, '');
