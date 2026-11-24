@@ -442,7 +442,7 @@ export default class Percolator extends View {
       next[ask.key] =
         this.asks[ask.key] ??
         (ask.kind === 'questions'
-          ? { inputs: ask.items.map(() => this.textState({ placeholder: 'Your answer' })), na: ask.items.map(() => false), ticks: [] }
+          ? { inputs: ask.items.map(() => this.answerState()), na: ask.items.map(() => false), ticks: [] }
           : { inputs: [], na: [], ticks: ask.items.map(() => false) });
     }
     this.asks = next;
@@ -498,8 +498,24 @@ export default class Percolator extends View {
 
   // ── the start picker ────────────────────────────────────────────────
 
-  /** A one-line text state that marks the panel as typing while it has the keyboard; Enter starts the run. */
-  textState(options) {
+  /** An answer field: typing clears the answer's error, and Enter submits the answers (never starts a run). */
+  answerState() {
+    return this.textState(
+      { placeholder: 'Your answer' },
+      {
+        change: () => {
+          this.actError = null;
+        },
+        submit: (cx) => this.submitAnswer(cx),
+      },
+    );
+  }
+
+  /**
+   * A one-line text state that marks the panel as typing while it has the keyboard. By default (the start picker's
+   * fields) typing clears the picker's error and Enter starts the run; `on.change` and `on.submit` replace that.
+   */
+  textState(options, on = {}) {
     const s = InputState.new(options);
     s.on('focus', (_e, cx) => {
       this.typing = true;
@@ -509,11 +525,17 @@ export default class Percolator extends View {
       this.typing = false;
       cx.notify();
     });
+    const change =
+      on.change ??
+      (() => {
+        if (this.start) this.start.error = this.start.said = null;
+      });
+    const submit = on.submit ?? ((cx) => this.startRun(cx));
     s.on('change', (_e, cx) => {
-      if (this.start) this.start.error = this.start.said = null;
+      change(cx);
       cx.notify();
     });
-    s.on('submit', (_e, cx) => this.startRun(cx));
+    s.on('submit', (_e, cx) => submit(cx));
     return s;
   }
 

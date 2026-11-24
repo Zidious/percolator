@@ -70,10 +70,12 @@ function panelAsking(run: ReturnType<typeof asking>) {
     actError: null,
     said: null,
     asks: {},
-    textState: () => {
+    // keeps the handlers the panel gives its text states, so a test can press Enter or type in one
+    textState: (_options: unknown, on: { submit?: (cx: unknown) => void; change?: (cx: unknown) => void } = {}) => {
       let v = '';
-      return { value: () => v, set_value: (x: string) => (v = x) };
+      return { value: () => v, set_value: (x: string) => (v = x), on };
     },
+    startRun: () => performed.push({ action: 'startRun', argv: [] }),
     perform: (action: string, argv: string[]) => performed.push({ action, argv }),
   });
   const cx = { notify() {} };
@@ -103,6 +105,20 @@ test('submitting the questions form needs every question answered or N/A', () =>
   p.submitAnswer(cx);
   assert.equal(p.actError, null);
   assert.deepEqual(performed, [{ action: 'answer', argv: ['answer', 'r1', '--answer', '1=Postgres', '--na', '2'] }]);
+});
+
+test('Enter in an answer field submits the answers, never starts a run; typing clears the answer error', () => {
+  const { p, cx, performed } = panelAsking(asking('questions'));
+  p.start = { mode: 'new', error: null, said: null };
+  p.syncAsks();
+  const [first, second] = p.asks['r1/plan/1'].inputs;
+  first.set_value('Postgres');
+  second.set_value('No');
+  p.actError = 'Answer question 2 or mark it N/A';
+  first.on.change(cx);
+  assert.equal(p.actError, null);
+  second.on.submit(cx);
+  assert.deepEqual(performed, [{ action: 'answer', argv: ['answer', 'r1', '--answer', '1=Postgres', '--answer', '2=No'] }]);
 });
 
 test('submitting the findings form sends the ticked ones', () => {
