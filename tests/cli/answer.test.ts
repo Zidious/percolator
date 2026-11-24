@@ -185,13 +185,17 @@ test('perc resume on a run that is asking is refused', async () => {
 test('perc status lists what the run asks and how to answer', async () => {
   const e = await setup();
   try {
-    const q = await e.asking(QUESTIONS);
+    // a question is printed in full, its options under it; a finding by its first line only
+    const q = await e.asking({ ...QUESTIONS, items: ['Which DB?\n\n- Postgres\n- SQLite', 'Keep v1?'] });
     const out = (await e.perc(['status', q.runId])).out.split('\n');
     const i = out.indexOf('your turn: plan has questions for you');
-    assert.deepEqual(out.slice(i, i + 5), [
+    assert.deepEqual(out.slice(i, i + 8), [
       'your turn: plan has questions for you',
       '  Answer each one or mark it N/A; plan then runs again with your answers.',
       '  1. Which DB?',
+      '',
+      '     - Postgres',
+      '     - SQLite',
       '  2. Keep v1?',
       `  next: perc answer ${q.runId} --answer <n>="<text>" --na <n> …`,
     ]);

@@ -306,6 +306,13 @@ async function runAnswer(args: string[], deps: DriverDeps): Promise<number> {
 /** The first non-empty line of an asked item, without a leading heading marker. */
 const itemLine = (text: string): string => (text.split(/\r?\n/).find((l) => l.trim() !== '') ?? '').replace(/^#+\s*/, '').trim();
 
+/** A question in full: its first line numbered, the rest indented under it (blank lines kept blank). */
+const questionLines = (n: number, text: string): string[] => {
+  const prefix = `  ${n}. `;
+  const [first = '', ...rest] = text.trim().split(/\r?\n/);
+  return [`${prefix}${first}`, ...rest.map((l) => (l.trim() === '' ? '' : `${' '.repeat(prefix.length)}${l}`))];
+};
+
 /** What a run is doing or waiting for, in one line; an hc failure is reported, never thrown. */
 async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: DriverDeps): Promise<string> {
   const waiting = await readWaiting(dir).catch(() => undefined);
@@ -366,7 +373,9 @@ async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
       deps.out(`your turn: ${a.message}`);
       if (a.detail !== undefined) deps.out(`  ${a.detail}`);
       for (const r of a.review ?? []) deps.out(`  read: ${r.path}`);
-      for (const [i, item] of (a.asked?.items ?? []).entries()) deps.out(`  ${i + 1}. ${itemLine(item)}`);
+      for (const [i, item] of (a.asked?.items ?? []).entries()) {
+        for (const l of a.kind === 'questions' ? questionLines(i + 1, item) : [`  ${i + 1}. ${itemLine(item)}`]) deps.out(l);
+      }
       for (const n of attentionNext(a, run)) deps.out(`  next: ${n}`);
     }
     deps.out('history:');
