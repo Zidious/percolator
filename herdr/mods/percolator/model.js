@@ -54,6 +54,10 @@ export function rowState(run) {
         return blocked(`Paused · ${step} at cap`);
       case 'paused':
         return blocked(`Paused · ${step}`);
+      case 'questions':
+        return blocked(`Your turn · ${a.asked?.step ?? step} has questions`);
+      case 'findings':
+        return blocked(`Your turn · ${a.asked?.step ?? step} findings at cap`);
       case 'failed':
         return blocked(`Failed · ${step}`);
       case 'stalled':
@@ -121,6 +125,46 @@ export function actionArgv(action, run, feedback) {
   }
 }
 
+/** An asked item's label: its first non-empty line without a leading heading marker; `Finding <n>` or `Question <n>`
+ *  when it has none. */
+export function itemLabel(text, n, kind) {
+  const line = String(text ?? '')
+    .split(/\r?\n/)
+    .find((l) => l.trim() !== '');
+  const label = (line ?? '').replace(/^#+\s*/, '').trim();
+  return label !== '' ? label : `${kind === 'findings' ? 'Finding' : 'Question'} ${n}`;
+}
+
+/** What a run paused on questions or findings asks, its items numbered from 1 as `perc answer` takes them; `key` changes
+ *  with every new ask, so a form's state is not carried over. Null when it asks nothing. */
+export function askOf(run) {
+  const a = run?.attention;
+  if (!a || (a.kind !== 'questions' && a.kind !== 'findings') || !a.asked) return null;
+  const { step, attempt, items } = a.asked;
+  return {
+    kind: a.kind,
+    step,
+    attempt,
+    key: `${run.id}/${step}/${attempt}`,
+    items: items.map((text, i) => ({ n: i + 1, label: itemLabel(text, i + 1, a.kind), text })),
+  };
+}
+
+/** The `perc answer` argv for a form's values: per question its text or null (N/A); per finding whether it is ticked. */
+export function answerArgv(run, values) {
+  if (run.attention?.kind === 'findings') {
+    const ticked = values.flatMap((v, i) => (v ? [i + 1] : []));
+    return ['answer', run.id, ...(ticked.length > 0 ? ['--agree', ticked.join(',')] : [])];
+  }
+  const argv = ['answer', run.id];
+  values.forEach((v, i) => {
+    if (v === null) argv.push('--na', String(i + 1));
+    else if (typeof v !== 'string' || v.trim() === '') throw new Error(`Answer question ${i + 1} or mark it N/A`);
+    else argv.push('--answer', `${i + 1}=${v}`);
+  });
+  return argv;
+}
+
 /** Runs that need you. */
 export function needsCount(runs) {
   return runs.filter(needsYou).length;
@@ -175,7 +219,7 @@ export function resolvePath(base, p) {
   return ABSOLUTE.test(p) ? p : `${base.replace(/[\\/]+$/, '')}/${p}`;
 }
 
-const TAGS = { gate: 'GATE', cap: 'PAUSED', paused: 'PAUSED', failed: 'FAILED', stalled: 'STALLED' };
+const TAGS = { gate: 'GATE', cap: 'PAUSED', paused: 'PAUSED', questions: 'QUESTIONS', findings: 'FINDINGS', failed: 'FAILED', stalled: 'STALLED' };
 
 /** The tag shown before an attention message. */
 export function attentionTag(kind) {
@@ -542,7 +586,7 @@ export function terminalAddress(live, term) {
   return live.find((x) => x.address === term || x.name === term)?.address ?? null;
 }
 
-const BOXES = ['gate', 'cap', 'paused', 'failed', 'stalled'];
+const BOXES = ['gate', 'cap', 'paused', 'questions', 'findings', 'failed', 'stalled'];
 
 /** What shows under the run's active stop: the attention box for its kind, the agent card while an agent works, else
  *  nothing. */

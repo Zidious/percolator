@@ -18,6 +18,12 @@ export declare function outcomeOf(run: RunStatusJson): { tag: 'DELIVERED' | 'ROU
 export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
 /** `feedback` is the reject feedback, or the picked pipeline for `pick`. */
 export declare function actionArgv(action: Action, run: { id: string }, feedback?: string): string[] | null;
+export type AskItem = { n: number; label: string; text: string };
+export type Ask = { kind: 'questions' | 'findings'; step: string; attempt: number; key: string; items: AskItem[] };
+export declare function itemLabel(text: string, n: number, kind: 'questions' | 'findings'): string;
+export declare function askOf(run: RunStatusJson | null | undefined): Ask | null;
+/** questions: per question its text or null (N/A); findings: per finding whether it is ticked */
+export declare function answerArgv(run: RunStatusJson, values: (string | null)[] | boolean[]): string[];
 export declare function linkedLine(run: RunStatusJson, runs: RunStatusJson[]): { text: string; run: string | null } | null;
 export type SliceRow = { index: number; title: string; id: string; status: RunStatusJson['status'] | 'pending'; stepLabel: string; prUrl?: string };
 export declare function sliceRows(run: RunStatusJson, runs: RunStatusJson[]): SliceRow[];
@@ -100,7 +106,7 @@ export declare function readRatio(stored: unknown): number;
 export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short'; newRun: 'icon' | 'text' };
 export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
 export declare function terminalAddress(live: { address: string; name?: string | null }[], term: string | null | undefined): string | null;
-export declare function activeBox(run: RunStatusJson): 'agent' | 'gate' | 'cap' | 'paused' | 'failed' | 'stalled' | null;
+export declare function activeBox(run: RunStatusJson): 'agent' | 'gate' | 'cap' | 'paused' | 'questions' | 'findings' | 'failed' | 'stalled' | null;
 export declare function agentCard(
   run: RunStatusJson,
   live: { address: string; name?: string | null }[],

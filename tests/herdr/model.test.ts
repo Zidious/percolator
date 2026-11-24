@@ -5,6 +5,9 @@ import { test } from 'node:test';
 import {
   STAGES,
   actionArgv,
+  answerArgv,
+  askOf,
+  itemLabel,
   ago,
   attentionTag,
   BOARD_RATIO,
@@ -126,7 +129,7 @@ const ids = (rs: { id: string }[]) => rs.map((r) => r.id.split('-')[0]);
 
 test('the fixture covers every attention kind, a running run, a completed run and an unreadable entry', () => {
   const kinds = runs().flatMap((r) => ('attention' in r && r.attention ? [r.attention.kind] : []));
-  assert.deepEqual([...new Set(kinds)].sort(), ['agent', 'cap', 'failed', 'gate', 'paused', 'stalled']);
+  assert.deepEqual([...new Set(kinds)].sort(), ['agent', 'cap', 'failed', 'findings', 'gate', 'paused', 'questions', 'stalled']);
   assert.ok(runs().some((r) => r.status === 'running' && !('attention' in r && r.attention)));
   assert.ok(runs().some((r) => r.status === 'completed'));
   assert.ok(runs().some((r) => r.status === 'unreadable'));
@@ -203,7 +206,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t22', 'dd', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 'audit', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t24', 't25', 't22', 'dd', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 'audit', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -211,7 +214,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't25', 't24', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -223,6 +226,8 @@ test('rowState gives the tone and the board text for each kind of run', () => {
     ['t2', 'blocked', 'Your turn · approve-groom'],
     ['t4', 'blocked', 'Paused · review at cap'],
     ['t12', 'blocked', 'Paused · plan'],
+    ['t25', 'blocked', 'Your turn · plan has questions'],
+    ['t24', 'blocked', 'Your turn · review findings at cap'],
     ['t9', 'blocked', 'Failed · implement'],
     ['t11', 'blocked', 'Stalled · driver stopped'],
     ['t13', 'working', 'groom'],
@@ -329,7 +334,7 @@ test('actionArgv refuses a reject without feedback', () => {
 });
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
-  assert.equal(needsCount(runs()), 7);
+  assert.equal(needsCount(runs()), 9);
   assert.equal(runningCount(runs()), 8);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
@@ -469,8 +474,8 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
   assert.equal(moveRow([], 'gone', 1), null);
 });
 
-test('the fixture has timelines for t8, t3, t2, t4, t16, t17, dd-alert, t21 (hotfix and triage), t22, t23 (epic and two slices) and audit, and none for the rest (an older perc)', () => {
-  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't16', 't17', 'dd', 't21', 't21', 't22', 't23', 't23', 't23', 'audit']);
+test('the fixture has timelines for t8, t3, t2, t4, t24, t16, t17, dd-alert, t21 (hotfix and triage), t22, t23 (epic and two slices) and audit, and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't24', 't16', 't17', 'dd', 't21', 't21', 't22', 't23', 't23', 't23', 'audit']);
 });
 
 test('roundView defaults to the latest round and marks it running', () => {
@@ -516,7 +521,7 @@ test('stepAttempts is one step attempts in order', () => {
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
-  assert.deepEqual(cupLabel(runs()), { text: '7 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel(runs()), { text: '9 need you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
   assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
@@ -1007,6 +1012,8 @@ test('activeBox names what shows under the active stop', () => {
   assert.equal(box('t2'), 'gate');
   assert.equal(box('t4'), 'cap');
   assert.equal(box('t12'), 'paused');
+  assert.equal(box('t25'), 'questions');
+  assert.equal(box('t24'), 'findings');
   assert.equal(box('t9'), 'failed');
   assert.equal(box('t11'), 'stalled');
   assert.equal(box('t13'), 'agent');
@@ -1622,4 +1629,54 @@ test('watcherState offers Stop when the heartbeat is stale but the percolator-wa
   const live = [{ address: 'w:1', name: 'percolator-watch' }];
   assert.deepEqual(watcherState(off, { startedAt: null, now: 0, live }), { alive: false, label: 'Watcher not responding', argv: ['watch', 'stop'] });
   assert.equal(watcherState(off, { startedAt: null, now: 0, live: [{ address: 'x', name: 'other' }] }).label, 'Not watching');
+});
+
+test('attentionTag names questions and findings', () => {
+  assert.equal(attentionTag('questions'), 'QUESTIONS');
+  assert.equal(attentionTag('findings'), 'FINDINGS');
+});
+
+test('itemLabel is the first non-empty line without its heading marker, else a numbered name', () => {
+  assert.equal(itemLabel('## Missing test\n\nwhy', 1, 'findings'), 'Missing test');
+  assert.equal(itemLabel('\n  Which DB?\nmore', 1, 'questions'), 'Which DB?');
+  assert.equal(itemLabel('', 2, 'findings'), 'Finding 2');
+  assert.equal(itemLabel('  ', 3, 'questions'), 'Question 3');
+});
+
+test('askOf gives what a run asks, keyed by run, step and attempt; null otherwise', () => {
+  const run = byId('t24');
+  assert.deepEqual(askOf(run), {
+    kind: 'findings',
+    step: 'review',
+    attempt: 3,
+    key: `${run.id}/review/3`,
+    items: [
+      {
+        n: 1,
+        label: 'Retry only transient errors',
+        text: '## Retry only transient errors\n\nsrc/tracker/gh.ts retries `gh issue comment` on a 422, which is not transient. Retry only on 5xx and network errors.',
+      },
+      {
+        n: 2,
+        label: 'Missing test for the retry ceiling',
+        text: '## Missing test for the retry ceiling\n\ntests/tracker/gh.test.ts: add one that asserts the third failure surfaces the original error text.',
+      },
+    ],
+  });
+  assert.equal(askOf(byId('t25'))!.kind, 'questions');
+  assert.equal(askOf(byId('t12')), null);
+});
+
+test('answerArgv builds perc answer from the form values', () => {
+  const q = byId('t25');
+  assert.deepEqual(answerArgv(q, ['Postgres', null]), ['answer', q.id, '--answer', '1=Postgres', '--na', '2']);
+  assert.throws(() => answerArgv(q, ['Postgres', '  ']), { message: 'Answer question 2 or mark it N/A' });
+  const f = byId('t24');
+  assert.deepEqual(answerArgv(f, [true, false]), ['answer', f.id, '--agree', '1']);
+  assert.deepEqual(answerArgv(f, [true, true]), ['answer', f.id, '--agree', '1,2']);
+  assert.deepEqual(answerArgv(f, [false, false]), ['answer', f.id]);
+});
+
+test('actionArgv leaves answer to the form', () => {
+  assert.equal(actionArgv('answer', byId('t25')), null);
 });
