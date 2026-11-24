@@ -57,6 +57,12 @@ test('findingItems: one item per ## section, the whole text without any, none wh
   assert.deepEqual(findingItems('## Policy compliance\n\nok\n## Bug\n'), ['## Policy compliance\n\nok', '## Bug']);
 });
 
+test('findingItems: an h1 title before the first ## section is not a finding; text after it still is', () => {
+  assert.deepEqual(findingItems('# Review findings\n\n## Missing test\nwhy\n## Typo\nhere'), ['## Missing test\n\nwhy', '## Typo\n\nhere']);
+  assert.deepEqual(findingItems('# Review findings\n\n1. bug A\n\n## Typo\nhere'), ['1. bug A', '## Typo\n\nhere']);
+  assert.deepEqual(findingItems('# Review findings\n'), []);
+});
+
 test('checkAnswer refuses incomplete or malformed answers to questions', () => {
   const items = questions.kind === 'questions' ? questions.items : [];
   refuses(() => checkAnswer('r1', questions, items, flags()), 'run r1: answer every question or mark it N/A; unanswered: 1, 2, 3 (--answer <n>=<text>, --na <n>)');

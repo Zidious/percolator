@@ -16,11 +16,18 @@ export type AnswerFlags = { answer: string[]; na: string[]; agree: string[] };
 /** An answer that does not fit what the run asks: a usage error (exit 2). */
 export class AnswerError extends Error {}
 
-/** One item per `## ` section of a findings file, after the text before the first one (when not blank); none when blank. */
+/** Leading h1 title lines (`# Title`) and blank lines between them: the file's title, not a finding. */
+const LEADING_H1 = /^(?:[ \t]*\r?\n| {0,3}#(?:[ \t][^\n]*)?(?:\r?\n|$))+/;
+
+/**
+ * One item per `## ` section of a findings file, after the text before the first one (when not blank once a leading
+ * h1 title is dropped); none when blank.
+ */
 export function findingItems(md: string): string[] {
   // a bare heading put first turns the text before the file's first heading into a section of its own
   const [preamble, ...sections] = splitSections(`##\n${md}`);
-  const items = preamble!.body === '' ? [] : [preamble!.body];
+  const text = preamble!.body.replace(LEADING_H1, '').trim();
+  const items = text === '' ? [] : [text];
   for (const s of sections) {
     const heading = s.title === '' ? '##' : `## ${s.title}`;
     items.push(s.body === '' ? heading : `${heading}\n\n${s.body}`);
