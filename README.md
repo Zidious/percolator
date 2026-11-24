@@ -140,7 +140,7 @@ profiles:
             skill: superpowers:brainstorming  # loaded as a plugin for claude; SKILL.md in the task otherwise
             prompt: |
               Let's brainstorm this ticket to make sure it matches expectations before we move on to planning or implementing it.
-              Write the agreed ticket (goal, acceptance criteria, out of scope, open questions) as the groomed ticket, then stop: no plan and no code.
+              Write the agreed ticket (goal, acceptance criteria, out of scope) as the groomed ticket, then stop: no plan and no code. If questions only the owner can answer are still open, don't leave them in the ticket: escalate with them (questions in done.json), and you will run again with the answers.
           plan:
             agent: claude
             model: opus

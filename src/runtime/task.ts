@@ -32,7 +32,7 @@ export const STAGE_BRIEFS: Readonly<Record<Exclude<FeatureStage, 'deliver'>, str
   implement:
     'Implement the plan in the worktree and commit on the current branch. If the inputs include review findings, address them. Write a short summary of your changes to summary.md.',
   review:
-    'Review the branch diff (git diff {{base}}...HEAD) against the plan. Write your findings to findings.md as a top-level numbered list (1. …, 2. …), one finding per item; put any detail under its item. If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.',
+    'Review the branch diff (git diff {{base}}...HEAD) against the plan. Write your findings to findings.md, one "## <title>" section per finding, with its detail under it. If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.',
 });
 
 export type TaskInput = {
@@ -144,7 +144,7 @@ export function buildTask(t: TaskInput): string {
   sections.push(outputs);
 
   let finish =
-    `## When you finish\n\nWrite ${t.doneFile} last, as one JSON object: {"status":"pass"}, {"status":"fail"} (review findings, or the step failed) or {"status":"escalate","reason":"…"} when a person is needed.`;
+    `## When you finish\n\nWrite ${t.doneFile} last, as one JSON object: {"status":"pass"}, {"status":"fail"} (review findings, or the step failed) or {"status":"escalate","reason":"…"} when a person is needed. If you have questions only the owner can answer, don't guess: escalate with them, {"status":"escalate","questions":["…","…"]}, and this step runs again with their answers as input answers.`;
   if (t.parentTerminal !== undefined) finish += ` Then run: hc send ${t.parentTerminal} "${step.id} done"`;
   sections.push(finish);
 
