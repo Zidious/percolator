@@ -53,7 +53,7 @@ Read the module before changing it.
 | `src/graph/` | core stages and contracts, layer merge with locks, rules, graph build |
 | `src/engine/` | `runGraph`, run state, `Runtime` interface |
 | `src/runtime/` | `HerdrRuntime`: task rendering, terminal lifecycle, outputs collection |
-| `src/run/` | run lifecycle: prepare, launch/drive, driver lock, metadata; `request.ts`: `--input` parsing and the run request checked against its pipeline; `pick-pipeline.ts`: the pipeline a ticket asks for (label, `/percolator run` comment); `child.ts`: linked child runs; `route.ts`: a router's decision (`route.json`) and handoff; `fan-out.ts`: the fan-out and seed builtins (`fanout.json`, slice runs); `pipelines-json.ts`: `perc pipelines` |
+| `src/run/` | run lifecycle: prepare, launch/drive, driver lock, metadata; `request.ts`: `--input` parsing and the run request checked against its pipeline; `pick-pipeline.ts`: the pipeline a ticket asks for (label, `/percolator run` comment); `child.ts`: linked child runs; `route.ts`: a router's decision (`route.json`) and handoff; `fan-out.ts`: the fan-out and seed builtins (`fanout.json`, slice runs); `pipelines-json.ts`: `perc pipelines`; `answer.ts`: what a paused run asks and the owner's answer (`perc answer`) |
 | `src/tracker/` | GitHub: tickets, `gh` client, intake, approval gate, PRs; `BUILTIN_NAMES` is the single source of builtin node names, `EXITS` of exit kinds |
 | `src/tracker/exits/` | one handler per exit builtin (comment, issues, report, release, review, private fork PR) |
 | `src/herdr/` | clients for `hc` and `herdr-app` |

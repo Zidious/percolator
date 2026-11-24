@@ -909,3 +909,58 @@ test('a fan-out slice runs percolator.seed, then its stages to a PR on its own b
     await e.cleanup();
   }
 });
+
+test('checkResumable refuses a run that is asking, unless it is being answered', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const dir = e.runDir(meta);
+    const state = await loadState(dir);
+    state.status = 'paused';
+    state.asking = { kind: 'questions', stepId: 'plan', attempt: 1, items: ['q'] };
+    await saveState(dir, state);
+    await assert.rejects(checkResumable(meta.runId, e.deps), {
+      message: `run ${meta.runId} is waiting for answers to questions from plan; answer with perc answer ${meta.runId} (perc status ${meta.runId} lists them)`,
+    });
+    await checkResumable(meta.runId, e.deps, { answering: true });
+    state.asking = { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'review' };
+    await saveState(dir, state);
+    await assert.rejects(drive(meta.runId, e.deps), {
+      message: `run ${meta.runId} is waiting for answers to findings from review; answer with perc answer ${meta.runId} (perc status ${meta.runId} lists them)`,
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('drive fills in the findings items when review pauses at its cap', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    e.decisions.push('/percolator approve');
+    e.onWait.fn = async (t) => {
+      if (t.labels['percolator.step'] !== 'review') return false;
+      await fs.writeFile(path.join(t.argv.at(-1)!, 'findings.md'), '## Missing test\n\nwhy\n\n## Typo\n\nwhere\n');
+      t.state = 'finished';
+      t.exitCode = 1;
+      return true;
+    };
+    const end = await drive(meta.runId, e.deps);
+    assert.equal(end.status, 'paused');
+    const saved = await loadState(e.runDir(meta));
+    assert.deepEqual(saved.asking, {
+      kind: 'findings',
+      stepId: 'review',
+      attempt: 3,
+      edgeId: 'review',
+      findings: 'steps/review/3/outputs/findings.md',
+      items: ['## Missing test\n\nwhy', '## Typo\n\nwhere'],
+    });
+    assert.deepEqual(e.out.slice(-2), [
+      `run ${meta.runId} paused at review: findings: review reached 3 rounds`,
+      `answer with: perc answer ${meta.runId} (perc status ${meta.runId} lists them)`,
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});

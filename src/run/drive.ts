@@ -22,6 +22,7 @@ import { validate } from '../validate.ts';
 import type { ValidateResult } from '../validate.ts';
 import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
 import { ensureWorktree } from '../workspace/worktree.ts';
+import { askedItems } from './answer.ts';
 import { acquireDriverLock, drivenByProcess, otherLiveLock } from './lock.ts';
 import type { Liveness } from './lock.ts';
 import { startLinkedRun } from './child.ts';
@@ -63,10 +64,12 @@ function mappingChanges(was: readonly string[], now: readonly string[]): string[
  * The checks a run must pass before it is driven again: not completed or failed, not driven by another
  * live terminal (`selfTerminal` is this process's own), and the same graph and ground versions it started with.
  * `drive` runs them, and so does `perc resume` before it launches a driver, so errors reach the owner's terminal.
+ * A run waiting for answers is refused unless `opts.answering` (`perc answer`, which records them first).
  */
 export async function checkResumable(
   runId: string,
   deps: Pick<DriverDeps, 'hc' | 'home' | 'selfTerminal' | 'pid' | 'pidAlive'>,
+  opts: { answering?: boolean } = {},
 ): Promise<{ dir: string; meta: RunMeta; state: RunState; v: ValidateResult }> {
   const dir = runDir(deps.home, runId);
   const meta = await readRunMeta(dir);
@@ -76,6 +79,11 @@ export async function checkResumable(
     throw new Error(`run ${runId} already completed${url === undefined ? '' : `: ${url}`}`);
   }
   if (state.status === 'failed') throw new Error(`run ${runId} failed at ${state.currentStep}; start a new run`);
+  if (state.asking !== undefined && opts.answering !== true) {
+    throw new Error(
+      `run ${runId} is waiting for answers to ${state.asking.kind} from ${state.asking.stepId}; answer with perc answer ${runId} (perc status ${runId} lists them)`,
+    );
+  }
 
   const driver = await deps.hc.get(meta.driver);
   if (driver?.state === 'live' && driver.address !== deps.selfTerminal) {
@@ -277,8 +285,17 @@ async function driveHeld(
   const end = await runGraph(v.graph, state, { runtime: logged, save, now: () => now().toISOString() });
 
   if (end.status === 'paused') {
+    // the findings file is split once, here, so perc status and perc answer number the same items
+    if (end.asking?.kind === 'findings' && end.asking.items === undefined) {
+      end.asking.items = await askedItems(dir, end);
+      await saveState(dir, end);
+    }
     deps.out(`run ${runId} paused at ${end.currentStep}: ${end.pausedReason}`);
-    deps.out(`resume with: perc resume ${runId}`);
+    deps.out(
+      end.asking !== undefined
+        ? `answer with: perc answer ${runId} (perc status ${runId} lists them)`
+        : `resume with: perc resume ${runId}`,
+    );
     return end;
   }
   await sweepTerminals(deps.hc, runId, { exceptRole: 'driver' });
