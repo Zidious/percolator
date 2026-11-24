@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { BackEdge, Graph, Step } from '../graph/build.ts';
 import type { NodeOutcome, RunContext, Runtime } from './runtime.ts';
-import type { RunState } from './state.ts';
+import type { FindingSource, RunState } from './state.ts';
 
 export type RunDeps = {
   runtime: Runtime;
@@ -191,6 +191,19 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
     }
   }
 
+  /** Steps up to `i` in `edge`'s loop that route their fail to it and failed with findings in this round, in step order. */
+  function failedInRound(edge: BackEdge, i: number): FindingSource[] {
+    const out: FindingSource[] = [];
+    // each step of the span ran this round before the cursor reached `i`, so its latest record is this round's
+    for (const s of steps.slice(edge.toStepIndex, i + 1)) {
+      if (graph.failRoutes[s.id] !== edge.id) continue;
+      const last = state.history.findLast((h) => h.stepId === s.id && h.status !== 'contract_error');
+      const f = last?.outputs['findings'];
+      if (last?.status === 'fail' && typeof f === 'string') out.push({ stepId: s.id, attempt: last.attempt, findings: f });
+    }
+    return out;
+  }
+
   /** Count a round on `edge` after the step at `i` (`fromStep` failed with `findings`): jump back, or apply the cap. */
   function decide(edge: BackEdge, i: number, findings: string | undefined, fromStep: string): void {
     // clamped: failing again after resuming at a cap does not count past it
@@ -203,12 +216,14 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       state.cursor = i;
       state.status = 'paused';
       state.pausedReason = `findings: ${edge.id} reached ${edge.maxRounds} rounds`;
+      const also = failedInRound(edge, i).filter((f) => f.stepId !== fromStep);
       state.asking = {
         kind: 'findings',
         stepId: fromStep,
         attempt: state.executed[fromStep] ?? 0,
         edgeId: edge.id,
         ...(findings === undefined ? {} : { findings }),
+        ...(also.length === 0 ? {} : { also }),
       };
     } else {
       // cursor stays on the step: resume re-runs it

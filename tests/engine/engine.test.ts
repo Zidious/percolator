@@ -610,8 +610,35 @@ test('both review nodes failing count one round, and the last findings win', asy
   assert.equal(s.rounds['review.1'], 3);
   assert.equal(rt.calls.filter((id) => id === 'implement').length, 3);
   assert.ok(!rt.calls.includes('deliver'));
-  assert.deepEqual(s.asking, { kind: 'findings', stepId: 'review.1', attempt: 3, edgeId: 'review.1', findings: 'b3' });
+  assert.deepEqual(s.asking, {
+    kind: 'findings',
+    stepId: 'review.1',
+    attempt: 3,
+    edgeId: 'review.1',
+    findings: 'b3',
+    also: [{ stepId: 'review.0', attempt: 3, findings: 'a3' }],
+  });
   assert.equal(s.pendingJump, undefined);
+});
+
+test('at the cap, a review slot that passed in the last round is not asked about', async () => {
+  const g = graph({}, twoReviewers);
+  const rt = new FakeRuntime({ 'review.0': [fail('a1'), fail('a2'), pass({ findings: '' })], 'review.1': [fail('b1'), fail('b2'), fail('b3')] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  assert.deepEqual(s.asking, { kind: 'findings', stepId: 'review.1', attempt: 3, edgeId: 'review.1', findings: 'b3' });
+});
+
+test('agreeing with findings of two failing reviewers overrides both in the extra round', async () => {
+  const g = graph({}, twoReviewers);
+  const rt = new FakeRuntime({ 'review.0': [fail('a1'), fail('a2'), fail('a3')], 'review.1': [fail('b1'), fail('b2'), fail('b3')] });
+  const s1 = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  answerFindings(s1, g, { 'review.0': 'steps/review.0/3/agreed-findings.md', 'review.1': 'steps/review.1/3/agreed-findings.md' });
+  s1.status = 'running';
+  const rt2 = new FakeRuntime();
+  await runGraph(g, s1, { runtime: rt2, save: saver().save });
+  assert.equal(rt2.calls[0], 'implement');
+  assert.equal(rt2.previous[0]!['review.0']!['findings'], 'steps/review.0/3/agreed-findings.md');
+  assert.equal(rt2.previous[0]!['review.1']!['findings'], 'steps/review.1/3/agreed-findings.md');
 });
 
 test('a later non-last review fail overwrites the pending findings', async () => {

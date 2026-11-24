@@ -7,7 +7,7 @@ import { loadState, newState, saveState } from '../../src/engine/state.ts';
 import type { Asking, RunState } from '../../src/engine/state.ts';
 import { buildGraph } from '../../src/graph/build.ts';
 import { mergeLayers } from '../../src/graph/merge.ts';
-import { AnswerError, applyAnswer, askedItems, checkAnswer, findingItems } from '../../src/run/answer.ts';
+import { AnswerError, applyAnswer, askedItems, checkAnswer, findingItems, numberFindings } from '../../src/run/answer.ts';
 import type { AnswerFlags } from '../../src/run/answer.ts';
 
 const init = { runId: 'r1', ticket: 'T-1', profile: 'default', groundVersions: {} };
@@ -95,9 +95,11 @@ test('checkAnswer for findings: ticked numbers sorted and unique, none by defaul
 function askingState(asking: Asking): RunState {
   const s = newState(init);
   s.status = 'paused';
-  s.cursor = graph.steps.findIndex((x) => x.id === asking.stepId);
+  // a step not in the test graph (review.1) sits at review
+  const at = graph.steps.findIndex((x) => x.id === asking.stepId);
+  s.cursor = at === -1 ? reviewAt : at;
   if (asking.kind === 'findings') s.rounds = { review: 3 };
-  s.asking = asking;
+  s.asking = structuredClone(asking);
   return s;
 }
 
@@ -152,6 +154,61 @@ test('applyAnswer with no findings ticked writes nothing and moves on', async ()
   }
 });
 
+const twoFailing: Asking = {
+  ...findings,
+  stepId: 'review.1',
+  edgeId: 'review',
+  findings: 'steps/review.1/3/outputs/findings.md',
+  also: [{ stepId: 'review.0', attempt: 3, findings: 'steps/review.0/3/outputs/findings.md' }],
+};
+
+async function writeFindings(d: string, stepId: string, text: string): Promise<void> {
+  await fs.mkdir(path.join(d, 'steps', stepId, '3', 'outputs'), { recursive: true });
+  await fs.writeFile(path.join(d, 'steps', stepId, '3', 'outputs', 'findings.md'), text);
+}
+
+test('askedItems lists the findings of every step that failed in the last round, the others first', async () => {
+  const d = await tmp();
+  try {
+    await writeFindings(d, 'review.0', '## A0\n## B0\n');
+    await writeFindings(d, 'review.1', '## A1\n');
+    assert.deepEqual(await askedItems(d, askingState(twoFailing)), ['## A0', '## B0', '## A1']);
+  } finally {
+    await rm(d);
+  }
+});
+
+test('applyAnswer with ticks across two failing steps writes an agreed file for each, empty when none of theirs is ticked', async () => {
+  const d = await tmp();
+  try {
+    const s = askingState({ ...twoFailing, items: ['## A0', '## B0', '## A1'], itemSteps: ['review.0', 'review.0', 'review.1'] });
+    const summary = await applyAnswer(d, s, graph, { kind: 'findings', agree: [2] }, ['## A0', '## B0', '## A1']);
+    assert.equal(summary, 'agreed with 1 of 3 findings of review.0, review.1; the run goes back to implement');
+    assert.equal(await fs.readFile(path.join(d, 'steps', 'review.0', '3', 'agreed-findings.md'), 'utf8'), '## B0\n');
+    assert.equal(await fs.readFile(path.join(d, 'steps', 'review.1', '3', 'agreed-findings.md'), 'utf8'), '');
+    assert.deepEqual((await loadState(d)).answered, {
+      'review.0': { findings: 'steps/review.0/3/agreed-findings.md' },
+      'review.1': { findings: 'steps/review.1/3/agreed-findings.md' },
+    });
+  } finally {
+    await rm(d);
+  }
+});
+
+test('applyAnswer splits the files again when the items carry no steps', async () => {
+  const d = await tmp();
+  try {
+    await writeFindings(d, 'review.0', '## A0\n');
+    await writeFindings(d, 'review.1', '## A1\n');
+    const s = askingState(twoFailing);
+    await applyAnswer(d, s, graph, { kind: 'findings', agree: [2] }, ['## A0', '## A1']);
+    assert.equal(await fs.readFile(path.join(d, 'steps', 'review.1', '3', 'agreed-findings.md'), 'utf8'), '## A1\n');
+    assert.equal(await fs.readFile(path.join(d, 'steps', 'review.0', '3', 'agreed-findings.md'), 'utf8'), '');
+  } finally {
+    await rm(d);
+  }
+});
+
 test('applyAnswer at the end of the graph says the run moves on to the end', async () => {
   const d = await tmp();
   try {
@@ -195,6 +252,26 @@ test('askedItems: the questions, the split findings file, or none', async () => 
     const { findings: _, ...noFile } = findings;
     assert.deepEqual(await askedItems(d, askingState(noFile)), []);
     assert.deepEqual(await askedItems(d, newState(init)), []);
+  } finally {
+    await rm(d);
+  }
+});
+
+test('numberFindings keeps the items, and their steps when several steps failed; leaves numbered or question states alone', async () => {
+  const d = await tmp();
+  try {
+    await writeFindings(d, 'review.0', '## A0\n');
+    await writeFindings(d, 'review.1', '## A1\n');
+    const two = askingState(twoFailing);
+    assert.equal(await numberFindings(d, two), true);
+    assert.deepEqual(two.asking, { ...twoFailing, items: ['## A0', '## A1'], itemSteps: ['review.0', 'review.1'] });
+    const one = askingState({ ...twoFailing, also: undefined });
+    delete (one.asking as { also?: unknown }).also;
+    assert.equal(await numberFindings(d, one), true);
+    assert.ok(one.asking?.kind === 'findings' && !('itemSteps' in one.asking));
+    assert.deepEqual(one.asking.items, ['## A1']);
+    assert.equal(await numberFindings(d, one), false);
+    assert.equal(await numberFindings(d, askingState(questions)), false);
   } finally {
     await rm(d);
   }

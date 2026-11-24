@@ -197,10 +197,26 @@ test('answerFindings with none moves past the loop and keeps the findings as unr
   assert.throws(() => answerFindings(t, loopGraph, undefined), { message: 'run state is not asking about findings' });
 });
 
+test('answerFindings with agreed findings per step overrides each of them', () => {
+  const s = askingFindings('steps/review/3/outputs/findings.md');
+  answerFindings(s, loopGraph, { review: 'steps/review/3/agreed-findings.md', other: 'steps/other/3/agreed-findings.md' });
+  assert.deepEqual(s.answered, {
+    review: { findings: 'steps/review/3/agreed-findings.md' },
+    other: { findings: 'steps/other/3/agreed-findings.md' },
+  });
+  assert.equal(s.grantedRound, 'review');
+});
+
 test('loadState rejects a bad asking or answered', async () => {
   const file = path.join(dir, 'state.json');
   await fs.writeFile(file, JSON.stringify({ ...newState(init), asking: { kind: 'maybe' } }));
   await assert.rejects(loadState(dir), { message: `Run state ${file} has an invalid "asking": {"kind":"maybe"}` });
+  const also = { kind: 'findings', stepId: 'review.1', attempt: 3, edgeId: 'review.1', also: [{ stepId: 'review.0' }] };
+  await fs.writeFile(file, JSON.stringify({ ...newState(init), asking: also }));
+  await assert.rejects(loadState(dir), { message: `Run state ${file} has an invalid "asking": ${JSON.stringify(also)}` });
+  const steps = { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'review', items: ['a'], itemSteps: [1] };
+  await fs.writeFile(file, JSON.stringify({ ...newState(init), asking: steps }));
+  await assert.rejects(loadState(dir), { message: `Run state ${file} has an invalid "asking": ${JSON.stringify(steps)}` });
   await fs.writeFile(file, JSON.stringify({ ...newState(init), answered: { plan: { answers: 1 } } }));
   await assert.rejects(loadState(dir), { message: `Run state ${file} has an invalid "answered": {"plan":{"answers":1}}` });
 });
@@ -210,6 +226,10 @@ test('asking and answered round-trip', async () => {
   s.answered = { plan: { answers: 'steps/plan/1/answers.md' } };
   await saveState(dir, s);
   assert.deepEqual(await loadState(dir), s);
+  const t = askingFindings('f');
+  t.asking = { ...t.asking!, kind: 'findings', edgeId: 'review', also: [{ stepId: 'review.0', attempt: 3, findings: 'g' }], items: ['a', 'b'], itemSteps: ['review.0', 'review'] };
+  await saveState(dir, t);
+  assert.deepEqual(await loadState(dir), t);
   const q = newState(init);
   q.asking = { kind: 'questions', stepId: 'plan', attempt: 2, items: ['a'] };
   await saveState(dir, q);

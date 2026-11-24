@@ -22,7 +22,7 @@ import { validate } from '../validate.ts';
 import type { ValidateResult } from '../validate.ts';
 import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
 import { ensureWorktree } from '../workspace/worktree.ts';
-import { askedItems } from './answer.ts';
+import { numberFindings } from './answer.ts';
 import { acquireDriverLock, drivenByProcess, otherLiveLock } from './lock.ts';
 import type { Liveness } from './lock.ts';
 import { startLinkedRun } from './child.ts';
@@ -286,10 +286,7 @@ async function driveHeld(
 
   if (end.status === 'paused') {
     // the findings file is split once, here, so perc status and perc answer number the same items
-    if (end.asking?.kind === 'findings' && end.asking.items === undefined) {
-      end.asking.items = await askedItems(dir, end);
-      await saveState(dir, end);
-    }
+    if (await numberFindings(dir, end)) await saveState(dir, end);
     deps.out(`run ${runId} paused at ${end.currentStep}: ${end.pausedReason}`);
     deps.out(
       end.asking !== undefined

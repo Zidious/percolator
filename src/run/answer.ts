@@ -26,13 +26,43 @@ export function findingItems(md: string): string[] {
   });
 }
 
-/** What the run asks, item by item: its questions, or the findings file split into items. Empty when not asking. */
+type FindingsAsking = Extract<Asking, { kind: 'findings' }>;
+
+/** The findings of every step that failed in the deciding round (the others first), split into items, with each item's step. */
+export async function splitFindings(dir: string, asking: FindingsAsking): Promise<{ items: string[]; itemSteps: string[] }> {
+  const sources = [...(asking.also ?? []), { stepId: asking.stepId, findings: asking.findings }];
+  const items: string[] = [];
+  const itemSteps: string[] = [];
+  for (const src of sources) {
+    if (src.findings === undefined) continue;
+    for (const item of findingItems(await fs.readFile(path.join(dir, src.findings), 'utf8').catch(() => ''))) {
+      items.push(item);
+      itemSteps.push(src.stepId);
+    }
+  }
+  return { items, itemSteps };
+}
+
+/**
+ * Split a findings asking's files once and keep the items in `state` (and each item's step when several steps failed),
+ * so perc status and perc answer number the same items. Returns whether it changed `state`.
+ */
+export async function numberFindings(dir: string, state: RunState): Promise<boolean> {
+  const asking = state.asking;
+  if (asking?.kind !== 'findings' || asking.items !== undefined) return false;
+  const { items, itemSteps } = await splitFindings(dir, asking);
+  asking.items = items;
+  if (asking.also !== undefined) asking.itemSteps = itemSteps;
+  return true;
+}
+
+/** What the run asks, item by item: its questions, or the findings files split into items. Empty when not asking. */
 export async function askedItems(dir: string, state: RunState): Promise<string[]> {
   const asking = state.asking;
   if (asking === undefined) return [];
   if (asking.items !== undefined) return asking.items;
-  if (asking.kind !== 'findings' || asking.findings === undefined) return [];
-  return findingItems(await fs.readFile(path.join(dir, asking.findings), 'utf8').catch(() => ''));
+  if (asking.kind !== 'findings') return [];
+  return (await splitFindings(dir, asking)).items;
 }
 
 /** Check `flags` against what run `runId` asks (`items`); throws AnswerError naming what is wrong. */
@@ -108,12 +138,23 @@ export async function applyAnswer(dir: string, state: RunState, graph: Graph, a:
   } else if (asking.kind === 'findings' && a.kind === 'findings') {
     const edge = graph.backEdges[asking.edgeId];
     if (!edge) throw new Error(`run ${state.runId} asks about back-edge "${asking.edgeId}", which is not in this graph`);
-    const of = `of ${items.length} findings of ${asking.stepId}`;
+    const sources = [...(asking.also ?? []), asking];
+    const of = `of ${items.length} findings of ${sources.map((x) => x.stepId).join(', ')}`;
     if (a.agree.length > 0) {
-      const file = path.join(attemptDir, 'agreed-findings.md');
-      await fs.mkdir(attemptDir, { recursive: true });
-      await writeFileAtomic(file, `${a.agree.map((n) => items[n - 1]).join('\n\n')}\n`);
-      answerFindings(state, graph, rel(file));
+      // the items' steps as numbered when the run paused; split again for a state that did not keep them
+      const itemSteps =
+        asking.itemSteps ?? (asking.also === undefined ? items.map(() => asking.stepId) : (await splitFindings(dir, asking)).itemSteps);
+      const agreed: Record<string, string> = {};
+      // a failing step none of whose findings is ticked gets an empty file, so the loop start does not see them
+      for (const src of sources) {
+        const mine = a.agree.filter((n) => itemSteps[n - 1] === src.stepId).map((n) => items[n - 1]);
+        const srcDir = stepDir(dir, src.stepId, src.attempt);
+        const file = path.join(srcDir, 'agreed-findings.md');
+        await fs.mkdir(srcDir, { recursive: true });
+        await writeFileAtomic(file, mine.length === 0 ? '' : `${mine.join('\n\n')}\n`);
+        agreed[src.stepId] = rel(file);
+      }
+      answerFindings(state, graph, agreed);
       summary = `agreed with ${a.agree.length} ${of}; the run goes back to ${graph.steps[edge.toStepIndex]!.stage}`;
     } else {
       answerFindings(state, graph, undefined);
