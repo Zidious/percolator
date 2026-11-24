@@ -428,7 +428,8 @@ async function attentionOf(o: {
         kind: asking.kind,
         since: lastEnd,
         ...turn(asking.kind, asking.stepId, findings),
-        review: failing(asking.stepId),
+        // every step whose findings are numbered, the others first as the items are
+        review: [...new Set([...(asking.kind === 'findings' ? (asking.also ?? []).map((s) => s.stepId) : []), asking.stepId])].flatMap(failing),
         actions: ['answer'],
         asked: { step: asking.stepId, attempt: asking.attempt, items },
       };

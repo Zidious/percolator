@@ -1547,6 +1547,40 @@ test('paused on findings at a cap, split from the findings file when state has n
   }
 });
 
+test('paused on findings of two failing reviewers lists both steps\' files under review, the others first', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const f0 = rel('review.0', 3, 'findings');
+    const f1 = rel('review.1', 3, 'findings');
+    const posix = (p: string) => p.split(path.sep).join('/');
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'review.1';
+      s.pausedReason = 'findings: review reached 3 rounds';
+      s.rounds['review'] = 3;
+      s.asking = {
+        kind: 'findings',
+        stepId: 'review.1',
+        attempt: 3,
+        edgeId: 'review',
+        findings: posix(f1),
+        also: [{ stepId: 'review.0', attempt: 3, findings: posix(f0) }, { stepId: 'review.0', attempt: 3, findings: posix(f0) }],
+        items: ['## A0', '## A1'],
+      };
+      s.history.push(rec('review.0', 3, 'fail', { findings: f0 }), rec('review.1', 3, 'fail', { findings: f1 }));
+    });
+    const run = (await e.status(m)) as Readable;
+    assert.ok(run.attention?.kind === 'findings');
+    assert.deepEqual(run.attention.review, [
+      { step: 'review.0', key: 'findings', path: path.join(e.dir(m), f0) },
+      { step: 'review.1', key: 'findings', path: path.join(e.dir(m), f1) },
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('yourTurn findings with nothing to tick says the only answer is to move on, and attentionNext agrees', () => {
   const f = yourTurn({ ...TURN, kind: 'findings', step: 'report', nothingToTick: true });
   assert.deepEqual(f, {
