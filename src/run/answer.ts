@@ -150,7 +150,16 @@ export async function applyAnswer(dir: string, state: RunState, graph: Graph, a:
   const rel = (file: string) => path.relative(dir, file).split(path.sep).join('/');
   let summary: string;
   if (asking.kind === 'questions' && a.kind === 'questions') {
-    const body = items.map((q, i) => `## Question ${i + 1}\n\n${q}\n\n**Answer:** ${a.answers[i] ?? 'N/A'}`).join('\n\n');
+    // a step that asks again keeps the answers to its earlier questions, which come first
+    const earlierRel = state.answered?.[asking.stepId]?.answers;
+    // (kept as written, below their file's title line, so an answer holding a heading stays whole)
+    const earlier =
+      earlierRel === undefined ? '' : (await fs.readFile(path.join(dir, earlierRel), 'utf8')).replace(/^# .*\r?\n/, '').trim();
+    const asked = [...earlier.matchAll(/^## Question (\d+)$/gm)].reduce((n, m) => Math.max(n, Number(m[1])), 0);
+    const body = [
+      ...(earlier === '' ? [] : [earlier]),
+      ...items.map((q, i) => `## Question ${asked + i + 1}\n\n${q}\n\n**Answer:** ${a.answers[i] ?? 'N/A'}`),
+    ].join('\n\n');
     const file = path.join(attemptDir, 'answers.md');
     await fs.mkdir(attemptDir, { recursive: true });
     await writeFileAtomic(file, `# Answers to ${asking.stepId}'s questions\n\n${body}\n`);

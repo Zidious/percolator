@@ -3,12 +3,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { runGraph } from '../../src/engine/engine.ts';
 import { loadState, newState, saveState } from '../../src/engine/state.ts';
 import type { Asking, RunState } from '../../src/engine/state.ts';
 import { buildGraph } from '../../src/graph/build.ts';
 import { mergeLayers } from '../../src/graph/merge.ts';
 import { AnswerError, applyAnswer, askedItems, checkAnswer, findingItems, numberFindings } from '../../src/run/answer.ts';
 import type { AnswerFlags } from '../../src/run/answer.ts';
+import { ask, FakeRuntime } from '../helpers/fake-runtime.ts';
 
 const init = { runId: 'r1', ticket: 'T-1', profile: 'default', groundVersions: {} };
 
@@ -124,6 +126,33 @@ test('applyAnswer writes the answers file, records it and saves state', async ()
     const saved = await loadState(d);
     assert.deepEqual(saved.answered, { 'plan.0': { answers: 'steps/plan.0/1/answers.md' } });
     assert.ok(!('asking' in saved));
+  } finally {
+    await rm(d);
+  }
+});
+
+test('a step that asks again re-runs with the answers to its earlier questions as well as the new ones', async () => {
+  const d = await tmp();
+  const save = async () => {};
+  try {
+    const answerAll = async (s: RunState, answers: string[]) => {
+      assert.ok(s.asking?.kind === 'questions');
+      await applyAnswer(d, s, graph, { kind: 'questions', answers }, s.asking.items);
+      s.status = 'running';
+    };
+    const s1 = await runGraph(graph, newState(init), { runtime: new FakeRuntime({ groom: [ask('Q1?', 'Q2?')] }), save });
+    await answerAll(s1, ['one', 'two']);
+    const s2 = await runGraph(graph, s1, { runtime: new FakeRuntime({ groom: [ask('Q3?')] }), save });
+    await answerAll(s2, ['three']);
+    const rt = new FakeRuntime();
+    await runGraph(graph, s2, { runtime: rt, save });
+    assert.equal(rt.calls[0], 'groom');
+    const answers = await fs.readFile(path.join(d, rt.previous[0]!['groom']!['answers']!), 'utf8');
+    assert.equal(
+      answers,
+      "# Answers to groom's questions\n\n## Question 1\n\nQ1?\n\n**Answer:** one\n\n## Question 2\n\nQ2?\n\n**Answer:** two\n\n" +
+        '## Question 3\n\nQ3?\n\n**Answer:** three\n',
+    );
   } finally {
     await rm(d);
   }

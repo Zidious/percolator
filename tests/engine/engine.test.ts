@@ -165,14 +165,14 @@ test('answers survive an escalate without questions until the step runs again', 
   assert.equal(rt.previous[0]!['groom']!['answers'], 'steps/groom/1/answers.md');
 });
 
-test('new questions from the answered step replace its answers', async () => {
+test('new questions from the answered step keep its earlier answers until it finishes', async () => {
   const g = graph();
   const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ groom: [ask('q1')] }), save: saver().save });
   answerQuestions(s1, 'steps/groom/1/answers.md');
   s1.status = 'running';
   const s2 = await runGraph(g, s1, { runtime: new FakeRuntime({ groom: [ask('q2')] }), save: saver().save });
   assert.equal(s2.status, 'paused');
-  assert.ok(!('answered' in s2));
+  assert.deepEqual(s2.answered, { groom: { answers: 'steps/groom/1/answers.md' } });
 });
 
 test('review fails at its cap → pauses asking about findings', async () => {
