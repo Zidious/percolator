@@ -71,12 +71,14 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
     const endedAt = now();
     const attempt = (state.executed[step.id] ?? 0) + 1;
     state.executed[step.id] = attempt;
-    // the owner's answers to this step are spent once it records its next attempt
-    if (state.answered?.[step.id] !== undefined) {
+    const missing = missingOutputs(step, outcome, graph);
+    // the owner's answers to this step are spent once it finishes an attempt: a contract error or an escalate
+    // without questions (a timeout, a crash) re-runs it, and the re-run still needs them
+    const unfinished = missing.length > 0 || (outcome.status === 'escalate' && outcome.questions === undefined);
+    if (!unfinished && state.answered?.[step.id] !== undefined) {
       delete state.answered[step.id];
       if (Object.keys(state.answered).length === 0) delete state.answered;
     }
-    const missing = missingOutputs(step, outcome, graph);
     state.history.push({
       stepId: step.id,
       attempt,

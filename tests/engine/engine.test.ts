@@ -138,6 +138,43 @@ test('answers reach only the re-run step', async () => {
   assert.ok(!('asking' in s2));
 });
 
+test('answers survive a contract retry of the answered step', async () => {
+  const g = graph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ groom: [ask('q1')] }), save: saver().save });
+  answerQuestions(s1, 'steps/groom/1/answers.md');
+  s1.status = 'running';
+  const rt = new FakeRuntime({ groom: [pass()] });
+  const s2 = await runGraph(g, s1, { runtime: rt, save: saver().save });
+  assert.deepEqual(rt.calls.slice(0, 2), ['groom', 'groom']);
+  assert.equal(rt.previous[1]!['groom']!['answers'], 'steps/groom/1/answers.md');
+  assert.equal(s2.status, 'completed');
+  assert.ok(!('answered' in s2));
+});
+
+test('answers survive an escalate without questions until the step runs again', async () => {
+  const g = graph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ groom: [ask('q1')] }), save: saver().save });
+  answerQuestions(s1, 'steps/groom/1/answers.md');
+  s1.status = 'running';
+  const s2 = await runGraph(g, s1, { runtime: new FakeRuntime({ groom: [esc('timeout')] }), save: saver().save });
+  assert.equal(s2.status, 'paused');
+  assert.deepEqual(s2.answered, { groom: { answers: 'steps/groom/1/answers.md' } });
+  const rt = new FakeRuntime();
+  await runGraph(g, { ...s2, status: 'running' }, { runtime: rt, save: saver().save });
+  assert.equal(rt.calls[0], 'groom');
+  assert.equal(rt.previous[0]!['groom']!['answers'], 'steps/groom/1/answers.md');
+});
+
+test('new questions from the answered step replace its answers', async () => {
+  const g = graph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ groom: [ask('q1')] }), save: saver().save });
+  answerQuestions(s1, 'steps/groom/1/answers.md');
+  s1.status = 'running';
+  const s2 = await runGraph(g, s1, { runtime: new FakeRuntime({ groom: [ask('q2')] }), save: saver().save });
+  assert.equal(s2.status, 'paused');
+  assert.ok(!('answered' in s2));
+});
+
 test('review fails at its cap → pauses asking about findings', async () => {
   const rt = new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3')] });
   const s = await runGraph(graph(), newState(init), { runtime: rt, save: saver().save });
