@@ -37,14 +37,25 @@ export function findingItems(md: string): string[] {
 
 type FindingsAsking = Extract<Asking, { kind: 'findings' }>;
 
-/** The findings of every step that failed in the deciding round (the others first), split into items, with each item's step. */
-export async function splitFindings(dir: string, asking: FindingsAsking): Promise<{ items: string[]; itemSteps: string[] }> {
+/**
+ * The findings of every step that failed in run `runId`'s deciding round (the others first), split into items, with
+ * each item's step. A findings file that can't be read is an error, never "no findings": that would move the run on.
+ */
+export async function splitFindings(
+  dir: string,
+  runId: string,
+  asking: FindingsAsking,
+): Promise<{ items: string[]; itemSteps: string[] }> {
   const sources = [...(asking.also ?? []), { stepId: asking.stepId, findings: asking.findings }];
   const items: string[] = [];
   const itemSteps: string[] = [];
   for (const src of sources) {
     if (src.findings === undefined) continue;
-    for (const item of findingItems(await fs.readFile(path.join(dir, src.findings), 'utf8').catch(() => ''))) {
+    const file = path.join(dir, src.findings);
+    const text = await fs.readFile(file, 'utf8').catch((err: NodeJS.ErrnoException) => {
+      throw new Error(`run ${runId}: cannot read ${src.stepId}'s findings ${file} (${err.code ?? err.message}); restore the file, then run perc status ${runId} again`);
+    });
+    for (const item of findingItems(text)) {
       items.push(item);
       itemSteps.push(src.stepId);
     }
@@ -59,7 +70,7 @@ export async function splitFindings(dir: string, asking: FindingsAsking): Promis
 export async function numberFindings(dir: string, state: RunState): Promise<boolean> {
   const asking = state.asking;
   if (asking?.kind !== 'findings' || asking.items !== undefined) return false;
-  const { items, itemSteps } = await splitFindings(dir, asking);
+  const { items, itemSteps } = await splitFindings(dir, state.runId, asking);
   asking.items = items;
   if (asking.also !== undefined) asking.itemSteps = itemSteps;
   return true;
@@ -71,7 +82,7 @@ export async function askedItems(dir: string, state: RunState): Promise<string[]
   if (asking === undefined) return [];
   if (asking.items !== undefined) return asking.items;
   if (asking.kind !== 'findings') return [];
-  return (await splitFindings(dir, asking)).items;
+  return (await splitFindings(dir, state.runId, asking)).items;
 }
 
 /** Check `flags` against what run `runId` asks (`items`); throws AnswerError naming what is wrong. */
@@ -153,7 +164,7 @@ export async function applyAnswer(dir: string, state: RunState, graph: Graph, a:
     if (a.agree.length > 0) {
       // the items' steps as numbered when the run paused; split again for a state that did not keep them
       const itemSteps =
-        asking.itemSteps ?? (asking.also === undefined ? items.map(() => asking.stepId) : (await splitFindings(dir, asking)).itemSteps);
+        asking.itemSteps ?? (asking.also === undefined ? items.map(() => asking.stepId) : (await splitFindings(dir, state.runId, asking)).itemSteps);
       const agreed: Record<string, string> = {};
       // a failing step none of whose findings is ticked gets an empty file, so the loop start does not see them
       for (const src of sources) {

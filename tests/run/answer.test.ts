@@ -251,14 +251,29 @@ test('askedItems: the questions, the split findings file, or none', async () => 
   const d = await tmp();
   try {
     assert.deepEqual(await askedItems(d, askingState(questions)), ['a?', 'b?', 'c?']);
-    assert.deepEqual(await askedItems(d, askingState(findings)), []);
     await fs.mkdir(path.join(d, 'steps', 'review', '3', 'outputs'), { recursive: true });
+    await fs.writeFile(path.join(d, 'steps', 'review', '3', 'outputs', 'findings.md'), '');
+    assert.deepEqual(await askedItems(d, askingState(findings)), []);
     await fs.writeFile(path.join(d, 'steps', 'review', '3', 'outputs', 'findings.md'), '## A\nx\n## B\n');
     assert.deepEqual(await askedItems(d, askingState(findings)), ['## A\n\nx', '## B']);
     assert.deepEqual(await askedItems(d, askingState({ ...findings, items: ['kept'] })), ['kept']);
     const { findings: _, ...noFile } = findings;
     assert.deepEqual(await askedItems(d, askingState(noFile)), []);
     assert.deepEqual(await askedItems(d, newState(init)), []);
+  } finally {
+    await rm(d);
+  }
+});
+
+test('askedItems and numberFindings refuse a findings file that cannot be read, naming it and the run', async () => {
+  const d = await tmp();
+  try {
+    const file = path.join(d, 'steps', 'review', '3', 'outputs', 'findings.md');
+    const message = `run r1: cannot read review's findings ${file} (ENOENT); restore the file, then run perc status r1 again`;
+    await assert.rejects(askedItems(d, askingState(findings)), { message });
+    const state = askingState(findings);
+    await assert.rejects(numberFindings(d, state), { message });
+    assert.ok(state.asking?.kind === 'findings' && state.asking.items === undefined);
   } finally {
     await rm(d);
   }
