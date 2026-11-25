@@ -95,3 +95,11 @@ test('splitListItems: a numbered list indented under a paragraph line is not the
   const md = 'Summary: two issues, see steps.\n   1. run it\n   2. see it fail\n';
   assert.deepEqual(splitListItems(md), [md.trim()]);
 });
+
+test('splitListItems: a heading ends an item, and an item that is only headings is dropped', () => {
+  assert.deepEqual(splitListItems('### Bugs\n1. a\n2. b\n### Nits\n1. c\n'), ['1. a', '2. b', '1. c']);
+});
+
+test('splitListItems: headings without any marker keep the text one item', () => {
+  assert.deepEqual(splitListItems('### Bugs\nnone\n### Nits\nnone'), ['### Bugs\nnone\n### Nits\nnone']);
+});

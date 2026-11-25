@@ -377,3 +377,7 @@ test('numberFindings keeps the items, and their steps when several steps failed;
     await rm(d);
   }
 });
+
+test('findingItems: a numbered list grouped under ### headings gives one item per finding, no heading items', () => {
+  assert.deepEqual(findingItems('# Review\n\n### Bugs\n1. a\n2. b\n### Nits\n1. c\n'), ['1. a', '2. b', '1. c']);
+});

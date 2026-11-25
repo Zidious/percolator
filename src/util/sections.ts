@@ -9,6 +9,8 @@ const CLOSING = /(^|\s)#+\s*$/;
 const MARKER = /^( {0,3})\d{1,9}[.)](?:[ \t]|$)/;
 /** An unordered-list marker (`-`, `*` or `+`, then a space, a tab or nothing); group 1 is the indent. */
 const BULLET = /^(\s*)[-*+](?:[ \t]|$)/;
+/** An ATX heading line (`#` to `######`, then a space, a tab or nothing), indented up to 3 spaces. */
+const HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
 const indentOf = (line: string): number => /^\s*/.exec(line)![0].length;
 
 /**
@@ -60,8 +62,9 @@ export function splitSections(md: string): Section[] {
  * One trimmed item per top-level ordered-list item (`1.` or `1)`, any number), with its continuation lines; the
  * non-blank text before the first marker is an item of its own. The first marker's indent is the top level, so a list
  * nested deeper stays in its item. A first marker nested in a bullet or indented under the text right before it is
- * not a top level: the whole text is one item. Lines inside fenced code blocks are never markers. No marker: the whole
- * text as one item; blank: none. Lines are joined with `\n`.
+ * not a top level: the whole text is one item. A heading line ends the item before it; an item of headings only is
+ * dropped. Lines inside fenced code blocks are never markers or headings. No marker: the whole text as one item;
+ * blank: none. Lines are joined with `\n`.
  */
 export function splitListItems(md: string): string[] {
   const lines = md.split(/\r?\n/);
@@ -76,11 +79,12 @@ export function splitListItems(md: string): string[] {
     const indent = at.code ? undefined : MARKER.exec(line)?.[1];
     if (top === undefined && indent !== undefined && !isTopLevel(before, indent.length)) return whole === '' ? [] : [whole];
     if (top === undefined && !at.code) before.push(line);
-    if (indent !== undefined && (top === undefined || indent === top)) {
-      top = indent;
-      items.push([]);
-    }
+    const heading = !at.code && HEADING.test(line);
+    if (heading || (indent !== undefined && (top === undefined || indent === top))) items.push([]);
+    if (indent !== undefined && top === undefined) top = indent;
     items.at(-1)!.push(line);
   }
-  return items.map((lines) => lines.join('\n').trim()).filter((text) => text !== '');
+  if (top === undefined) return whole === '' ? [] : [whole];
+  const onlyHeadings = (item: string[]) => item.every((l) => l.trim() === '' || HEADING.test(l));
+  return items.filter((item) => !onlyHeadings(item)).map((item) => item.join('\n').trim());
 }
