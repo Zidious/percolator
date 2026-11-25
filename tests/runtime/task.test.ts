@@ -5,6 +5,9 @@ import type { RunContext } from '../../src/engine/runtime.ts';
 import type { Step } from '../../src/graph/build.ts';
 import { buildTask, renderTemplate, STAGE_BRIEFS, TemplateError, type TaskInput } from '../../src/runtime/task.ts';
 import type { MaterializedMapping } from '../../src/workspace/run-dir.ts';
+import type { GraphFragment } from '../../src/config/schema.ts';
+import { buildGraph } from '../../src/graph/build.ts';
+import { mergeLayers } from '../../src/graph/merge.ts';
 
 function step(over: Partial<Step> = {}): Step {
   return {
@@ -244,4 +247,50 @@ test('the header names the outer loop of nested loops, and an inner one only pas
 test('{{round}} still renders the innermost clamped round', () => {
   const t = buildTask(input({ prompt: 'Round {{round}} of {{max_rounds}}', ctx: ctx({ round: 3, maxRounds: 3, loops: [loop('review', 4, 3, 1)] }) }));
   assert.match(t, /## Task\n\nRound 3 of 3/);
+});
+
+/** A built feature graph with the given extra nodes, and the step of it with `id`. */
+function built(nodes: GraphFragment['nodes']) {
+  return buildGraph(
+    mergeLayers([
+      {
+        source: 'test',
+        fragment: {
+          bindings: {
+            intake: { builtin: 'github.intake' },
+            groom: { agent: 'claude' },
+            plan: { agent: 'claude' },
+            implement: { agent: 'claude' },
+            review: { agent: 'claude' },
+            deliver: { builtin: 'github.open_pr' },
+          },
+          nodes,
+        },
+      },
+    ]),
+  );
+}
+const taskOf = (g: ReturnType<typeof buildGraph>, id: string, previousOutputs: RunContext['previousOutputs']) =>
+  buildTask(input({ step: g.steps.find((s) => s.id === id)!, ctx: ctx({ graph: g, previousOutputs }) }));
+
+test('a stage a rejected gate sends back to is told to address its feedback', () => {
+  const g = built({ 'approve-plan': { kind: 'gate', after: 'plan' } });
+  const task = taskOf(g, 'plan', { 'approve-plan': { findings: 'steps/approve-plan/1/outputs/findings.md' } });
+  const feedback = '## Feedback\n\nGate approve-plan rejected the last round. Address its feedback: findings (from approve-plan) in the inputs.';
+  assert.ok(task.includes(feedback), task);
+  assert.ok(task.indexOf('## Inputs') < task.indexOf(feedback));
+  assert.ok(task.indexOf(feedback) < task.indexOf('## Workspace'));
+});
+
+test("no feedback section when the gate's latest output is its approval", () => {
+  const g = built({ 'approve-plan': { kind: 'gate', after: 'plan' } });
+  const task = taskOf(g, 'plan', { 'approve-plan': { approval: 'steps/approve-plan/2/outputs/approval.md' } });
+  assert.ok(!task.includes('## Feedback'));
+});
+
+test("a gate in review's loop sends its feedback to implement", () => {
+  const g = built({ 'approve-x': { kind: 'gate', after: 'review' } });
+  const outs = { 'approve-x': { findings: 'steps/approve-x/1/outputs/findings.md' } };
+  assert.ok(taskOf(g, 'implement', outs).includes('## Feedback\n\nGate approve-x rejected the last round.'));
+  assert.ok(!taskOf(g, 'plan', outs).includes('## Feedback'));
 });
