@@ -100,6 +100,13 @@ test('splitListItems: a heading ends an item, and an item that is only headings 
   assert.deepEqual(splitListItems('### Bugs\n1. a\n2. b\n### Nits\n1. c\n'), ['1. a', '2. b', '1. c']);
 });
 
+test('splitListItems: a heading indented into an item belongs to it', () => {
+  assert.deepEqual(splitListItems('1. **Bug A**\n   ### Repro\n   steps\n2. Bug B'), [
+    '1. **Bug A**\n   ### Repro\n   steps',
+    '2. Bug B',
+  ]);
+});
+
 test('splitListItems: headings without any marker keep the text one item', () => {
   assert.deepEqual(splitListItems('### Bugs\nnone\n### Nits\nnone'), ['### Bugs\nnone\n### Nits\nnone']);
 });

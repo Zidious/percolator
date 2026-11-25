@@ -69,8 +69,8 @@ export function splitSections(md: string): Section[] {
  * One trimmed item per top-level ordered-list item (`1.` or `1)`, any number), with its continuation lines; the
  * non-blank text before the first marker is an item of its own. The first marker's indent is the top level, so a list
  * nested deeper stays in its item. A first marker nested in a bullet or indented under the text right before it is
- * not a top level: the whole text is one item. A heading line ends the item before it; an item of headings only is
- * dropped. Lines inside fenced code blocks are never markers or headings. No marker: the whole text as one item;
+ * not a top level: the whole text is one item. A heading line ends the item before it unless it is indented past the
+ * top-level marker (then it is the item's content); an item of headings only is dropped. Lines inside fenced code blocks are never markers or headings. No marker: the whole text as one item;
  * blank: none. Lines are joined with `\n`.
  */
 export function splitListItems(md: string): string[] {
@@ -86,7 +86,7 @@ export function splitListItems(md: string): string[] {
     const indent = at.code ? undefined : MARKER.exec(line)?.[1];
     if (top === undefined && indent !== undefined && !isTopLevel(before, indent.length)) return whole === '' ? [] : [whole];
     if (top === undefined && !at.code) before.push(line);
-    const heading = !at.code && HEADING.test(line);
+    const heading = !at.code && HEADING.test(line) && (top === undefined || indentOf(line) <= top.length);
     if (heading || (indent !== undefined && (top === undefined || indent === top))) items.push([]);
     if (indent !== undefined && top === undefined) top = indent;
     items.at(-1)!.push(line);
