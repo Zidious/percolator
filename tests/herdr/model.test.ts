@@ -1819,3 +1819,11 @@ test('answerArgv builds perc answer from the form values', () => {
 test('actionArgv leaves answer to the form', () => {
   assert.equal(actionArgv('answer', byId('t25')), null);
 });
+
+test('itemLabel unwraps paired marks only, and strips a list marker only where the splitter sees one', () => {
+  assert.equal(itemLabel('## `__dirname` is undefined', 1, 'findings'), '__dirname is undefined');
+  assert.equal(itemLabel('## __init__.py is missing', 1, 'findings'), '__init__.py is missing');
+  assert.equal(itemLabel('## 2024. retrospective', 1, 'findings'), '2024. retrospective');
+  assert.equal(itemLabel('    1. indented code, not a marker', 1, 'findings'), '1. indented code, not a marker');
+  assert.equal(itemLabel('1. a stray ` stays', 1, 'findings'), 'a stray ` stays');
+});

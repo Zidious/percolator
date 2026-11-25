@@ -238,3 +238,19 @@ test('perc status lists what the run asks and how to answer', async () => {
     await e.cleanup();
   }
 });
+
+test('perc status labels keep __dirname and a leading year in a ## title', async () => {
+  const e = await setup();
+  try {
+    const asking: Asking = { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'review', findings: 'steps/review/3/outputs/findings.md' };
+    const m = await e.asking(asking);
+    const out = path.join(e.dir(m.runId), 'steps', 'review', '3', 'outputs');
+    await fs.mkdir(out, { recursive: true });
+    await fs.writeFile(path.join(out, 'findings.md'), '## `__dirname` is undefined\n\nwhy\n\n## 2024. retrospective\n\nwhy\n');
+    const lines = (await e.perc(['status', m.runId])).out.split('\n');
+    const j = lines.findIndex((l) => l.startsWith('  1. '));
+    assert.deepEqual(lines.slice(j, j + 2), ['  1. __dirname is undefined', '  2. 2024. retrospective']);
+  } finally {
+    await e.cleanup();
+  }
+});
