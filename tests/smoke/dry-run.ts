@@ -6,7 +6,7 @@
 // panel draws, or exercises one config option. Ticket scenarios (--ticket, default 1) comment on that issue; nothing
 // opens a PR, an issue or a release.
 //
-//   dry-feature   groom asks two questions → approve-plan gate (ticketless) → review fails every round → FINDINGS at cap 2
+//   dry-feature   groom asks two questions → approve-plan gate (ticketless; reject at approve-plan → back to groom with the feedback) → review fails every round → FINDINGS at cap 2
 //   dry-loop      a test script fails every round → on_fail back to implement → PAUSED at its cap 2 (Grant a round)
 //   dry-once      review fails in round 1 only → completes (exit none)
 //   dry-list      review writes its findings as a numbered list (as real reviews do) → FINDINGS at once (cap 1)
@@ -16,7 +16,7 @@
 //   dry-timeout   implement hangs, timeout_s 10 → PAUSED (timed out)
 //   dry-contract  implement passes without summary.md → contract error
 //   dry-crash     implement exits 3 without done.json → PAUSED (agent exited)
-//   dry-fail      a script hook with no on_fail fails → FAILED; also before: all and after hooks
+//   dry-fail      a script hook with no on_fail fails → FAILED (lint failed (exit code 1)); also before: all and after hooks
 //   dry-slow      implement takes FAKE_AGENT_SLOW_S (90) → the running agent card; kill its driver → STALLED
 //   dry-inputs    ticket: optional, a required and an optional input, rendered into the prompt
 //   dry-issue     exit issue behind an approve-issue gate with when_output: no drafts → gate passes, nothing opened

@@ -91,7 +91,7 @@ nodes:
   sign-off: { kind: gate, after: plan }
 ```
 
-The run waits there until the user answers, the same way as `approve-groom`; a rejection fails the run unless the gate has an `on_fail` (for the gate above, `{ back_to: plan, max_rounds: 3 }` sends a rejected plan back to be redone; `back_to` must be the gate's stage or an earlier one). Nodes on the same hook point run in the order they appear in the YAML.
+The run waits there until the user answers, the same way as `approve-groom`. A rejection sends the run back, with the feedback, to the stage the gate follows: `after: X` to X, `before: X` to the stage before X, and a gate in a stage's binding to that stage after another node of it, else to the stage before. That is 3 rounds at most (clamped by `max_rounds_ceiling`), then the run escalates. A gate in a looping stage (`review`, or one with `max_rounds`) counts its reject as a round of that loop. Give the gate an `on_fail` to send it elsewhere (`{ back_to: implement, max_rounds: 2 }`; `back_to` must be the gate's stage or an earlier one). A gate without `on_fail` that has nowhere to go back to is refused by `perc validate`: `before: all`, `after: all` (give it an `on_fail`) and `before: intake`. Nodes on the same hook point run in the order they appear in the YAML.
 
 **Make a stage follow a file** (policy, coding standards): the file must come from a ground. For a local file, add its directory as a ground:
 
@@ -192,7 +192,7 @@ pipelines:
         on_fail: { back_to: diagnose, max_rounds: 3 }   # a rejection redrafts
 ```
 
-`when_output` is for gate nodes only. Do not list that key under `outputs:`: a listed output is required, so the gate would always stop. Without `on_fail`, a rejection fails the run.
+`when_output` is for gate nodes only. Do not list that key under `outputs:`: a listed output is required, so the gate would always stop. Without `on_fail`, a rejection goes back to the stage before `open` (here diagnose).
 
 ## Routers
 

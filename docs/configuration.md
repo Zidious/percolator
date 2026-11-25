@@ -175,7 +175,7 @@ profiles:
 | `builtin` | builtin | `github.intake`, or on the exit stage the builtin of an exit, such as `github.open_pr` (see [Exits](pipelines.md#exits)). |
 | `command` | script | An argv array, never a shell string. `{run_dir}`, `{outputs_dir}` and `{worktree}` are filled in. |
 | `before` / `after` | nodes | Hook point: a stage, or `all`. At most one of the two. |
-| `on_fail` | nodes | `{ back_to: <earlier stage>, max_rounds: n }`: a bounded back-edge. `n` counts failed rounds, the first run included, so `1` escalates on the first fail. |
+| `on_fail` | nodes | `{ back_to: <earlier stage>, max_rounds: n }`: a bounded back-edge. `n` counts failed rounds, the first run included, so `1` escalates on the first fail. A gate without it goes back to the stage it follows (`after: X` to X, `before: X` to the stage before X), 3 rounds at most; a gate in a looping stage (review) counts as a round of that loop. |
 | `max_rounds` | a stage's binding | Round cap for the review loop (default 3). On another stage's binding it makes that stage loop back to the one before it. |
 | `once` | hooks | Skip the hook once it has passed in this run, so a loop does not re-run it. |
 | `timeout_s` | agent, script | Escalate to you if the step is not done after n seconds; its terminal keeps running, and `perc resume` re-attaches to it. Builtins and gates ignore it. |
@@ -198,7 +198,8 @@ profiles:
 ```
 
 - `audit` runs after implement. If it fails, the run goes back to implement once; if it fails again (two failed rounds), the run pauses and escalates to you.
-- `sign-off` adds a second human gate after plan, which you answer the same way as `approve-groom`.
+- `sign-off` adds a second human gate after plan, which you answer the same way as `approve-groom`. It has no `on_fail`, so rejecting it sends the run back to plan with your feedback, 3 rounds at most, then it escalates to you.
+- A gate without `on_fail` must have a stage to go back to: `perc validate` refuses one `before: all`, `after: all` or `before: intake` (`gate "pre" runs before intake, so a reject has no earlier stage to go back to; attach it after intake or a later stage, or remove it`).
 - `back_to` must point to an earlier stage. A `before: all` hook cannot loop.
 - `before`/`after` must name a stage of the node's own pipeline, or `all`.
 - Any step that writes a `pr_body` output sets the PR description; the last one in run order wins.
