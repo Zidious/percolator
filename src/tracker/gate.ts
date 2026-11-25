@@ -223,6 +223,7 @@ export function githubGate(o: {
   const decided = async (step: Step, io: { outputsDir: string }, decision: Decision): Promise<NodeOutcome> => {
     await fs.mkdir(io.outputsDir, { recursive: true });
     let status: 'pass' | 'fail';
+    let reason: string | undefined;
     if (decision.decision === 'approve') {
       const via = decision.via === 'comment' ? `comment ${decision.url}` : 'perc approve';
       await writeFileAtomic(path.join(io.outputsDir, 'approval.md'), `Approved by @${decision.by} via ${via}.\n`);
@@ -231,10 +232,12 @@ export function githubGate(o: {
       const why = decision.feedback && decision.feedback !== '' ? decision.feedback : '(no feedback given)';
       await writeFileAtomic(path.join(io.outputsDir, 'findings.md'), `Rejected by @${decision.by}: ${why}\n`);
       status = 'fail';
+      // one line, for the failed run's message when this gate has no loop
+      reason = `rejected by @${decision.by}: ${why.replace(/\s+/g, ' ').trim()}`;
     }
     const collected = await collectOutputs(io.outputsDir, o.runDir);
     if ('error' in collected) return escalate(`gate ${step.id}: ${collected.error}`);
-    return { status, outputs: collected.outputs };
+    return { status, outputs: collected.outputs, ...(reason !== undefined ? { reason } : {}) };
   };
 
   return async (step, ctx, io) => {

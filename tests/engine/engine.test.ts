@@ -853,3 +853,28 @@ test('a looped custom stage that passes clears unresolved findings', async () =>
   assert.equal(s.status, 'completed');
   assert.ok(!('unresolvedFindings' in s));
 });
+
+test("a failed step's reason is kept in failedReason", async () => {
+  const s = await runGraph(graph(), newState(init), {
+    runtime: new FakeRuntime({ 'plan.1': [{ status: 'fail', outputs: {}, reason: 'exit code 1' }] }),
+    save: saver().save,
+  });
+  assert.equal(s.status, 'failed');
+  assert.equal(s.failedReason, 'exit code 1');
+  const t = await runGraph(graph(), newState(init), { runtime: new FakeRuntime({ 'plan.1': [{ status: 'fail', outputs: {} }] }), save: saver().save });
+  assert.equal(t.status, 'failed');
+  assert.ok(!('failedReason' in t));
+});
+
+test('implicit gate edge escalates at its cap', async () => {
+  const g = graph({ 'approve-plan': { kind: 'gate', after: 'plan' } });
+  const rejected = { status: 'fail' as const, outputs: { findings: 'f' }, reason: 'rejected by @zid: x' };
+  const rt = new FakeRuntime({ 'approve-plan': [rejected, rejected, rejected] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'paused');
+  assert.equal(s.pausedReason, 'cap: approve-plan reached 3 rounds');
+  assert.equal(s.pausedCap, 'approve-plan');
+  assert.equal(rt.calls.filter((id) => id === 'plan.0').length, 3);
+  assert.equal(s.cursor, g.steps.findIndex((x) => x.id === 'approve-plan'));
+  assert.ok(!('failedReason' in s));
+});

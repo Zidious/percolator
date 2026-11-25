@@ -118,6 +118,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       const edge = route === undefined ? undefined : graph.backEdges[route];
       if (!edge) {
         state.status = 'failed';
+        if (outcome.reason !== undefined) state.failedReason = outcome.reason;
       } else if (edge.jumpAfterIndex === i) {
         // this fail decides the round; an earlier trigger on the same edge is folded into it
         if (state.pendingJump?.edgeId === edge.id) delete state.pendingJump;
