@@ -23,7 +23,7 @@ import { AnswerError, applyAnswer, askedItems, checkAnswer } from './run/answer.
 import { launchDriver, prepareRun } from './run/prepare.ts';
 import { InputError, parseInputs } from './run/request.ts';
 import type { DriverDeps } from './run/prepare.ts';
-import { attentionNext, driverLiveness, readAttention, runStatusJson, statusJson } from './run/status.ts';
+import { attentionNext, driverLiveness, failedText, readAttention, runStatusJson, statusJson } from './run/status.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
 import { deciderLogin, readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
@@ -349,6 +349,7 @@ async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: Driv
   if (waitingText) return waitingText;
   if (state.status === 'paused') return state.pausedReason ?? '';
   if (state.status === 'completed') return (await prUrl(dir, state)) ?? '';
+  if (state.status === 'failed' && state.failedReason !== undefined) return failedText(state.currentStep ?? '-', state.failedReason);
   return '';
 }
 

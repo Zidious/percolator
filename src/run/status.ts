@@ -22,7 +22,7 @@ import { parsePick } from './route.ts';
 import { watcherStatus } from '../watch/watch.ts';
 
 export type AttentionKind = 'gate' | 'cap' | 'paused' | 'questions' | 'findings' | 'failed' | 'stalled' | 'agent';
-export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'answer' | 'clean' | 'open-pane';
+export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'answer' | 'clean' | 'open-pane' | 'run-again';
 export type ReviewItem = { step: string; key: string; path: string };
 export type AttentionJson = {
   kind: AttentionKind;
@@ -258,7 +258,7 @@ export type YourTurnInput = {
   sliceOf?: string;
   /** a pick-pipeline gate: the pipelines `perc approve --pipeline` may name */
   choices?: string[];
-  /** findings: the stage a granted round goes back to */
+  /** findings: the stage a granted round goes back to; gate: the stage a reject goes back to (none: a reject ends the run) */
   backTo?: string;
   /** findings: the failing step wrote none, so the only answer is to move on */
   nothingToTick?: boolean;
@@ -283,6 +283,11 @@ export function runAgain(a: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs'
   return ['perc run', ...(a.ticket ? [a.ticket] : []), ...pipeline, ...inputs, `--repo ${quoted(a.repoRoot)}`].join(' ');
 }
 
+/** A failed step, with why it failed when the run recorded it (`lint failed (exit code 1)`). */
+export function failedText(step: string, reason: string | undefined): string {
+  return reason === undefined ? `${step} failed` : `${step} failed (${reason})`;
+}
+
 /** What the owner has to do next, as one sentence plus the exact commands to type. Shared by `perc status` and the JSON. */
 export function yourTurn(a: YourTurnInput): { message: string; detail?: string; next: string[] } {
   const resume = [`perc resume ${a.runId}`];
@@ -291,6 +296,7 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
       return {
         // a ticketless run has no issue for the gate to comment on
         message: a.ticket ? `${a.step} is waiting for approval` : 'approve or reject here (no issue to comment on)',
+        detail: a.backTo !== undefined ? `Rejecting sends the run back to ${a.backTo} with your feedback.` : "Rejecting ends the run; a failed run can't be resumed.",
         next: [
           ...(a.choices !== undefined ? a.choices.map((c) => `perc approve ${a.runId} --pipeline ${c}`) : [`perc approve ${a.runId}`]),
           `perc reject ${a.runId} "<what to change>"`,
@@ -328,8 +334,8 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
         };
       }
       return {
-        message: `${a.step} failed`,
-        detail: "A failed run can't be resumed. Start a new run for the ticket, then delete this one (or clean it up to keep its record).",
+        message: failedText(a.step, a.reason),
+        detail: `A failed run can't be resumed. Start a new run ${a.ticket ? 'for the ticket' : `of pipeline ${a.pipeline ?? 'feature'}`}, then delete this one (or clean it up to keep its record).`,
         next: [runAgain(a), `perc delete ${a.runId}`, `perc clean ${a.runId}`],
       };
     case 'stalled':
@@ -369,6 +375,19 @@ async function suggestion(dir: string, state: RunState, choices: string[]): Prom
   return parsePick(text, choices).pipeline;
 }
 
+/**
+ * Where a reject of `gate` sends the run: the stage of the loop from the gate, else (a gate in a loop stage)
+ * of the stage loop from a step of its stage. None: an older graph whose gate has no loop; a reject ends the run.
+ */
+function gateBackTo(gate: string, steps: RunGraphStep[], loops: RunGraphLoop[]): { backTo?: string } {
+  const stageOf = (id: string | undefined) => steps.find((s) => s.id === id)?.stage;
+  const own = loops.find((l) => l.from === gate);
+  const stage = stageOf(gate);
+  const loop = own ?? loops.find((l) => l.atCap === 'continue' && stage !== undefined && stageOf(l.from) === stage);
+  const backTo = stageOf(loop?.to);
+  return backTo === undefined ? {} : { backTo };
+}
+
 async function attentionOf(o: {
   dir: string;
   meta: RunMeta;
@@ -377,6 +396,8 @@ async function attentionOf(o: {
   alive: boolean | null;
   steps: RunGraphStep[];
   loops: RunGraphLoop[];
+  /** graph.json was read: without it the loops are unknown, so a gate does not say where a reject goes */
+  graphKnown: boolean;
 }): Promise<AttentionJson | undefined> {
   const { dir, meta, state, waiting, alive } = o;
   const lastEnd = state.history.at(-1)?.endedAt || meta.createdAt;
@@ -404,10 +425,12 @@ async function attentionOf(o: {
         choices,
       };
     }
+    const { detail, ...gateTurn } = turn('gate', waiting.stepId, gateBackTo(waiting.stepId, o.steps, o.loops));
     return {
       kind: 'gate',
       since: waiting.since,
-      ...turn('gate', waiting.stepId),
+      ...gateTurn,
+      ...(o.graphKnown && detail !== undefined ? { detail } : {}),
       ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
       review: gateReview(dir, waiting.stepId, o.steps, state),
       actions: ['approve', 'reject'],
@@ -449,9 +472,12 @@ async function attentionOf(o: {
     return {
       kind: 'failed',
       since: lastEnd,
-      ...turn('failed', state.currentStep, sliceOf !== undefined ? { sliceOf } : {}),
+      ...turn('failed', state.currentStep, {
+        ...(sliceOf !== undefined ? { sliceOf } : {}),
+        ...(state.failedReason !== undefined ? { reason: state.failedReason } : {}),
+      }),
       review: failing(state.currentStep),
-      actions: ['clean'],
+      actions: sliceOf === undefined ? ['run-again', 'clean'] : ['clean'],
       ...(sliceOf === undefined ? { commands: [runAgain(again)] } : {}),
     };
   }
@@ -616,7 +642,7 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, list
       outputs: absOutputs(dir, h?.outputs ?? {}),
     };
   });
-  const attention = await attentionOf({ dir, meta, state, waiting, alive, steps: stepDefs, loops: loopDefs });
+  const attention = await attentionOf({ dir, meta, state, waiting, alive, steps: stepDefs, loops: loopDefs, graphKnown: graph !== undefined });
   const url = await prUrl(dir, state);
   return {
     id: meta.runId,

@@ -483,6 +483,7 @@ test('status <id> shows your turn at a gate', async () => {
         '  step approve-groom',
         '  detail waiting for approval: u',
         'your turn: approve-groom is waiting for approval',
+        '  Rejecting sends the run back to groom with your feedback.',
         `  read: ${path.join(e.dir(meta.runId), 'steps', 'groom', '1', 'outputs', 'groomed_ticket.md')}`,
         `  next: perc approve ${meta.runId}`,
         `  next: perc reject ${meta.runId} "<what to change>"`,
@@ -1056,6 +1057,23 @@ test('status of a ticketless run shows its pipeline instead of a ticket', async 
     assert.deepEqual(one.out.split('\n').slice(0, 3), [`run ${id}`, '  pipeline dd-alert', '  profile work']);
     const list = await e.perc(['status']);
     assert.match(list.out, new RegExp(`^${id}  running  -  dd-alert  `));
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('status <id> of a failed run says why it failed', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const s = await loadState(e.dir(meta.runId));
+    s.status = 'failed';
+    s.currentStep = 'lint';
+    await saveState(e.dir(meta.runId), s);
+    assert.equal((await e.perc(['status', meta.runId])).out.split('\n')[7], '  detail ');
+    s.failedReason = 'exit code 1';
+    await saveState(e.dir(meta.runId), s);
+    assert.equal((await e.perc(['status', meta.runId])).out.split('\n')[7], '  detail lint failed (exit code 1)');
   } finally {
     await e.cleanup();
   }
