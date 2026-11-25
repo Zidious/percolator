@@ -50,11 +50,11 @@ function refuses(fn: () => unknown, message: string): void {
   });
 }
 
-test('findingItems: one item per ## section, the whole text without any, none when blank', () => {
+test('findingItems: one item per ## section, one item per numbered item without any, none when blank', () => {
   assert.deepEqual(findingItems('## A\n\nwhy\n\n## B\nmore'), ['## A\n\nwhy', '## B\n\nmore']);
   assert.deepEqual(findingItems('  \n## A\nx'), ['## A\n\nx']);
   assert.deepEqual(findingItems('1. bug A\n2. bug B\n\n## Policy compliance\nok'), ['1. bug A\n2. bug B', '## Policy compliance\n\nok']);
-  assert.deepEqual(findingItems('1. one\n2. two'), ['1. one\n2. two']);
+  assert.deepEqual(findingItems('1. one\n2. two'), ['1. one', '2. two']);
   assert.deepEqual(findingItems('  \n'), []);
   assert.deepEqual(findingItems('## Policy compliance\n\nok\n## Bug\n'), ['## Policy compliance\n\nok', '## Bug']);
 });
@@ -63,6 +63,40 @@ test('findingItems: an h1 title before the first ## section is not a finding; te
   assert.deepEqual(findingItems('# Review findings\n\n## Missing test\nwhy\n## Typo\nhere'), ['## Missing test\n\nwhy', '## Typo\n\nhere']);
   assert.deepEqual(findingItems('# Review findings\n\n1. bug A\n\n## Typo\nhere'), ['1. bug A', '## Typo\n\nhere']);
   assert.deepEqual(findingItems('# Review findings\n'), []);
+});
+
+const fixture = (name: string) => fs.readFile(path.join(import.meta.dirname, '..', 'fixtures', 'findings', name), 'utf8');
+
+test("findingItems: t25's numbered-list reviews give one item per finding (9, 4, 3)", async () => {
+  const [r1, r2, r3] = await Promise.all([1, 2, 3].map((n) => fixture(`t25-review-${n}.md`)));
+  assert.equal(findingItems(r1!).length, 9);
+  assert.equal(findingItems(r2!).length, 4);
+  assert.equal(findingItems(r3!).length, 3);
+  const first = findingItems(r1!)[0]!;
+  assert.ok(first.startsWith("1. **The owner's answers are lost when the re-run step does not finish cleanly** (`src/engine/engine.ts:75`)."));
+  assert.ok(first.includes('   - Contract case:'));
+  assert.ok(first.includes('   - Timeout case:'));
+  assert.ok(first.includes('   Change: drop the entry only when the attempt passes'));
+  assert.ok(!first.includes('2. **Pressing Enter'));
+  assert.ok(findingItems(r1!)[8]!.startsWith('9. **Small wording and coverage gaps**'));
+  assert.ok(findingItems(r1!)[8]!.includes('   - The groomed ticket requires screenshots'));
+  assert.ok(findingItems(r3!)[2]!.startsWith('3. **The summary says "answered 1 questions"**'));
+});
+
+test('findingItems: a numbered list before ## sections stays one preamble item; each section is one item', async () => {
+  assert.deepEqual(findingItems(await fixture('list-then-sections.md')), [
+    '1. **Bug A** (`a.ts:1`).\n   Detail A.\n\n2. **Bug B**.',
+    '## Policy compliance\n\nOne breach.',
+    '## Typo\n\nREADME.md: "teh".',
+  ]);
+});
+
+test('findingItems: a CRLF numbered list splits as LF does', () => {
+  assert.deepEqual(findingItems('# Findings\r\n\r\n1. A\r\n   more\r\n2. B\r\n'), ['1. A\n   more', '2. B']);
+});
+
+test('findingItems: a numbered list inside a ## section stays in that section', () => {
+  assert.deepEqual(findingItems('## Bugs\n\n1. A\n2. B\n## Typo\nx'), ['## Bugs\n\n1. A\n2. B', '## Typo\n\nx']);
 });
 
 test('checkAnswer refuses incomplete or malformed answers to questions', () => {

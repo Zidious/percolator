@@ -4,7 +4,7 @@ import { answerFindings, answerQuestions, saveState } from '../engine/state.ts';
 import type { Asking, RunState } from '../engine/state.ts';
 import type { Graph } from '../graph/build.ts';
 import { writeFileAtomic } from '../util/fs.ts';
-import { splitSections } from '../util/sections.ts';
+import { splitListItems, splitSections } from '../util/sections.ts';
 import { stepDir } from '../workspace/run-dir.ts';
 
 /** The owner's answer to what a run asks: per question its text or null (N/A); or the 1-based findings they agree with. */
@@ -21,12 +21,13 @@ const LEADING_H1 = /^(?:[ \t]*\r?\n| {0,3}#(?:[ \t][^\n]*)?(?:\r?\n|$))+/;
 
 /**
  * One item per `## ` section of a findings file, after the text before the first one (when not blank once a leading
- * h1 title is dropped); none when blank.
+ * h1 title is dropped); without any, one item per top-level numbered item (`splitListItems`); none when blank.
  */
 export function findingItems(md: string): string[] {
   // a bare heading put first turns the text before the file's first heading into a section of its own
   const [preamble, ...sections] = splitSections(`##\n${md}`);
   const text = preamble!.body.replace(LEADING_H1, '').trim();
+  if (sections.length === 0) return splitListItems(text);
   const items = text === '' ? [] : [text];
   for (const s of sections) {
     const heading = s.title === '' ? '##' : `## ${s.title}`;
