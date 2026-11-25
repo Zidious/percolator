@@ -8,7 +8,7 @@ const HOST: Record<string, string[]> = {
   'gpui-base': ['v_flex', 'h_flex', 'InputState', 'ScrollHandle', 'Scrollbar', 'TextareaState', 'Input', 'Textarea', 'TextView'],
   herdr: [
     'checking', 'closeOverlay', 'exec', 'layout', 'nextCommand', 'openOverlay', 'pickFolder', 'props', 'readTextFile', 'run',
-    'setShared', 'settings', 'shared', 'terminals', 'theme', 'appHome', 'home', 'watchFolder', 'agents',
+    'setShared', 'settings', 'shared', 'spaces', 'terminals', 'theme', 'appHome', 'home', 'watchFolder', 'agents',
   ],
 };
 registerHooks({
@@ -49,6 +49,110 @@ test('+ New run opened again after closing it redraws the picker when the pipeli
   p.openStart(cx);
   assert.equal(p.start?.mode, 'new');
   assert.ok(cx.redraws > before, 'reopening the picker must redraw the panel');
+});
+
+type Space = { folder: string; machine?: string | null; active?: boolean };
+const toSpace = (s: Space) => ({ id: s.folder, index: 1, name: '', named: false, folder: s.folder, machine: s.machine ?? null, branch: null, active: s.active ?? false, status: null, tabs: [] });
+const listed = { ok: true, data: { pipelines: [{ name: 'feature', inputs: [] }] } };
+
+/**
+ * A panel with runs on C:/src/old, the given spaces, and git toplevels from `tops`; a folder in `held`
+ * answers only when the test calls `release()`. cx.spawn keeps the jobs so the test can await them.
+ */
+function panelWithSpaces(spaces: Space[], tops: Record<string, string | null>, held: string[] = []) {
+  const p = Object.create(Percolator.prototype);
+  const asked: string[] = [];
+  let release = () => {};
+  const gate = new Promise<void>((r) => (release = r));
+  Object.assign(p, {
+    runs: [{ id: 'r1', repo: 'C:/src/old', createdAt: '2026-11-23T00:00:00Z' }],
+    start: null,
+    typing: false,
+    tops: {},
+    pipes: { 'C:/src/old': listed, 'C:/src/app': listed, 'C:/src/mine': listed, '/src/a': listed },
+    inputs: {},
+    ticketInput: { set_value() {} },
+    handle: { focus() {} },
+    openSpaces: () => spaces.map(toSpace),
+    gitTop: async (folder: string) => {
+      asked.push(folder);
+      if (held.includes(folder)) await gate;
+      return tops[folder] ?? null;
+    },
+  });
+  const jobs: Promise<unknown>[] = [];
+  const cx = {
+    notify() {},
+    spawn(fn: (cx: unknown) => Promise<unknown>) {
+      jobs.push(fn(this));
+    },
+  };
+  const settle = async () => {
+    while (jobs.length) await jobs.shift();
+  };
+  return { p, cx, asked, settle, release };
+}
+
+const APP_SPACES: Space[] = [{ folder: '/src/a' }, { folder: 'C:/src/app/.worktrees/t1-x', active: true }];
+const APP_TOPS = { '/src/a': '/src/a', 'C:/src/app/.worktrees/t1-x': 'C:/src/app/.worktrees/t1-x' };
+
+test("+ New run preselects the shown space's repo once its folder resolved", async () => {
+  const { p, cx, settle } = panelWithSpaces(APP_SPACES, APP_TOPS);
+  p.probeSpaces(cx);
+  await settle();
+  p.openStart(cx);
+  assert.equal(p.start.repo, 'C:/src/app');
+  assert.equal(p.start.auto, true);
+  assert.deepEqual(Object.keys(p.tops).sort(), ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+});
+
+test('a probe that resolves after the picker opened moves the automatic preselection', async () => {
+  const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+  p.probeSpaces(cx);
+  p.openStart(cx);
+  assert.equal(p.start.repo, 'C:/src/old');
+  release();
+  await settle();
+  assert.equal(p.start.repo, 'C:/src/app');
+  assert.equal(p.start.auto, true);
+  assert.equal(p.start.pick, 'feature');
+});
+
+test("a probe that resolves after the owner picked a repo keeps the owner's pick", async () => {
+  const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+  p.probeSpaces(cx);
+  p.openStart(cx);
+  p.pickRepo('C:/src/mine', cx);
+  release();
+  await settle();
+  assert.equal(p.start.repo, 'C:/src/mine');
+  assert.equal(p.start.auto, false);
+});
+
+test('each space folder is probed once, and remote or empty folders never', async () => {
+  const { p, cx, asked, settle } = panelWithSpaces([{ folder: '/a' }, { folder: '/a' }, { folder: '' }, { folder: '/r', machine: 'box' }], { '/a': '/a' });
+  p.probeSpaces(cx);
+  p.probeSpaces(cx);
+  await settle();
+  p.probeSpaces(cx);
+  await settle();
+  assert.deepEqual(asked, ['/a']);
+  assert.deepEqual(p.tops, { '/a': '/a' });
+});
+
+test("with no spaces the picker opens on the latest run's repo, as before", () => {
+  const { p, cx } = panelWithSpaces([], {});
+  p.openStart(cx);
+  assert.equal(p.start.repo, 'C:/src/old');
+});
+
+test('picking the same repo spelled differently does not reload its pipelines', () => {
+  const { p, cx } = panelWithSpaces([], {});
+  p.openStart(cx);
+  p.start.said = 'started r1';
+  p.pickRepo('c:\\src\\old', cx);
+  assert.equal(p.start.repo, 'C:/src/old');
+  assert.equal(p.start.said, 'started r1', 'the same repo is no new pick: nothing is reset or reloaded');
 });
 
 const asking = (kind: 'questions' | 'findings') => ({
