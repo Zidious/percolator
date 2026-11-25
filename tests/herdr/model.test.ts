@@ -72,6 +72,7 @@ import {
   detailParts,
   panelShape,
   readerFiles,
+  boxFiles,
   readerMax,
   slotOpensAgent,
   showsOutcome,
@@ -211,7 +212,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t24', 't25', 't22', 'dd', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 'audit', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t26', 't24', 't25', 't22', 'dd', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 'audit', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -219,7 +220,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't25', 't24', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't25', 't24', 't26', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -233,6 +234,7 @@ test('rowState gives the tone and the board text for each kind of run', () => {
     ['t12', 'blocked', 'Paused · plan'],
     ['t25', 'blocked', 'Your turn · plan has questions'],
     ['t24', 'blocked', 'Your turn · review findings at cap'],
+    ['t26', 'blocked', 'Your turn · review.1 findings at cap'],
     ['t9', 'blocked', 'Failed · implement'],
     ['t11', 'blocked', 'Stalled · driver stopped'],
     ['t13', 'working', 'groom'],
@@ -339,7 +341,7 @@ test('actionArgv refuses a reject without feedback', () => {
 });
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
-  assert.equal(needsCount(runs()), 9);
+  assert.equal(needsCount(runs()), 10);
   assert.equal(runningCount(runs()), 8);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
@@ -526,7 +528,7 @@ test('stepAttempts is one step attempts in order', () => {
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
-  assert.deepEqual(cupLabel(runs()), { text: '9 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel(runs()), { text: '10 need you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
   assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
@@ -1142,6 +1144,44 @@ test('boxActions are the attention buttons without open-pane (Open terminal ↗ 
   const both = { ...readable('t4'), attention: { ...readable('t4').attention!, actions: ['grant', 'open-pane'] } } as Readable;
   assert.deepEqual(boxActions(both), ['grant']);
   assert.deepEqual(boxActions(byId('t8')), []);
+});
+
+test('boxFiles: one per reviewed file, labelled by step when the steps differ; none when the box asks nothing', () => {
+  assert.deepEqual(boxFiles(byId('t26')), [
+    { path: 'samples/findings-sections.md', label: 'review.0' },
+    { path: 'samples/findings-list.md', label: 'review.1' },
+  ]);
+  assert.equal(boxFiles(byId('t24')).length, 1);
+  assert.deepEqual(boxFiles(byId('t13')), [], 'an agent card reads nothing');
+  const t26 = readable('t26');
+  const same = {
+    ...t26,
+    attention: { ...t26.attention!, review: [{ step: 'groom', key: 'a', path: 'x/a.md' }, { step: 'groom', key: 'b', path: 'x/b.md' }] },
+  } as RunStatusJson;
+  assert.deepEqual(boxFiles(same).map((f) => f.label), ['groom · a', 'groom · b']);
+});
+
+test('readerFiles: the box reads the picked review file, else the first', () => {
+  assert.equal(readerFiles(byId('t26'), null, null, null).box, 'samples/findings-sections.md');
+  assert.equal(readerFiles(byId('t26'), null, null, null, 'samples/findings-list.md').box, 'samples/findings-list.md');
+});
+
+test('readerFiles: a picked box file that is no longer reviewed falls back to the first', () => {
+  assert.equal(readerFiles(byId('t24'), null, null, null, 'samples/findings-list.md').box, 'samples/findings-sections.md');
+});
+
+test("t26's asked items are its two files split, review.0's first, with clean labels", async () => {
+  const { findingItems } = await import('../../src/run/answer.ts');
+  const read = (f: string) => fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'herdr', 'fixtures', f), 'utf8');
+  const r = readable('t26');
+  assert.deepEqual(r.attention!.asked!.items, [...findingItems(read('samples/findings-sections.md')), ...findingItems(read('samples/findings-list.md'))]);
+  assert.deepEqual(askOf(r)!.items.map((i) => i.label), [
+    'Retry only transient errors',
+    'Missing test for the retry ceiling',
+    'Answers lost on a contract error (src/engine/engine.ts:75).',
+    'Enter in an answer field starts a run (herdr/mods/percolator/main.js:445).',
+    'The summary says "answered 1 questions".',
+  ]);
 });
 
 test('readerFiles: the box reads the first review file; the strip its picked output, else its round first output', () => {

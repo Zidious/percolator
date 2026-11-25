@@ -106,6 +106,7 @@ export default class Percolator extends View {
     this.unfolded = []; // the selected run's stages whose folded hooks show as rows
     this.file = null; // the strip's file, read under the picked stop
     this.boxFile = null; // the file to review, read in the attention box
+    this.boxPick = null; // the box file picked by its tab (as perc gave it); null = the first
     this.files = {};
     this.width = 900;
     this.busy = null;
@@ -270,6 +271,7 @@ export default class Percolator extends View {
       this.said = null;
       this.feedback.set_value('');
       this.unfolded = [];
+      this.boxPick = null;
     }
     this.sel = id;
     this.stopSel = null;
@@ -304,12 +306,18 @@ export default class Percolator extends View {
     this.syncReader(cx);
   }
 
+  /** One of the attention box's files to review, from its tabs. */
+  pickBoxFile(path, cx) {
+    this.boxPick = path;
+    this.syncReader(cx);
+  }
+
   /** Points the readers at what the run needs read now (readerFiles: the file to review in the attention box, the
    *  strip's output under the picked stop) and reads them again: the same path can hold new text (a re-groom rewrites
    *  groomed_ticket.md). */
   syncReader(cx) {
     const r = this.current();
-    const raw = r ? readerFiles(r, this.stopSel, this.roundSel, this.outPick ?? null) : { box: null, strip: null };
+    const raw = r ? readerFiles(r, this.stopSel, this.roundSel, this.outPick ?? null, this.boxPick ?? null) : { box: null, strip: null };
     this.file = raw.strip ? this.resolve(raw.strip) : null;
     this.boxFile = raw.box ? this.resolve(raw.box) : null;
     for (const path of new Set([this.file, this.boxFile])) {

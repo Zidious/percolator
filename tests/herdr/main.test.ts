@@ -476,3 +476,24 @@ test('before the panel knows it is connected to perc it lists and probes no open
     delete fakes.spaces;
   }
 });
+
+test('picking a box tab reads that file; selecting another run goes back to the first', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const all = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'status.json'), 'utf8')).runs;
+  const t26 = all.find((r: any) => r.id.startsWith('t26-'));
+  const t24 = all.find((r: any) => r.id.startsWith('t24-'));
+  const p = Object.create(Percolator.prototype);
+  Object.assign(p, { runs: [t26, t24], files: {}, sel: null, conn: 'perc', feedback: { set_value() {} } });
+  const cx = { notify() {}, spawn() {} };
+  p.select(t26.id, cx);
+  assert.equal(p.boxFile, 'samples/findings-sections.md');
+  p.pickBoxFile('samples/findings-list.md', cx);
+  assert.equal(p.boxFile, 'samples/findings-list.md');
+  p.select(t26.id, cx);
+  assert.equal(p.boxFile, 'samples/findings-list.md', 'selecting the same run again keeps the pick');
+  p.select(t24.id, cx);
+  p.select(t26.id, cx);
+  assert.equal(p.boxPick, null);
+  assert.equal(p.boxFile, 'samples/findings-sections.md');
+});

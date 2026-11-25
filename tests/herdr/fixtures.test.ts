@@ -131,3 +131,9 @@ test('the fixture has a finished run that offers run next and one hidden by a li
   assert.equal(audit.ticket, null);
   assert.deepEqual(runNextChoices(audit, pipelines, runs)?.tickets, ['github.com/zidious/percolator#31', 'github.com/zidious/percolator#32']);
 });
+
+test('the fixture has a findings run with two review slots, both files in its box', () => {
+  const t26 = readFixture('status.json').runs.find((r: any) => r.id === 't26-20261125-030000-ab12');
+  assert.deepEqual(t26.attention.review.map((r: any) => r.step), ['review.0', 'review.1']);
+  assert.equal(t26.attention.asked.items.length, 5);
+});

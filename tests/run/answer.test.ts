@@ -279,6 +279,22 @@ test('applyAnswer splits the files again when the items carry no steps', async (
   }
 });
 
+test('applyAnswer: ticking 2 and 5 across a ## slot and a numbered-list slot writes each slot its own finding', async () => {
+  const d = await tmp();
+  try {
+    await writeFindings(d, 'review.0', '# Review findings\n\n## A0\nx\n\n## B0\ny\n\n## C0\nz\n');
+    await writeFindings(d, 'review.1', '1. **A1**\n   a\n\n2. **B1**\n   b\n\n3. **C1**\n');
+    const s = askingState(twoFailing);
+    assert.equal(await numberFindings(d, s), true);
+    const items = s.asking!.kind === 'findings' ? s.asking!.items! : [];
+    await applyAnswer(d, s, graph, { kind: 'findings', agree: [2, 5] }, items);
+    assert.equal(await fs.readFile(path.join(d, 'steps', 'review.0', '3', 'agreed-findings.md'), 'utf8'), '## B0\n\ny\n');
+    assert.equal(await fs.readFile(path.join(d, 'steps', 'review.1', '3', 'agreed-findings.md'), 'utf8'), '2. **B1**\n   b\n');
+  } finally {
+    await rm(d);
+  }
+});
+
 test('applyAnswer at the end of the graph says the run moves on to the end', async () => {
   const d = await tmp();
   try {

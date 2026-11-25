@@ -1339,6 +1339,155 @@
       "graph": "full"
     },
     {
+      "id": "t26-20261125-030000-ab12",
+      "pipeline": "feature",
+      "inputs": {},
+      "ticket": {
+        "ref": "github.com/zidious/percolator#26",
+        "number": 26,
+        "title": "review in two slots",
+        "url": "https://github.com/Zidious/percolator/issues/26"
+      },
+      "parent": null,
+      "children": [],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t26-20261125-030000-ab12",
+      "worktree": "/home/me/src/percolator/.worktrees/t26-20261125-030000-ab12",
+      "createdAt": "2026-11-25T03:00:00.000Z",
+      "status": "paused",
+      "currentStep": "review.1",
+      "driver": {
+        "alive": false,
+        "terminal": "t26_driver_a0_9df2",
+        "space": "w1:s4",
+        "shown": false
+      },
+      "attention": {
+        "kind": "findings",
+        "since": "2026-11-25T03:40:00.000Z",
+        "message": "review hit its cap with findings left",
+        "detail": "Tick the findings to fix: the run goes back to implement for one more round with only those. With none ticked, it moves on.",
+        "review": [
+          {
+            "step": "review.0",
+            "key": "findings",
+            "path": "samples/findings-sections.md"
+          },
+          {
+            "step": "review.1",
+            "key": "findings",
+            "path": "samples/findings-list.md"
+          }
+        ],
+        "actions": [
+          "answer"
+        ],
+        "asked": {
+          "step": "review.1",
+          "attempt": 3,
+          "items": [
+            "## Retry only transient errors\n\nsrc/tracker/gh.ts retries `gh issue comment` on a 422, which is not transient. Retry only on 5xx and network errors.",
+            "## Missing test for the retry ceiling\n\ntests/tracker/gh.test.ts: add one that asserts the third failure surfaces the original error text.",
+            "1. **Answers lost on a contract error** (`src/engine/engine.ts:75`).\n   The re-run no longer lists answers.\n   Change: keep them until the step passes.",
+            "2. **Enter in an answer field starts a run** (`herdr/mods/percolator/main.js:445`).\n   Change: give answer fields their own submit.",
+            "3. **The summary says \"answered 1 questions\"**.\n   Change: use the singular."
+          ]
+        }
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 3,
+          "outputs": {}
+        },
+        {
+          "id": "review.0",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "fail",
+          "attempts": 3,
+          "outputs": {
+            "findings": "samples/findings-sections.md"
+          }
+        },
+        {
+          "id": "review.1",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "fail",
+          "attempts": 3,
+          "outputs": {
+            "findings": "samples/findings-list.md"
+          }
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review.1",
+          "to": "implement",
+          "max": 3,
+          "atCap": "continue",
+          "round": 3
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full"
+    },
+    {
       "id": "t9-20261120-215502-c3d9",
       "pipeline": "feature",
       "inputs": {},

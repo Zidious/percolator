@@ -16,6 +16,7 @@ import {
   boxActions,
   boxAsks,
   boxDriver,
+  boxFiles,
   historyLabel,
   outcomeOf,
   programInitial,
@@ -23,7 +24,7 @@ import {
   timelineRows,
 } from './model.js';
 import { stopStrip } from './pipeline.js';
-import { button, inlineReader, own, scrollY } from './ui.js';
+import { button, inlineReader, link, own, scrollY } from './ui.js';
 
 const LABELS = {
   approve: ['Approve', 'ok'],
@@ -311,6 +312,7 @@ function attentionBox(p, t, r, kind, narrow, fill) {
     .when(live, (el) => el.child(button(t, 'open-terminal', 'Open terminal ↗', '', () => p.openAgent())))
     .when(Boolean(drv), (el) => el.child(button(t, 'box-driver', drv.label, '', () => p.peekDriver())));
   const grow = fill && Boolean(p.boxFile);
+  const files = boxFiles(r); // more than one: a tab per file above the reader
   const box = v_flex()
     .when(grow, (el) => el.flex_1().min_h(0))
     .when(!grow, (el) => el.flex_none())
@@ -345,6 +347,22 @@ function attentionBox(p, t, r, kind, narrow, fill) {
           .child(div().flex_none().child(`${card.program} ·`))
           .child(div().flex_none().text_color(t[agentTone(card.status)]).child(card.status))
           .child(div().min_w(0).truncate().child(`· ${card.name}`)),
+      ),
+    )
+    .when(files.length > 1, (el) =>
+      el.child(
+        h_flex()
+          .flex_none()
+          .flex_wrap()
+          .gap(8)
+          .children(
+            files.map((f, i) =>
+              link(t, `box-tab-${i}`, f.label, (_e, cx) => {
+                p.pickBoxFile(f.path, cx);
+                cx.notify();
+              }).when(p.boxFile === p.resolve(f.path), (el) => el.text_color(t.accent)),
+            ),
+          ),
       ),
     )
     .when(Boolean(p.boxFile), (el) => el.child(inlineReader(p, t, p.boxFile, 'box-reader', grow)))
