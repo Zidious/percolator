@@ -208,7 +208,7 @@ pipelines:
       - { label: bug, to: hotfix }   # label rules, first match wins
     choose:                          # optional: an agent picks when no rule matched
       agent: claude
-      model: sonnet
+      model: sonnet                  # or agent: command with command: [program, ...args], as on a node (no tokens)
       from: [feature, hotfix]        # the pipelines it may pick
       confirm: unsure                # unsure (default): stop at the pick-pipeline gate only when the agent is unsure; always: every time
     fallback: feature                # optional; default the profile default (feature if the default is itself a router)
