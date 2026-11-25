@@ -270,6 +270,93 @@ test('blocked is surfaced and the run keeps waiting', async () => {
   assert.equal(subs(e.hc).filter((s) => s === 'wait').length, 2);
 });
 
+test('blocked, then working again, clears the attention once', async () => {
+  let term: FakeTerminal | undefined;
+  const e = await env(async (t, n) => {
+    if (n === 1) {
+      term = t;
+      t.status = 'blocked';
+    }
+    if (n === 2) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+  });
+  const cleared: unknown[] = [];
+  const rt = runtime(e, {
+    sleep: async (ms) => {
+      e.sleeps.push(ms);
+      if (e.sleeps.length === 2) term!.status = 'working';
+    },
+    onAttentionCleared: (a) => cleared.push(a),
+  });
+  assert.equal((await rt.executeStep(step(), ctx())).status, 'pass');
+  assert.deepEqual(cleared, [{ stepId: 'plan', terminal: terminalName(RUN_ID, '#123', 'plan', 1) }]);
+});
+
+test('a single idle poll between working polls raises no attention', async () => {
+  let term: FakeTerminal | undefined;
+  const e = await env(async (t, n) => {
+    if (n === 1) {
+      term = t;
+      t.status = 'idle';
+      t.turn = 1;
+    }
+    if (n === 2) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
+  });
+  const rt = runtime(e, {
+    sleep: async (ms) => {
+      e.sleeps.push(ms);
+      term!.status = 'working';
+    },
+  });
+  assert.equal((await rt.executeStep(step(), ctx())).status, 'pass');
+  assert.deepEqual(e.attention, []);
+});
+
+test('idle is attention only after 3 consecutive polls', async () => {
+  let term: FakeTerminal | undefined;
+  const e = await env((t, n) => {
+    if (n === 1) {
+      term = t;
+      t.status = 'idle';
+      t.turn = 1;
+    }
+  });
+  const atSleep: number[] = [];
+  const rt = runtime(e, {
+    sleep: async (ms) => {
+      e.sleeps.push(ms);
+      if (e.sleeps.length === 3) await finishWith(e.hc, term!, { status: 'pass' }, { plan: 'p' });
+    },
+    onAttention: (a) => {
+      e.attention.push(a);
+      atSleep.push(e.sleeps.length);
+    },
+  });
+  assert.equal((await rt.executeStep(step(), ctx())).status, 'pass');
+  assert.deepEqual(e.attention.map((a) => a.kind), ['idle']);
+  assert.deepEqual(atSleep, [2]);
+});
+
+test('working again clears the attention, and idle again raises it again', async () => {
+  let term: FakeTerminal | undefined;
+  const e = await env((t, n) => {
+    term = t;
+    t.status = 'idle';
+    t.turn = 1;
+  });
+  const cleared: unknown[] = [];
+  const rt = runtime(e, {
+    sleep: async (ms) => {
+      e.sleeps.push(ms);
+      if (e.sleeps.length === 3) term!.status = 'working';
+      if (e.sleeps.length === 6) await finishWith(e.hc, term!, { status: 'pass' }, { plan: 'p' });
+    },
+    onAttentionCleared: (a) => cleared.push(a),
+  });
+  assert.equal((await rt.executeStep(step(), ctx())).status, 'pass');
+  assert.deepEqual(e.attention.map((a) => a.kind), ['idle', 'idle']);
+  assert.deepEqual(cleared, [{ stepId: 'plan', terminal: terminalName(RUN_ID, '#123', 'plan', 1) }]);
+});
+
 test('resume re-attaches to a live terminal without relaunching or rewriting task.md', async () => {
   const e = await env(async (t, n) => {
     if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });
@@ -809,7 +896,7 @@ test('idle at turn 0 within the boot grace is not attention', async () => {
 });
 
 test('idle at turn 0 past the boot grace is attention once', async () => {
-  const { e, out, atSleep } = await idleAtTurn0({ bootGraceS: 5 });
+  const { e, out, atSleep } = await idleAtTurn0({ bootGraceS: 5, idlePolls: 1 });
   assert.equal(out.status, 'pass');
   assert.deepEqual(e.attention, [{ stepId: 'plan', terminal: terminalName(RUN_ID, '#123', 'plan', 1), kind: 'idle' }]);
   // the first poll (0 s) is inside the grace; the second (10 s) is past it

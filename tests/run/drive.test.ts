@@ -8,6 +8,7 @@ import { main } from '../../src/cli.ts';
 import { checkResumable, drive } from '../../src/run/drive.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
+import { statusJson } from '../../src/run/status.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
 import { writeDecision } from '../../src/tracker/gate.ts';
 import { GATE_MARKER } from '../../src/tracker/intake.ts';
@@ -436,6 +437,45 @@ test('attention is printed, recorded in attention.json and cleared after the ste
     assert.deepEqual(seen, { stepId: 'groom', terminal: groom, kind: 'blocked', at: (seen as { at: string }).at });
     assert.match((seen as { at: string }).at, /^2026-03-04T05:\d\d:\d\d\.000Z$/);
     assert.equal(await exists(file), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('attention.json is removed and status has no your-turn once the agent works again', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const file = path.join(e.runDir(meta), 'attention.json');
+    const groom = name(meta, 'groom');
+    let idlePolls = 0;
+    let checked = false;
+    e.onWait.fn = async (t, n) => {
+      if (t.labels['percolator.step'] !== 'groom') return false;
+      if (n === 1) {
+        t.status = 'idle';
+        t.turn = 1;
+        return true;
+      }
+      // working again: the runtime has cleared the attention before this wait
+      for (let i = 0; i < 100 && (await exists(file)); i++) await new Promise((r) => setTimeout(r, 10));
+      assert.equal(await exists(file), false);
+      assert.ok(e.out.includes('groom: working again'), e.out.join('\n'));
+      assert.notEqual((await statusJson(e.deps)).runs[0]?.attention?.kind, 'agent');
+      checked = true;
+      return false;
+    };
+    e.onSleep.fn = async () => {
+      const t = e.deps.hc.terminals.get(groom);
+      if (t?.status !== 'idle' || ++idlePolls < 3) return;
+      for (let i = 0; i < 100 && !(await exists(file)); i++) await new Promise((r) => setTimeout(r, 10));
+      assert.equal(await exists(file), true);
+      t.status = 'working';
+    };
+    e.decisions.push('/percolator approve');
+    const state = await drive(meta.runId, e.deps);
+    assert.equal(state.status, 'completed');
+    assert.equal(checked, true);
   } finally {
     await e.cleanup();
   }

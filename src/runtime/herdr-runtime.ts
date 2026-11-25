@@ -50,6 +50,10 @@ export type HerdrRuntimeOptions = {
   builtins?: Record<string, StepHandler>;
   gate?: StepHandler;
   onAttention?: (a: Attention) => void;
+  /** idle (or done) must be seen on this many polls in a row before it is attention; default 3 */
+  idlePolls?: number;
+  /** the terminal whose attention was raised reports working again */
+  onAttentionCleared?: (a: { stepId: string; terminal: string }) => void;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 };
@@ -282,6 +286,9 @@ export class HerdrRuntime implements Runtime {
     const doneFile = path.join(io.stepDir, 'done.json');
     const started = this.#now();
     const seen = new Set<string>();
+    // the attention key last raised, and how many polls in a row have shown the current idle key
+    let raised: string | undefined;
+    let idle = { key: '', polls: 0 };
     const timeoutS = step.def.timeout_s;
     let result: { status: NodeOutcome['status']; reason?: string; questions?: string[] };
     for (;;) {
@@ -295,6 +302,12 @@ export class HerdrRuntime implements Runtime {
         if (isAgent) return escalate(await this.#exitedReason(step, io, n, t?.exitCode ?? null));
         result = t?.exitCode === 0 ? { status: 'pass' } : { status: 'fail', reason: `exit code ${t?.exitCode ?? null}` };
         break;
+      }
+      if (t.status !== 'idle' && t.status !== 'done') idle = { key: '', polls: 0 };
+      if (t.status === 'working' && raised !== undefined) {
+        seen.delete(raised);
+        raised = undefined;
+        o.onAttentionCleared?.({ stepId: step.id, terminal: n });
       }
       if (t.status === 'working' || t.status === null) {
         const waitS = o.waitTimeoutS ?? 60;
@@ -314,8 +327,12 @@ export class HerdrRuntime implements Runtime {
         const key = `${kind}:${t.turn}`;
         // an agent that is still starting up looks idle at turn 0: not attention during the boot grace
         const booting = kind === 'idle' && t.turn === 0 && this.#now() - started < (o.bootGraceS ?? 120) * 1000;
-        if (!booting && !seen.has(key)) {
+        // an agent between tool calls can look idle for a poll: idle is attention only once it stays idle
+        if (kind === 'idle') idle = idle.key === key ? { key, polls: idle.polls + 1 } : { key, polls: 1 };
+        const settled = kind !== 'idle' || idle.polls >= (o.idlePolls ?? 3);
+        if (!booting && settled && !seen.has(key)) {
           seen.add(key);
+          raised = key;
           o.onAttention?.({ stepId: step.id, terminal: n, kind });
         }
         await this.#sleep(o.pollMs ?? 2000);
