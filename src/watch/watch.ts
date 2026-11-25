@@ -284,6 +284,15 @@ export async function watcherStatus(
   return alive && typeof w.startedAt === 'string' ? { alive, since: w.startedAt, repos } : { alive: false, repos };
 }
 
+/**
+ * The pid in `watch.json` if it was written on this host by a live pid other than `selfPid`, however old its
+ * heartbeat: a watcher in a long poll beats late but can still be asked to stop.
+ */
+export async function stoppableWatcher(home: string, isPidAlive: (pid: number) => boolean, selfPid: number): Promise<number | undefined> {
+  const w = (await readWatch(home, new Date(), isPidAlive))?.w;
+  return w?.host === os.hostname() && typeof w.pid === 'number' && w.pid !== selfPid && isPidAlive(w.pid) ? w.pid : undefined;
+}
+
 /** The pid of a live watcher in `watch.json` other than `selfPid` (a pid reused by this process is not another). */
 export async function otherWatcher(home: string, now: Date, isPidAlive: (pid: number) => boolean, selfPid: number): Promise<number | undefined> {
   const r = await readWatch(home, now, isPidAlive);

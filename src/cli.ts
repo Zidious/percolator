@@ -31,7 +31,7 @@ import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
 import { validate, validateAll } from './validate.ts';
 import { pidAlive } from './run/lock.ts';
-import { otherWatcher, requestStop, stopFile, WATCH_STOP_TIMEOUT_S, WATCH_TERMINAL, WATCHER_LABELS, waitForWatcherExit, watchFile, watchLoop } from './watch/watch.ts';
+import { otherWatcher, requestStop, stopFile, stoppableWatcher, WATCH_STOP_TIMEOUT_S, WATCH_TERMINAL, WATCHER_LABELS, waitForWatcherExit, watchFile, watchLoop } from './watch/watch.ts';
 import type { Graph } from './graph/build.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
@@ -658,10 +658,11 @@ async function runWatch(args: string[], deps: DriverDeps): Promise<number> {
 /**
  * Asks a live watcher to stop and waits up to WATCH_STOP_TIMEOUT_S for it, so a firing it is starting
  * gets its driver; then ends every terminal labelled as the watcher (and only those) and forgets its heartbeat.
+ * A watcher it could neither stop nor end keeps its stop request and heartbeat.
  */
 async function stopWatch(deps: DriverDeps): Promise<number> {
   const now = deps.now ?? (() => new Date());
-  const pid = await otherWatcher(deps.home, now(), deps.pidAlive ?? pidAlive, deps.pid ?? process.pid);
+  const pid = await stoppableWatcher(deps.home, deps.pidAlive ?? pidAlive, deps.pid ?? process.pid);
   let graceful = true;
   if (pid !== undefined) {
     await requestStop(deps.home, pid, now());
@@ -669,11 +670,17 @@ async function stopWatch(deps: DriverDeps): Promise<number> {
     graceful = await waitForWatcherExit(deps.home, pid, { now, sleep, pidAlive: deps.pidAlive ?? pidAlive }, WATCH_STOP_TIMEOUT_S);
   }
   const watchers = await deps.hc.list({ labels: { ...WATCHER_LABELS }, all: true });
+  let ended = false;
   for (const t of watchers) {
     const id = t.name ?? t.address;
-    if (t.state === 'live') await deps.hc.kill(id);
+    if (t.state === 'live') {
+      await deps.hc.kill(id);
+      ended = true;
+    }
     await deps.hc.rm(id);
   }
+  // still running and not ended: keep the stop request for its next repo boundary, and watch.json so it stays visible
+  if (!graceful && !ended) throw new Error(`the watcher (pid ${pid}) did not stop within ${WATCH_STOP_TIMEOUT_S}s; end pid ${pid}`);
   await fs.rm(watchFile(deps.home), { force: true });
   await fs.rm(stopFile(deps.home), { force: true });
   const names = watchers.map((t) => t.name ?? t.address).join(', ');
@@ -685,12 +692,8 @@ async function stopWatch(deps: DriverDeps): Promise<number> {
     deps.out('no watcher running');
     return 0;
   }
-  if (graceful) {
-    deps.out(`stopped the watcher (pid ${pid})`);
-    return 0;
-  }
-  deps.out(`the watcher (pid ${pid}) did not stop within ${WATCH_STOP_TIMEOUT_S}s; end pid ${pid}`);
-  return 1;
+  deps.out(`stopped the watcher (pid ${pid})`);
+  return 0;
 }
 
 const ttyAsk = (question: string) => askLine(question, { input: process.stdin, output: process.stdout });
