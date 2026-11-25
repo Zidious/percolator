@@ -182,6 +182,32 @@ test('perc resume on a run that is asking is refused', async () => {
   }
 });
 
+test('perc status and perc answer number a numbered-list findings file the same way, with clean labels', async () => {
+  const e = await setup();
+  try {
+    const asking: Asking = { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'review', findings: 'steps/review/3/outputs/findings.md' };
+    const m = await e.asking(asking);
+    const text = await fs.readFile(path.join(import.meta.dirname, '..', 'fixtures', 'findings', 't25-review-3.md'), 'utf8');
+    await fs.mkdir(path.join(e.dir(m.runId), 'steps', 'review', '3', 'outputs'), { recursive: true });
+    await fs.writeFile(path.join(e.dir(m.runId), 'steps', 'review', '3', 'outputs', 'findings.md'), text);
+    const out = (await e.perc(['status', m.runId])).out.split('\n');
+    const j = out.findIndex((l) => l.startsWith('  1. '));
+    assert.equal(out[j], "  1. A missing earlier answers file fails perc answer with Node's raw ENOENT text (src/run/answer.ts applyAnswer, the fs.readFile(path.join(dir, earlierRel)) added in aca9d4b).");
+    assert.ok(out[j + 1]!.startsWith('  2. Follow-up questions are numbered from any ## Question N line'), out[j + 1]);
+    // the space before ) is the file's own, inside the `` … `` around the code
+    assert.equal(out[j + 2], '  3. The summary says "answered 1 questions" (src/run/answer.ts applyAnswer, summary = answered ${items.length} questions of ${asking.stepId} ).');
+    assert.equal(out[j + 3], `  next: perc answer ${m.runId} --agree <n>[,<n>…]`);
+    const r = await e.perc(['answer', m.runId, '--agree', '2']);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out.split('\n')[0], 'agreed with 1 of 3 findings of review; the run goes back to implement');
+    const agreed = await fs.readFile(path.join(e.dir(m.runId), 'steps', 'review', '3', 'agreed-findings.md'), 'utf8');
+    assert.ok(agreed.startsWith('2. **Follow-up questions are numbered from any `## Question N` line'), agreed);
+    assert.ok(!agreed.includes('1. **A missing') && !agreed.includes('3. **The summary'));
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('perc status lists what the run asks and how to answer', async () => {
   const e = await setup();
   try {

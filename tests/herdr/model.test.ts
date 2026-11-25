@@ -1727,6 +1727,21 @@ test('itemLabel is the first non-empty line without its heading marker, else a n
   assert.equal(itemLabel('  ', 3, 'questions'), 'Question 3');
 });
 
+test('itemLabel drops a list marker and **, __ and backticks, for ## titles too', () => {
+  assert.equal(itemLabel('1. **Answers lost on a contract error** (`src/engine/engine.ts:75`).\n   more', 1, 'findings'), 'Answers lost on a contract error (src/engine/engine.ts:75).');
+  assert.equal(itemLabel('2) __Bold__ thing', 2, 'findings'), 'Bold thing');
+  assert.equal(itemLabel('## Unclear name `doIt`\n\nwhy', 1, 'findings'), 'Unclear name doIt');
+  assert.equal(itemLabel('1. ', 4, 'findings'), 'Finding 4');
+});
+
+test("itemLabel on t25's split findings gives clean labels, no doubled number", async () => {
+  const { findingItems } = await import('../../src/run/answer.ts');
+  const r1 = findingItems(fs.readFileSync(path.join(import.meta.dirname, '..', 'fixtures', 'findings', 't25-review-1.md'), 'utf8'));
+  const labels = r1.map((t, i) => itemLabel(t, i + 1, 'findings'));
+  assert.equal(labels[0], "The owner's answers are lost when the re-run step does not finish cleanly (src/engine/engine.ts:75).");
+  for (const l of labels) assert.doesNotMatch(l, /^\d+[.)]|\*\*|__|`/);
+});
+
 test('askOf gives what a run asks, keyed by run, step and attempt; null otherwise', () => {
   const run = byId('t24');
   assert.deepEqual(askOf(run), {

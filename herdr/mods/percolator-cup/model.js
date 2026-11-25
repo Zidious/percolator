@@ -125,13 +125,17 @@ export function actionArgv(action, run, feedback) {
   }
 }
 
-/** An asked item's label: its first non-empty line without a leading heading marker; `Finding <n>` or `Question <n>`
- *  when it has none. */
+/** An asked item's label: its first non-empty line without a leading heading or list marker, `**`, `__` or backticks;
+ *  `Finding <n>` or `Question <n>` when that leaves nothing. */
 export function itemLabel(text, n, kind) {
   const line = String(text ?? '')
     .split(/\r?\n/)
     .find((l) => l.trim() !== '');
-  const label = (line ?? '').replace(/^#+\s*/, '').trim();
+  const label = (line ?? '')
+    .replace(/^\s*#+\s*/, '')
+    .replace(/^\s*\d+[.)](?:\s+|$)/, '')
+    .replace(/\*\*|__|`/g, '')
+    .trim();
   return label !== '' ? label : `${kind === 'findings' ? 'Finding' : 'Question'} ${n}`;
 }
 
