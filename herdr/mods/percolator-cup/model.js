@@ -125,13 +125,19 @@ export function actionArgv(action, run, feedback) {
   }
 }
 
-/** An asked item's label: its first non-empty line without a leading heading marker; `Finding <n>` or `Question <n>`
- *  when it has none. */
+/** An asked item's label: its first non-empty line without a leading heading or list marker, `**`, `__` or backticks;
+ *  `Finding <n>` or `Question <n>` when that leaves nothing. */
 export function itemLabel(text, n, kind) {
   const line = String(text ?? '')
     .split(/\r?\n/)
     .find((l) => l.trim() !== '');
-  const label = (line ?? '').replace(/^#+\s*/, '').trim();
+  const label = (line ?? '')
+    .replace(/^\s*#+\s*/, '')
+    .replace(/^ {0,3}\d{1,9}[.)](?:[ \t]+|$)/, '')
+    .replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '$1')
+    .replace(/(^|[\s(])__(?=\S)(.+?)(?<=\S)__(?=$|[\s,;:!?)]|\.(?:$|\s))/g, '$1$2')
+    .replace(/`([^`]*)`/g, '$1')
+    .trim();
   return label !== '' ? label : `${kind === 'findings' ? 'Finding' : 'Question'} ${n}`;
 }
 
@@ -651,11 +657,22 @@ export function boxActions(run) {
   return (run.attention?.actions ?? []).filter((a) => a !== 'open-pane');
 }
 
-/** What the inline readers show (as perc gave it): `box`, under an attention box, its first file to review; `strip`, under
- *  the picked stop, the output picked there, else its (picked, else latest) round's first output, unless the box already
- *  reads that file (it shows once). */
-export function readerFiles(run, stopSel, roundSel, outPick) {
-  const box = boxAsks(run) ? (run.attention?.review?.[0]?.path ?? null) : null;
+/** The files an attention box that asks something offers to read, in perc's order, each labelled by its step (by step
+ *  and key when two share a step); none when the box asks nothing. */
+export function boxFiles(run) {
+  if (!boxAsks(run)) return [];
+  const review = run.attention?.review ?? [];
+  const steps = new Set(review.map((f) => f.step));
+  const distinct = steps.size === review.length;
+  return review.map((f) => ({ path: f.path, label: distinct ? f.step : `${f.step} · ${f.key}` }));
+}
+
+/** What the inline readers show (as perc gave it): `box`, under an attention box, its picked file to review, else the
+ *  first; `strip`, under the picked stop, the output picked there, else its (picked, else latest) round's first output,
+ *  unless the box already reads that file (it shows once). */
+export function readerFiles(run, stopSel, roundSel, outPick, boxPick = null) {
+  const files = boxFiles(run);
+  const box = files.find((f) => f.path === boxPick)?.path ?? files[0]?.path ?? null;
   if (!stopSel) return { box, strip: null };
   const view = roundView(run, stopSel, roundSel);
   const strip = outPick ?? (view ? Object.values(view.attempt.outputs ?? {})[0] : undefined) ?? null;

@@ -147,7 +147,9 @@ export declare function readerFiles(
   stopSel: string | null,
   roundSel: number | null,
   outPick: string | null,
+  boxPick?: string | null,
 ): { box: string | null; strip: string | null };
+export declare function boxFiles(run: RunStatusJson): { path: string; label: string }[];
 export declare function readerMax(area: number): number;
 export declare function readFullShown(inWindow: boolean): boolean;
 export declare function boxOutside(run: RunStatusJson, o: { narrow: boolean; unfolded: string[] }): boolean;

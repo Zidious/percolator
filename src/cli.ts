@@ -303,8 +303,15 @@ async function runAnswer(args: string[], deps: DriverDeps): Promise<number> {
   return 0;
 }
 
-/** The first non-empty line of an asked item, without a leading heading marker. */
-const itemLine = (text: string): string => (text.split(/\r?\n/).find((l) => l.trim() !== '') ?? '').replace(/^#+\s*/, '').trim();
+/** The first non-empty line of an asked item, without a leading heading or list marker, `**`, `__` or backticks. */
+const itemLine = (text: string): string =>
+  (text.split(/\r?\n/).find((l) => l.trim() !== '') ?? '')
+    .replace(/^\s*#+\s*/, '')
+    .replace(/^ {0,3}\d{1,9}[.)](?:[ \t]+|$)/, '')
+    .replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '$1')
+    .replace(/(^|[\s(])__(?=\S)(.+?)(?<=\S)__(?=$|[\s,;:!?)]|\.(?:$|\s))/g, '$1$2')
+    .replace(/`([^`]*)`/g, '$1')
+    .trim();
 
 /** A question in full: its first line numbered, the rest indented under it (blank lines kept blank). */
 const questionLines = (n: number, text: string): string[] => {

@@ -32,7 +32,7 @@ export const STAGE_BRIEFS: Readonly<Record<Exclude<FeatureStage, 'deliver'>, str
   implement:
     'Implement the plan in the worktree and commit on the current branch. If the inputs include review findings, address them. Write a short summary of your changes to summary.md.',
   review:
-    'Review the branch diff (git diff {{base}}...HEAD) against the plan. Write your findings to findings.md, one "## <title>" section per finding, with its detail under it. If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.',
+    'Review the branch diff (git diff {{base}}...HEAD) against the plan. Write your findings to findings.md, one "## <title>" section per finding, with its detail under it; keep this format even when a skill suggests another, so Percolator can number the findings. If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.',
 });
 
 export type TaskInput = {
