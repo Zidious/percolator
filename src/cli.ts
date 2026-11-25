@@ -35,6 +35,7 @@ import { otherWatcher, WATCH_TERMINAL, WATCHER_LABELS, watchFile, watchLoop } fr
 import type { Graph } from './graph/build.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
+import { pipeWriter } from './util/pipe.ts';
 import { removeWorktree } from './workspace/worktree.ts';
 
 export type Io = { stdout(s: string): void; stderr(s: string): void };
@@ -729,7 +730,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
 
 if (isDirectRun(process.argv[1], import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2), {
-    stdout: (s) => process.stdout.write(s),
-    stderr: (s) => process.stderr.write(s),
+    stdout: pipeWriter(process.stdout),
+    stderr: pipeWriter(process.stderr),
   });
 }
