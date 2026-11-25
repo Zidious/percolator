@@ -24,6 +24,7 @@ node src/cli.ts watch [--repo <dir>]... [--interval <s>] [--foreground]  # start
 pnpm herdr:sync                       # mirror herdr/mods/* into the Herdr app (reloads live; removes stale files, keeps perc.json); after any panel/cup change
 node tests/smoke/hc.smoke.ts          # manual smoke tests against the real hc / gh (gh.smoke.ts); flags in each file's header; never in pnpm test
 node tests/smoke/panel.shots.ts [--out dir]   # screenshots of every fixture state at 280/380/720 and in the window; needs Herdr open
+node tests/smoke/dry-run.ts [--out dir]       # dry-run config: every agent is the scripted tests/smoke/fake-agent.ts (questions, gate, findings at cap, back-edge cap, comment exit); prints the perc run lines; never in pnpm test
 node tests/smoke/skill.smoke.ts       # sandboxed agent scenarios for skills/percolator-config; --verify <root> afterwards; never in pnpm test
 ```
 
