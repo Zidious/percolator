@@ -176,6 +176,78 @@ test("the picker's emptied ticket field (opening it) leaves the preselection aut
   assert.equal(p.start.auto, true);
 });
 
+/** Stubs InputState.new with an input that keeps its text and every handler, so a test can fire its real `change`. */
+function fakeInputs() {
+  const made: Array<{ text: string; handlers: Record<string, Array<(e: unknown, cx: unknown) => void>>; fire(ev: string, cx: unknown): void }> = [];
+  fakes['InputState.new'] = () => {
+    const s = {
+      text: '',
+      handlers: {} as Record<string, Array<(e: unknown, cx: unknown) => void>>,
+      on(ev: string, h: (e: unknown, cx: unknown) => void) {
+        (s.handlers[ev] ??= []).push(h);
+        return true;
+      },
+      set_value(v: string) {
+        s.text = v;
+      },
+      value() {
+        return s.text;
+      },
+      fire(ev: string, cx: unknown) {
+        for (const h of s.handlers[ev] ?? []) h({}, cx);
+      },
+    };
+    made.push(s);
+    return s;
+  };
+  return made;
+}
+
+test("the ticket field's change on opening (emptied) leaves the preselection automatic, so a late probe still moves it", async () => {
+  fakeInputs();
+  try {
+    const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+    p.ticketInput = p.ticketState();
+    p.probeSpaces(cx);
+    p.openStart(cx);
+    p.ticketInput.fire('change', cx); // set_value('') may emit change after the picker opened
+    release();
+    await settle();
+    assert.equal(p.start.repo, 'C:/src/app');
+    assert.equal(p.start.auto, true);
+  } finally {
+    delete fakes['InputState.new'];
+  }
+});
+
+test("typing in the ticket field ends the automatic preselection and clears the picker's error", () => {
+  fakeInputs();
+  try {
+    const { p, cx } = panelWithSpaces([], {});
+    p.ticketInput = p.ticketState();
+    p.openStart(cx);
+    p.start.error = 'boom';
+    p.ticketInput.set_value('owner/old#7');
+    p.ticketInput.fire('change', cx);
+    assert.equal(p.start.auto, false);
+    assert.equal(p.start.error, null);
+  } finally {
+    delete fakes['InputState.new'];
+  }
+});
+
+test('+ New run opened on a named pipeline keeps its repo and pick when a probe answers late', async () => {
+  const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+  p.pipes['C:/src/old'] = { ok: true, data: { pipelines: [{ name: 'feature', inputs: [] }, { name: 'dd-alert', inputs: [] }] } };
+  p.probeSpaces(cx);
+  p.openStart(cx, 'dd-alert');
+  release();
+  await settle();
+  assert.equal(p.start.repo, 'C:/src/old');
+  assert.equal(p.start.pick, 'dd-alert');
+  assert.equal(p.start.auto, false);
+});
+
 test('typing in a pipeline input ends the automatic preselection', async () => {
   const handlers: Record<string, (e: unknown, cx: unknown) => void> = {};
   fakes['InputState.new'] = () => ({ on: (ev: string, h: (e: unknown, cx: unknown) => void) => ((handlers[ev] = h), true) });

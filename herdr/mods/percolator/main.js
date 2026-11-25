@@ -152,8 +152,7 @@ export default class Percolator extends View {
     this.inputs = {}; // `<pipeline>/<input>` → its InputState, made when the pipelines arrive
     this.asks = {}; // askOf(run).key → { inputs, na, ticks }: a questions or findings form, made when its run arrives
     this.startedId = null; // the run Start started: selected once a refresh lists it
-    this.ticketInput = this.textState({ placeholder: 'owner/repo#12' });
-    this.ticketInput.on('change', (_e, cx) => this.ticketChanged(cx));
+    this.ticketInput = this.ticketState();
     this.handle = cx.focus_handle();
     this.handle.focus();
 
@@ -547,6 +546,19 @@ export default class Percolator extends View {
     return s;
   }
 
+  /** The picker's ticket field: typing in it may preselect a repo; ticketChanged decides if it ends `auto`. */
+  ticketState() {
+    return this.textState(
+      { placeholder: 'owner/repo#12' },
+      {
+        change: (cx) => {
+          if (this.start) this.start.error = this.start.said = null;
+          this.ticketChanged(cx);
+        },
+      },
+    );
+  }
+
   /** The input's state: made with the pipelines (startPipelines), so render only reads it. */
   inputState(pipeline, input) {
     return this.inputs[`${pipeline}/${input.name}`] ?? null;
@@ -582,7 +594,10 @@ export default class Percolator extends View {
     }
   }
 
-  /** "+ New run": the picker over any pipeline, on the shown space's repo (startRepo); `pick` names the pipeline to show. */
+  /**
+   * "+ New run": the picker over any pipeline, on the shown space's repo (startRepo); `pick` names the pipeline to show.
+   * A named pipeline (percolator.new/<pipeline>) is the owner's choice, so a late probe leaves the repo alone.
+   */
   openStart(cx, pick = null) {
     if (this.start?.mode === 'new' && pick === null) return this.closeStart(cx);
     this.ticketInput.set_value('');
@@ -591,7 +606,7 @@ export default class Percolator extends View {
     for (const [folder, top] of Object.entries(this.tops)) if (top === null) delete this.tops[folder];
     this.probeSpaces(cx);
     const repo = startRepo(this.openSpaces(), this.tops, this.runs);
-    this.start = { mode: 'new', run: null, repo, auto: true, pick, tickets: [], ticket: '', error: null, said: null };
+    this.start = { mode: 'new', run: null, repo, auto: pick === null, pick, tickets: [], ticket: '', error: null, said: null };
     this.loadPipelines(cx);
   }
 
