@@ -959,6 +959,56 @@ export function knownRepos(runs) {
   return [...new Set(newestFirst(runs).map((r) => r.repo))];
 }
 
+/** A repo path to compare by: `/` separators, no trailing one, and lower case for Windows paths. */
+export function repoKey(path) {
+  const p = String(path).replace(/\\/g, '/').replace(/(.)\/+$/, '$1');
+  return /^[A-Za-z]:/.test(p) || p.startsWith('//') ? p.toLowerCase() : p;
+}
+
+/** Two spellings of one repo; false when either is missing. */
+export function sameRepo(a, b) {
+  return a != null && b != null && repoKey(a) === repoKey(b);
+}
+
+/** The repo of a git toplevel: `<repo>` for a run worktree `<repo>/.worktrees/<id>`, else the toplevel. */
+export function mainRepo(top) {
+  const m = /^(.*?)[\\/]\.worktrees[\\/][^\\/]+[\\/]?$/.exec(top);
+  return m && m[1] ? m[1] : top;
+}
+
+const spaceRepo = (space, tops) => {
+  if (space.machine != null || !space.folder) return null;
+  const top = tops[space.folder];
+  return typeof top === 'string' && top !== 'loading' ? mainRepo(top) : null;
+};
+
+/** The start picker's repos: the open spaces' git repos in space order, then earlier runs' repos, each once. */
+export function startRepos(spaces, tops, runs) {
+  const seen = new Set();
+  const out = [];
+  const add = (repo, open) => {
+    const key = repoKey(repo);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ repo, open });
+  };
+  for (const s of spaces) {
+    const repo = spaceRepo(s, tops);
+    if (repo) add(repo, true);
+  }
+  for (const repo of knownRepos(runs)) add(repo, false);
+  return out;
+}
+
+/** The repo to preselect: the shown space's, else the first open space's, else the latest run's, else null. */
+export function startRepo(spaces, tops, runs) {
+  const shown = spaces.find((s) => s.active);
+  const own = shown ? spaceRepo(shown, tops) : null;
+  if (own) return own;
+  const open = startRepos(spaces, tops, []);
+  return open[0]?.repo ?? knownRepos(runs)[0] ?? null;
+}
+
 const TICKET_URL = /^https?:\/\/([^/\s]+)\/([^/\s]+)\/([^/\s#]+)\/(?:issues|pull)\/\d+\/?$/i;
 const TICKET_REF = /^(?:([^/\s#]+)\/)?([^/\s#]+)\/([^/\s#]+)#\d+$/;
 
