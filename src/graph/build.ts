@@ -523,6 +523,12 @@ function implicitBackTo(step: Step, stages: readonly string[], steps: readonly S
   const stage = step.stage;
   const followsOwn =
     step.role === 'hook' ? step.def.after === stage : steps.some((s) => s.role === 'slot' && s.stage === stage && steps.indexOf(s) < steps.indexOf(step));
+  if (followsOwn && stage === stages.at(-1)) {
+    throw new GraphError(
+      `gate "${step.id}" runs after ${stage}, the exit stage, so a reject would deliver again; attach it before ${stage}, or give it on_fail: { back_to: <stage>, max_rounds: <n> }`,
+      where(step.role === 'hook' ? `${stepKey(step)}.after` : stepKey(step)),
+    );
+  }
   if (followsOwn) return stage;
   const previous = stages[stages.indexOf(stage) - 1];
   if (previous === undefined) {

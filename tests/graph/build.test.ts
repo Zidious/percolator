@@ -952,6 +952,27 @@ test('a gate without on_fail and nowhere to go back to is refused where it is at
   );
 });
 
+test('a gate without on_fail after the exit stage is refused, since a reject would deliver again', () => {
+  throwsAt(
+    () => buildGraph(fullAt({ 'nodes.post': 5, 'nodes.post.after': 6 }, { nodes: { post: { kind: 'gate', after: 'deliver' } } })),
+    'g.yaml:6: nodes.post.after: gate "post" runs after deliver, the exit stage, so a reject would deliver again; attach it before deliver, or give it on_fail: { back_to: <stage>, max_rounds: <n> }',
+    'nodes.post.after',
+  );
+  throwsAt(
+    () => buildGraph(fullAt({ 'bindings.deliver': 3, 'bindings.deliver.1': 4 }, {}, { deliver: [{ builtin: 'github.open_pr' }, { kind: 'gate' }] })),
+    'g.yaml:4: bindings.deliver.1: gate "deliver.1" runs after deliver, the exit stage, so a reject would deliver again; attach it before deliver, or give it on_fail: { back_to: <stage>, max_rounds: <n> }',
+    'bindings.deliver.1',
+  );
+  const lines = { 'profiles.default.pipelines.triage.nodes.post.after': 9 };
+  throwsAt(
+    () => buildGraph(triage({ nodes: { post: { kind: 'gate', after: 'route' } } }, lines), undefined, { descriptions: {} }),
+    'c.yaml:9: profiles.default.pipelines.triage.nodes.post.after: gate "post" runs after route, the exit stage, so a reject would deliver again; attach it before route, or give it on_fail: { back_to: <stage>, max_rounds: <n> }',
+    'profiles.default.pipelines.triage.nodes.post.after',
+  );
+  // before the exit stage is fine: it goes back to review's loop or the stage before
+  assert.equal(buildGraph(full({ nodes: { pre: { kind: 'gate', before: 'deliver' } } })).failRoutes.pre, 'pre');
+});
+
 test('implicit gate edge across a fan-out is refused', () => {
   const nodes = { 'approve-x': { kind: 'gate' as const, before: 'implement' } };
   const lines = { 'profiles.default.pipelines.epic.nodes.approve-x': 14 };

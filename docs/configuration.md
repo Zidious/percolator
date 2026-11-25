@@ -199,7 +199,7 @@ profiles:
 
 - `audit` runs after implement. If it fails, the run goes back to implement once; if it fails again (two failed rounds), the run pauses and escalates to you.
 - `sign-off` adds a second human gate after plan, which you answer the same way as `approve-groom`. It has no `on_fail`, so rejecting it sends the run back to plan with your feedback, 3 rounds at most, then it escalates to you.
-- A gate without `on_fail` must have a stage to go back to: `perc validate` refuses one `before: all`, `after: all` or `before: intake` (`gate "pre" runs before intake, so a reject has no earlier stage to go back to; attach it after intake or a later stage, or remove it`).
+- A gate without `on_fail` must have a stage to go back to: `perc validate` refuses one `before: all`, `after: all` or `before: intake` (`gate "pre" runs before intake, so a reject has no earlier stage to go back to; attach it after intake or a later stage, or remove it`). It also refuses one after the exit stage (`after: deliver`, a gate after the exit in its binding, or `after: route` in a router), since a reject would deliver again: attach it before the exit stage, or give it an `on_fail`.
 - `back_to` must point to an earlier stage. A `before: all` hook cannot loop.
 - `before`/`after` must name a stage of the node's own pipeline, or `all`.
 - Any step that writes a `pr_body` output sets the PR description; the last one in run order wins.
