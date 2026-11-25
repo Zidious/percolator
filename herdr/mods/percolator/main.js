@@ -564,8 +564,9 @@ export default class Percolator extends View {
     return this.inputs[`${pipeline}/${input.name}`] ?? null;
   }
 
-  /** The spaces open in Herdr (none while checking or in fixtures that have none). */
+  /** The spaces open in Herdr (none while checking; none in fixtures mode, so it never lists the machine's real repos). */
   openSpaces() {
+    if (this.conn === 'fixtures') return [];
     return spaces() ?? [];
   }
 
@@ -738,6 +739,7 @@ export default class Percolator extends View {
   /** Start: `perc run …` (argv only, never a shell); fixtures mode says what it would run instead. */
   startRun(cx) {
     const s = this.start;
+    if (s) s.auto = false; // Start, even a refused one, is the owner's choice: a late probe leaves its repo alone
     const pl = this.startPipeline();
     if (!s || !pl || this.busy) return;
     const choice = this.startChoice(pl);

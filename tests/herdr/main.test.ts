@@ -395,3 +395,48 @@ test('submitting the findings form sends the ticked ones', () => {
   p.submitAnswer(cx);
   assert.deepEqual(performed, [{ action: 'answer', argv: ['answer', 'r1', '--agree', '2'] }]);
 });
+
+test('a refused Start also ends the automatic preselection', async () => {
+  const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+  p.pipes['C:/src/old'] = { ok: true, data: { pipelines: [{ name: 'feature', ticket: 'required', inputs: [] }] } };
+  p.probeSpaces(cx);
+  p.openStart(cx);
+  p.startRun(cx);
+  assert.ok(p.start.error, 'Start is refused without a ticket');
+  release();
+  await settle();
+  assert.equal(p.start.repo, 'C:/src/old');
+  assert.equal(p.start.auto, false);
+});
+
+test('pressing Start ends the automatic preselection, so a late probe leaves its repo alone', async () => {
+  const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+  p.probeSpaces(cx);
+  p.conn = 'fixtures'; // says what it would run instead of spawning perc
+  p.openStart(cx);
+  p.startRun(cx);
+  const said = p.start.said;
+  assert.match(said, /--repo C:\/src\/old/);
+  release();
+  await settle();
+  assert.equal(p.start.repo, 'C:/src/old');
+  assert.equal(p.start.auto, false);
+  assert.equal(p.start.said, said, "the would-run message stays under the repo it names");
+});
+
+test("fixtures mode lists no open spaces, so it never probes the machine's real folders", () => {
+  fakes.spaces = () => [toSpace({ folder: 'C:/src/real', active: true })];
+  try {
+    const p = Object.create(Percolator.prototype);
+    p.conn = 'fixtures';
+    p.tops = {};
+    const spawned: unknown[] = [];
+    p.probeSpaces({ spawn: (fn: unknown) => spawned.push(fn), notify() {} });
+    assert.deepEqual(p.openSpaces(), []);
+    assert.deepEqual(spawned, []);
+    p.conn = 'perc';
+    assert.equal(p.openSpaces().length, 1);
+  } finally {
+    delete fakes.spaces;
+  }
+});
