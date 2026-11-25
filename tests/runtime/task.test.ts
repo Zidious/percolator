@@ -165,9 +165,13 @@ test('the plan brief tells the agent to record the owner\'s terminal decisions',
   );
 });
 
-test('the review brief asks for one ## section per finding', () => {
+test('the review brief asks for one ## section per finding, even when a skill suggests another format', () => {
   const t = buildTask(input());
-  assert.ok(t.includes('Write your findings to findings.md, one "## <title>" section per finding, with its detail under it.'));
+  assert.ok(
+    t.includes(
+      'Write your findings to findings.md, one "## <title>" section per finding, with its detail under it; keep this format even when a skill suggests another, so Percolator can number the findings.',
+    ),
+  );
   assert.ok(t.includes('If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.'));
 });
 
