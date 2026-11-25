@@ -1515,7 +1515,7 @@
       "attention": {
         "kind": "failed",
         "since": "2026-11-20T22:31:00.000Z",
-        "message": "implement failed",
+        "message": "implement failed (exit code 1)",
         "detail": "A failed run can't be resumed. Start a new run for the ticket, then delete this one (or clean it up to keep its record).",
         "review": [
           {
@@ -1525,6 +1525,7 @@
           }
         ],
         "actions": [
+          "run-again",
           "clean"
         ],
         "commands": [

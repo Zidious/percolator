@@ -499,6 +499,8 @@ export default class Percolator extends View {
       if (res.code === 0 || action === 'delete') this.refresh(cx);
       if (res.code === 0) {
         if (action === 'reject') this.closeReject();
+        // as Start does: the new run is selected once a refresh lists it
+        if (action === 'run-again') this.startedId = startedRun(res.stdout);
       } else {
         const why = firstLine(res.stderr) || `perc ${argv[0]} exited ${res.code}`;
         if (action === 'reject') this.rejectError = why;

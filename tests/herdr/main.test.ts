@@ -497,3 +497,25 @@ test('picking a box tab reads that file; selecting another run goes back to the 
   assert.equal(p.boxPick, null);
   assert.equal(p.boxFile, 'samples/findings-sections.md');
 });
+
+test('Run again starts the run and selects it once a refresh lists it', async () => {
+  const p = Object.create(Percolator.prototype);
+  let refreshed = 0;
+  Object.assign(p, { conn: 'perc', busy: null, actError: null, startedId: null, perc: { node: 'node', cli: 'cli.ts' }, refresh: () => refreshed++ });
+  fakes.exec = async () => ({ code: 0, stdout: 'run t9-20261125-120000-ab12 started\n', stderr: '' });
+  try {
+    let spawned: Promise<void> | undefined;
+    const cx = { spawn: (fn: (cx: unknown) => Promise<void>) => (spawned = fn(cx)), notify() {} };
+    p.perform('run-again', ['run', 'github.com/o/r#9', '--repo', '/r'], cx);
+    await spawned;
+    assert.equal(p.startedId, 't9-20261125-120000-ab12');
+    assert.equal(refreshed, 1);
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('the Run again button reads Run again', async () => {
+  const { LABELS } = await import('../../herdr/mods/percolator/turn.js' as string);
+  assert.deepEqual(LABELS['run-again'], ['Run again', 'ok']);
+});

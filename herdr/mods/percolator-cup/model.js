@@ -120,9 +120,24 @@ export function actionArgv(action, run, feedback) {
       return ['resume', run.id];
     case 'clean':
       return ['clean', run.id];
+    case 'run-again':
+      return runAgainArgv(run);
     default:
       return null;
   }
+}
+
+/** The `perc run` argv that starts a failed run's kind of run again, in the order of perc's own line: its ticket,
+ *  its pipeline (unless feature), each input as one `k=v` element, its repo. */
+export function runAgainArgv(run) {
+  return [
+    'run',
+    ...(run.ticket ? [run.ticket.ref] : []),
+    ...(run.pipeline && run.pipeline !== 'feature' ? ['--pipeline', run.pipeline] : []),
+    ...Object.entries(run.inputs ?? {}).flatMap(([k, v]) => ['--input', `${k}=${v}`]),
+    '--repo',
+    run.repo,
+  ];
 }
 
 /** An asked item's label: its first non-empty line without a leading heading or list marker, `**`, `__` or backticks;

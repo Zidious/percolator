@@ -26,13 +26,14 @@ import {
 import { stopStrip } from './pipeline.js';
 import { button, inlineReader, link, own, scrollY } from './ui.js';
 
-const LABELS = {
+export const LABELS = {
   approve: ['Approve', 'ok'],
   reject: ['Reject…', 'no'],
   grant: ['Grant a round & resume', 'ok'],
   resume: ['Resume', 'ok'],
   answer: ['Submit', 'ok'],
   clean: ['Clean up', ''],
+  'run-again': ['Run again', 'ok'],
 };
 
 /** A tick box and its label, a click toggles it (`on`). */
