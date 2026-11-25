@@ -564,9 +564,9 @@ export default class Percolator extends View {
     return this.inputs[`${pipeline}/${input.name}`] ?? null;
   }
 
-  /** The spaces open in Herdr (none while checking; none in fixtures mode, so it never lists the machine's real repos). */
+  /** The spaces open in Herdr: none until the panel knows it is connected to perc, so fixtures and missing modes never probe the machine's real folders. */
   openSpaces() {
-    if (this.conn === 'fixtures') return [];
+    if (this.conn !== 'perc') return [];
     return spaces() ?? [];
   }
 
@@ -588,7 +588,10 @@ export default class Percolator extends View {
         const st = this.start;
         if (st?.mode === 'new' && st.auto) {
           const repo = startRepo(this.openSpaces(), this.tops, this.runs);
-          if (repo && !sameRepo(repo, st.repo)) this.pickRepo(repo, cx, { auto: true });
+          if (repo && !sameRepo(repo, st.repo)) {
+            st.pick = null; // the panel picked the old repo's pipeline too: the new repo's default replaces it
+            this.pickRepo(repo, cx, { auto: true });
+          }
         }
         cx.notify();
       });

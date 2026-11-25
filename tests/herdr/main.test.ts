@@ -440,3 +440,39 @@ test("fixtures mode lists no open spaces, so it never probes the machine's real 
     delete fakes.spaces;
   }
 });
+
+test("a late probe that moves the automatic repo preselects the new repo's default pipeline", async () => {
+  const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+  p.pipes['C:/src/old'] = { ok: true, data: { pipelines: [{ name: 'feature', default: true, inputs: [] }] } };
+  p.pipes['C:/src/app'] = { ok: true, data: { pipelines: [{ name: 'feature', inputs: [] }, { name: 'triage', default: true, inputs: [] }] } };
+  p.probeSpaces(cx);
+  p.openStart(cx);
+  assert.equal(p.start.pick, 'feature');
+  release();
+  await settle();
+  assert.equal(p.start.repo, 'C:/src/app');
+  assert.equal(p.start.pick, 'triage');
+  assert.equal(p.start.auto, true);
+});
+
+test('before the panel knows it is connected to perc it lists and probes no open spaces', () => {
+  fakes.spaces = () => [toSpace({ folder: 'C:/src/real', active: true })];
+  try {
+    const p = Object.create(Percolator.prototype);
+    p.tops = {};
+    p.gitTop = async () => null;
+    const spawned: unknown[] = [];
+    const cx = { spawn: (fn: unknown) => spawned.push(fn), notify() {} };
+    for (const conn of [null, 'missing']) {
+      p.conn = conn;
+      p.probeSpaces(cx);
+      assert.deepEqual(p.openSpaces(), [], `conn ${conn}`);
+    }
+    assert.deepEqual(spawned, []);
+    p.conn = 'perc';
+    p.probeSpaces(cx);
+    assert.equal(spawned.length, 1);
+  } finally {
+    delete fakes.spaces;
+  }
+});
