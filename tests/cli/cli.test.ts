@@ -455,14 +455,15 @@ test('usage lists perc watch', async () => {
 });
 
 /** A home with a live watcher's watch.json (pid 9), and the clock and sleep `perc watch stop` waits with. */
-async function liveWatcher(onSleep: (o: { home: string; tick: () => void }) => Promise<void>) {
+async function liveWatcher(onSleep: (o: { home: string; tick: () => void }) => Promise<void>, terminal?: string) {
   const home = await fs.mkdtemp(path.join(tmp, 'home-'));
   const file = path.join(home, '.percolator', 'watch', 'watch.json');
   const stop = path.join(home, '.percolator', 'watch', 'stop.json');
   await fs.mkdir(path.dirname(file), { recursive: true });
   let clock = Date.parse('2026-11-25T10:00:00Z');
   const at = new Date(clock).toISOString();
-  await fs.writeFile(file, JSON.stringify({ pid: 9, host: os.hostname(), intervalS: 60, heartbeatAt: at, startedAt: at, repos: [] }));
+  const where = terminal !== undefined ? { terminal } : {};
+  await fs.writeFile(file, JSON.stringify({ pid: 9, host: os.hostname(), ...where, intervalS: 60, heartbeatAt: at, startedAt: at, repos: [] }));
   const stopAsked: unknown[] = [];
   const deps = {
     home,
@@ -485,7 +486,7 @@ test('perc watch stop waits for the watcher to exit and does not kill it', async
   const w = await liveWatcher(async ({ home }) => {
     await fs.rm(path.join(home, '.percolator', 'watch', 'watch.json'));
     hc.terminals.get('percolator-watch')!.state = 'finished';
-  });
+  }, 'percolator-watch');
   const r = await runWith(['watch', 'stop'], { hc, ...w.deps });
   assert.equal(r.code, 0, r.err);
   assert.equal(r.out, 'stopped the watcher in terminal percolator-watch\n');
@@ -535,11 +536,40 @@ test('perc watch stop asks a watcher with a stale heartbeat to stop before endin
     hc.terminals.get('percolator-watch')!.state = 'finished';
   });
   const old = new Date(Date.parse('2026-11-25T10:00:00Z') - 4 * 60 * 1000).toISOString();
-  await fs.writeFile(w.file, JSON.stringify({ pid: 9, host: os.hostname(), intervalS: 60, heartbeatAt: old, startedAt: old, repos: [] }));
+  await fs.writeFile(
+    w.file,
+    JSON.stringify({ pid: 9, host: os.hostname(), terminal: 'percolator-watch', intervalS: 60, heartbeatAt: old, startedAt: old, repos: [] }),
+  );
   const r = await runWith(['watch', 'stop'], { hc, ...w.deps });
   assert.equal(r.code, 0, r.err);
   assert.equal(r.out, 'stopped the watcher in terminal percolator-watch\n');
   assert.deepEqual(w.stopAsked, [9]);
   assert.equal(killedBeforeSleep, false);
   assert.equal(hc.calls.some((c) => c[0] === 'kill'), false);
+});
+
+test('perc watch stop forgets a stale watch.json whose pid now belongs to another process, with no watcher terminal', async () => {
+  const w = await liveWatcher(async () => {
+    throw new Error('perc watch stop waited for a watcher that is not running');
+  });
+  const old = new Date(Date.parse('2026-11-25T10:00:00Z') - 4 * 60 * 1000).toISOString();
+  await fs.writeFile(w.file, JSON.stringify({ pid: 9, host: os.hostname(), intervalS: 60, heartbeatAt: old, startedAt: old, repos: [] }));
+  const r = await runWith(['watch', 'stop'], { hc: new FakeHc(), ...w.deps });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, 'no watcher running\n');
+  assert.deepEqual(w.stopAsked, []);
+  assert.equal(await w.gone(w.file), true);
+  assert.equal(await w.gone(w.stop), true);
+});
+
+test('perc watch stop names the foreground pid it stopped, not a finished watcher terminal', async () => {
+  const hc = new FakeHc();
+  hc.add({ name: 'percolator-watch', labels: { 'percolator.role': 'watcher' } });
+  hc.terminals.get('percolator-watch')!.state = 'finished';
+  const w = await liveWatcher(async ({ home }) => fs.rm(path.join(home, '.percolator', 'watch', 'watch.json')));
+  const r = await runWith(['watch', 'stop'], { hc, ...w.deps });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.out, 'stopped the watcher (pid 9)\n');
+  assert.deepEqual(w.stopAsked, [9]);
+  assert.equal(hc.terminals.has('percolator-watch'), false);
 });

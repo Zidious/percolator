@@ -662,37 +662,44 @@ async function runWatch(args: string[], deps: DriverDeps): Promise<number> {
  */
 async function stopWatch(deps: DriverDeps): Promise<number> {
   const now = deps.now ?? (() => new Date());
-  const pid = await stoppableWatcher(deps.home, deps.pidAlive ?? pidAlive, deps.pid ?? process.pid);
+  const alive = deps.pidAlive ?? pidAlive;
+  const listWatchers = () => deps.hc.list({ labels: { ...WATCHER_LABELS }, all: true });
+  const found = await stoppableWatcher(deps.home, now(), alive, deps.pid ?? process.pid);
+  // a stale heartbeat counts only while a live watcher terminal backs it: its pid may since belong to another process
+  const target = found !== undefined && (found.fresh || (await listWatchers()).some((t) => t.state === 'live')) ? found : undefined;
+  const pid = target?.pid;
   let graceful = true;
   if (pid !== undefined) {
     await requestStop(deps.home, pid, now());
     const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-    graceful = await waitForWatcherExit(deps.home, pid, { now, sleep, pidAlive: deps.pidAlive ?? pidAlive }, WATCH_STOP_TIMEOUT_S);
+    graceful = await waitForWatcherExit(deps.home, pid, { now, sleep, pidAlive: alive }, WATCH_STOP_TIMEOUT_S);
   }
-  const watchers = await deps.hc.list({ labels: { ...WATCHER_LABELS }, all: true });
-  let ended = false;
+  const watchers = await listWatchers();
+  const ended: string[] = [];
   for (const t of watchers) {
     const id = t.name ?? t.address;
     if (t.state === 'live') {
       await deps.hc.kill(id);
-      ended = true;
+      ended.push(id);
     }
     await deps.hc.rm(id);
   }
   // still running and not ended: keep the stop request for its next repo boundary, and watch.json so it stays visible
-  if (!graceful && !ended) throw new Error(`the watcher (pid ${pid}) did not stop within ${WATCH_STOP_TIMEOUT_S}s; end pid ${pid}`);
+  if (!graceful && ended.length === 0) throw new Error(`the watcher (pid ${pid}) did not stop within ${WATCH_STOP_TIMEOUT_S}s; end pid ${pid}`);
   await fs.rm(watchFile(deps.home), { force: true });
   await fs.rm(stopFile(deps.home), { force: true });
-  const names = watchers.map((t) => t.name ?? t.address).join(', ');
-  if (watchers.length > 0) {
+  if (ended.length > 0) {
+    const names = ended.join(', ');
     deps.out(graceful ? `stopped the watcher in terminal ${names}` : `the watcher in terminal ${names} did not stop within ${WATCH_STOP_TIMEOUT_S}s; ended it`);
     return 0;
   }
-  if (pid === undefined) {
+  if (target === undefined) {
     deps.out('no watcher running');
     return 0;
   }
-  deps.out(`stopped the watcher (pid ${pid})`);
+  // a finished terminal is named only when the watcher that stopped ran in it
+  const inTerminal = target.terminal !== undefined && watchers.some((t) => (t.name ?? t.address) === target.terminal);
+  deps.out(inTerminal ? `stopped the watcher in terminal ${target.terminal}` : `stopped the watcher (pid ${pid})`);
   return 0;
 }
 

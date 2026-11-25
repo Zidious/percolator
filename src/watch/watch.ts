@@ -104,6 +104,8 @@ export async function watchLoop(o: WatchOptions, deps: DriverDeps & { signal?: A
   const fresh = { recover: new Set(o.repos), seed: new Set(o.repos) };
   // beat before the first pass and after each repo, so a long pass (recovery, slow grounds) never looks dead
   const beat = (): Promise<void> => writeHeartbeat(deps, o, startedAt, now());
+  // a request naming this pid before it has beaten was meant for an earlier watcher with the same pid
+  if (await asked()) await fs.rm(stopFile(deps.home), { force: true });
   await beat();
   pass: while (!(await stopped())) {
     pruneLedger(ledger, now());
@@ -285,12 +287,19 @@ export async function watcherStatus(
 }
 
 /**
- * The pid in `watch.json` if it was written on this host by a live pid other than `selfPid`, however old its
- * heartbeat: a watcher in a long poll beats late but can still be asked to stop.
+ * The watcher in `watch.json` if it was written on this host by a live pid other than `selfPid`, however old its
+ * heartbeat (`fresh` tells): a watcher in a long poll beats late but can still be asked to stop.
  */
-export async function stoppableWatcher(home: string, isPidAlive: (pid: number) => boolean, selfPid: number): Promise<number | undefined> {
-  const w = (await readWatch(home, new Date(), isPidAlive))?.w;
-  return w?.host === os.hostname() && typeof w.pid === 'number' && w.pid !== selfPid && isPidAlive(w.pid) ? w.pid : undefined;
+export async function stoppableWatcher(
+  home: string,
+  now: Date,
+  isPidAlive: (pid: number) => boolean,
+  selfPid: number,
+): Promise<{ pid: number; fresh: boolean; terminal?: string } | undefined> {
+  const r = await readWatch(home, now, isPidAlive);
+  const w = r?.w;
+  if (w?.host !== os.hostname() || typeof w.pid !== 'number' || w.pid === selfPid || !isPidAlive(w.pid)) return undefined;
+  return { pid: w.pid, fresh: r?.alive === true, ...(typeof w.terminal === 'string' ? { terminal: w.terminal } : {}) };
 }
 
 /** The pid of a live watcher in `watch.json` other than `selfPid` (a pid reused by this process is not another). */

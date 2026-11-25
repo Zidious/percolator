@@ -555,6 +555,20 @@ test('a stop file naming another pid does not stop the watcher', async () => {
   }
 });
 
+test('a starting watcher drops a leftover stop request for its own pid', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    // left by an earlier watcher with this pid that was ended before it saw the request
+    await requestStop(e.home, 4242, new Date('2026-11-22T10:00:00Z'));
+    assert.deepEqual(await stopLoop(e, [e.root]), { slept: 1, aborted: true });
+    assert.equal(e.deps.gh.calls.filter((c) => c.method === 'listIssues').length, 1);
+    assert.equal(await exists(stopFile(e.home)), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('the default sleep wakes on a stop request', async () => {
   const e = await setupRunEnv();
   try {
