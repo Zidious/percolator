@@ -85,3 +85,13 @@ test('splitListItems: no marker is one item, blank is none; 2024.x is not a mark
   assert.deepEqual(splitListItems(' \n'), []);
   assert.deepEqual(splitListItems('v2.5 is out'), ['v2.5 is out']);
 });
+
+test('splitListItems: a numbered list nested under a bullet is not the top level, so the text stays one item', () => {
+  const md = '# Review\n\n- Bug A\n   1. repro step\n   2. second step\n- Bug B\n';
+  assert.deepEqual(splitListItems(md), [md.trim()]);
+});
+
+test('splitListItems: a numbered list indented under a paragraph line is not the top level, so the text stays one item', () => {
+  const md = 'Summary: two issues, see steps.\n   1. run it\n   2. see it fail\n';
+  assert.deepEqual(splitListItems(md), [md.trim()]);
+});

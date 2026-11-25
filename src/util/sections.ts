@@ -7,6 +7,20 @@ const H2 = /^##(?:[ \t]+(.*))?$/;
 const CLOSING = /(^|\s)#+\s*$/;
 /** An ordered-list marker (`1.` or `1)`, then a space, a tab or nothing), indented up to 3 spaces; group 1 is the indent. */
 const MARKER = /^( {0,3})\d{1,9}[.)](?:[ \t]|$)/;
+/** An unordered-list marker (`-`, `*` or `+`, then a space, a tab or nothing); group 1 is the indent. */
+const BULLET = /^(\s*)[-*+](?:[ \t]|$)/;
+const indentOf = (line: string): number => /^\s*/.exec(line)![0].length;
+
+/**
+ * Whether a first ordered marker at `indent` is the top level, given the non-code lines before it: not when a bullet at
+ * or left of it comes first (the list is nested in that bullet), nor when the line right before it is text left of it
+ * (the list is indented under that text).
+ */
+function isTopLevel(before: string[], indent: number): boolean {
+  if (before.some((l) => (BULLET.exec(l)?.[1]?.length ?? Infinity) <= indent)) return false;
+  const prev = before.at(-1);
+  return prev === undefined || prev.trim() === '' || indentOf(prev) >= indent;
+}
 
 /**
  * The open fence after `line`, given the one open before it (undefined: outside a fenced block). `code` says whether
@@ -45,17 +59,23 @@ export function splitSections(md: string): Section[] {
 /**
  * One trimmed item per top-level ordered-list item (`1.` or `1)`, any number), with its continuation lines; the
  * non-blank text before the first marker is an item of its own. The first marker's indent is the top level, so a list
- * nested deeper stays in its item. Lines inside fenced code blocks are never markers. No marker: the whole text as
- * one item; blank: none. Lines are joined with `\n`.
+ * nested deeper stays in its item. A first marker nested in a bullet or indented under the text right before it is
+ * not a top level: the whole text is one item. Lines inside fenced code blocks are never markers. No marker: the whole
+ * text as one item; blank: none. Lines are joined with `\n`.
  */
 export function splitListItems(md: string): string[] {
+  const lines = md.split(/\r?\n/);
+  const whole = lines.join('\n').trim();
   const items: string[][] = [[]];
+  const before: string[] = [];
   let top: string | undefined;
   let fence: string | undefined;
-  for (const line of md.split(/\r?\n/)) {
+  for (const line of lines) {
     const at = fenceAt(fence, line);
     fence = at.fence;
     const indent = at.code ? undefined : MARKER.exec(line)?.[1];
+    if (top === undefined && indent !== undefined && !isTopLevel(before, indent.length)) return whole === '' ? [] : [whole];
+    if (top === undefined && !at.code) before.push(line);
     if (indent !== undefined && (top === undefined || indent === top)) {
       top = indent;
       items.push([]);
