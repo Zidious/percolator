@@ -212,3 +212,36 @@ test('a declared input the run was not given renders empty; an undeclared one is
     message: 'unknown template variable(s): input_other',
   });
 });
+
+const header = (over: Partial<RunContext>, s: Step = step()) => buildTask(input({ step: s, ctx: ctx(over) })).split('\n')[0];
+const loop = (from: string, round: number, maxRounds: number, granted = 0) => ({ from, round, maxRounds, granted });
+
+test('the header reads round 1/1 outside any loop', () => {
+  assert.equal(header({ round: 1, maxRounds: 1 }), '# Percolator task: review (review, round 1/1)');
+});
+
+test('the header reads the round of the one loop around the step', () => {
+  assert.equal(header({ loops: [loop('review', 2, 3)] }), '# Percolator task: review (review, round 2/3)');
+});
+
+test('the header counts rounds granted past the cap', () => {
+  assert.equal(header({ round: 3, loops: [loop('review', 4, 3, 1)] }), '# Percolator task: review (review, round 4 (1 granted after cap 3))');
+  assert.equal(header({ round: 3, loops: [loop('review', 5, 3, 2)] }), '# Percolator task: review (review, round 5 (2 granted after cap 3))');
+});
+
+test('the header names the outer loop of nested loops, and an inner one only past round 1', () => {
+  const implement = step({ id: 'implement', name: 'implement', stage: 'implement' });
+  assert.equal(
+    header({ round: 1, maxRounds: 2, loops: [loop('review', 2, 3), loop('check', 1, 2)] }, implement),
+    '# Percolator task: implement (implement, review round 2/3)',
+  );
+  assert.equal(
+    header({ round: 2, maxRounds: 2, loops: [loop('review', 2, 3), loop('check', 2, 2)] }, implement),
+    '# Percolator task: implement (implement, review round 2/3, check round 2/2)',
+  );
+});
+
+test('{{round}} still renders the innermost clamped round', () => {
+  const t = buildTask(input({ prompt: 'Round {{round}} of {{max_rounds}}', ctx: ctx({ round: 3, maxRounds: 3, loops: [loop('review', 4, 3, 1)] }) }));
+  assert.match(t, /## Task\n\nRound 3 of 3/);
+});

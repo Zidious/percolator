@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { STAGES } from '../config/schema.ts';
 import type { FeatureStage } from '../config/schema.ts';
-import type { RunContext } from '../engine/runtime.ts';
+import type { LoopRound, RunContext } from '../engine/runtime.ts';
 import type { Step } from '../graph/build.ts';
 import type { MaterializedMapping } from '../workspace/run-dir.ts';
 
@@ -69,6 +69,19 @@ function customBrief(stage: string, pipeline: string, required: string[]): strin
   return `${brief} Write ${required.map((k) => `${k}.md`).join(', ')} to the outputs directory.`;
 }
 
+/**
+ * The header's round: `round r/cap` (`round r (g granted after cap cap)` past it) of the one loop around the step;
+ * with nested loops the outermost's, named by its step, then each inner one past round 1.
+ */
+export function roundLabel(ctx: Pick<RunContext, 'round' | 'maxRounds' | 'loops'>): string {
+  const loops = ctx.loops ?? [];
+  const of = (l: LoopRound) => (l.granted > 0 ? `round ${l.round} (${l.granted} granted after cap ${l.maxRounds})` : `round ${l.round}/${l.maxRounds}`);
+  const [outer, ...inner] = loops;
+  if (outer === undefined) return `round ${ctx.round}/${ctx.maxRounds}`;
+  if (inner.length === 0) return of(outer);
+  return [outer, ...inner.filter((l) => l.round > 1)].map((l) => `${l.from} ${of(l)}`).join(', ');
+}
+
 export function buildTask(t: TaskInput): string {
   const { step, ctx } = t;
   const isSlot = step.role === 'slot';
@@ -91,7 +104,7 @@ export function buildTask(t: TaskInput): string {
   const required = ctx.graph.contracts[step.stage] ?? [];
 
   const sections: string[] = [
-    `# Percolator task: ${step.id} (${step.stage}, round ${ctx.round}/${ctx.maxRounds})\n\n` +
+    `# Percolator task: ${step.id} (${step.stage}, ${roundLabel(ctx)})\n\n` +
       'You are one node in a Percolator run. Work only on this task. Do not start other agents. Do not push, open pull requests or comment on the tracker; Percolator does that.',
   ];
 

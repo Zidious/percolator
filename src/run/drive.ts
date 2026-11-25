@@ -163,6 +163,10 @@ async function driveHeld(
     const body = `${JSON.stringify({ ...a, at: now().toISOString() }, null, 2)}\n`;
     attentionWrite = attentionWrite.then(() => writeFileAtomic(attentionFile, body)).catch(() => {});
   };
+  const onAttentionCleared = (a: { stepId: string }): void => {
+    deps.out(`${a.stepId}: working again`);
+    attentionWrite = attentionWrite.then(() => fs.rm(attentionFile, { force: true })).catch(() => {});
+  };
   const ticket = meta.ticket === undefined ? undefined : parseTicket(meta.ticket);
   // an issue exit's `next`: one linked run of that pipeline per issue it opened
   const nextRuns = (next: string | undefined) =>
@@ -258,6 +262,7 @@ async function driveHeld(
         deps.out(`${stepId}: waiting for approval: ${url ?? `perc approve ${runId} | perc reject ${runId} <feedback>`}`),
     }),
     onAttention,
+    onAttentionCleared,
     ...(sleep !== undefined ? { sleep } : {}),
     now: nowMs,
   });

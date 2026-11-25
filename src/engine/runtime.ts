@@ -9,6 +9,9 @@ export type NodeOutcome = {
   questions?: string[];
 };
 
+/** One back-edge loop containing a step: its round counts the rounds granted past the cap (`round` > `maxRounds` then). */
+export type LoopRound = { from: string; round: number; maxRounds: number; granted: number };
+
 export type RunContext = {
   state: RunState;
   graph: Graph;
@@ -16,6 +19,8 @@ export type RunContext = {
   round: number;
   /** `maxRounds` of the innermost back-edge loop containing the step; 1 outside any loop */
   maxRounds: number;
+  /** every back-edge loop containing the step, outermost first; absent or empty outside loops */
+  loops?: LoopRound[];
   /** latest outputs per stepId */
   previousOutputs: Record<string, Record<string, string>>;
 };

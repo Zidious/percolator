@@ -41,7 +41,7 @@ node tests/smoke/skill.smoke.ts       # sandboxed agent scenarios for skills/per
 - **Never commit `docs/superpowers/` or `.superpowers/`** (local specs/plans and subagent scratch), not even with `git add -f`. What a spec decides that must outlive it goes into code, tests or this file.
 - **Strict TDD for every step**, bug and review fixes included: RED (test fails for the expected reason), GREEN (minimum code), refactor. No production code without a failing test first; if code came first, delete it. Load `superpowers:test-driven-development` before implementing. Reports paste RED and GREEN output; missing RED is a blocking review finding. Tests assert behaviour, including error message text, never just mocks.
 - **Tests:** `node:test` + `node:assert/strict` (translate vitest-style sketches). `tests/` mirrors `src/`; fixtures in `tests/fixtures/`; temp dirs via `fs.mkdtemp(path.join(os.tmpdir(), ...))`; output pristine.
-- **Commits:** conventional (`feat(scope): …`, `chore: …`); no agent attribution trailers; never amend or push unless asked.
+- **Commits:** follow [Conventional Commits](https://www.conventionalcommits.org): `<type>(<scope>)?: <summary>`, type one of `feat`, `fix`, `docs`, `test`, `refactor`, `perf`, `chore`, `ci`, `build`, `revert`; `!` or a `BREAKING CHANGE:` footer for breaking changes. PR titles follow the same form, since a squash merge makes the title the commit. No agent attribution trailers; never amend or push unless asked.
 
 ## Layout
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import path from 'node:path';
 import { test } from 'node:test';
 import { promisify } from 'node:util';
@@ -26,4 +26,29 @@ test('perc validate succeeds on the e2e fixture', async () => {
     { cwd: root },
   );
   assert.match(stdout, /^profile: work$/m);
+});
+
+function runClosedStdout(args: string[]): Promise<{ code: number | null; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['src/cli.ts', ...args], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout.destroy();
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (d: string) => { stderr += d; });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code, stderr }));
+  });
+}
+
+test('perc --help exits 0 quietly when stdout is closed', async () => {
+  const { code, stderr } = await runClosedStdout(['--help']);
+  assert.equal(stderr, '');
+  assert.equal(code, 0);
+});
+
+test('perc validate keeps its exit code when stdout is closed', async () => {
+  const { code, stderr } = await runClosedStdout(['validate', '--config', fx('e2e/unbound.yaml'), '--profile', 'work']);
+  assert.equal(code, 1);
+  assert.match(stderr, /unbound/i);
+  assert.doesNotMatch(stderr, /EPIPE/);
 });

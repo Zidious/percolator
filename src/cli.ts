@@ -31,10 +31,11 @@ import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
 import { validate, validateAll } from './validate.ts';
 import { pidAlive } from './run/lock.ts';
-import { otherWatcher, WATCH_TERMINAL, WATCHER_LABELS, watchFile, watchLoop } from './watch/watch.ts';
+import { otherWatcher, requestStop, stopFile, stoppableWatcher, WATCH_STOP_TIMEOUT_S, WATCH_TERMINAL, WATCHER_LABELS, waitForWatcherExit, watchFile, watchLoop } from './watch/watch.ts';
 import type { Graph } from './graph/build.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
+import { pipeWriter } from './util/pipe.ts';
 import { removeWorktree } from './workspace/worktree.ts';
 
 export type Io = { stdout(s: string): void; stderr(s: string): void };
@@ -654,16 +655,51 @@ async function runWatch(args: string[], deps: DriverDeps): Promise<number> {
   return 0;
 }
 
-/** Ends every terminal labelled as the watcher (and only those), then forgets its heartbeat. */
+/**
+ * Asks a live watcher to stop and waits up to WATCH_STOP_TIMEOUT_S for it, so a firing it is starting
+ * gets its driver; then ends every terminal labelled as the watcher (and only those) and forgets its heartbeat.
+ * A watcher it could neither stop nor end keeps its stop request and heartbeat.
+ */
 async function stopWatch(deps: DriverDeps): Promise<number> {
-  const watchers = await deps.hc.list({ labels: { ...WATCHER_LABELS }, all: true });
+  const now = deps.now ?? (() => new Date());
+  const alive = deps.pidAlive ?? pidAlive;
+  const listWatchers = () => deps.hc.list({ labels: { ...WATCHER_LABELS }, all: true });
+  const found = await stoppableWatcher(deps.home, now(), alive, deps.pid ?? process.pid);
+  // a stale heartbeat counts only while a live watcher terminal backs it: its pid may since belong to another process
+  const target = found !== undefined && (found.fresh || (await listWatchers()).some((t) => t.state === 'live')) ? found : undefined;
+  const pid = target?.pid;
+  let graceful = true;
+  if (pid !== undefined) {
+    await requestStop(deps.home, pid, now());
+    const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    graceful = await waitForWatcherExit(deps.home, pid, { now, sleep, pidAlive: alive }, WATCH_STOP_TIMEOUT_S);
+  }
+  const watchers = await listWatchers();
+  const ended: string[] = [];
   for (const t of watchers) {
     const id = t.name ?? t.address;
-    if (t.state === 'live') await deps.hc.kill(id);
+    if (t.state === 'live') {
+      await deps.hc.kill(id);
+      ended.push(id);
+    }
     await deps.hc.rm(id);
   }
+  // still running and not ended: keep the stop request for its next repo boundary, and watch.json so it stays visible
+  if (!graceful && ended.length === 0) throw new Error(`the watcher (pid ${pid}) did not stop within ${WATCH_STOP_TIMEOUT_S}s; end pid ${pid}`);
   await fs.rm(watchFile(deps.home), { force: true });
-  deps.out(watchers.length === 0 ? 'no watcher running' : `stopped the watcher in terminal ${watchers.map((t) => t.name ?? t.address).join(', ')}`);
+  await fs.rm(stopFile(deps.home), { force: true });
+  if (ended.length > 0) {
+    const names = ended.join(', ');
+    deps.out(graceful ? `stopped the watcher in terminal ${names}` : `the watcher in terminal ${names} did not stop within ${WATCH_STOP_TIMEOUT_S}s; ended it`);
+    return 0;
+  }
+  if (target === undefined) {
+    deps.out('no watcher running');
+    return 0;
+  }
+  // a finished terminal is named only when the watcher that stopped ran in it
+  const inTerminal = target.terminal !== undefined && watchers.some((t) => (t.name ?? t.address) === target.terminal);
+  deps.out(inTerminal ? `stopped the watcher in terminal ${target.terminal}` : `stopped the watcher (pid ${pid})`);
   return 0;
 }
 
@@ -729,7 +765,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
 
 if (isDirectRun(process.argv[1], import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2), {
-    stdout: (s) => process.stdout.write(s),
-    stderr: (s) => process.stderr.write(s),
+    stdout: pipeWriter(process.stdout),
+    stderr: pipeWriter(process.stderr),
   });
 }
