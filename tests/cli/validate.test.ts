@@ -689,6 +689,39 @@ test('validate refuses a router that routes to an unknown pipeline, whichever pi
   );
 });
 
+const chooseLines = (choose: string) =>
+  ['      triage:', '        router: true', '        stages: [intake, route]', `        choose: { agent: command, ${choose}from: [hotfix] }`, ''].join('\n');
+
+test('validate refuses a router choose agent: command without a program, or one starting with -, at choose', async () => {
+  const needs = 'agent "command" needs "command" (the program to run); add command: [program, ...args]';
+  const cases: [string, string][] = [
+    ['', `profiles.default.pipelines.triage.choose: ${needs}`],
+    ['command: [], ', `profiles.default.pipelines.triage.choose: ${needs}`],
+    ['command: [-x], ', 'profiles.default.pipelines.triage.choose.command: command must not start with "-"; put the program first'],
+  ];
+  for (const [choose, message] of cases) {
+    await withConfig(
+      (abs) => routable(pipelinesConfig(abs, chooseLines(choose))),
+      async (cfg) => {
+        await assert.rejects(validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'triage' }), {
+          name: 'ConfigError',
+          message: `${cfg}:25: ${message}`,
+        });
+      },
+    );
+  }
+});
+
+test('validate accepts a router choose agent: command and builds it into route.1', async () => {
+  await withConfig(
+    (abs) => routable(pipelinesConfig(abs, chooseLines('command: [node, pick.js], '))),
+    async (cfg) => {
+      const r = await validate({ ...opts(), configFile: cfg, profile: 'default', pipeline: 'triage' });
+      assert.deepEqual(r.graph.steps.find((s) => s.id === 'route.1')!.def.command, ['node', 'pick.js']);
+    },
+  );
+});
+
 const epicLines = [
   '      epic:',
   '        stages: [intake, plan, implement, deliver]',

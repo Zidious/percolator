@@ -117,6 +117,7 @@ test('descriptions state the defaults the code uses', () => {
     ['$.profiles.*.bindings', /after all layers merge, every stage must be bound/],
     ['$.profiles.*.rules.allowed_agents', /^Agents that agent nodes may use; default any agent\.$/],
     ['$.profiles.*.pipelines.*.choose.confirm', /default unsure/],
+    ['$.profiles.*.pipelines.*.choose.command', /program for agent: command; passed as given/],
     ['$.profiles.*.pipelines.*.fallback', /default the profile's default pipeline, or feature/],
     ['$.profiles.*.pipelines.*.next', /^Issue exit only/],
     ['$.profiles.*.pipelines.*.fan_out.max_parallel', /default 3/],

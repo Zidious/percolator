@@ -755,6 +755,13 @@
                         "type": "string"
                       }
                     },
+                    "command": {
+                      "description": "Argv array, never a shell string: the program for agent: command; passed as given ({run_dir}, {outputs_dir}, {worktree} are not filled in).",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "prompt": {
                       "description": "Task prompt for the agent; default: pick one of from and write pick.md (pipeline and whether it is unsure).",
                       "anyOf": [

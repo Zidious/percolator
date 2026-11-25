@@ -122,7 +122,7 @@ A router is a pipeline that reads the ticket and hands it to another pipeline. S
 | Key | What it does |
 |---|---|
 | `routes` | Label rules, `{ label, to }`, tried in order. |
-| `choose` | The agent that picks when no rule matched: `agent`, `model`, `effort`, `skill(s)`, `prompt` as on a node, `from` (the pipelines it may pick) and `confirm`: `unsure` (default) stops at the `pick-pipeline` gate only when the agent says it is unsure, `always` stops every time. |
+| `choose` | The agent that picks when no rule matched: `agent`, `model`, `effort`, `skill(s)`, `prompt`, `command` (for `agent: command`) as on a node, `from` (the pipelines it may pick) and `confirm`: `unsure` (default) stops at the `pick-pipeline` gate only when the agent says it is unsure, `always` stops every time. |
 | `fallback` | The pipeline used when nothing picked one. Default: the profile's default, or `feature` when the default is the router. |
 
 The route step decides in this order and stops at the first answer:

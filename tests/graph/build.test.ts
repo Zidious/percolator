@@ -718,6 +718,13 @@ test('the choose prompt and agent settings pass through; names without a descrip
   assert.match(String(plain.steps[2]!.def.prompt), /^Pick the pipeline for this ticket from: hotfix; feature\. Write pick\.md/);
 });
 
+test('choose.command passes through to the choose step', () => {
+  const g = buildGraph(triage({ choose: { agent: 'command', command: ['node', 'pick.js'], from: ['hotfix'] } }));
+  const { prompt, ...rest } = g.steps[2]!.def;
+  assert.deepEqual(rest, { agent: 'command', command: ['node', 'pick.js'] });
+  assert.match(String(prompt), /^Pick the pipeline for this ticket from: hotfix\. Write pick\.md/);
+});
+
 test('max_rounds_ceiling clamps the pick-pipeline cap', () => {
   const merged = triage();
   merged.rules.push({ value: { max_rounds_ceiling: 2 }, source: 'r', locked: false });

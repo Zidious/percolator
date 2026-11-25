@@ -176,6 +176,24 @@ test('a claude step with model and effort launches with --model and --effort', a
   assert.deepEqual(run.argv.slice(0, 5), ['claude', '--model', 'opus', '--effort', 'medium']);
 });
 
+test("a router's choose step with agent: command runs its program with the task message, placeholders untouched", async () => {
+  const e = await env(async (t, n) => {
+    if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { pick: 'pipeline: x\nunsure: true' });
+  });
+  const s = step({
+    id: 'route.1',
+    name: 'route',
+    stage: 'route',
+    slotLast: false,
+    def: { agent: 'command', command: ['node', 'pick.js', '{run_dir}'], prompt: 'pick' } as Step['def'],
+  });
+  const out = await runtime(e).executeStep(s, ctx());
+  assert.equal(out.status, 'pass');
+  const run = e.hc.calls.find((c) => c[0] === 'run')![1] as { argv: string[] };
+  const stepDir = path.join(e.runDir, 'steps', 'route.1', '1');
+  assert.deepEqual(run.argv, ['node', 'pick.js', '{run_dir}', `Your task is in ${path.join(stepDir, 'task.md')}. Read it and follow it exactly.`]);
+});
+
 test('codex step argv has --no-daemon and skill files listed in task.md', async () => {
   const e = await env(async (t, n) => {
     if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });

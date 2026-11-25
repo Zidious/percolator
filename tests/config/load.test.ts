@@ -304,6 +304,31 @@ test('a router pipeline loads', async () => {
   );
 });
 
+test('choose takes command as on a node, with any agent', async () => {
+  await withYaml(
+    [
+      'version: 1',
+      'profiles:',
+      '  default:',
+      '    pipelines:',
+      '      triage:',
+      '        router: true',
+      '        stages: [intake, route]',
+      "        choose: { agent: command, command: [node, pick.js, '{run_dir}'], from: [feature] }",
+      '      other:',
+      '        router: true',
+      '        stages: [intake, route]',
+      '        choose: { agent: claude, command: [x], from: [feature] }',
+      '',
+    ].join('\n'),
+    async (file) => {
+      const p =(await loadUserConfig(file)).profiles.default!.pipelines!;
+      assert.deepEqual(p.triage!.choose, { agent: 'command', command: ['node', 'pick.js', '{run_dir}'], from: ['feature'] });
+      assert.deepEqual(p.other!.choose, { agent: 'claude', command: ['x'], from: ['feature'] });
+    },
+  );
+});
+
 test('a pipeline may name the next pipeline for its issues', async () => {
   await withYaml(
     'version: 1\nprofiles:\n  default:\n    pipelines:\n      split:\n        stages: [intake, deliver]\n        exit: issue\n        next: hotfix\n',

@@ -177,10 +177,8 @@ profiles:
         routes:
           - { label: never-on-this-issue, to: dry-ticket }
         choose:
-          # choose takes no command, so agent: command cannot be scripted here: a small model with a fixed answer
-          agent: claude
-          model: haiku
-          prompt: "Do not read the ticket. Write pick.md in the outputs directory with exactly these lines: 'pipeline: dry-ticket', 'unsure: true', then 'Dry run: always unsure.' Then write done.json with status pass."
+          agent: command
+          command: ${argv('pick:dry-ticket')}
           from: [dry-ticket, feature]
           confirm: always
         fallback: dry-ticket

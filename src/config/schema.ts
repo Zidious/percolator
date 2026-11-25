@@ -380,6 +380,10 @@ export const PipelineSchema = z.strictObject({
         .describe("Reasoning effort for the agent (claude only); default the agent's own."),
       skill: z.string().optional().describe('One skill the agent loads.'),
       skills: z.array(z.string()).optional().describe('Skills the agent loads.'),
+      command: z
+        .array(z.string())
+        .optional()
+        .describe('Argv array, never a shell string: the program for agent: command; passed as given ({run_dir}, {outputs_dir}, {worktree} are not filled in).'),
       prompt: z
         .union([
           z.string(),
