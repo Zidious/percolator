@@ -357,6 +357,28 @@ test('working again clears the attention, and idle again raises it again', async
   assert.deepEqual(cleared, [{ stepId: 'plan', terminal: terminalName(RUN_ID, '#123', 'plan', 1) }]);
 });
 
+test('working again forgets every attention raised in the turn, so an earlier blocked prompt is raised again', async () => {
+  let term: FakeTerminal | undefined;
+  const e = await env((t) => {
+    term = t;
+    t.status = 'blocked';
+    t.turn = 1;
+  });
+  const cleared: unknown[] = [];
+  const rt = runtime(e, {
+    sleep: async (ms) => {
+      e.sleeps.push(ms);
+      if (e.sleeps.length === 2) term!.status = 'idle';
+      if (e.sleeps.length === 5) term!.status = 'working';
+      if (e.sleeps.length === 7) await finishWith(e.hc, term!, { status: 'pass' }, { plan: 'p' });
+    },
+    onAttentionCleared: (a) => cleared.push(a),
+  });
+  assert.equal((await rt.executeStep(step(), ctx())).status, 'pass');
+  assert.deepEqual(e.attention.map((a) => a.kind), ['blocked', 'idle', 'blocked']);
+  assert.deepEqual(cleared, [{ stepId: 'plan', terminal: terminalName(RUN_ID, '#123', 'plan', 1) }]);
+});
+
 test('resume re-attaches to a live terminal without relaunching or rewriting task.md', async () => {
   const e = await env(async (t, n) => {
     if (n === 1) await finishWith(e.hc, t, { status: 'pass' }, { plan: 'p' });

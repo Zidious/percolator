@@ -286,8 +286,8 @@ export class HerdrRuntime implements Runtime {
     const doneFile = path.join(io.stepDir, 'done.json');
     const started = this.#now();
     const seen = new Set<string>();
-    // the attention key last raised, and how many polls in a row have shown the current idle key
-    let raised: string | undefined;
+    // the attention keys raised since working was last seen, and how many polls in a row have shown the current idle key
+    const raised = new Set<string>();
     let idle = { key: '', polls: 0 };
     const timeoutS = step.def.timeout_s;
     let result: { status: NodeOutcome['status']; reason?: string; questions?: string[] };
@@ -304,9 +304,9 @@ export class HerdrRuntime implements Runtime {
         break;
       }
       if (t.status !== 'idle' && t.status !== 'done') idle = { key: '', polls: 0 };
-      if (t.status === 'working' && raised !== undefined) {
-        seen.delete(raised);
-        raised = undefined;
+      if (t.status === 'working' && raised.size > 0) {
+        for (const key of raised) seen.delete(key);
+        raised.clear();
         o.onAttentionCleared?.({ stepId: step.id, terminal: n });
       }
       if (t.status === 'working' || t.status === null) {
@@ -332,7 +332,7 @@ export class HerdrRuntime implements Runtime {
         const settled = kind !== 'idle' || idle.polls >= (o.idlePolls ?? 3);
         if (!booting && settled && !seen.has(key)) {
           seen.add(key);
-          raised = key;
+          raised.add(key);
           o.onAttention?.({ stepId: step.id, terminal: n, kind });
         }
         await this.#sleep(o.pollMs ?? 2000);
