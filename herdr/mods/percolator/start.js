@@ -1,10 +1,11 @@
 // The start picker: "+ New run" (any pipeline of a repo) and "▸ Run next…" (a finished run's ticket, the pipelines that
-// take one). The pipeline comes first, then the fields it asks for, the repo and the exact `perc run` line; its preview
-// (the pipeline spine over previewRun) sits below the picker, or to its right from 720px (previewSide).
+// take one). The repo comes first (the open spaces' repos, then earlier runs'), then the pipeline, then the fields it
+// asks for and the exact `perc run` line; its preview (the pipeline spine over previewRun) sits below the picker, or to
+// its right from 720px (previewSide).
 
 import { div } from 'gpui-kit';
 import { Input, h_flex, v_flex } from 'gpui-base';
-import { commandLine, pipelineOption, previewRun, previewSide, runLabel, startFields } from './model.js';
+import { commandLine, pipelineOption, previewRun, previewSide, runLabel, sameRepo, startFields } from './model.js';
 import { pipeline } from './pipeline.js';
 import { button, link, own } from './ui.js';
 
@@ -114,12 +115,17 @@ function fieldsPart(p, t, s, pl) {
   return part;
 }
 
+/** `repos`: startRepos's `{ repo, open }` items; the open spaces' repos carry an Open tag. */
 function repoPart(p, t, s, repos) {
   const part = v_flex().flex_none().gap(2).child(label(t, 'Repo'));
   if (s.mode === 'next') return part.child(div().min_w(0).truncate().text_size(12).child(s.repo ?? ''));
-  const all = s.repo && !repos.includes(s.repo) ? [s.repo, ...repos] : repos;
+  const all = s.repo && !repos.some((r) => sameRepo(r.repo, s.repo)) ? [{ repo: s.repo, open: false }, ...repos] : repos;
   return part
-    .children(all.map((r, i) => choice(t, `repo-${i}`, r === s.repo, r, '', (_e, cx) => p.pickRepo(r, cx))))
+    .children(
+      all.map((r, i) =>
+        choice(t, `repo-${i}`, sameRepo(r.repo, s.repo), r.repo, '', (_e, cx) => p.pickRepo(r.repo, cx), { tags: r.open ? ['Open'] : [] }),
+      ),
+    )
     .child(h_flex().pt(2).child(link(t, 'repo-folder', 'Choose folder…', (_e, cx) => p.chooseFolder(cx))));
 }
 
@@ -175,9 +181,9 @@ export function startDialog(p, t, { narrow, fold }, width, repos) {
     .flex_1()
     .min_w(0)
     .gap(2)
+    .child(repoPart(p, t, s, repos))
     .child(pipelinesPart(p, t, s, list))
     .when(Boolean(pl), (el) => el.child(fieldsPart(p, t, s, pl)))
-    .child(repoPart(p, t, s, repos))
     .child(foot(p, t, s, pl));
   const body =
     side === 'right'
