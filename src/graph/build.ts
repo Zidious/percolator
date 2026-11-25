@@ -406,7 +406,20 @@ function buildWhole(
   const backEdges: Record<string, BackEdge> = {};
   for (const step of steps) {
     const onFail = step.def.on_fail;
-    if (!onFail) continue;
+    if (!onFail) {
+      if (isImplicitGate(step, loopStages)) {
+        const to = implicitBackTo(step, stages, steps);
+        backEdges[step.id] = {
+          id: step.id,
+          fromStepId: step.id,
+          toStepIndex: regionStart[to]!,
+          jumpAfterIndex: steps.indexOf(step),
+          maxRounds: Math.min(3, ceiling),
+          onCap: 'escalate',
+        };
+      }
+      continue;
+    }
     const where = (key: string) => locate(step.locator, 'config', `${stepKey(step)}.${key}`);
     const loopStage = loopLast.get(step);
     if (loopStage !== undefined) {
@@ -463,6 +476,8 @@ function buildWhole(
     };
     // any slot node's fail in a loop stage is a round of it; a step's own on_fail is more specific
     for (const s of steps) if (s.role === 'slot' && s.stage === stage) failRoutes[s.id] = last.id;
+    // so is a reject of a gate without on_fail attached to it
+    for (const s of steps) if (s.stage === stage && s.def.on_fail === undefined && s.def.kind === 'gate') failRoutes[s.id] = last.id;
   }
   for (const id of Object.keys(backEdges)) failRoutes[id] = id;
 
@@ -480,6 +495,43 @@ function buildWhole(
     failRoutes,
   };
   return fan === undefined ? { graph } : { graph, fanStage: fan.stage };
+}
+
+/** A gate with no on_fail outside a loop stage: a reject sends the run back to the stage it follows. */
+function isImplicitGate(step: Step, loopStages: readonly string[]): boolean {
+  return step.def.on_fail === undefined && step.def.kind === 'gate' && !loopStages.includes(step.stage);
+}
+
+/**
+ * The stage a gate without on_fail goes back to on reject: the stage it runs after (`after: X`, or a slot
+ * gate after another node of its slot), else the stage before the one it opens. Refused when there is none.
+ */
+function implicitBackTo(step: Step, stages: readonly string[], steps: readonly Step[]): string {
+  const where = (key: string) => locate(step.locator, 'config', key);
+  if (step.stage === 'before-all') {
+    throw new GraphError(
+      `gate "${step.id}" runs before all stages, so a reject has no stage to go back to; attach it before or after a stage, or remove it`,
+      where(`${stepKey(step)}.before`),
+    );
+  }
+  if (step.stage === 'after-all') {
+    throw new GraphError(
+      `gate "${step.id}" runs after all stages, so a reject has no stage to go back to; attach it after a stage, or give it on_fail: { back_to: <stage>, max_rounds: <n> }`,
+      where(`${stepKey(step)}.after`),
+    );
+  }
+  const stage = step.stage;
+  const followsOwn =
+    step.role === 'hook' ? step.def.after === stage : steps.some((s) => s.role === 'slot' && s.stage === stage && steps.indexOf(s) < steps.indexOf(step));
+  if (followsOwn) return stage;
+  const previous = stages[stages.indexOf(stage) - 1];
+  if (previous === undefined) {
+    throw new GraphError(
+      `gate "${step.id}" runs before ${stage}, so a reject has no earlier stage to go back to; attach it after ${stage} or a later stage, or remove it`,
+      where(step.role === 'hook' ? `${stepKey(step)}.before` : stepKey(step)),
+    );
+  }
+  return previous;
 }
 
 /** A built-in step standing in for a stage's slot. */
@@ -543,6 +595,12 @@ function sliceChild(g: Graph, sliceFrom: string): Graph {
       // a stage loop always returns to the stage before it, so only an earlier fan-out stage can hold it
       throw new GraphError(
         `${step.stage} loops back to ${target} every round, so it cannot start a fan-out slice; set fan_out.stage to ${target} or an earlier stage`,
+        locate(step.locator, 'config', key),
+      );
+    }
+    if (isImplicitGate(step, g.loopStages)) {
+      throw new GraphError(
+        `${step.id} goes back to ${target} on reject (a gate without on_fail returns to the stage it follows), which runs before the fan-out at ${sliceFrom}; attach it after ${sliceFrom} or later, or give it on_fail with back_to ${sliceFrom} or later`,
         locate(step.locator, 'config', key),
       );
     }

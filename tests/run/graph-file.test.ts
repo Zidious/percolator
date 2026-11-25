@@ -106,3 +106,29 @@ test('readRunGraph names a root-level problem "value"', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('toRunGraph lists the implicit loop of a gate without on_fail', () => {
+  const merged = mergePipelines([
+    {
+      source: 'profile:default',
+      fragment: {
+        pipelines: {
+          feature: {
+            bindings: {
+              intake: { builtin: 'github.intake' },
+              groom: { agent: 'claude' },
+              plan: { agent: 'claude' },
+              implement: { agent: 'claude' },
+              review: { agent: 'claude' },
+              deliver: { builtin: 'github.open_pr' },
+            },
+            nodes: { 'approve-plan': { kind: 'gate', after: 'plan' } },
+          },
+        },
+      },
+      locator: { file: 'c.yaml', lines: {}, prefix: 'profiles.default' },
+    },
+  ]).feature!;
+  const rg = toRunGraph(buildGraph(merged));
+  assert.deepEqual(rg.loops.find((l) => l.id === 'approve-plan'), { id: 'approve-plan', from: 'approve-plan', to: 'plan', max: 3, atCap: 'escalate' });
+});
