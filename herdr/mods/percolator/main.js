@@ -533,7 +533,10 @@ export default class Percolator extends View {
     const change =
       on.change ??
       (() => {
-        if (this.start) this.start.error = this.start.said = null;
+        if (this.start) {
+          this.start.error = this.start.said = null;
+          this.start.auto = false; // the owner is filling in the picker: a late probe leaves its repo alone
+        }
       });
     const submit = on.submit ?? ((cx) => this.startRun(cx));
     s.on('change', (_e, cx) => {
@@ -583,7 +586,11 @@ export default class Percolator extends View {
   openStart(cx, pick = null) {
     if (this.start?.mode === 'new' && pick === null) return this.closeStart(cx);
     this.ticketInput.set_value('');
-    const repo = startRepo(this.openSpaces(), this.tops ?? {}, this.runs);
+    this.tops ??= {};
+    // a folder that was not in a repo (or whose git timed out) may be one now: ask again
+    for (const [folder, top] of Object.entries(this.tops)) if (top === null) delete this.tops[folder];
+    this.probeSpaces(cx);
+    const repo = startRepo(this.openSpaces(), this.tops, this.runs);
     this.start = { mode: 'new', run: null, repo, auto: true, pick, tickets: [], ticket: '', error: null, said: null };
     this.loadPipelines(cx);
   }
@@ -676,6 +683,7 @@ export default class Percolator extends View {
 
   pickPipeline(name, cx) {
     this.start.pick = name;
+    this.start.auto = false;
     this.start.error = this.start.said = null;
     cx.notify();
   }
@@ -706,7 +714,9 @@ export default class Percolator extends View {
   ticketChanged(cx) {
     const s = this.start;
     if (s?.mode !== 'new') return;
-    const repo = guessRepo(this.ticketInput.value(), this.runs);
+    const text = this.ticketInput.value();
+    if (text) s.auto = false; // typed (emptying the field on open is not the owner's doing)
+    const repo = guessRepo(text, this.runs);
     if (repo && !sameRepo(repo, s.repo)) this.pickRepo(repo, cx);
   }
 

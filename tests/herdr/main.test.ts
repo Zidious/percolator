@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
 
-// main.js imports Herdr's host modules, which only exist inside the app: stand them in with inert exports.
+// main.js imports Herdr's host modules, which only exist inside the app: stand them in with exports that call the
+// test's fake in `fakes` (by name, `InputState.new` for a static) when it set one, and do nothing otherwise.
+const fakes: Record<string, (...a: any[]) => any> = {};
+(globalThis as any).hostFakes = fakes;
 const HOST: Record<string, string[]> = {
   'gpui-kit': ['div', 'View', 'svg'],
   'gpui-base': ['v_flex', 'h_flex', 'InputState', 'ScrollHandle', 'Scrollbar', 'TextareaState', 'Input', 'Textarea', 'TextView'],
@@ -16,7 +19,10 @@ registerHooks({
   load: (url, context, next) => {
     if (!url.startsWith('host:')) return next(url, context);
     const names = HOST[url.slice('host:'.length)] ?? [];
-    const source = names.map((n) => (n === 'View' ? 'export class View {}' : `export const ${n} = () => {};`)).join('\n');
+    const call = (n: string) => `(...a) => globalThis.hostFakes['${n}']?.(...a)`;
+    const source = names
+      .map((n) => (n === 'View' ? 'export class View {}' : `export const ${n} = Object.assign(${call(n)}, { new: ${call(`${n}.new`)} });`))
+      .join('\n');
     return { format: 'module', source, shortCircuit: true };
   },
 });
@@ -65,13 +71,13 @@ function panelWithSpaces(spaces: Space[], tops: Record<string, string | null>, h
   let release = () => {};
   const gate = new Promise<void>((r) => (release = r));
   Object.assign(p, {
-    runs: [{ id: 'r1', repo: 'C:/src/old', createdAt: '2026-11-23T00:00:00Z' }],
+    runs: [{ id: 'r1', repo: 'C:/src/old', createdAt: '2026-11-23T00:00:00Z', ticket: { ref: 'owner/old#1' } }],
     start: null,
     typing: false,
     tops: {},
-    pipes: { 'C:/src/old': listed, 'C:/src/app': listed, 'C:/src/mine': listed, '/src/a': listed },
+    pipes: { 'C:/src/old': listed, 'C:/src/app': listed, 'C:/src/mine': listed, '/src/a': listed, '/notes': listed },
     inputs: {},
-    ticketInput: { set_value() {} },
+    ticketInput: { text: '', set_value(v: string) { this.text = v; }, value() { return this.text; } },
     handle: { focus() {} },
     openSpaces: () => spaces.map(toSpace),
     gitTop: async (folder: string) => {
@@ -138,6 +144,91 @@ test('each space folder is probed once, and remote or empty folders never', asyn
   await settle();
   assert.deepEqual(asked, ['/a']);
   assert.deepEqual(p.tops, { '/a': '/a' });
+});
+
+test('a probe that resolves after the owner picked a pipeline keeps the repo', async () => {
+  const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+  p.probeSpaces(cx);
+  p.openStart(cx);
+  p.pickPipeline('feature', cx);
+  release();
+  await settle();
+  assert.equal(p.start.repo, 'C:/src/old');
+  assert.equal(p.start.auto, false);
+});
+
+test('a probe that resolves after the owner typed a ticket of the preselected repo keeps the repo', async () => {
+  const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+  p.probeSpaces(cx);
+  p.openStart(cx);
+  p.ticketInput.set_value('owner/old#7');
+  p.ticketChanged(cx);
+  release();
+  await settle();
+  assert.equal(p.start.repo, 'C:/src/old');
+  assert.equal(p.start.auto, false);
+});
+
+test("the picker's emptied ticket field (opening it) leaves the preselection automatic", () => {
+  const { p, cx } = panelWithSpaces([], {});
+  p.openStart(cx);
+  p.ticketChanged(cx);
+  assert.equal(p.start.auto, true);
+});
+
+test('typing in a pipeline input ends the automatic preselection', async () => {
+  const handlers: Record<string, (e: unknown, cx: unknown) => void> = {};
+  fakes['InputState.new'] = () => ({ on: (ev: string, h: (e: unknown, cx: unknown) => void) => ((handlers[ev] = h), true) });
+  try {
+    const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+    p.probeSpaces(cx);
+    p.openStart(cx);
+    p.textState({ placeholder: '' });
+    handlers.change({}, cx);
+    release();
+    await settle();
+    assert.equal(p.start.repo, 'C:/src/old');
+    assert.equal(p.start.auto, false);
+  } finally {
+    delete fakes['InputState.new'];
+  }
+});
+
+test('gitTop asks git for the toplevel with an argv, in the folder, with a 10s timeout', async () => {
+  const calls: unknown[][] = [];
+  const answers: Array<() => Promise<unknown>> = [
+    async () => ({ code: 0, stdout: 'C:/src/app\n', stderr: '' }),
+    async () => ({ code: 128, stdout: '', stderr: 'fatal: not a git repository' }),
+    async () => {
+      throw new Error('no such folder');
+    },
+  ];
+  fakes.exec = (...a: unknown[]) => (calls.push(a), answers.shift()!());
+  try {
+    const p = Object.create(Percolator.prototype);
+    assert.equal(await p.gitTop('C:/src/app/sub'), 'C:/src/app');
+    assert.equal(await p.gitTop('/notes'), null);
+    assert.equal(await p.gitTop('/gone'), null);
+    assert.deepEqual(calls, [
+      ['git', ['rev-parse', '--show-toplevel'], { cwd: 'C:/src/app/sub', timeout: 10000 }],
+      ['git', ['rev-parse', '--show-toplevel'], { cwd: '/notes', timeout: 10000 }],
+      ['git', ['rev-parse', '--show-toplevel'], { cwd: '/gone', timeout: 10000 }],
+    ]);
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('+ New run asks git again about folders that were not in a repo, and only those', async () => {
+  const tops: Record<string, string | null> = { '/notes': null, '/src/a': '/src/a' };
+  const { p, cx, asked, settle } = panelWithSpaces([{ folder: '/notes', active: true }, { folder: '/src/a' }], tops);
+  p.probeSpaces(cx);
+  await settle();
+  tops['/notes'] = '/notes'; // git init, or a timeout that has passed
+  p.openStart(cx);
+  await settle();
+  assert.deepEqual(asked, ['/notes', '/src/a', '/notes']);
+  assert.equal(p.start.repo, '/notes');
 });
 
 test("with no spaces the picker opens on the latest run's repo, as before", () => {
