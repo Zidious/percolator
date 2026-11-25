@@ -10,7 +10,7 @@ import { prepareRun } from '../../src/run/prepare.ts';
 import { validate } from '../../src/validate.ts';
 import { loadLedger, saveLedger } from '../../src/watch/ledger.ts';
 import { triggerId } from '../../src/watch/poll.ts';
-import { otherWatcher, watcherStatus, watchLoop } from '../../src/watch/watch.ts';
+import { otherWatcher, requestStop, stopFile, waitForWatcherExit, watcherStatus, watchFile, watchLoop } from '../../src/watch/watch.ts';
 import { setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
 
@@ -480,4 +480,135 @@ test('otherWatcher is a live watcher in watch.json that is not this process', as
   // a pid reused by this very process is not another watcher
   assert.equal(await otherWatcher(home, now, () => true, 9), undefined);
   assert.equal(await otherWatcher(home, now, () => false, 10), undefined);
+});
+
+/** Runs `watchLoop` once with `sleep` and `signal` recorded; the stop file, not them, is meant to end it. */
+async function stopLoop(e: RunEnv, repos: string[]): Promise<{ slept: number; aborted: boolean }> {
+  const ac = new AbortController();
+  let slept = 0;
+  await watchLoop(
+    { repos, configFile: e.configFile, profile: 'work', intervalS: 60 },
+    {
+      ...e.deps,
+      now: () => new Date('2026-11-22T10:15:00Z'),
+      out: () => {},
+      pid: 4242,
+      signal: ac.signal,
+      sleep: async () => {
+        slept++;
+        ac.abort();
+      },
+    },
+  );
+  return { slept, aborted: ac.signal.aborted };
+}
+
+test('a stop requested during a poll still launches the firing\'s driver, then the watcher exits', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    e.deps.gh.addIssue(REPO, 7, { labels: ['triage'] });
+    const gh = e.deps.gh;
+    const listIssues = gh.listIssues.bind(gh);
+    gh.listIssues = async (repo, o) => {
+      await requestStop(e.home, 4242, new Date('2026-11-22T10:15:00Z'));
+      return listIssues(repo, o);
+    };
+    assert.deepEqual(await stopLoop(e, [e.root]), { slept: 0, aborted: false });
+    const runId = (await loadLedger(pdir(e))).fired[`label:${REPO}:triage:7`]?.runId;
+    const meta = await readRunMeta(runPath(e, runId!));
+    assert.equal(e.deps.hc.terminals.get(meta.driver)?.labels['percolator.role'], 'driver');
+    assert.equal(await exists(watchFile(e.home)), false);
+    assert.equal(await exists(stopFile(e.home)), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a stop request between repos skips the remaining repos', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    const gh = e.deps.gh;
+    const listIssues = gh.listIssues.bind(gh);
+    gh.listIssues = async (repo, o) => {
+      await requestStop(e.home, 4242, new Date('2026-11-22T10:15:00Z'));
+      return listIssues(repo, o);
+    };
+    assert.deepEqual(await stopLoop(e, [e.root, e.root]), { slept: 0, aborted: false });
+    assert.equal(gh.calls.filter((c) => c.method === 'listIssues').length, 1);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a stop file naming another pid does not stop the watcher', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    await requestStop(e.home, 999, new Date('2026-11-22T10:15:00Z'));
+    assert.deepEqual(await stopLoop(e, [e.root]), { slept: 1, aborted: true });
+    assert.equal(e.deps.gh.calls.filter((c) => c.method === 'listIssues').length, 1);
+    assert.equal(await exists(stopFile(e.home)), true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('the default sleep wakes on a stop request', async () => {
+  const e = await setupRunEnv();
+  try {
+    const { sleep: _sleep, ...deps } = e.deps;
+    const done = watchLoop({ repos: [], configFile: e.configFile, profile: 'work', intervalS: 60 }, { ...deps, out: () => {}, pid: 4242 });
+    while (!(await exists(watchFile(e.home)))) await new Promise((r) => setTimeout(r, 20));
+    await requestStop(e.home, 4242, new Date());
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      done,
+      new Promise((_, reject) => (timer = setTimeout(() => reject(new Error('the watcher did not stop within 5s')), 5000))),
+    ]);
+    clearTimeout(timer);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('waitForWatcherExit is true once watch.json is gone', async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-wait-'));
+  try {
+    await fs.mkdir(path.dirname(watchFile(home)), { recursive: true });
+    await fs.writeFile(watchFile(home), '{}');
+    let slept = 0;
+    const gone = await waitForWatcherExit(
+      home,
+      9,
+      { now: () => new Date(0), pidAlive: () => true, sleep: async () => { slept++; await fs.rm(watchFile(home)); } },
+      30,
+    );
+    assert.equal(gone, true);
+    assert.equal(slept, 1);
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+  }
+});
+
+test('waitForWatcherExit is false after the timeout, polling every 500ms', async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-wait-'));
+  try {
+    await fs.mkdir(path.dirname(watchFile(home)), { recursive: true });
+    await fs.writeFile(watchFile(home), '{}');
+    let clock = 0;
+    const sleeps: number[] = [];
+    const gone = await waitForWatcherExit(
+      home,
+      9,
+      { now: () => new Date(clock), pidAlive: () => true, sleep: async (ms) => { sleeps.push(ms); clock += 500; } },
+      30,
+    );
+    assert.equal(gone, false);
+    assert.equal(sleeps.length, 60);
+    assert.ok(sleeps.every((ms) => ms === 500));
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+  }
 });

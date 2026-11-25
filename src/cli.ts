@@ -31,7 +31,7 @@ import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
 import { validate, validateAll } from './validate.ts';
 import { pidAlive } from './run/lock.ts';
-import { otherWatcher, WATCH_TERMINAL, WATCHER_LABELS, watchFile, watchLoop } from './watch/watch.ts';
+import { otherWatcher, requestStop, stopFile, WATCH_STOP_TIMEOUT_S, WATCH_TERMINAL, WATCHER_LABELS, waitForWatcherExit, watchFile, watchLoop } from './watch/watch.ts';
 import type { Graph } from './graph/build.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
@@ -655,8 +655,19 @@ async function runWatch(args: string[], deps: DriverDeps): Promise<number> {
   return 0;
 }
 
-/** Ends every terminal labelled as the watcher (and only those), then forgets its heartbeat. */
+/**
+ * Asks a live watcher to stop and waits up to WATCH_STOP_TIMEOUT_S for it, so a firing it is starting
+ * gets its driver; then ends every terminal labelled as the watcher (and only those) and forgets its heartbeat.
+ */
 async function stopWatch(deps: DriverDeps): Promise<number> {
+  const now = deps.now ?? (() => new Date());
+  const pid = await otherWatcher(deps.home, now(), deps.pidAlive ?? pidAlive, deps.pid ?? process.pid);
+  let graceful = true;
+  if (pid !== undefined) {
+    await requestStop(deps.home, pid, now());
+    const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    graceful = await waitForWatcherExit(deps.home, pid, { now, sleep, pidAlive: deps.pidAlive ?? pidAlive }, WATCH_STOP_TIMEOUT_S);
+  }
   const watchers = await deps.hc.list({ labels: { ...WATCHER_LABELS }, all: true });
   for (const t of watchers) {
     const id = t.name ?? t.address;
@@ -664,8 +675,22 @@ async function stopWatch(deps: DriverDeps): Promise<number> {
     await deps.hc.rm(id);
   }
   await fs.rm(watchFile(deps.home), { force: true });
-  deps.out(watchers.length === 0 ? 'no watcher running' : `stopped the watcher in terminal ${watchers.map((t) => t.name ?? t.address).join(', ')}`);
-  return 0;
+  await fs.rm(stopFile(deps.home), { force: true });
+  const names = watchers.map((t) => t.name ?? t.address).join(', ');
+  if (watchers.length > 0) {
+    deps.out(graceful ? `stopped the watcher in terminal ${names}` : `the watcher in terminal ${names} did not stop within ${WATCH_STOP_TIMEOUT_S}s; ended it`);
+    return 0;
+  }
+  if (pid === undefined) {
+    deps.out('no watcher running');
+    return 0;
+  }
+  if (graceful) {
+    deps.out(`stopped the watcher (pid ${pid})`);
+    return 0;
+  }
+  deps.out(`the watcher (pid ${pid}) did not stop within ${WATCH_STOP_TIMEOUT_S}s; end pid ${pid}`);
+  return 1;
 }
 
 const ttyAsk = (question: string) => askLine(question, { input: process.stdin, output: process.stdout });
