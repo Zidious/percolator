@@ -178,7 +178,7 @@ profiles:
 | `on_fail` | nodes | `{ back_to: <earlier stage>, max_rounds: n }`: a bounded back-edge. `n` counts failed rounds, the first run included, so `1` escalates on the first fail. |
 | `max_rounds` | a stage's binding | Round cap for the review loop (default 3). On another stage's binding it makes that stage loop back to the one before it. |
 | `once` | hooks | Skip the hook once it has passed in this run, so a loop does not re-run it. |
-| `timeout_s` | agent, script | Escalate to you if the step is not done after n seconds. Builtins and gates ignore it. |
+| `timeout_s` | agent, script | Escalate to you if the step is not done after n seconds; its terminal keeps running, and `perc resume` re-attaches to it. Builtins and gates ignore it. |
 | `when_output` | gate | Stop only when an earlier step wrote this output (like `issues`); otherwise the gate passes at once. Rejected on any other kind. |
 | `required` | all | Locks the node: later layers may only restate it unchanged. |
 

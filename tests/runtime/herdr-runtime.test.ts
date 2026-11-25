@@ -380,7 +380,7 @@ test('timeout_s escalates and leaves the terminal live', async () => {
       return v;
     },
   }).executeStep(step({ def: { agent: 'claude', timeout_s: 10 } as Step['def'] }), ctx());
-  assert.deepEqual(out, { status: 'escalate', outputs: {}, reason: 'plan timed out after 10s' });
+  assert.deepEqual(out, { status: 'escalate', outputs: {}, reason: `plan timed out after 10s; its terminal ${terminalName(RUN_ID, '#123', 'plan', 1)} is still running: perc resume re-attaches to it (end the terminal first to start the step over)` });
   assert.ok(!subs(e.hc).includes('kill'));
   assert.equal(e.hc.terminals.get(terminalName(RUN_ID, '#123', 'plan', 1))!.state, 'live');
 });
@@ -542,7 +542,7 @@ test('resume after a timeout re-attaches to the live attempt-1 terminal and coll
   });
   const s = step({ def: { agent: 'claude', timeout_s: 10 } as Step['def'] });
   const rt = runtime(e, { now: () => clock });
-  assert.deepEqual(await rt.executeStep(s, ctx()), { status: 'escalate', outputs: {}, reason: 'plan timed out after 10s' });
+  assert.deepEqual(await rt.executeStep(s, ctx()), { status: 'escalate', outputs: {}, reason: `plan timed out after 10s; its terminal ${terminalName(RUN_ID, '#123', 'plan', 1)} is still running: perc resume re-attaches to it (end the terminal first to start the step over)` });
   const first = terminalName(RUN_ID, '#123', 'plan', 1);
   assert.equal(e.hc.terminals.get(first)!.state, 'live');
 

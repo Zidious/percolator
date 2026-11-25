@@ -321,7 +321,7 @@ export class HerdrRuntime implements Runtime {
         await this.#sleep(o.pollMs ?? 2000);
       }
       if (timeoutS !== undefined && this.#now() - started >= timeoutS * 1000) {
-        return escalate(`${step.id} timed out after ${timeoutS}s`);
+        return escalate(`${step.id} timed out after ${timeoutS}s; its terminal ${n} is still running: perc resume re-attaches to it (end the terminal first to start the step over)`);
       }
     }
 
