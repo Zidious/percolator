@@ -46,8 +46,7 @@ export const WATCH_STOP_TIMEOUT_S = 30;
 export async function requestStop(home: string, pid: number, at: Date): Promise<void> {
   const file = stopFile(home);
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await writeFileAtomic(file, `${JSON.stringify({ pid, at: at.toISOString() })}
-`);
+  await writeFileAtomic(file, `${JSON.stringify({ pid, at: at.toISOString() })}\n`);
 }
 
 /** Whether `stop.json` asks `pid` to stop (a stop meant for an earlier watcher never stops a later one). */
