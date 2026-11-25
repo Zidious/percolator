@@ -103,3 +103,16 @@ test('splitListItems: a heading ends an item, and an item that is only headings 
 test('splitListItems: headings without any marker keep the text one item', () => {
   assert.deepEqual(splitListItems('### Bugs\nnone\n### Nits\nnone'), ['### Bugs\nnone\n### Nits\nnone']);
 });
+
+test('splitListItems: a bullet summary before a column-0 list is intro text, not the list parent', () => {
+  assert.deepEqual(splitListItems('Summary:\n- 2 bugs, 1 nit\n\n1. **Bug A**\n   x\n2. **Bug B**\n'), [
+    'Summary:\n- 2 bugs, 1 nit',
+    '1. **Bug A**\n   x',
+    '2. **Bug B**',
+  ]);
+});
+
+test('splitListItems: a thematic break is not a bullet', () => {
+  assert.deepEqual(splitListItems('* * *\n\n1. A\n2. B'), ['* * *', '1. A', '2. B']);
+  assert.deepEqual(splitListItems('- - -\n\n1. A\n2. B'), ['- - -', '1. A', '2. B']);
+});

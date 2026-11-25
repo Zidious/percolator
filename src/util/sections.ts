@@ -11,15 +11,22 @@ const MARKER = /^( {0,3})\d{1,9}[.)](?:[ \t]|$)/;
 const BULLET = /^(\s*)[-*+](?:[ \t]|$)/;
 /** An ATX heading line (`#` to `######`, then a space, a tab or nothing), indented up to 3 spaces. */
 const HEADING = /^ {0,3}#{1,6}(?:[ \t]|$)/;
+/** A thematic break (`* * *`, `- - -`, `___`): three or more of one mark, spaces or tabs between; never a bullet. */
+const BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+/** The column a bullet's content starts at (after the mark and its space), or undefined when the line is no bullet. */
+const bulletContent = (line: string): number | undefined => {
+  const b = BREAK.test(line) ? undefined : BULLET.exec(line);
+  return b ? b[1]!.length + 2 : undefined;
+};
 const indentOf = (line: string): number => /^\s*/.exec(line)![0].length;
 
 /**
- * Whether a first ordered marker at `indent` is the top level, given the non-code lines before it: not when a bullet at
- * or left of it comes first (the list is nested in that bullet), nor when the line right before it is text left of it
- * (the list is indented under that text).
+ * Whether a first ordered marker at `indent` is the top level, given the non-code lines before it: not when it sits
+ * inside an earlier bullet's content (the list is nested in that bullet), nor when the line right before it is text
+ * left of it (the list is indented under that text).
  */
 function isTopLevel(before: string[], indent: number): boolean {
-  if (before.some((l) => (BULLET.exec(l)?.[1]?.length ?? Infinity) <= indent)) return false;
+  if (before.some((l) => (bulletContent(l) ?? Infinity) <= indent)) return false;
   const prev = before.at(-1);
   return prev === undefined || prev.trim() === '' || indentOf(prev) >= indent;
 }

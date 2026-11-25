@@ -381,3 +381,12 @@ test('numberFindings keeps the items, and their steps when several steps failed;
 test('findingItems: a numbered list grouped under ### headings gives one item per finding, no heading items', () => {
   assert.deepEqual(findingItems('# Review\n\n### Bugs\n1. a\n2. b\n### Nits\n1. c\n'), ['1. a', '2. b', '1. c']);
 });
+
+test('findingItems: a summary bullet list before the top-level findings stays the intro item', () => {
+  assert.deepEqual(findingItems('# Review\n\nSummary:\n- 2 bugs, 1 nit\n\n1. **Bug A**\n   x\n2. **Bug B**\n'), [
+    'Summary:\n- 2 bugs, 1 nit',
+    '1. **Bug A**\n   x',
+    '2. **Bug B**',
+  ]);
+  assert.deepEqual(findingItems('* * *\n\n1. A\n2. B'), ['* * *', '1. A', '2. B']);
+});
