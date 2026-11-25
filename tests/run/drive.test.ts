@@ -461,7 +461,9 @@ test('attention.json is removed and status has no your-turn once the agent works
       for (let i = 0; i < 100 && (await exists(file)); i++) await new Promise((r) => setTimeout(r, 10));
       assert.equal(await exists(file), false);
       assert.ok(e.out.includes('groom: working again'), e.out.join('\n'));
-      assert.notEqual((await statusJson(e.deps)).runs[0]?.attention?.kind, 'agent');
+      const run = (await statusJson(e.deps)).runs[0];
+      assert.ok(run !== undefined && run.status !== 'unreadable');
+      assert.notEqual(run.attention?.kind, 'agent');
       checked = true;
       return false;
     };
