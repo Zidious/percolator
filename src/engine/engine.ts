@@ -35,6 +35,12 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
   const indexOf = (stepId: string) => steps.findIndex((s) => s.id === stepId);
   // per visit, not persisted: still bounded, since each fresh budget needs an owner resume
   let contractRetried = false;
+  const persist = async (): Promise<void> => {
+    const current = steps[state.cursor];
+    if (current) state.currentStep = current.id;
+    else delete state.currentStep;
+    await deps.save(state);
+  };
   if (state.status === 'running') {
     delete state.pausedReason;
     delete state.pausedCap;
@@ -43,14 +49,10 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       jumpBack(graph.backEdges[state.grantedRound]!);
       delete state.grantedRound;
       voidOvertakenJump();
+      // saved now, so status shows the loop start while it runs, not the cap step
+      await persist();
     }
   }
-  const persist = async (): Promise<void> => {
-    const current = steps[state.cursor];
-    if (current) state.currentStep = current.id;
-    else delete state.currentStep;
-    await deps.save(state);
-  };
 
   while (state.status === 'running' && state.cursor < steps.length) {
     const i = state.cursor;

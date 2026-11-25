@@ -483,6 +483,36 @@ test('attention.json is removed and status has no your-turn once the agent works
   }
 });
 
+test('after perc answer --agree, status shows the step the granted round goes back to while it runs', async () => {
+  const e = await setup();
+  try {
+    const meta = await e.prepare();
+    const dir = e.runDir(meta);
+    const s = await loadState(dir);
+    s.status = 'paused';
+    s.cursor = 5;
+    s.currentStep = 'review';
+    s.rounds = { review: 3 };
+    s.asking = { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'review', items: ['## Missing test', '## Typo'] };
+    await saveState(dir, s);
+    const r = await main(['answer', meta.runId, '--agree', '1'], { stdout: () => {}, stderr: () => {} }, e.deps);
+    assert.equal(r, 0);
+    let seen: { currentStep?: string; implement?: string } | undefined;
+    e.onWait.fn = async (t) => {
+      if (t.labels['percolator.step'] !== 'implement' || seen !== undefined) return false;
+      const run = (await statusJson(e.deps)).runs.find((x) => x.id === meta.runId);
+      assert.ok(run !== undefined && run.status !== 'unreadable');
+      seen = { ...(run.currentStep !== undefined ? { currentStep: run.currentStep } : {}), implement: run.steps.find((x) => x.id === 'implement')?.status };
+      return false;
+    };
+    const driver = e.deps.hc.terminals.get(meta.driver)!;
+    await drive(meta.runId, { ...e.deps, selfTerminal: driver.address }).catch(() => {});
+    assert.deepEqual(seen, { currentStep: 'implement', implement: 'running' });
+  } finally {
+    await e.cleanup();
+  }
+});
+
 const priorGate = (run: string, text: string) =>
   [
     `${GATE_MARKER} run=${run} step=approve-groom round=1 -->`,

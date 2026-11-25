@@ -441,6 +441,23 @@ test('a granted round past the cap counts as round 4, then 5', async () => {
   assert.deepEqual(rt.roundsOf('review'), [1, 2, 3, 3, 3]);
 });
 
+test('a granted round saves the step it jumps back to before running it', async () => {
+  const g = graph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3')] }), save: saver().save });
+  answerFindings(s1, g, 'f');
+  s1.status = 'running';
+  const { save, saved } = saver();
+  const seen: { stepId: string; currentStep: string | undefined }[] = [];
+  const rt = new FakeRuntime();
+  const execute = rt.executeStep.bind(rt);
+  rt.executeStep = async (step, ctx) => {
+    seen.push({ stepId: step.id, currentStep: saved.at(-1)?.currentStep });
+    return execute(step, ctx);
+  };
+  await runGraph(g, s1, { runtime: rt, save });
+  assert.deepEqual(seen[0], { stepId: 'implement', currentStep: 'implement' });
+});
+
 test('ctx.previousOutputs holds the latest outputs per step', async () => {
   const rt = new FakeRuntime({
     implement: [pass({ summary: 's1' }), pass({ summary: 's2' })],
