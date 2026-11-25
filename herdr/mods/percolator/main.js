@@ -18,6 +18,7 @@ import {
   setShared,
   settings,
   shared,
+  spaces,
   terminals,
   theme,
 } from 'herdr';
@@ -28,7 +29,9 @@ import {
   askOf,
   canStart,
   guessRepo,
-  knownRepos,
+  sameRepo,
+  startRepo,
+  startRepos,
   runNextChoices,
   startArgv,
   startPick,
@@ -145,16 +148,17 @@ export default class Percolator extends View {
     // the start picker (+ New run, ▸ Run next…): { mode, run, repo, pick, tickets, ticket, error, said } while open
     this.start = null;
     this.pipes = {}; // repo → readPipelines's result, or 'loading'
+    this.tops = {}; // space folder → its git toplevel, null when not in a repo, or 'loading'
     this.inputs = {}; // `<pipeline>/<input>` → its InputState, made when the pipelines arrive
     this.asks = {}; // askOf(run).key → { inputs, na, ticks }: a questions or findings form, made when its run arrives
     this.startedId = null; // the run Start started: selected once a refresh lists it
-    this.ticketInput = this.textState({ placeholder: 'owner/repo#12' });
-    this.ticketInput.on('change', (_e, cx) => this.ticketChanged(cx));
+    this.ticketInput = this.ticketState();
     this.handle = cx.focus_handle();
     this.handle.focus();
 
     this.connect(cx);
     if (checking()) return;
+    this.probeSpaces(cx);
     if (this.inWindow()) {
       // However the window opened (⧉, the cup, the palette), it is now the place: one copy shown, one acting.
       setShared(WINDOW, props().overlay); // the cup reads it: the window is open
@@ -528,7 +532,10 @@ export default class Percolator extends View {
     const change =
       on.change ??
       (() => {
-        if (this.start) this.start.error = this.start.said = null;
+        if (this.start) {
+          this.start.error = this.start.said = null;
+          this.start.auto = false; // the owner is filling in the picker: a late probe leaves its repo alone
+        }
       });
     const submit = on.submit ?? ((cx) => this.startRun(cx));
     s.on('change', (_e, cx) => {
@@ -539,16 +546,71 @@ export default class Percolator extends View {
     return s;
   }
 
+  /** The picker's ticket field: typing in it may preselect a repo; ticketChanged decides if it ends `auto`. */
+  ticketState() {
+    return this.textState(
+      { placeholder: 'owner/repo#12' },
+      {
+        change: (cx) => {
+          if (this.start) this.start.error = this.start.said = null;
+          this.ticketChanged(cx);
+        },
+      },
+    );
+  }
+
   /** The input's state: made with the pipelines (startPipelines), so render only reads it. */
   inputState(pipeline, input) {
     return this.inputs[`${pipeline}/${input.name}`] ?? null;
   }
 
-  /** "+ New run": the picker over any pipeline, on the repo of the latest run; `pick` names the pipeline to show. */
+  /** The spaces open in Herdr: none until the panel knows it is connected to perc, so fixtures and missing modes never probe the machine's real folders. */
+  openSpaces() {
+    if (this.conn !== 'perc') return [];
+    return spaces() ?? [];
+  }
+
+  /** The git toplevel of a folder (argv only), or null when it is not in a repo or git can't run there. */
+  async gitTop(folder) {
+    const got = await exec('git', ['rev-parse', '--show-toplevel'], { cwd: folder, timeout: 10000 }).catch(() => null);
+    return got?.code === 0 ? got.stdout.trim() || null : null;
+  }
+
+  /** Asks git once per local space folder where its repo is; a late answer moves the picker's automatic repo. */
+  probeSpaces(cx) {
+    if (checking()) return;
+    for (const s of this.openSpaces()) {
+      const folder = s.folder;
+      if (s.machine != null || !folder || folder in this.tops) continue;
+      this.tops[folder] = 'loading';
+      cx.spawn(async (cx) => {
+        this.tops[folder] = await this.gitTop(folder);
+        const st = this.start;
+        if (st?.mode === 'new' && st.auto) {
+          const repo = startRepo(this.openSpaces(), this.tops, this.runs);
+          if (repo && !sameRepo(repo, st.repo)) {
+            st.pick = null; // the panel picked the old repo's pipeline too: the new repo's default replaces it
+            this.pickRepo(repo, cx, { auto: true });
+          }
+        }
+        cx.notify();
+      });
+    }
+  }
+
+  /**
+   * "+ New run": the picker over any pipeline, on the shown space's repo (startRepo); `pick` names the pipeline to show.
+   * A named pipeline (percolator.new/<pipeline>) is the owner's choice, so a late probe leaves the repo alone.
+   */
   openStart(cx, pick = null) {
     if (this.start?.mode === 'new' && pick === null) return this.closeStart(cx);
     this.ticketInput.set_value('');
-    this.start = { mode: 'new', run: null, repo: knownRepos(this.runs)[0] ?? null, pick, tickets: [], ticket: '', error: null, said: null };
+    this.tops ??= {};
+    // a folder that was not in a repo (or whose git timed out) may be one now: ask again
+    for (const [folder, top] of Object.entries(this.tops)) if (top === null) delete this.tops[folder];
+    this.probeSpaces(cx);
+    const repo = startRepo(this.openSpaces(), this.tops, this.runs);
+    this.start = { mode: 'new', run: null, repo, auto: pick === null, pick, tickets: [], ticket: '', error: null, said: null };
     this.loadPipelines(cx);
   }
 
@@ -556,7 +618,7 @@ export default class Percolator extends View {
   openRunNext(cx) {
     const r = this.current();
     if (!r || this.start?.run === r.id) return this.closeStart(cx);
-    this.start = { mode: 'next', run: r.id, repo: r.repo, pick: null, tickets: [], ticket: '', error: null, said: null };
+    this.start = { mode: 'next', run: r.id, repo: r.repo, auto: false, pick: null, tickets: [], ticket: '', error: null, said: null };
     this.loadPipelines(cx);
   }
 
@@ -640,6 +702,7 @@ export default class Percolator extends View {
 
   pickPipeline(name, cx) {
     this.start.pick = name;
+    this.start.auto = false;
     this.start.error = this.start.said = null;
     cx.notify();
   }
@@ -649,8 +712,10 @@ export default class Percolator extends View {
     cx.notify();
   }
 
-  pickRepo(repo, cx) {
-    if (this.start.repo === repo) return;
+  /** `auto`: the panel picked it (probeSpaces), so a later probe may still move it; the owner's pick stays. */
+  pickRepo(repo, cx, { auto = false } = {}) {
+    this.start.auto = auto;
+    if (sameRepo(this.start.repo, repo)) return;
     this.start.repo = repo;
     this.start.error = this.start.said = null;
     this.loadPipelines(cx);
@@ -668,13 +733,16 @@ export default class Percolator extends View {
   ticketChanged(cx) {
     const s = this.start;
     if (s?.mode !== 'new') return;
-    const repo = guessRepo(this.ticketInput.value(), this.runs);
-    if (repo && repo !== s.repo) this.pickRepo(repo, cx);
+    const text = this.ticketInput.value();
+    if (text) s.auto = false; // typed (emptying the field on open is not the owner's doing)
+    const repo = guessRepo(text, this.runs);
+    if (repo && !sameRepo(repo, s.repo)) this.pickRepo(repo, cx);
   }
 
   /** Start: `perc run …` (argv only, never a shell); fixtures mode says what it would run instead. */
   startRun(cx) {
     const s = this.start;
+    if (s) s.auto = false; // Start, even a refused one, is the owner's choice: a late probe leaves its repo alone
     const pl = this.startPipeline();
     if (!s || !pl || this.busy) return;
     const choice = this.startChoice(pl);
@@ -1130,7 +1198,7 @@ export default class Percolator extends View {
 
   /** The start picker in place of the board and the run, scrolling on its own. */
   startFrame(t, at) {
-    const dialog = startDialog(this, t, at, this.width / zoom(), knownRepos(this.runs));
+    const dialog = startDialog(this, t, at, this.width / zoom(), startRepos(this.openSpaces(), this.tops, this.runs));
     return div()
       .id('start-frame')
       .flex_1()
@@ -1144,6 +1212,7 @@ export default class Percolator extends View {
   render(cx) {
     const t = theme();
     this.catchUp(cx);
+    this.probeSpaces(cx);
     this.followFocus(cx);
     const at = this.shape();
     const { narrow } = at;

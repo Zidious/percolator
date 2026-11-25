@@ -99,6 +99,11 @@ import {
   commandLine,
   guessRepo,
   knownRepos,
+  mainRepo,
+  repoKey,
+  sameRepo,
+  startRepo,
+  startRepos,
   linkedLine,
   pipelineOption,
   startedRun,
@@ -116,7 +121,7 @@ import {
   startFields,
   ticketRepo,
 } from '../../herdr/mods/percolator/model.js';
-import type { Pipeline } from '../../herdr/mods/percolator/model.d.ts';
+import type { Pipeline, SpaceInfo } from '../../herdr/mods/percolator/model.d.ts';
 
 const FIXTURE = path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'status.json');
 const RAW = fs.readFileSync(FIXTURE, 'utf8');
@@ -1329,6 +1334,85 @@ test('knownRepos lists each repo once, most recent run first, and skips unreadab
   assert.deepEqual(knownRepos(rs), ['/src/a', '/src/b']);
   assert.deepEqual(knownRepos(runs()), ['/home/me/src/percolator']);
   assert.deepEqual(knownRepos([]), []);
+});
+
+const space = (o: { folder: string; machine?: string | null; active?: boolean }): SpaceInfo => ({
+  id: o.folder,
+  index: 1,
+  name: '',
+  named: false,
+  folder: o.folder,
+  machine: o.machine ?? null,
+  branch: null,
+  active: o.active ?? false,
+  status: null,
+  tabs: [],
+});
+
+test('repoKey compares Windows paths without case or separator differences', () => {
+  assert.equal(repoKey('C:\\src\\App\\'), repoKey('c:/src/app'));
+  assert.equal(repoKey('//server/Share/x'), repoKey('\\\\server\\share\\X'));
+  assert.notEqual(repoKey('/home/me/App'), repoKey('/home/me/app'));
+  assert.equal(repoKey('/home/me/app/'), '/home/me/app');
+});
+
+test('mainRepo maps a run worktree to its repo and leaves other folders alone', () => {
+  assert.equal(mainRepo('C:/src/app/.worktrees/t29-20261125-004821-7ec1'), 'C:/src/app');
+  assert.equal(mainRepo('C:\\src\\app\\.worktrees\\t1-x\\'), 'C:\\src\\app');
+  assert.equal(mainRepo('/home/me/app/.worktrees/t1-x'), '/home/me/app');
+  assert.equal(mainRepo('/home/me/app'), '/home/me/app');
+  assert.equal(mainRepo('/home/me/app/.worktrees'), '/home/me/app/.worktrees');
+});
+
+test('startRepos: open spaces first in space order, then earlier runs, each repo once', () => {
+  const spaces = [space({ folder: 'C:/a' }), space({ folder: 'C:/b/sub' })];
+  const tops = { 'C:/a': 'C:/a', 'C:/b/sub': 'C:/b' };
+  const rs = [
+    started({ id: 'r1', repo: 'C:\\B', createdAt: '2026-11-10T00:00:00.000Z' }),
+    started({ id: 'r2', repo: 'C:/c', createdAt: '2026-11-01T00:00:00.000Z' }),
+  ];
+  assert.deepEqual(startRepos(spaces, tops, rs), [
+    { repo: 'C:/a', open: true },
+    { repo: 'C:/b', open: true },
+    { repo: 'C:/c', open: false },
+  ]);
+});
+
+test('startRepos skips non-repos, home, remote and unresolved spaces, and folds worktrees into their repo', () => {
+  const spaces = [
+    space({ folder: '/home/me/notes' }),
+    space({ folder: '' }),
+    space({ folder: '/srv/x', machine: 'box' }),
+    space({ folder: '/home/me/new' }),
+    space({ folder: '/home/me/app/.worktrees/t1-x/src' }),
+    space({ folder: '/home/me/app' }),
+  ];
+  const tops = {
+    '/home/me/notes': null,
+    '/srv/x': '/srv/x',
+    '/home/me/new': 'loading',
+    '/home/me/app/.worktrees/t1-x/src': '/home/me/app/.worktrees/t1-x',
+    '/home/me/app': '/home/me/app',
+  };
+  assert.deepEqual(startRepos(spaces, tops, []), [{ repo: '/home/me/app', open: true }]);
+});
+
+test('startRepo: the shown space, else the first open repo, else the latest run, else null', () => {
+  const rs = [started({ id: 'r', repo: '/src/r', createdAt: '2026-11-10T00:00:00.000Z' })];
+  const a = space({ folder: '/src/a' });
+  const b = space({ folder: '/src/b', active: true });
+  const tops = { '/src/a': '/src/a', '/src/b': '/src/b' };
+  assert.equal(startRepo([a, b], tops, rs), '/src/b');
+  assert.equal(startRepo([a, { ...b, folder: '/notes' }], { ...tops, '/notes': null }, rs), '/src/a');
+  assert.equal(startRepo([], {}, rs), '/src/r');
+  assert.equal(startRepo([b], { '/src/b': 'loading' }, rs), '/src/r');
+  assert.equal(startRepo([], {}, []), null);
+});
+
+test('sameRepo is true only for two spellings of one repo', () => {
+  assert.equal(sameRepo('C:\\x', 'c:/x'), true);
+  assert.equal(sameRepo('/x', '/y'), false);
+  assert.equal(sameRepo(null, '/x'), false);
 });
 
 test('ticketRepo is the lower-cased host/owner/repo of a ticket URL or ref, else null', () => {
