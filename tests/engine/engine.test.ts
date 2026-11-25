@@ -412,6 +412,35 @@ test('ctx.round is the round of the innermost loop containing the step', async (
   assert.deepEqual(rt.roundsOf('deliver'), [1]);
 });
 
+test('ctx.loops lists the enclosing loops outermost first', async () => {
+  const g = graph({ check: { after: 'implement', kind: 'script', command: ['check'], on_fail: { back_to: 'implement', max_rounds: 2 } } });
+  const rt = new FakeRuntime({ review: [fail('f1'), pass({ findings: '' })], check: [pass(), fail('c1'), pass()] });
+  await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  const review = (round: number) => ({ from: 'review', round, maxRounds: 3, granted: 0 });
+  const check = (round: number) => ({ from: 'check', round, maxRounds: 2, granted: 0 });
+  assert.deepEqual(rt.loopsOf('implement'), [
+    [review(1), check(1)],
+    [review(2), check(1)],
+    [review(2), check(2)],
+  ]);
+  assert.deepEqual(rt.loopsOf('intake'), [[]]);
+});
+
+test('a granted round past the cap counts as round 4, then 5', async () => {
+  const g = graph();
+  const rt = new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3'), fail('f4'), fail('f5')] });
+  let s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  for (let i = 0; i < 2; i++) {
+    answerFindings(s, g, 'f');
+    s.status = 'running';
+    s = await runGraph(g, s, { runtime: rt, save: saver().save });
+  }
+  assert.equal(s.status, 'paused');
+  const loops = rt.loopsOf('review').map((l) => l.map(({ round, granted }) => ({ round, granted })));
+  assert.deepEqual(loops, [1, 2, 3, 4, 5].map((round) => [{ round, granted: Math.max(round - 3, 0) }]));
+  assert.deepEqual(rt.roundsOf('review'), [1, 2, 3, 3, 3]);
+});
+
 test('ctx.previousOutputs holds the latest outputs per step', async () => {
   const rt = new FakeRuntime({
     implement: [pass({ summary: 's1' }), pass({ summary: 's2' })],

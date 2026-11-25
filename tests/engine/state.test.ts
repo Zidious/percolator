@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
-import { answerFindings, answerQuestions, loadState, newState, saveState } from '../../src/engine/state.ts';
+import { answerFindings, answerQuestions, grantRound, loadState, newState, saveState } from '../../src/engine/state.ts';
 import type { RunState } from '../../src/engine/state.ts';
 import type { Graph } from '../../src/graph/build.ts';
 
@@ -99,6 +99,7 @@ for (const [field, value] of [
   ['rounds', null],
   ['executed', [1]],
   ['graphFingerprint', 7],
+  ['granted', { review: 'x' }],
 ] as const) {
   test(`loadState rejects an invalid ${field} (${JSON.stringify(value)}) naming the file and field`, async () => {
     const file = path.join(dir, 'state.json');
@@ -242,4 +243,25 @@ test('asking and answered round-trip', async () => {
   q.asking = { kind: 'questions', stepId: 'plan', attempt: 2, items: ['a'] };
   await saveState(dir, q);
   assert.deepEqual(await loadState(dir), q);
+});
+
+test('grantRound counts grants per edge', () => {
+  const s = newState(init);
+  s.rounds = { review: 3 };
+  s.pausedCap = 'review';
+  grantRound(s);
+  assert.deepEqual(s.granted, { review: 1 });
+  s.rounds = { review: 3 };
+  s.pausedCap = 'review';
+  grantRound(s);
+  assert.deepEqual(s.granted, { review: 2 });
+});
+
+test('answerFindings with agreed findings counts a grant; with none it does not', () => {
+  const s = askingFindings('f');
+  answerFindings(s, loopGraph, 'steps/review/3/agreed-findings.md');
+  assert.deepEqual(s.granted, { review: 1 });
+  const t = askingFindings('f');
+  answerFindings(t, loopGraph, undefined);
+  assert.equal(t.granted, undefined);
 });

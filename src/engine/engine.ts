@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { BackEdge, Graph, Step } from '../graph/build.ts';
-import type { NodeOutcome, RunContext, Runtime } from './runtime.ts';
+import type { LoopRound, NodeOutcome, RunContext, Runtime } from './runtime.ts';
 import type { FindingSource, RunState } from './state.ts';
 
 export type RunDeps = {
@@ -144,15 +144,21 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
   /**
    * Round and cap of the smallest back-edge span containing step `i`; 1 of 1 outside any loop.
    * The round is clamped: a resume at the cap re-runs the step in the last round, not past it.
+   * `loops` lists every loop containing `i`, outermost first, counting rounds granted past a cap.
    */
-  function roundAt(i: number): { round: number; maxRounds: number } {
+  function roundAt(i: number): { round: number; maxRounds: number; loops: LoopRound[] } {
+    const span = (e: BackEdge) => e.jumpAfterIndex - e.toStepIndex;
+    const containing = Object.values(graph.backEdges).filter((e) => e.toStepIndex <= i && i <= e.jumpAfterIndex);
+    const around = [...containing].sort((a, b) => span(b) - span(a) || a.toStepIndex - b.toStepIndex || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const clamped = (e: BackEdge) => Math.min(1 + (state.rounds[e.id] ?? 0), e.maxRounds);
+    const loops = around.map((e) => {
+      const granted = state.granted?.[e.id] ?? 0;
+      return { from: e.fromStepId, round: clamped(e) + granted, maxRounds: e.maxRounds, granted };
+    });
     let inner: BackEdge | undefined;
-    for (const e of Object.values(graph.backEdges)) {
-      if (e.toStepIndex > i || i > e.jumpAfterIndex) continue;
-      if (!inner || e.jumpAfterIndex - e.toStepIndex < inner.jumpAfterIndex - inner.toStepIndex) inner = e;
-    }
-    if (!inner) return { round: 1, maxRounds: 1 };
-    return { round: Math.min(1 + (state.rounds[inner.id] ?? 0), inner.maxRounds), maxRounds: inner.maxRounds };
+    for (const e of containing) if (!inner || span(e) < span(inner)) inner = e;
+    if (!inner) return { round: 1, maxRounds: 1, loops };
+    return { round: clamped(inner), maxRounds: inner.maxRounds, loops };
   }
 
   /** After the step at `i`: resolve a pending jump that is due or overtaken, and detect completion. */
@@ -187,7 +193,10 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
     const from = indexOf(edge.fromStepId);
     for (const other of Object.values(graph.backEdges)) {
       const t = indexOf(other.fromStepId);
-      if (other.id !== edge.id && t >= edge.toStepIndex && t < from) delete state.rounds[other.id];
+      if (other.id !== edge.id && t >= edge.toStepIndex && t < from) {
+        delete state.rounds[other.id];
+        if (state.granted?.[other.id] !== undefined) delete state.granted[other.id];
+      }
     }
   }
 

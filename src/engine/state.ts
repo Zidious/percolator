@@ -43,6 +43,8 @@ export type RunState = {
   groundVersions: Record<string, string>;
   cursor: number;
   rounds: Record<string, number>;
+  /** back-edge id → rounds the owner granted past its cap; reset with `rounds` when an enclosing loop jumps back */
+  granted?: Record<string, number>;
   executed: Record<string, number>;
   history: StepRecord[];
   status: 'running' | 'paused' | 'failed' | 'completed';
@@ -83,6 +85,7 @@ function invalidField(s: Record<string, unknown>): string | undefined {
   if (!Array.isArray(s['history'])) return 'history';
   if (!isNumberRecord(s['rounds'])) return 'rounds';
   if (!isNumberRecord(s['executed'])) return 'executed';
+  if (s['granted'] !== undefined && !isNumberRecord(s['granted'])) return 'granted';
   if (s['graphFingerprint'] !== undefined && typeof s['graphFingerprint'] !== 'string') return 'graphFingerprint';
   if (s['pausedCap'] !== undefined && typeof s['pausedCap'] !== 'string') return 'pausedCap';
   if (s['currentStep'] !== undefined && typeof s['currentStep'] !== 'string') return 'currentStep';
@@ -135,6 +138,7 @@ export function answerFindings(state: RunState, graph: Graph, agreed: string | R
   if (!edge) throw new Error(`run state asks about back-edge "${asking.edgeId}", which is not in this graph (config changed since this run started); start a new run`);
   if (agreed !== undefined) {
     state.rounds[edge.id] = Math.max((state.rounds[edge.id] ?? 0) - 1, 0);
+    countGrant(state, edge.id);
     state.grantedRound = edge.id;
     const perStep = typeof agreed === 'string' ? { [asking.stepId]: agreed } : agreed;
     const answered = { ...state.answered };
@@ -156,9 +160,14 @@ export function grantRound(state: RunState): string | undefined {
   const edgeId = state.pausedCap;
   if (edgeId === undefined) return undefined;
   state.rounds[edgeId] = Math.max((state.rounds[edgeId] ?? 0) - 1, 0);
+  countGrant(state, edgeId);
   delete state.pausedCap;
   state.grantedRound = edgeId;
   return edgeId;
+}
+
+function countGrant(state: RunState, edgeId: string): void {
+  state.granted = { ...state.granted, [edgeId]: (state.granted?.[edgeId] ?? 0) + 1 };
 }
 
 const STATE_FILE = 'state.json';

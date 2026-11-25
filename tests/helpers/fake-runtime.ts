@@ -1,5 +1,5 @@
 import type { Step } from '../../src/graph/build.ts';
-import type { NodeOutcome, RunContext, Runtime } from '../../src/engine/runtime.ts';
+import type { LoopRound, NodeOutcome, RunContext, Runtime } from '../../src/engine/runtime.ts';
 
 export const pass = (outputs: Record<string, string> = {}): NodeOutcome => ({ status: 'pass', outputs });
 export const fail = (findings: string): NodeOutcome => ({ status: 'fail', outputs: { findings } });
@@ -11,6 +11,7 @@ export class FakeRuntime implements Runtime {
   calls: string[] = [];
   rounds: number[] = [];
   maxRoundsSeen: number[] = [];
+  loopsSeen: LoopRound[][] = [];
   previous: Record<string, Record<string, string>>[] = [];
   readonly #script: Record<string, NodeOutcome[]>;
   readonly #used = new Map<string, number>();
@@ -23,6 +24,7 @@ export class FakeRuntime implements Runtime {
     this.calls.push(step.id);
     this.rounds.push(ctx.round);
     this.maxRoundsSeen.push(ctx.maxRounds);
+    this.loopsSeen.push(structuredClone(ctx.loops ?? []));
     this.previous.push(structuredClone(ctx.previousOutputs));
     const n = this.#used.get(step.id) ?? 0;
     this.#used.set(step.id, n + 1);
@@ -34,6 +36,11 @@ export class FakeRuntime implements Runtime {
   /** ctx.round seen by each call of `stepId`, in order */
   roundsOf(stepId: string): number[] {
     return this.rounds.filter((_, i) => this.calls[i] === stepId);
+  }
+
+  /** ctx.loops seen by each call of `stepId`, in order */
+  loopsOf(stepId: string): LoopRound[][] {
+    return this.loopsSeen.filter((_, i) => this.calls[i] === stepId);
   }
 
   /** ctx.maxRounds seen by each call of `stepId`, in order */
