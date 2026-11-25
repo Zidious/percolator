@@ -132,9 +132,10 @@ export function itemLabel(text, n, kind) {
     .split(/\r?\n/)
     .find((l) => l.trim() !== '');
   const label = (line ?? '')
-    .replace(/^\s*#+\s*|^ {0,3}\d{1,9}[.)](?:[ \t]+|$)/, '')
+    .replace(/^\s*#+\s*/, '')
+    .replace(/^ {0,3}\d{1,9}[.)](?:[ \t]+|$)/, '')
     .replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '$1')
-    .replace(/(^|[\s(])__(?=\S)(.+?)(?<=\S)__(?=$|[\s,;:!?)])/g, '$1$2')
+    .replace(/(^|[\s(])__(?=\S)(.+?)(?<=\S)__(?=$|[\s,;:!?)]|\.(?:$|\s))/g, '$1$2')
     .replace(/`([^`]*)`/g, '$1')
     .trim();
   return label !== '' ? label : `${kind === 'findings' ? 'Finding' : 'Question'} ${n}`;

@@ -208,6 +208,18 @@ test('perc status and perc answer number a numbered-list findings file the same 
   }
 });
 
+test('perc status prints a numbered ## finding with its number once', async () => {
+  const e = await setup();
+  try {
+    const f = await e.asking({ ...FINDINGS, items: ['## 1. Missing test\n\nwhy', '## 2. __Retry bug__.\n\nx'] });
+    const out = (await e.perc(['status', f.runId])).out.split('\n');
+    const j = out.indexOf('your turn: review hit its cap with findings left');
+    assert.deepEqual(out.slice(j + 2, j + 4), ['  1. Missing test', '  2. Retry bug.']);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('perc status lists what the run asks and how to answer', async () => {
   const e = await setup();
   try {
@@ -239,17 +251,17 @@ test('perc status lists what the run asks and how to answer', async () => {
   }
 });
 
-test('perc status labels keep __dirname and a leading year in a ## title', async () => {
+test('perc status labels keep __dirname and __init__.py in a ## title', async () => {
   const e = await setup();
   try {
     const asking: Asking = { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'review', findings: 'steps/review/3/outputs/findings.md' };
     const m = await e.asking(asking);
     const out = path.join(e.dir(m.runId), 'steps', 'review', '3', 'outputs');
     await fs.mkdir(out, { recursive: true });
-    await fs.writeFile(path.join(out, 'findings.md'), '## `__dirname` is undefined\n\nwhy\n\n## 2024. retrospective\n\nwhy\n');
+    await fs.writeFile(path.join(out, 'findings.md'), '## `__dirname` is undefined\n\nwhy\n\n## __init__.py is missing\n\nwhy\n');
     const lines = (await e.perc(['status', m.runId])).out.split('\n');
     const j = lines.findIndex((l) => l.startsWith('  1. '));
-    assert.deepEqual(lines.slice(j, j + 2), ['  1. __dirname is undefined', '  2. 2024. retrospective']);
+    assert.deepEqual(lines.slice(j, j + 2), ['  1. __dirname is undefined', '  2. __init__.py is missing']);
   } finally {
     await e.cleanup();
   }

@@ -306,9 +306,10 @@ async function runAnswer(args: string[], deps: DriverDeps): Promise<number> {
 /** The first non-empty line of an asked item, without a leading heading or list marker, `**`, `__` or backticks. */
 const itemLine = (text: string): string =>
   (text.split(/\r?\n/).find((l) => l.trim() !== '') ?? '')
-    .replace(/^\s*#+\s*|^ {0,3}\d{1,9}[.)](?:[ \t]+|$)/, '')
+    .replace(/^\s*#+\s*/, '')
+    .replace(/^ {0,3}\d{1,9}[.)](?:[ \t]+|$)/, '')
     .replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '$1')
-    .replace(/(^|[\s(])__(?=\S)(.+?)(?<=\S)__(?=$|[\s,;:!?)])/g, '$1$2')
+    .replace(/(^|[\s(])__(?=\S)(.+?)(?<=\S)__(?=$|[\s,;:!?)]|\.(?:$|\s))/g, '$1$2')
     .replace(/`([^`]*)`/g, '$1')
     .trim();
 
