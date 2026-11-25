@@ -24,6 +24,8 @@ import {
 import {
   BOARD_RATIO,
   actionArgv,
+  answerArgv,
+  askOf,
   canStart,
   guessRepo,
   knownRepos,
@@ -144,6 +146,7 @@ export default class Percolator extends View {
     this.start = null;
     this.pipes = {}; // repo → readPipelines's result, or 'loading'
     this.inputs = {}; // `<pipeline>/<input>` → its InputState, made when the pipelines arrive
+    this.asks = {}; // askOf(run).key → { inputs, na, ticks }: a questions or findings form, made when its run arrives
     this.startedId = null; // the run Start started: selected once a refresh lists it
     this.ticketInput = this.textState({ placeholder: 'owner/repo#12' });
     this.ticketInput.on('change', (_e, cx) => this.ticketChanged(cx));
@@ -212,6 +215,7 @@ export default class Percolator extends View {
       const got = await fetchStatus(this);
       if (got.ok) {
         this.runs = sortRuns(got.data.runs);
+        this.syncAsks();
         this.watcher = watcherState(got.data, { startedAt: this.watchStartedAt, now: Date.now(), live: terminals() });
         if (this.watcher.alive) this.watchStartedAt = null;
         this.notice = finishedNotice(this.notice, this.runs, false);
@@ -429,6 +433,40 @@ export default class Percolator extends View {
     this.perform('delete', deleteArgv(ids), cx);
   }
 
+  /** One form per run that asks (all unticked, nothing answered), kept while the same ask is listed. */
+  syncAsks() {
+    const next = {};
+    for (const r of this.runs) {
+      const ask = askOf(r);
+      if (!ask) continue;
+      next[ask.key] =
+        this.asks[ask.key] ??
+        (ask.kind === 'questions'
+          ? { inputs: ask.items.map(() => this.answerState()), na: ask.items.map(() => false), ticks: [] }
+          : { inputs: [], na: [], ticks: ask.items.map(() => false) });
+    }
+    this.asks = next;
+  }
+
+  /** Submit's click: perc answer with the form's values, or the reason it can't go yet in the box. */
+  submitAnswer(cx) {
+    const r = this.current();
+    const ask = askOf(r);
+    const form = ask && this.asks[ask.key];
+    if (!form || this.busy) return;
+    this.said = null;
+    let argv;
+    try {
+      argv = answerArgv(r, ask.kind === 'questions' ? form.inputs.map((s, i) => (form.na[i] ? null : s.value())) : form.ticks);
+    } catch (err) {
+      this.actError = err.message;
+      cx.notify();
+      return;
+    }
+    this.actError = null;
+    this.perform('answer', argv, cx);
+  }
+
   perform(action, argv, cx) {
     if (!argv) return;
     if (this.conn === 'fixtures') {
@@ -460,8 +498,24 @@ export default class Percolator extends View {
 
   // ── the start picker ────────────────────────────────────────────────
 
-  /** A one-line text state that marks the panel as typing while it has the keyboard; Enter starts the run. */
-  textState(options) {
+  /** An answer field: typing clears the answer's error, and Enter submits the answers (never starts a run). */
+  answerState() {
+    return this.textState(
+      { placeholder: 'Your answer' },
+      {
+        change: () => {
+          this.actError = null;
+        },
+        submit: (cx) => this.submitAnswer(cx),
+      },
+    );
+  }
+
+  /**
+   * A one-line text state that marks the panel as typing while it has the keyboard. By default (the start picker's
+   * fields) typing clears the picker's error and Enter starts the run; `on.change` and `on.submit` replace that.
+   */
+  textState(options, on = {}) {
     const s = InputState.new(options);
     s.on('focus', (_e, cx) => {
       this.typing = true;
@@ -471,11 +525,17 @@ export default class Percolator extends View {
       this.typing = false;
       cx.notify();
     });
+    const change =
+      on.change ??
+      (() => {
+        if (this.start) this.start.error = this.start.said = null;
+      });
+    const submit = on.submit ?? ((cx) => this.startRun(cx));
     s.on('change', (_e, cx) => {
-      if (this.start) this.start.error = this.start.said = null;
+      change(cx);
       cx.notify();
     });
-    s.on('submit', (_e, cx) => this.startRun(cx));
+    s.on('submit', (_e, cx) => submit(cx));
     return s;
   }
 

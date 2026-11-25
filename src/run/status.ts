@@ -17,11 +17,12 @@ import type { FanOutFile } from './fan-out.ts';
 import { listRuns } from './meta.ts';
 import type { RunListing, RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
+import { askedItems } from './answer.ts';
 import { parsePick } from './route.ts';
 import { watcherStatus } from '../watch/watch.ts';
 
-export type AttentionKind = 'gate' | 'cap' | 'paused' | 'failed' | 'stalled' | 'agent';
-export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'clean' | 'open-pane';
+export type AttentionKind = 'gate' | 'cap' | 'paused' | 'questions' | 'findings' | 'failed' | 'stalled' | 'agent';
+export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'answer' | 'clean' | 'open-pane';
 export type ReviewItem = { step: string; key: string; path: string };
 export type AttentionJson = {
   kind: AttentionKind;
@@ -36,6 +37,8 @@ export type AttentionJson = {
   agentState?: string;
   /** a pick-pipeline gate only: the pipelines `pick` may name (`perc approve <id> --pipeline <name>`) */
   choices?: string[];
+  /** questions or findings only: what the run asks, item by item (`perc answer <id>` numbers them from 1) */
+  asked?: { step: string; attempt: number; items: string[] };
 };
 export type StepJson = RunGraphStep & {
   status: 'pending' | 'running' | 'waiting' | StepRecord['status'];
@@ -255,6 +258,10 @@ export type YourTurnInput = {
   sliceOf?: string;
   /** a pick-pipeline gate: the pipelines `perc approve --pipeline` may name */
   choices?: string[];
+  /** findings: the stage a granted round goes back to */
+  backTo?: string;
+  /** findings: the failing step wrote none, so the only answer is to move on */
+  nothingToTick?: boolean;
 };
 
 /**
@@ -297,6 +304,21 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
       };
     case 'paused':
       return { message: `${a.step} paused: ${a.reason}`, next: resume };
+    case 'questions':
+      return {
+        message: `${a.step} has questions for you`,
+        detail: `Answer each one or mark it N/A; ${a.step} then runs again with your answers.`,
+        next: [`perc answer ${a.runId} --answer <n>="<text>" --na <n> …`],
+      };
+    case 'findings':
+      if (a.nothingToTick === true) {
+        return { message: `${a.step} hit its cap and wrote no findings to tick`, detail: 'The only answer is to move on past it.', next: [`perc answer ${a.runId}`] };
+      }
+      return {
+        message: `${a.step} hit its cap with findings left`,
+        detail: `Tick the findings to fix: the run goes back${a.backTo === undefined ? '' : ` to ${a.backTo}`} for one more round with only those. With none ticked, it moves on.`,
+        next: [`perc answer ${a.runId} --agree <n>[,<n>…]`, `perc answer ${a.runId}`],
+      };
     case 'failed':
       if (a.sliceOf !== undefined) {
         return {
@@ -333,7 +355,8 @@ export function attentionNext(
   const again = { ticket: run.ticket?.ref, pipeline: run.pipeline, inputs: run.inputs, repoRoot: run.repo };
   const slice = a.kind === 'failed' && a.commands === undefined && typeof run.parent === 'string' ? { sliceOf: run.parent } : {};
   const choices = a.choices !== undefined ? { choices: a.choices } : {};
-  return yourTurn({ kind: a.kind, runId: run.id, step: '', ...again, ...slice, ...choices }).next;
+  const none = a.kind === 'findings' && a.asked?.items.length === 0 ? { nothingToTick: true } : {};
+  return yourTurn({ kind: a.kind, runId: run.id, step: '', ...again, ...slice, ...choices, ...none }).next;
 }
 
 const PICK_GATE = 'pick-pipeline';
@@ -391,6 +414,26 @@ async function attentionOf(o: {
     };
   }
   if (state.status === 'paused') {
+    const asking = state.asking;
+    if (asking !== undefined) {
+      const items = await askedItems(dir, state);
+      const findings: Partial<YourTurnInput> = {};
+      if (asking.kind === 'findings') {
+        const to = o.loops.find((l) => l.id === asking.edgeId)?.to;
+        const backTo = o.steps.find((s) => s.id === to)?.stage;
+        if (backTo !== undefined) findings.backTo = backTo;
+        if (items.length === 0) findings.nothingToTick = true;
+      }
+      return {
+        kind: asking.kind,
+        since: lastEnd,
+        ...turn(asking.kind, asking.stepId, findings),
+        // every step whose findings are numbered, the others first as the items are
+        review: [...new Set([...(asking.kind === 'findings' ? (asking.also ?? []).map((s) => s.stepId) : []), asking.stepId])].flatMap(failing),
+        actions: ['answer'],
+        asked: { step: asking.stepId, attempt: asking.attempt, items },
+      };
+    }
     if (state.pausedCap !== undefined) {
       const from = o.loops.find((l) => l.id === state.pausedCap)?.from ?? state.currentStep;
       const reason = (state.pausedReason ?? '').replace(/^cap: /, '');

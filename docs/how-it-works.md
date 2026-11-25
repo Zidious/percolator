@@ -19,5 +19,5 @@ Each run works in its own git worktree at `<repo>/.worktrees/<run-id>`, on a bra
 
 **Bounded**
 
-- Every loop has a round cap. Review delivers at its cap, and a stage that loops through `max_rounds` on its binding moves on at its cap; an `on_fail` back-edge pauses the run and escalates to you.
-- `perc resume` on a run paused at a cap grants exactly one more round.
+- Every loop has a round cap. Review and a stage that loops through `max_rounds` pause at their cap and ask you about the findings left (`perc answer`); an `on_fail` back-edge pauses the run and escalates to you.
+- `perc resume` on a run paused at an `on_fail` cap grants exactly one more round.

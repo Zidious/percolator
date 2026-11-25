@@ -87,7 +87,7 @@ test('buildTask for review lists policies with the compliance instruction, input
   assert.match(t, /Use these skills: a, b\./);
   assert.match(
     t,
-    /## Policies \(binding\)\n\nFollow every policy below\. Check the change against each one and add a "Policy compliance" section to findings\.md\.\n\n- \/run\/grounds\/g\/policy\.md/,
+    /## Policies \(binding\)\n\nFollow every policy below\. Check the change against each one: each breach is a finding, its own "## " section naming the policy; write nothing about the policies the change keeps\.\n\n- \/run\/grounds\/g\/policy\.md/,
   );
   assert.match(t, /## Context \(reference\)\n\n- \/run\/grounds\/g\/ctx\.md/);
   const planLine = `- plan (from plan): ${path.join(runDir, 'steps/plan/1/outputs/plan.md')}`;
@@ -97,7 +97,11 @@ test('buildTask for review lists policies with the compliance instruction, input
   assert.ok(t.includes(`Worktree: ${worktree} (branch perc/7, base main).`));
   assert.ok(t.includes(`Write each output as a Markdown file in ${runDir}\\steps\\review\\2\\outputs, named <key>.md.`));
   assert.match(t, /Required: findings\.md/);
-  assert.ok(t.includes(`Write ${runDir}\\steps\\review\\2\\done.json last, as one JSON object: {"status":"pass"}`));
+  assert.ok(
+    t.includes(
+      `Write ${runDir}\\steps\\review\\2\\done.json last, as one JSON object: {"status":"pass"}, {"status":"fail"} (review findings, or the step failed) or {"status":"escalate","reason":"…"} when a person is needed. If you have questions only the owner can answer, don't guess: escalate with them, {"status":"escalate","questions":["…","…"]}, and this step runs again with their answers as input answers.`,
+    ),
+  );
   assert.ok(t.includes('Then run: hc send herdr-1 "review done"'));
 });
 
@@ -161,13 +165,9 @@ test('the plan brief tells the agent to record the owner\'s terminal decisions',
   );
 });
 
-test('the review brief requires findings as a top-level numbered list', () => {
+test('the review brief asks for one ## section per finding', () => {
   const t = buildTask(input());
-  assert.ok(
-    t.includes(
-      'Write your findings to findings.md as a top-level numbered list (1. …, 2. …), one finding per item; put any detail under its item.',
-    ),
-  );
+  assert.ok(t.includes('Write your findings to findings.md, one "## <title>" section per finding, with its detail under it.'));
   assert.ok(t.includes('If there are none, write "No findings." and finish with status pass; otherwise finish with status fail.'));
 });
 

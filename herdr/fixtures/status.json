@@ -977,6 +977,368 @@
       "graph": "full"
     },
     {
+      "id": "t25-20261124-040000-a1b2",
+      "pipeline": "feature",
+      "inputs": {},
+      "ticket": {
+        "ref": "github.com/zidious/percolator#25",
+        "number": 25,
+        "title": "escalate open questions to the owner",
+        "url": "https://github.com/Zidious/percolator/issues/25"
+      },
+      "parent": null,
+      "children": [],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t25-20261124-040000-a1b2",
+      "worktree": "/home/me/src/percolator/.worktrees/t25-20261124-040000-a1b2",
+      "createdAt": "2026-11-24T04:00:00.000Z",
+      "status": "paused",
+      "currentStep": "plan",
+      "driver": {
+        "alive": false,
+        "terminal": "t25_driver_a0_d600",
+        "space": "w1:s12",
+        "shown": false
+      },
+      "attention": {
+        "kind": "questions",
+        "since": "2026-11-21T02:10:00.000Z",
+        "message": "plan has questions for you",
+        "detail": "Answer each one or mark it N/A; plan then runs again with your answers.",
+        "review": [],
+        "actions": [
+          "answer"
+        ],
+        "asked": {
+          "step": "plan",
+          "attempt": 1,
+          "items": [
+            "Should a question with an empty answer count as N/A, or be refused?",
+            "Keep the old \"deliver at cap\" behaviour behind a config switch for perc watch runs?"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "escalate",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t24-20261124-050000-c3d4",
+      "pipeline": "feature",
+      "inputs": {},
+      "ticket": {
+        "ref": "github.com/zidious/percolator#24",
+        "number": 24,
+        "title": "retry flaky gh calls with backoff",
+        "url": "https://github.com/Zidious/percolator/issues/24"
+      },
+      "parent": null,
+      "children": [],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t24-20261124-050000-c3d4",
+      "worktree": "/home/me/src/percolator/.worktrees/t24-20261124-050000-c3d4",
+      "createdAt": "2026-11-24T05:00:00.000Z",
+      "status": "paused",
+      "currentStep": "review",
+      "driver": {
+        "alive": false,
+        "terminal": "t24_driver_a0_fcd5",
+        "space": "w1:s4",
+        "shown": false
+      },
+      "attention": {
+        "kind": "findings",
+        "since": "2026-11-20T23:58:02.000Z",
+        "message": "review hit its cap with findings left",
+        "detail": "Tick the findings to fix: the run goes back to implement for one more round with only those. With none ticked, it moves on.",
+        "review": [
+          {
+            "step": "review",
+            "key": "findings",
+            "path": "samples/findings-sections.md"
+          }
+        ],
+        "actions": [
+          "answer"
+        ],
+        "asked": {
+          "step": "review",
+          "attempt": 3,
+          "items": [
+            "## Retry only transient errors\n\nsrc/tracker/gh.ts retries `gh issue comment` on a 422, which is not transient. Retry only on 5xx and network errors.",
+            "## Missing test for the retry ceiling\n\ntests/tracker/gh.test.ts: add one that asserts the third failure surfaces the original error text."
+          ]
+        }
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 3,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "fail",
+          "attempts": 3,
+          "outputs": {
+            "findings": "samples/findings-sections.md"
+          }
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "continue",
+          "round": 3
+        }
+      ],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-20T21:12:31.000Z",
+          "endedAt": "2026-11-20T21:12:33.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "groom",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-20T21:12:33.000Z",
+          "endedAt": "2026-11-20T21:13:50.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "approve-groom",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-20T21:13:51.000Z",
+          "endedAt": "2026-11-20T21:20:00.000Z",
+          "outputs": {},
+          "decision": {
+            "decision": "approve",
+            "by": "zidious"
+          }
+        },
+        {
+          "kind": "attempt",
+          "step": "plan",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-20T21:20:05.000Z",
+          "endedAt": "2026-11-20T21:24:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "implement",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-20T21:24:10.000Z",
+          "endedAt": "2026-11-20T21:30:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "review",
+          "attempt": 1,
+          "status": "fail",
+          "startedAt": "2026-11-20T21:30:10.000Z",
+          "endedAt": "2026-11-20T21:33:00.000Z",
+          "outputs": {
+            "findings": "samples/findings.md"
+          }
+        },
+        {
+          "kind": "attempt",
+          "step": "implement",
+          "attempt": 2,
+          "status": "pass",
+          "startedAt": "2026-11-20T21:33:10.000Z",
+          "endedAt": "2026-11-20T21:37:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "review",
+          "attempt": 2,
+          "status": "fail",
+          "startedAt": "2026-11-20T21:37:10.000Z",
+          "endedAt": "2026-11-20T21:40:00.000Z",
+          "outputs": {
+            "findings": "samples/findings.md"
+          }
+        },
+        {
+          "kind": "attempt",
+          "step": "implement",
+          "attempt": 3,
+          "status": "pass",
+          "startedAt": "2026-11-20T21:40:10.000Z",
+          "endedAt": "2026-11-20T21:44:00.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "review",
+          "attempt": 3,
+          "status": "escalate",
+          "startedAt": "2026-11-20T21:44:10.000Z",
+          "endedAt": "2026-11-20T21:47:00.000Z",
+          "outputs": {
+            "findings": "samples/findings-sections.md"
+          }
+        },
+        {
+          "kind": "cap",
+          "loop": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "at": "2026-11-20T21:47:00.000Z"
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full"
+    },
+    {
       "id": "t9-20261120-215502-c3d9",
       "pipeline": "feature",
       "inputs": {},

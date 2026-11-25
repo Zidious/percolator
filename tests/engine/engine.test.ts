@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
 import { graphFingerprint, runGraph } from '../../src/engine/engine.ts';
-import { grantRound, newState } from '../../src/engine/state.ts';
+import { answerFindings, answerQuestions, grantRound, newState } from '../../src/engine/state.ts';
 import type { RunState } from '../../src/engine/state.ts';
 import type { GraphFragment, Pipeline } from '../../src/config/schema.ts';
 import { buildGraph } from '../../src/graph/build.ts';
 import { mergeLayers, mergePipelines } from '../../src/graph/merge.ts';
-import { esc, fail, FakeRuntime, pass } from '../helpers/fake-runtime.ts';
+import { ask, esc, fail, FakeRuntime, pass } from '../helpers/fake-runtime.ts';
 
 const init = { runId: 'r1', ticket: 'T-1', profile: 'default', groundVersions: {} };
 
@@ -104,13 +104,132 @@ test('qa on_fail back_to implement max 2 → pauses at cap', async () => {
   assert.equal(saved.at(-1)!.status, 'paused');
 });
 
-test('review fails 3 times → proceeds to deliver with unresolved findings', async () => {
+test('escalate with questions pauses and records them', async () => {
+  const g = graph();
+  const { save, saved } = saver();
+  const s = await runGraph(g, newState(init), { runtime: new FakeRuntime({ 'plan.0': [ask('q1', 'q2')] }), save });
+  assert.equal(s.status, 'paused');
+  assert.equal(s.cursor, g.steps.findIndex((x) => x.id === 'plan.0'));
+  assert.equal(s.pausedReason, 'questions: plan.0 asks 2');
+  const asking = { kind: 'questions', stepId: 'plan.0', attempt: 1, items: ['q1', 'q2'] };
+  assert.deepEqual(s.asking, asking);
+  assert.deepEqual(saved.at(-1)!.asking, asking);
+});
+
+test('questions with a reason keep it in the paused reason', async () => {
+  const outcome = { ...ask('q1'), reason: 'need the owner' };
+  const s = await runGraph(graph(), newState(init), { runtime: new FakeRuntime({ 'plan.0': [outcome] }), save: saver().save });
+  assert.equal(s.pausedReason, 'questions: plan.0 asks 1; need the owner');
+});
+
+test('answers reach only the re-run step', async () => {
+  const g = graph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ 'plan.0': [ask('q1', 'q2')] }), save: saver().save });
+  answerQuestions(s1, 'steps/plan.0/1/answers.md');
+  s1.status = 'running';
+  const rt = new FakeRuntime();
+  const s2 = await runGraph(g, s1, { runtime: rt, save: saver().save });
+  assert.equal(rt.calls[0], 'plan.0');
+  assert.equal(rt.previous[0]!['plan.0']!['answers'], 'steps/plan.0/1/answers.md');
+  assert.equal(rt.calls[1], 'plan.1');
+  assert.ok(!('answers' in (rt.previous[1]!['plan.0'] ?? {})));
+  assert.equal(s2.status, 'completed');
+  assert.ok(!('answered' in s2));
+  assert.ok(!('asking' in s2));
+});
+
+test('answers survive a contract retry of the answered step', async () => {
+  const g = graph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ groom: [ask('q1')] }), save: saver().save });
+  answerQuestions(s1, 'steps/groom/1/answers.md');
+  s1.status = 'running';
+  const rt = new FakeRuntime({ groom: [pass()] });
+  const s2 = await runGraph(g, s1, { runtime: rt, save: saver().save });
+  assert.deepEqual(rt.calls.slice(0, 2), ['groom', 'groom']);
+  assert.equal(rt.previous[1]!['groom']!['answers'], 'steps/groom/1/answers.md');
+  assert.equal(s2.status, 'completed');
+  assert.ok(!('answered' in s2));
+});
+
+test('answers survive an escalate without questions until the step runs again', async () => {
+  const g = graph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ groom: [ask('q1')] }), save: saver().save });
+  answerQuestions(s1, 'steps/groom/1/answers.md');
+  s1.status = 'running';
+  const s2 = await runGraph(g, s1, { runtime: new FakeRuntime({ groom: [esc('timeout')] }), save: saver().save });
+  assert.equal(s2.status, 'paused');
+  assert.deepEqual(s2.answered, { groom: { answers: 'steps/groom/1/answers.md' } });
+  const rt = new FakeRuntime();
+  await runGraph(g, { ...s2, status: 'running' }, { runtime: rt, save: saver().save });
+  assert.equal(rt.calls[0], 'groom');
+  assert.equal(rt.previous[0]!['groom']!['answers'], 'steps/groom/1/answers.md');
+});
+
+test('new questions from the answered step keep its earlier answers until it finishes', async () => {
+  const g = graph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ groom: [ask('q1')] }), save: saver().save });
+  answerQuestions(s1, 'steps/groom/1/answers.md');
+  s1.status = 'running';
+  const s2 = await runGraph(g, s1, { runtime: new FakeRuntime({ groom: [ask('q2')] }), save: saver().save });
+  assert.equal(s2.status, 'paused');
+  assert.deepEqual(s2.answered, { groom: { answers: 'steps/groom/1/answers.md' } });
+});
+
+test('review fails at its cap → pauses asking about findings', async () => {
   const rt = new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3')] });
   const s = await runGraph(graph(), newState(init), { runtime: rt, save: saver().save });
   assert.equal(rt.calls.filter((id) => id === 'implement').length, 3);
-  assert.equal(rt.calls.at(-1), 'deliver');
-  assert.equal(s.unresolvedFindings, 'f3');
-  assert.equal(s.status, 'completed');
+  assert.equal(s.status, 'paused');
+  assert.equal(s.currentStep, 'review');
+  assert.equal(s.pausedReason, 'findings: review reached 3 rounds');
+  assert.deepEqual(s.asking, { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'review', findings: 'f3' });
+  assert.ok(!rt.calls.includes('deliver'));
+  assert.ok(!('unresolvedFindings' in s));
+});
+
+test('agreeing with some findings runs one more round with only those', async () => {
+  const g = graph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3')] }), save: saver().save });
+  answerFindings(s1, g, 'steps/review/3/agreed-findings.md');
+  s1.status = 'running';
+  const rt = new FakeRuntime({ review: [fail('f4')] });
+  const s2 = await runGraph(g, structuredClone(s1), { runtime: rt, save: saver().save });
+  assert.deepEqual(rt.calls, ['implement', 'review']);
+  assert.equal(rt.previous[0]!['review']!['findings'], 'steps/review/3/agreed-findings.md');
+  assert.equal(s2.status, 'paused');
+  assert.deepEqual(s2.asking, { kind: 'findings', stepId: 'review', attempt: 4, edgeId: 'review', findings: 'f4' });
+  const rt3 = new FakeRuntime();
+  const s3 = await runGraph(g, structuredClone(s1), { runtime: rt3, save: saver().save });
+  assert.deepEqual(rt3.calls, ['implement', 'review', 'deliver']);
+  assert.equal(s3.status, 'completed');
+});
+
+test('agreeing with none moves past the stage', async () => {
+  const g = graph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3')] }), save: saver().save });
+  answerFindings(s1, g, undefined);
+  s1.status = 'running';
+  const rt = new FakeRuntime();
+  const s2 = await runGraph(g, s1, { runtime: rt, save: saver().save });
+  assert.deepEqual(rt.calls, ['deliver']);
+  assert.equal(s2.unresolvedFindings, 'f3');
+  assert.equal(s2.status, 'completed');
+});
+
+test('agreeing with none when the loop stage ends the graph completes the run', async () => {
+  const full = graph();
+  const end = full.steps.findIndex((x) => x.id === 'review') + 1;
+  const g = { ...full, steps: full.steps.slice(0, end) };
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3')] }), save: saver().save });
+  assert.equal(s1.status, 'paused');
+  answerFindings(s1, g, undefined);
+  s1.status = 'running';
+  const rt = new FakeRuntime();
+  const { save, saved } = saver();
+  const s2 = await runGraph(g, s1, { runtime: rt, save });
+  assert.deepEqual(rt.calls, []);
+  assert.equal(s2.status, 'completed');
+  assert.equal(saved.at(-1)!.status, 'completed');
 });
 
 test('review passes on round 2 → 2 implement runs, no unresolved findings', async () => {
@@ -206,15 +325,16 @@ test('after:review hook runs every round, including failing ones', async () => {
   assert.deepEqual(firstFail.pendingJump, { edgeId: 'review', stepId: 'review', findings: 'f1' });
 });
 
-test('review cap with an after:review hook continues with the last findings', async () => {
+test('review cap with an after:review hook pauses on the hook with the last findings', async () => {
   const g = graph({ audit: { after: 'review', agent: 'claude' } });
   const rt = new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3')] });
   const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
   assert.equal(rt.calls.filter((id) => id === 'audit').length, 3);
-  assert.equal(rt.calls.at(-1), 'deliver');
-  assert.equal(s.unresolvedFindings, 'f3');
+  assert.ok(!rt.calls.includes('deliver'));
+  assert.equal(s.status, 'paused');
+  assert.equal(s.currentStep, 'audit');
+  assert.deepEqual(s.asking, { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'review', findings: 'f3' });
   assert.equal(s.pendingJump, undefined);
-  assert.equal(s.status, 'completed');
 });
 
 test('pause while a jump is pending: resume applies the jump', async () => {
@@ -258,7 +378,18 @@ test('an outer qa round gives review a fresh loop', async () => {
   const g = graph({ qa: { before: 'deliver', kind: 'script', command: ['qa'], on_fail: { back_to: 'implement', max_rounds: 2 } } });
   const findings = ['f1', 'f2', 'f3', 'f4', 'f5', 'f6'];
   const rt = new FakeRuntime({ review: findings.map(fail), qa: [fail('q1'), pass()] });
-  const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  let s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'paused');
+  assert.equal(s.asking?.kind === 'findings' && s.asking.findings, 'f3');
+  answerFindings(s, g, undefined);
+  s.status = 'running';
+  s = await runGraph(g, s, { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'paused');
+  assert.equal(s.asking?.kind === 'findings' && s.asking.findings, 'f6');
+  assert.ok(!rt.calls.includes('deliver'));
+  answerFindings(s, g, undefined);
+  s.status = 'running';
+  s = await runGraph(g, s, { runtime: rt, save: saver().save });
   assert.equal(s.status, 'completed');
   assert.equal(rt.calls.filter((id) => id === 'review').length, 6, 'review capped at 3 in each qa round');
   assert.equal(rt.calls.filter((id) => id === 'implement').length, 6);
@@ -450,27 +581,64 @@ test('a fail on a non-last review node loops back to implement after the rest of
   assert.deepEqual(firstFail.pendingJump, { edgeId: 'review.1', stepId: 'review.0', findings: 'f1' });
 });
 
-test('non-last review fails every round → deliver with unresolved findings', async () => {
+test('non-last review fails every round → pauses asking about its findings', async () => {
   const g = graph({}, twoReviewers);
   const rt = new FakeRuntime({ 'review.0': [fail('f'), fail('f'), fail('f')] });
   const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
-  assert.equal(s.status, 'completed');
-  assert.equal(s.unresolvedFindings, 'f');
+  assert.equal(s.status, 'paused');
+  assert.deepEqual(s.asking, { kind: 'findings', stepId: 'review.0', attempt: 3, edgeId: 'review.1', findings: 'f' });
+  assert.equal(s.currentStep, 'review.1');
   assert.equal(s.rounds['review.1'], 3);
   assert.equal(rt.calls.filter((id) => id === 'review.1').length, 3);
-  assert.equal(rt.calls.filter((id) => id === 'deliver').length, 1);
+  assert.ok(!rt.calls.includes('deliver'));
+});
+
+test('findings from a pending jump name the step that failed', async () => {
+  const g = graph({}, twoReviewers);
+  const rt = new FakeRuntime({ 'review.1': [fail('b1'), fail('b2')], 'review.0': [pass(), pass(), fail('a3')] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'paused');
+  assert.equal(s.asking?.stepId, 'review.0');
+  assert.equal(s.asking?.kind === 'findings' && s.asking.findings, 'a3');
 });
 
 test('both review nodes failing count one round, and the last findings win', async () => {
   const g = graph({}, twoReviewers);
   const rt = new FakeRuntime({ 'review.0': [fail('a1'), fail('a2'), fail('a3')], 'review.1': [fail('b1'), fail('b2'), fail('b3')] });
   const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
-  assert.equal(s.status, 'completed');
+  assert.equal(s.status, 'paused');
   assert.equal(s.rounds['review.1'], 3);
   assert.equal(rt.calls.filter((id) => id === 'implement').length, 3);
-  assert.equal(rt.calls.filter((id) => id === 'deliver').length, 1);
-  assert.equal(s.unresolvedFindings, 'b3');
+  assert.ok(!rt.calls.includes('deliver'));
+  assert.deepEqual(s.asking, {
+    kind: 'findings',
+    stepId: 'review.1',
+    attempt: 3,
+    edgeId: 'review.1',
+    findings: 'b3',
+    also: [{ stepId: 'review.0', attempt: 3, findings: 'a3' }],
+  });
   assert.equal(s.pendingJump, undefined);
+});
+
+test('at the cap, a review slot that passed in the last round is not asked about', async () => {
+  const g = graph({}, twoReviewers);
+  const rt = new FakeRuntime({ 'review.0': [fail('a1'), fail('a2'), pass({ findings: '' })], 'review.1': [fail('b1'), fail('b2'), fail('b3')] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  assert.deepEqual(s.asking, { kind: 'findings', stepId: 'review.1', attempt: 3, edgeId: 'review.1', findings: 'b3' });
+});
+
+test('agreeing with findings of two failing reviewers overrides both in the extra round', async () => {
+  const g = graph({}, twoReviewers);
+  const rt = new FakeRuntime({ 'review.0': [fail('a1'), fail('a2'), fail('a3')], 'review.1': [fail('b1'), fail('b2'), fail('b3')] });
+  const s1 = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  answerFindings(s1, g, { 'review.0': 'steps/review.0/3/agreed-findings.md', 'review.1': 'steps/review.1/3/agreed-findings.md' });
+  s1.status = 'running';
+  const rt2 = new FakeRuntime();
+  await runGraph(g, s1, { runtime: rt2, save: saver().save });
+  assert.equal(rt2.calls[0], 'implement');
+  assert.equal(rt2.previous[0]!['review.0']!['findings'], 'steps/review.0/3/agreed-findings.md');
+  assert.equal(rt2.previous[0]!['review.1']!['findings'], 'steps/review.1/3/agreed-findings.md');
 });
 
 test('a later non-last review fail overwrites the pending findings', async () => {

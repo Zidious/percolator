@@ -283,7 +283,7 @@ export class HerdrRuntime implements Runtime {
     const started = this.#now();
     const seen = new Set<string>();
     const timeoutS = step.def.timeout_s;
-    let result: { status: NodeOutcome['status']; reason?: string };
+    let result: { status: NodeOutcome['status']; reason?: string; questions?: string[] };
     for (;;) {
       const t = await hc.get(n);
       const done = await readDone(doneFile);
@@ -334,11 +334,15 @@ export class HerdrRuntime implements Runtime {
     return outcome;
   }
 
-  async #collect(result: { status: NodeOutcome['status']; reason?: string }, io: StepIo): Promise<NodeOutcome> {
+  async #collect(
+    result: { status: NodeOutcome['status']; reason?: string; questions?: string[] },
+    io: StepIo,
+  ): Promise<NodeOutcome> {
     const collected = await collectOutputs(io.outputsDir, this.#o.runDir);
     if ('error' in collected) return escalate(collected.error);
     const outcome: NodeOutcome = { status: result.status, outputs: collected.outputs };
     if (result.status !== 'pass' && result.reason !== undefined) outcome.reason = result.reason;
+    if (result.status === 'escalate' && result.questions !== undefined) outcome.questions = result.questions;
     return outcome;
   }
 

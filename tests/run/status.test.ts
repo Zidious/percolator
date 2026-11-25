@@ -1489,3 +1489,126 @@ test('watcher alive from a fresh heartbeat; dead from a stale one', async () => 
     await e.cleanup();
   }
 });
+
+test('paused on questions', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const plan = rel('plan', 1, 'notes');
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.pausedReason = 'questions: plan asks 2';
+      s.asking = { kind: 'questions', stepId: 'plan', attempt: 1, items: ['Which DB?', 'Keep v1?'] };
+      s.history.push(rec('plan', 1, 'escalate', { notes: plan }));
+    });
+    const run = (await e.status(m)) as Readable;
+    assert.deepEqual(run.attention, {
+      kind: 'questions',
+      since: T2,
+      message: 'plan has questions for you',
+      detail: 'Answer each one or mark it N/A; plan then runs again with your answers.',
+      review: [{ step: 'plan', key: 'notes', path: path.join(e.dir(m), plan) }],
+      actions: ['answer'],
+      asked: { step: 'plan', attempt: 1, items: ['Which DB?', 'Keep v1?'] },
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('paused on findings at a cap, split from the findings file when state has no items', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const findings = rel('review', 3, 'findings');
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'review';
+      s.pausedReason = 'findings: review reached 3 rounds';
+      s.rounds['review'] = 3;
+      s.asking = { kind: 'findings', stepId: 'review', attempt: 3, edgeId: 'review', findings: findings.split(path.sep).join('/') };
+      s.history.push(rec('review', 3, 'fail', { findings }));
+    });
+    await fs.mkdir(path.dirname(path.join(e.dir(m), findings)), { recursive: true });
+    await fs.writeFile(path.join(e.dir(m), findings), '## Missing test\n\nwhy\n\n## Typo\n');
+    const run = (await e.status(m)) as Readable;
+    assert.deepEqual(run.attention, {
+      kind: 'findings',
+      since: T2,
+      message: 'review hit its cap with findings left',
+      detail: 'Tick the findings to fix: the run goes back to implement for one more round with only those. With none ticked, it moves on.',
+      review: [{ step: 'review', key: 'findings', path: path.join(e.dir(m), findings) }],
+      actions: ['answer'],
+      asked: { step: 'review', attempt: 3, items: ['## Missing test\n\nwhy', '## Typo'] },
+    });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('paused on findings of two failing reviewers lists both steps\' files under review, the others first', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const f0 = rel('review.0', 3, 'findings');
+    const f1 = rel('review.1', 3, 'findings');
+    const posix = (p: string) => p.split(path.sep).join('/');
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'review.1';
+      s.pausedReason = 'findings: review reached 3 rounds';
+      s.rounds['review'] = 3;
+      s.asking = {
+        kind: 'findings',
+        stepId: 'review.1',
+        attempt: 3,
+        edgeId: 'review',
+        findings: posix(f1),
+        also: [{ stepId: 'review.0', attempt: 3, findings: posix(f0) }, { stepId: 'review.0', attempt: 3, findings: posix(f0) }],
+        items: ['## A0', '## A1'],
+      };
+      s.history.push(rec('review.0', 3, 'fail', { findings: f0 }), rec('review.1', 3, 'fail', { findings: f1 }));
+    });
+    const run = (await e.status(m)) as Readable;
+    assert.ok(run.attention?.kind === 'findings');
+    assert.deepEqual(run.attention.review, [
+      { step: 'review.0', key: 'findings', path: path.join(e.dir(m), f0) },
+      { step: 'review.1', key: 'findings', path: path.join(e.dir(m), f1) },
+    ]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('yourTurn findings with nothing to tick says the only answer is to move on, and attentionNext agrees', () => {
+  const f = yourTurn({ ...TURN, kind: 'findings', step: 'report', nothingToTick: true });
+  assert.deepEqual(f, {
+    message: 'report hit its cap and wrote no findings to tick',
+    detail: 'The only answer is to move on past it.',
+    next: ['perc answer r1'],
+  });
+  const run = { id: 'r1', ticket: null, pipeline: 'feature', inputs: {}, repo: '/repo' };
+  const a = { kind: 'findings' as const, since: T1, message: '', actions: ['answer' as const], asked: { step: 'report', attempt: 2, items: [] } };
+  assert.deepEqual(attentionNext(a, run), f.next);
+  const back = yourTurn({ ...TURN, kind: 'findings', step: 'review', backTo: 'fix' });
+  assert.equal(back.detail, 'Tick the findings to fix: the run goes back to fix for one more round with only those. With none ticked, it moves on.');
+});
+
+test('yourTurn questions and findings, and attentionNext gives the same', () => {
+  const q = yourTurn({ ...TURN, kind: 'questions', step: 'plan' });
+  assert.deepEqual(q, {
+    message: 'plan has questions for you',
+    detail: 'Answer each one or mark it N/A; plan then runs again with your answers.',
+    next: ['perc answer r1 --answer <n>="<text>" --na <n> …'],
+  });
+  const f = yourTurn({ ...TURN, kind: 'findings', step: 'review' });
+  assert.deepEqual(f, {
+    message: 'review hit its cap with findings left',
+    detail: 'Tick the findings to fix: the run goes back for one more round with only those. With none ticked, it moves on.',
+    next: ['perc answer r1 --agree <n>[,<n>…]', 'perc answer r1'],
+  });
+  const run = { id: 'r1', ticket: null, pipeline: 'feature', inputs: {}, repo: '/repo' };
+  assert.deepEqual(attentionNext({ kind: 'questions', since: T1, message: '', actions: ['answer'] }, run), q.next);
+  assert.deepEqual(attentionNext({ kind: 'findings', since: T1, message: '', actions: ['answer'] }, run), f.next);
+});

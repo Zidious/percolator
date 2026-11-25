@@ -4,6 +4,7 @@ import type { NodeOutcome, RunContext, Runtime } from '../../src/engine/runtime.
 export const pass = (outputs: Record<string, string> = {}): NodeOutcome => ({ status: 'pass', outputs });
 export const fail = (findings: string): NodeOutcome => ({ status: 'fail', outputs: { findings } });
 export const esc = (reason: string): NodeOutcome => ({ status: 'escalate', outputs: {}, reason });
+export const ask = (...questions: string[]): NodeOutcome => ({ status: 'escalate', outputs: {}, questions });
 
 /** Returns scripted outcomes per stepId in order; unscripted or exhausted steps pass with a valid contract. */
 export class FakeRuntime implements Runtime {

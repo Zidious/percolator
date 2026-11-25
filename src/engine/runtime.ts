@@ -5,6 +5,8 @@ export type NodeOutcome = {
   status: 'pass' | 'fail' | 'escalate';
   outputs: Record<string, string>;
   reason?: string;
+  /** escalate only: what the step asks the owner */
+  questions?: string[];
 };
 
 export type RunContext = {
