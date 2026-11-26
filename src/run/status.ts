@@ -268,6 +268,9 @@ export type YourTurnInput = {
   choices?: string[];
   /** findings: the stage a granted round goes back to; gate: the stage a reject goes back to (none: a reject ends the run) */
   backTo?: string;
+  /** gate: its loop is on its last round, so a reject pauses at this cap of rounds (asking which findings to fix, for a stage loop) */
+  capRounds?: number;
+  capAsksFindings?: boolean;
   /** findings: the failing step wrote none, so the only answer is to move on */
   nothingToTick?: boolean;
 };
@@ -296,6 +299,17 @@ export function runAgain(a: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs'
   return ['perc run', ...(a.ticket ? [a.ticket] : []), ...pipeline, ...inputs, `--repo ${quoted(a.repoRoot)}`, ...config, ...profile].join(' ');
 }
 
+/** Where a reject of a gate sends the run: back with the feedback, else to the cap of its loop on the last round. */
+function gateDetail(a: Pick<YourTurnInput, 'backTo' | 'capRounds' | 'capAsksFindings'>): string {
+  if (a.backTo === undefined) return "Rejecting ends the run; a failed run can't be resumed.";
+  if (a.capRounds !== undefined) {
+    return a.capAsksFindings === true
+      ? `Rejecting pauses the run at its cap (${a.capRounds} rounds) to ask which findings to fix.`
+      : `Rejecting pauses the run at its cap (${a.capRounds} rounds); perc resume grants one more.`;
+  }
+  return `Rejecting sends the run back to ${a.backTo} with your feedback.`;
+}
+
 /** A failed step, with why it failed when the run recorded it (`lint failed (exit code 1)`). */
 export function failedText(step: string, reason: string | undefined): string {
   return reason === undefined ? `${step} failed` : `${step} failed (${reason})`;
@@ -309,7 +323,7 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
       return {
         // a ticketless run has no issue for the gate to comment on
         message: a.ticket ? `${a.step} is waiting for approval` : 'approve or reject here (no issue to comment on)',
-        detail: a.backTo !== undefined ? `Rejecting sends the run back to ${a.backTo} with your feedback.` : "Rejecting ends the run; a failed run can't be resumed.",
+        detail: gateDetail(a),
         next: [
           ...(a.choices !== undefined ? a.choices.map((c) => `perc approve ${a.runId} --pipeline ${c}`) : [`perc approve ${a.runId}`]),
           `perc reject ${a.runId} "<what to change>"`,
@@ -396,6 +410,13 @@ export function attentionNext(
 
 const PICK_GATE = 'pick-pipeline';
 
+/** A pick gate's reject has the choose agent pick again, or pauses at its cap on the last round. */
+function pickDetail(g: Pick<YourTurnInput, 'backTo' | 'capRounds'>): { detail?: string } {
+  if (g.backTo === undefined) return {};
+  if (g.capRounds !== undefined) return { detail: gateDetail(g) };
+  return { detail: 'Rejecting has the agent pick again with your feedback.' };
+}
+
 /** The choose agent's latest valid pick among `choices`, if it made one (sure or not). */
 async function suggestion(dir: string, state: RunState, choices: string[]): Promise<string | undefined> {
   const rel = latest(state, 'route.1')?.outputs['pick'];
@@ -408,13 +429,21 @@ async function suggestion(dir: string, state: RunState, choices: string[]): Prom
  * Where a reject of `gate` sends the run: the stage of the loop from the gate, else (a gate in a loop stage)
  * of the stage loop from a step of its stage. None: an older graph whose gate has no loop; a reject ends the run.
  */
-function gateBackTo(gate: string, steps: RunGraphStep[], loops: RunGraphLoop[]): { backTo?: string } {
+function gateBackTo(
+  gate: string,
+  steps: RunGraphStep[],
+  loops: RunGraphLoop[],
+  rounds: Record<string, number>,
+): Pick<YourTurnInput, 'backTo' | 'capRounds' | 'capAsksFindings'> {
   const stageOf = (id: string | undefined) => steps.find((s) => s.id === id)?.stage;
   const own = loops.find((l) => l.from === gate);
   const stage = stageOf(gate);
   const loop = own ?? loops.find((l) => l.atCap === 'continue' && stage !== undefined && stageOf(l.from) === stage);
   const backTo = stageOf(loop?.to);
-  return backTo === undefined ? {} : { backTo };
+  if (loop === undefined || backTo === undefined) return {};
+  // the engine's cap: a fail that brings the loop's rounds to its max pauses instead of going back
+  if ((rounds[loop.id] ?? 0) + 1 < loop.max) return { backTo };
+  return { backTo, capRounds: loop.max, ...(loop.atCap === 'continue' ? { capAsksFindings: true } : {}) };
 }
 
 async function attentionOf(o: {
@@ -457,13 +486,14 @@ async function attentionOf(o: {
         kind: 'gate',
         since: waiting.since,
         message: suggests === undefined ? 'pick the pipeline for this ticket' : `pick the pipeline for this ticket (the agent suggests ${suggests})`,
+        ...pickDetail(gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds)),
         ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
         review: gateReview(dir, waiting.stepId, o.steps, state),
         actions: ['pick', 'reject'],
         choices,
       };
     }
-    const { detail, ...gateTurn } = turn('gate', waiting.stepId, gateBackTo(waiting.stepId, o.steps, o.loops));
+    const { detail, ...gateTurn } = turn('gate', waiting.stepId, gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds));
     return {
       kind: 'gate',
       since: waiting.since,

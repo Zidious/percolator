@@ -1330,6 +1330,30 @@ test('yourTurn gate', () => {
   assert.equal(yourTurn({ ...TURN, kind: 'gate', step: 'approve-plan' }).detail, "Rejecting ends the run; a failed run can't be resumed.");
 });
 
+test('yourTurn gate on the last round of its loop says a reject pauses at the cap', () => {
+  const gate = { ...TURN, kind: 'gate' as const, step: 'sign-off', backTo: 'plan', capRounds: 3 };
+  assert.equal(yourTurn(gate).detail, 'Rejecting pauses the run at its cap (3 rounds); perc resume grants one more.');
+  assert.equal(
+    yourTurn({ ...gate, capAsksFindings: true }).detail,
+    'Rejecting pauses the run at its cap (3 rounds) to ask which findings to fix.',
+  );
+});
+
+test('a gate on the last round of its loop says a reject pauses at the cap', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.waitAtGate(m);
+    await e.edit(m, (s) => {
+      s.rounds['approve-groom'] = 2;
+    });
+    const r = (await e.status(m)) as Readable;
+    assert.equal(r.attention?.detail, 'Rejecting pauses the run at its cap (3 rounds); perc resume grants one more.');
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('yourTurn cap', () => {
   assert.deepEqual(yourTurn({ ...TURN, kind: 'cap', reason: '3 rounds' }), {
     message: 'groom hit its cap (3 rounds)',
@@ -1452,6 +1476,7 @@ test("a pick-pipeline gate asks you to pick from the router's pipelines, naming 
       kind: 'gate',
       since: NOW.toISOString(),
       message: 'pick the pipeline for this ticket (the agent suggests hotfix)',
+      detail: 'Rejecting has the agent pick again with your feedback.',
       commentUrl: URL,
       review: [{ step: 'route.1', key: 'pick', path: path.join(e.dir(m), rel('route.1', 1, 'pick')) }],
       actions: ['pick', 'reject'],
