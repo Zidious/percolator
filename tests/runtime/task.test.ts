@@ -294,3 +294,13 @@ test("a gate in review's loop sends its feedback to implement", () => {
   assert.ok(taskOf(g, 'implement', outs).includes('## Feedback\n\nGate approve-x rejected the last round.'));
   assert.ok(!taskOf(g, 'plan', outs).includes('## Feedback'));
 });
+
+test('a reject back to intake gives its feedback to the first stage with an agent', () => {
+  for (const nodes of [{ 'approve-x': { kind: 'gate', after: 'intake' } }, { 'approve-x': { kind: 'gate', before: 'groom' } }] as const) {
+    const g = built(nodes);
+    const outs = { 'approve-x': { findings: 'steps/approve-x/1/outputs/findings.md' } };
+    const feedback = 'Gate approve-x rejected the last round. Address its feedback: findings (from approve-x) in the inputs.';
+    assert.ok(taskOf(g, 'groom', outs).includes(`## Feedback\n\n${feedback}`), JSON.stringify(nodes));
+    assert.ok(!taskOf(g, 'plan', outs).includes('## Feedback'), JSON.stringify(nodes));
+  }
+});

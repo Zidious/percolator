@@ -148,13 +148,16 @@ export function buildTask(t: TaskInput): string {
   }
   if (inputs.length > 0) sections.push(`## Inputs\n\n${bullets(inputs)}`);
 
-  // gates whose latest record is a reject that sent the run back to this stage
+  // gates whose latest record is a reject that sent the run back to this stage; a reject back to a stage
+  // with no agent (intake's builtin) is for the first agent after it
   const rejectedBy = isSlot
     ? ctx.graph.steps.filter((g) => {
         if (g.def?.kind !== 'gate' || typeof ctx.previousOutputs[g.id]?.findings !== 'string') return false;
         const route = ctx.graph.failRoutes?.[g.id];
         const edge = route === undefined ? undefined : ctx.graph.backEdges?.[route];
-        return edge !== undefined && edge.toStepIndex === ctx.graph.regionStart?.[step.stage];
+        if (edge === undefined) return false;
+        const agent = ctx.graph.steps.slice(edge.toStepIndex).find((s) => s.role === 'slot' && s.def?.builtin === undefined);
+        return agent?.stage === step.stage;
       })
     : [];
   if (rejectedBy.length > 0) {
