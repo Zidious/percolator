@@ -141,9 +141,9 @@ async function retryHeld(meta: RunMeta, deps: DriverDeps, o: DeleteOptions, acti
  */
 async function removeGateComments(meta: RunMeta, gh: Gh): Promise<number> {
   if (meta.issue === undefined) return 0;
-  // an issue deleted or transferred away holds no comment of ours to remove
+  // an issue or repo deleted, transferred or out of reach for good holds no comment of ours to remove
   const issue = await gh.issue(meta.repo, meta.issue).catch((err: unknown) => {
-    if (/Could not resolve to an issue/.test((err as Error).message)) return undefined;
+    if (/Could not resolve to an? (issue|Repository)/.test((err as Error).message)) return undefined;
     throw err;
   });
   if (issue === undefined) return 0;

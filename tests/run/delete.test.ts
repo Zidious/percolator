@@ -285,6 +285,17 @@ test('deleteRun of a run whose issue no longer exists deletes as before', async 
   }
 });
 
+test('deleteRun of a run whose repo no longer resolves deletes as before', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    e.deps.gh.fail('issue', 'Could not resolve to a Repository with the name o/r');
+    assert.equal(await del(e, m), line(m, 0));
+    await assertDeleted(e, m);
+  } finally {
+    await e.cleanup();
+  }
+});
 
 test('deleteRun keeps the record when gh fails', async () => {
   const e = await setup();
@@ -300,7 +311,6 @@ test('deleteRun keeps the record when gh fails', async () => {
     await e.cleanup();
   }
 });
-
 
 test('deleteRun retries a held worktree and then gives up', async () => {
   const e = await setup();
