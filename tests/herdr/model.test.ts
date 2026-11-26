@@ -108,6 +108,8 @@ import {
   startRepos,
   linkedLine,
   parentLink,
+  trackBackSpace,
+  spaceAfterDelete,
   deleteView,
   keyHints,
   pipelineOption,
@@ -1741,6 +1743,36 @@ test('deleteView says Deleting… while the delete of the run runs, and Delete f
   const deleteFailed = { ids: ['r1'], error: 'run r1: worktree w is still in use' };
   assert.deepEqual(deleteView('r1', { busy: null, deleting: null, deleteFailed }), { kind: 'failed', error: 'run r1: worktree w is still in use' });
   assert.equal(deleteView('r2', { busy: null, deleting: null, deleteFailed }), null);
+});
+
+
+const sp = (id: string, active = false) =>
+  ({ id, index: 1, name: '', named: false, folder: '/x', machine: null, branch: null, active, status: null, tabs: [] }) as SpaceInfo;
+const onSpace = (id: string, space: string) => ({ ...readable('t8'), id, driver: { ...readable('t8').driver, space } }) as RunStatusJson;
+const SPACE_RUNS = [onSpace('r1', 'w1:s8'), onSpace('r2', 'w1:s9')];
+
+test("trackBackSpace keeps the shown space unless it is a run's space", () => {
+  assert.equal(trackBackSpace(null, [sp('w1:s1', true), sp('w1:s8')], SPACE_RUNS), 'w1:s1');
+  assert.equal(trackBackSpace('w1:s1', [sp('w1:s1'), sp('w1:s8', true)], SPACE_RUNS), 'w1:s1');
+  assert.equal(trackBackSpace('w1:s1', [sp('w1:s2', true)], SPACE_RUNS), 'w1:s2');
+  assert.equal(trackBackSpace('w1:s1', [sp('w1:s2')], SPACE_RUNS), 'w1:s1');
+});
+
+test("spaceAfterDelete switches only when the deleted run's shown space closed", () => {
+  const open = [sp('w1:s1'), sp('w1:s9', true)];
+  // the shown space was not a deleted run's
+  assert.equal(spaceAfterDelete({ shown: 'w1:s1', back: 'w1:s1' }, open, SPACE_RUNS, ['r1']), null);
+  assert.equal(spaceAfterDelete({ shown: 'w1:s9', back: 'w1:s1' }, open, SPACE_RUNS, ['r1']), null);
+  // it is still open
+  assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: 'w1:s1' }, [...open, sp('w1:s8')], SPACE_RUNS, ['r1']), null);
+  assert.equal(spaceAfterDelete({ shown: null, back: 'w1:s1' }, open, SPACE_RUNS, ['r1']), null);
+  assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: 'w1:s1' }, open, SPACE_RUNS, ['r1']), 'w1:s1');
+});
+
+test('spaceAfterDelete falls back to the first open space that is no run\'s, else none', () => {
+  assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: 'w1:s5' }, [sp('w1:s9', true), sp('w1:s3'), sp('w1:s4')], SPACE_RUNS, ['r1']), 'w1:s3');
+  assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: null }, [sp('w1:s9', true), sp('w1:s3')], SPACE_RUNS, ['r1']), 'w1:s3');
+  assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: 'w1:s5' }, [sp('w1:s9', true)], SPACE_RUNS, ['r1']), null);
 });
 
 

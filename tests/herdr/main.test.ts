@@ -693,3 +693,84 @@ test("an action's error is cleared when the next action starts", () => {
     delete fakes.exec;
   }
 });
+
+const herdrSpace = (id: string, active = false) => ({ id, index: 1, name: '', named: false, folder: '/x', machine: null, branch: null, active, status: null, tabs: [] });
+
+/** A panel on perc whose run r1 lives in space w1:s8; `open` is what spaces() lists, fake `run` records commands. */
+function panelWithRunSpace(open: { list: ReturnType<typeof herdrSpace>[] }) {
+  const { p, cx, done } = panelDeleting('r1', ok);
+  p.runs = [{ id: 'r1', status: 'running', driver: { space: 'w1:s8' } }, { id: 'r2', status: 'running', driver: { space: 'w1:s9' } }];
+  const sent: unknown[][] = [];
+  fakes.run = (...a: unknown[]) => sent.push(a);
+  fakes.spaces = () => open.list;
+  return { p, cx, done, sent };
+}
+const cleanFakes = () => {
+  delete fakes.exec;
+  delete fakes.run;
+  delete fakes.spaces;
+};
+
+test("the panel remembers the last shown space that is no run's", () => {
+  const open = { list: [herdrSpace('w1:s1', true), herdrSpace('w1:s8')] };
+  const { p } = panelWithRunSpace(open);
+  try {
+    p.backSpace = null;
+    p.trackSpace();
+    assert.equal(p.backSpace, 'w1:s1');
+    open.list = [herdrSpace('w1:s1'), herdrSpace('w1:s8', true)];
+    p.trackSpace();
+    assert.equal(p.backSpace, 'w1:s1');
+  } finally {
+    cleanFakes();
+  }
+});
+
+test("deleting the shown run's space goes back to the space shown before it", async () => {
+  const open = { list: [herdrSpace('w1:s1'), herdrSpace('w1:s8', true), herdrSpace('w1:s9')] };
+  const { p, cx, done, sent } = panelWithRunSpace(open);
+  try {
+    p.backSpace = 'w1:s1';
+    fakes.exec = async () => {
+      // perc ended the space's shell: Herdr closed it and shows another run's space
+      open.list = [herdrSpace('w1:s1'), herdrSpace('w1:s9', true)];
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    p.deleteRuns(['r1'], cx);
+    await done();
+    assert.deepEqual(sent, [['space.select', { id: 'w1:s1' }]]);
+  } finally {
+    cleanFakes();
+  }
+});
+
+test("a delete while another space is shown does not switch spaces", async () => {
+  const open = { list: [herdrSpace('w1:s1', true), herdrSpace('w1:s8')] };
+  const { p, cx, done, sent } = panelWithRunSpace(open);
+  try {
+    p.backSpace = 'w1:s1';
+    fakes.exec = async () => {
+      open.list = [herdrSpace('w1:s1', true)];
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    p.deleteRuns(['r1'], cx);
+    await done();
+    assert.deepEqual(sent, []);
+  } finally {
+    cleanFakes();
+  }
+});
+
+test('in fixtures mode a delete sends no space.select', async () => {
+  const open = { list: [herdrSpace('w1:s1'), herdrSpace('w1:s8', true)] };
+  const { p, cx, done, sent } = panelWithRunSpace(open);
+  try {
+    p.conn = 'fixtures';
+    p.backSpace = 'w1:s1';
+    p.deleteRuns(['r1'], cx);
+    await done();
+    assert.deepEqual(sent, []);
+  } finally {
+    cleanFakes();
+  }
+});

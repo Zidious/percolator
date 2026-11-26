@@ -69,6 +69,8 @@ import {
   runningCount,
   selectAfterDelete,
   selectAfterRefresh,
+  spaceAfterDelete,
+  trackBackSpace,
   showsHere,
   sortRuns,
   visibleRuns,
@@ -116,6 +118,7 @@ export default class Percolator extends View {
     this.said = null;
     this.notice = null; // beside Delete finished runs ↗, seen with or without a selection
     this.deleting = null; // { ids, next, shown, doneAt? }: the delete the owner confirmed and the row to select after it
+    this.backSpace = null; // the latest shown space that is no run's: where a delete of the shown run's space goes back to
     this.deleteFailed = null; // { ids, error }: the last delete failed; its runs' headers say so until retry or another pick
     this.fetches = 0;
     this.historyOpen = false;
@@ -446,8 +449,21 @@ export default class Percolator extends View {
       return;
     }
     this.deleteFailed = null;
-    if (this.conn !== 'fixtures') this.deleting = { ids, next: selectAfterDelete(this.rows(), ids, this.sel) };
+    const shown = this.openSpaces().find((s) => s.active)?.id ?? null;
+    if (this.conn !== 'fixtures') this.deleting = { ids, next: selectAfterDelete(this.rows(), ids, this.sel), shown };
     this.perform('delete', deleteArgv(ids), cx);
+  }
+
+  /** Keeps the space to go back to after a delete: the latest shown one that is no run's (render calls it). */
+  trackSpace() {
+    this.backSpace = trackBackSpace(this.backSpace ?? null, this.openSpaces(), this.runs);
+  }
+
+  /** Once perc ended a deleted run's space while it was shown, shows the space the owner came from instead of the
+   *  one Herdr picked (often another run's); the deleted runs are still in `this.runs` until the refresh lands. */
+  spaceBack(d) {
+    const id = spaceAfterDelete({ shown: d.shown ?? null, back: this.backSpace ?? null }, this.openSpaces(), this.runs, d.ids);
+    if (id !== null) command('space.select', { id });
   }
 
   /** One form per run that asks (all unticked, nothing answered), kept while the same ask is listed. */
@@ -500,7 +516,10 @@ export default class Percolator extends View {
         stderr: String(e?.message ?? e),
       }));
       this.busy = null;
-      if (action === 'delete' && this.deleting) this.deleting.doneAt = this.fetches;
+      if (action === 'delete' && this.deleting) {
+        this.deleting.doneAt = this.fetches;
+        this.spaceBack(this.deleting);
+      }
       // a delete of several runs that exits 1 still removed some: refresh either way
       if (res.code === 0 || action === 'delete') this.refresh(cx);
       if (res.code === 0) {
@@ -1245,6 +1264,7 @@ export default class Percolator extends View {
     const t = theme();
     this.catchUp(cx);
     this.probeSpaces(cx);
+    this.trackSpace();
     this.followFocus(cx);
     const at = this.shape();
     const { narrow } = at;

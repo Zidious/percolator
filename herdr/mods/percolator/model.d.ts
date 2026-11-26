@@ -235,3 +235,10 @@ export declare function deleteView(
   runId: string,
   s: { busy: string | null; deleting: { ids: string[]; doneAt?: number } | null; deleteFailed: { ids: string[]; error: string } | null },
 ): { kind: 'deleting' } | { kind: 'failed'; error: string } | null;
+export declare function trackBackSpace(prev: string | null, spaces: SpaceInfo[], runs: RunStatusJson[]): string | null;
+export declare function spaceAfterDelete(
+  o: { shown: string | null; back: string | null },
+  spaces: SpaceInfo[],
+  runs: RunStatusJson[],
+  ids: string[],
+): string | null;

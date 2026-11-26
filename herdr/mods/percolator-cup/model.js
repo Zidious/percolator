@@ -962,6 +962,28 @@ export function deleteBusyError(busy) {
   return busy ? 'Another action is running; try Delete again' : null;
 }
 
+const runSpaces = (runs) => new Set(runs.flatMap((r) => (r.status !== 'unreadable' && r.driver?.space ? [r.driver.space] : [])));
+
+/** The space to go back to after deleting a run: the shown one when it is no listed run's space, else still `prev`. */
+export function trackBackSpace(prev, spaces, runs) {
+  const shown = spaces.find((s) => s.active)?.id;
+  return shown !== undefined && !runSpaces(runs).has(shown) ? shown : prev;
+}
+
+/**
+ * The space to select once deleting `ids` closed the space that was shown (`o.shown`, one of theirs; Herdr then shows
+ * a neighbour, often another run's): `o.back` when it is still open, else the first open space that is no run's;
+ * null to leave Herdr's pick (nothing closed, or every open space is a run's).
+ */
+export function spaceAfterDelete(o, spaces, runs, ids) {
+  const deleted = runs.filter((r) => ids.includes(r.id) && r.status !== 'unreadable').map((r) => r.driver?.space);
+  if (o.shown === null || !deleted.includes(o.shown) || spaces.some((s) => s.id === o.shown)) return null;
+  if (o.back !== null && spaces.some((s) => s.id === o.back)) return o.back;
+  const taken = runSpaces(runs);
+  return spaces.find((s) => !taken.has(s.id))?.id ?? null;
+}
+
+
 /** What the run's header says about a delete of it: Deleting… while perc deletes it, Delete failed until the owner
  *  retries, selects another run or a delete succeeds; null otherwise. */
 export function deleteView(runId, { busy, deleting, deleteFailed }) {
