@@ -860,6 +860,22 @@ export function linkedLine(run, runs) {
   return from ?? started;
 }
 
+/** The header's link from a fan-out slice back to its parent (Esc and Backspace follow it too); null for any other
+ *  run, or a slice whose parent is not listed. */
+export function parentLink(run, runs) {
+  if (run.status === 'unreadable' || !run.parent) return null;
+  const p = runs.find((r) => r.id === run.parent && r.status !== 'unreadable');
+  if (!p || !(p.children ?? []).some((c) => c.id === run.id && c.slice)) return null;
+  return { text: `${fromLine(run, runs).text} · back to parent`, run: p.id };
+}
+
+/** The wide panel's key hints for the selected run (null: none): Esc goes back to a slice's parent. */
+export function keyHints(run, runs) {
+  const esc = run && parentLink(run, runs) ? 'esc parent' : 'esc close';
+  return `↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · ${esc}`;
+}
+
+
 // ── the watcher (`perc watch`) ──
 
 /** How long after Start the panel waits for the watcher's first heartbeat, saying Starting… meanwhile. */

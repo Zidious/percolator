@@ -27,6 +27,8 @@ export declare function askOf(run: RunStatusJson | null | undefined): Ask | null
 /** questions: per question its text or null (N/A); findings: per finding whether it is ticked */
 export declare function answerArgv(run: RunStatusJson, values: (string | null)[] | boolean[]): string[];
 export declare function linkedLine(run: RunStatusJson, runs: RunStatusJson[]): { text: string; run: string | null } | null;
+export declare function parentLink(run: RunStatusJson, runs: RunStatusJson[]): { text: string; run: string } | null;
+export declare function keyHints(run: RunStatusJson | null, runs: RunStatusJson[]): string;
 export type SliceRow = { index: number; title: string; id: string; status: RunStatusJson['status'] | 'pending'; stepLabel: string; prUrl?: string };
 export declare function sliceRows(run: RunStatusJson, runs: RunStatusJson[]): SliceRow[];
 export declare function fanOutRow(rows: PipeRow[]): number;

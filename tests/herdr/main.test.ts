@@ -519,3 +519,59 @@ test('the Run again button reads Run again', async () => {
   const { LABELS } = await import('../../herdr/mods/percolator/turn.js' as string);
   assert.deepEqual(LABELS['run-again'], ['Run again', 'ok']);
 });
+
+const EPIC = 't23-epic-20261121-090000-7c2a';
+const HOTFIX = 't21-hotfix-20261121-070000-4b5c';
+
+/** A panel over the fixture's runs with `sel` selected; fake `run` records the Herdr commands it sends. */
+async function panelOnFixture(sel: string) {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const all = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'status.json'), 'utf8')).runs;
+  const p = Object.create(Percolator.prototype);
+  Object.assign(p, {
+    runs: all, filter: 'all', files: {}, sel, stopSel: null, unfolded: [], start: null, rejecting: false, conn: 'perc', width: 900,
+    feedback: { set_value() {} }, boardScroll: { scroll_to_item() {} },
+  });
+  const sent: unknown[][] = [];
+  fakes.run = (...a: unknown[]) => sent.push(a);
+  return { p, cx: { notify() {}, spawn() {} }, sent };
+}
+
+for (const key of ['escape', 'backspace']) {
+  test(`${key} on a selected slice selects its parent`, async () => {
+    const { p, cx, sent } = await panelOnFixture(`${EPIC}-s2`);
+    try {
+      assert.equal(p.key(key, cx), true);
+      assert.equal(p.sel, EPIC);
+      assert.deepEqual(sent, []);
+    } finally {
+      delete fakes.run;
+    }
+  });
+}
+
+test('on a run that is not a slice, backspace does nothing and escape still hides the panel', async () => {
+  const { p, cx, sent } = await panelOnFixture(HOTFIX);
+  try {
+    assert.equal(p.key('backspace', cx), false);
+    assert.equal(p.sel, HOTFIX);
+    assert.equal(p.key('escape', cx), true);
+    assert.equal(p.sel, HOTFIX);
+    assert.deepEqual(sent, [['layout.hide', { id: 'percolator-panel' }]]);
+  } finally {
+    delete fakes.run;
+  }
+});
+
+test('escape on a slice with the stop strip open closes the strip and keeps the slice', async () => {
+  const { p, cx } = await panelOnFixture(`${EPIC}-s2`);
+  try {
+    p.stopSel = 'plan';
+    assert.equal(p.key('escape', cx), true);
+    assert.equal(p.stopSel, null);
+    assert.equal(p.sel, `${EPIC}-s2`);
+  } finally {
+    delete fakes.run;
+  }
+});

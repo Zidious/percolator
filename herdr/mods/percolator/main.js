@@ -52,7 +52,9 @@ import {
   dragBoard,
   driverPeek,
   findNode,
+  keyHints,
   panelShape,
+  parentLink,
   titleLayout,
   unfoldAfterPick,
   moveRow,
@@ -888,8 +890,19 @@ export default class Percolator extends View {
       if (this.start) this.closeStart();
       else if (this.rejecting) this.closeReject();
       else if (this.stopSel) this.pickStop(null, cx);
-      else this.hide();
-    } else return false;
+      else if (!this.toParent(cx)) this.hide();
+    } else if (key === 'backspace') return this.toParent(cx);
+    else return false;
+    return true;
+  }
+
+  /** A selected slice's parent: selects it; false when the run is not a slice whose parent is listed. */
+  toParent(cx) {
+    const r = this.current();
+    const up = r && parentLink(r, this.runs);
+    if (!up) return false;
+    this.select(up.run, cx);
+    this.revealRow();
     return true;
   }
 
@@ -1110,7 +1123,7 @@ export default class Percolator extends View {
       .bg(t.chrome)
       .text_size(10.5)
       .text_color(t.muted)
-      .child(div().min_w(0).truncate().child('↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · esc close'));
+      .child(div().min_w(0).truncate().child(keyHints(this.current(), this.runs)));
   }
 
   /** The placeholder while nothing can be shown: not linked yet, or loading. */

@@ -4,7 +4,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { ago, canPick, driverPeek, fanOutRow, hookNote, nowTone, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, textTone, ticketTitle, took } from './model.js';
+import { ago, canPick, driverPeek, fanOutRow, hookNote, nowTone, parentLink, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, textTone, ticketTitle, took } from './model.js';
 import { chip, inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
@@ -26,6 +26,7 @@ export function header(p, t, r, narrow) {
       .child(h_flex().gap(6).items_center().child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx))));
   }
   const drv = driverPeek(r);
+  const up = parentLink(r, p.runs);
   const now = Date.now();
   return v_flex()
     .px(16)
@@ -38,6 +39,16 @@ export function header(p, t, r, narrow) {
         .child(div().flex_none().text_size(15).font_semibold().child(r.ticket ? `#${r.ticket.number}` : ''))
         .child(div().min_w(0).text_size(15).truncate().child(ticketTitle(r)))
         .when(Boolean(pipelineChip(r)), (el) => el.child(chip(t, pipelineChip(r)))),
+    )
+    .when(Boolean(up), (el) =>
+      el.child(
+        h_flex().child(
+          link(t, 'parent', up.text, (_e, cx) => {
+            p.select(up.run, cx);
+            p.revealRow();
+          }),
+        ),
+      ),
     )
     .child(
       h_flex()

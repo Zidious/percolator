@@ -25,7 +25,7 @@ The layout is Herdr's `main` (sidebar with spaces and agents, tabs, work area, s
    - The picked stop's strip (under its row in one column; under the box in two): the step, then "Kind", "Stage", "Status", "Attempts" and "Took" with their values, its outputs as links, and the picked output (else the first) read under them.
    - History: a fold under a line, "History ▸ 3 attempts" ("▾" when open), closed by default, the choice kept while the panel lives. Open, the run history in a box that scrolls past 200px, newest first, one row per attempt: mark, step, round ("Round 2"), status, start time (HH:MM), time taken, and a note ("Approved by @login" for a gate decision). A loop that hit its cap adds a red ↺ row ("review → implement hit its cap of 3 rounds"). Against a perc that sends no timeline, one row per step that ran.
    A reader (the file to review, a stop's output) shows the file name and, in the docked panel, "Read full ↗"; it scrolls on its own past half the area under the title bar. A file the box already reads is not read again in the strip.
-6. Key hint row (two columns only): "↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · esc close".
+6. Key hint row (two columns only): "↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · esc close" ("esc parent" on a fan-out slice).
 
 **The start picker.** **+ New run** (again closes it) and **▸ Run next…** open it in place of the board and the run, in a raised box that scrolls on its own; the title bar stays. Its title is "Start a run", or "Run next on #42" (the run's pipeline when it has no ticket). Top to bottom:
 
@@ -53,7 +53,7 @@ Every run's header, in both tabs and unreadable runs included, has **Delete ↗*
 
 **Board height.** Drag the divider between the board and the run below: the board keeps at least two rows (or all its rows if fewer) and at most 70% of the area below the title bar; double-click resets it to 30%. The height is kept as a ratio of that area in shared state (`percolator.boardRatio`, saved by Herdr), so the docked panel and the window show the same proportion and it survives a restart; before the first drag, the older per-copy `localStorage` value `board.ratio` is used if there is one. ↑/↓ scroll the board to the selected row.
 
-**Keys** (panel focused, not typing): ↑/↓ runs, ←/→ stops, Enter opens the agent at work, `a` approve, `r` reject, `g` grant or resume, Esc closes the start picker, then the reject box, then the stop strip, then hides the panel.
+**Keys** (panel focused, not typing): ↑/↓ runs, ←/→ stops, Enter opens the agent at work, `a` approve, `r` reject, `g` grant or resume, Esc closes the start picker, then the reject box, then the stop strip, then on a fan-out slice selects its parent, else hides the panel. Backspace selects a slice's parent.
 
 **Watcher.** Stop runs `perc watch stop`; Start watcher runs `perc watch` with a `--repo <dir>` for every repo earlier runs used. While either runs the link shows "…"; a failure's first stderr line shows beside the tabs, and in fixtures mode it says `Fixtures: would run perc watch …` there instead.
 

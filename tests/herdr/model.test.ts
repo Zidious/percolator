@@ -107,6 +107,8 @@ import {
   startRepo,
   startRepos,
   linkedLine,
+  parentLink,
+  keyHints,
   pipelineOption,
   startedRun,
   startPick,
@@ -1700,6 +1702,33 @@ test('linkedLine on a routed fan-out parent says where it came from and its slic
   const epic = { ...(rs.find((r) => r.id === EPIC) as Readable), parent: TRIAGE };
   assert.deepEqual(linkedLine(epic, [...rs.filter((r) => r.id !== EPIC), epic]), { text: '↳ from #21 · → 3 slices · 2 started', run: TRIAGE });
 });
+
+test('parentLink on a slice of a listed parent links back to it', () => {
+  const rs = runs();
+  const s2 = rs.find((r) => r.id === `${EPIC}-s2`)!;
+  assert.deepEqual(parentLink(s2, rs), { text: '↳ slice 2 of #23: Panel rows · back to parent', run: EPIC });
+  const parent = { ...(rs.find((r) => r.id === EPIC) as Readable), ticket: null };
+  assert.deepEqual(parentLink(s2, [s2, parent]), { text: '↳ slice 2 of epic: Panel rows · back to parent', run: EPIC });
+});
+
+test('parentLink is null for a non-slice child, a run with no parent, a slice whose parent is not listed and an unreadable run', () => {
+  const rs = runs();
+  const of = (id: string) => rs.find((r) => r.id === id)!;
+  assert.equal(parentLink(of(HOTFIX), rs), null);
+  assert.equal(parentLink(readable('t8'), rs), null);
+  assert.equal(parentLink(of(`${EPIC}-s2`), [of(`${EPIC}-s2`)]), null);
+  assert.equal(parentLink(byId('t5'), rs), null);
+});
+
+
+test('the key hints end with esc parent on a slice, else esc close', () => {
+  const rs = runs();
+  const base = '↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume';
+  assert.equal(keyHints(rs.find((r) => r.id === `${EPIC}-s2`)!, rs), `${base} · esc parent`);
+  assert.equal(keyHints(rs.find((r) => r.id === HOTFIX)!, rs), `${base} · esc close`);
+  assert.equal(keyHints(null, rs), `${base} · esc close`);
+});
+
 
 test("sliceRows shows each slice's step and PR", () => {
   const rs = runs();
