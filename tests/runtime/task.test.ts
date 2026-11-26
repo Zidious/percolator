@@ -250,7 +250,7 @@ test('{{round}} still renders the innermost clamped round', () => {
 });
 
 /** A built feature graph with the given extra nodes, and the step of it with `id`. */
-function built(nodes: GraphFragment['nodes']) {
+function built(nodes: GraphFragment['nodes'], bindings: GraphFragment['bindings'] = {}) {
   return buildGraph(
     mergeLayers([
       {
@@ -263,6 +263,7 @@ function built(nodes: GraphFragment['nodes']) {
             implement: { agent: 'claude' },
             review: { agent: 'claude' },
             deliver: { builtin: 'github.open_pr' },
+            ...bindings,
           },
           nodes,
         },
@@ -303,4 +304,12 @@ test('a reject back to intake gives its feedback to the first stage with an agen
     assert.ok(taskOf(g, 'groom', outs).includes(`## Feedback\n\n${feedback}`), JSON.stringify(nodes));
     assert.ok(!taskOf(g, 'plan', outs).includes('## Feedback'), JSON.stringify(nodes));
   }
+});
+
+test('a reject back to a script-only stage gives its feedback to the next stage with an agent', () => {
+  const g = built({ check: { kind: 'gate', after: 'plan' } }, { plan: { command: ['pnpm', 'test'] } });
+  const outs = { check: { findings: 'steps/check/1/outputs/findings.md' } };
+  const feedback = 'Gate check rejected the last round. Address its feedback: findings (from check) in the inputs.';
+  assert.ok(taskOf(g, 'implement', outs).includes(`## Feedback\n\n${feedback}`), 'implement has no Feedback section');
+  for (const id of ['groom', 'review']) assert.ok(!taskOf(g, id, outs).includes('## Feedback'), id);
 });
