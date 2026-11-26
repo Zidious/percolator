@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import type { RunContext } from '../../../src/engine/runtime.ts';
+import type { StepRecord } from '../../../src/engine/state.ts';
 import type { Graph, Step } from '../../../src/graph/build.ts';
 import { githubPrivateForkPr } from '../../../src/tracker/exits/private-fork.ts';
 import { FakeGh } from '../../helpers/fake-gh.ts';
@@ -20,7 +21,7 @@ const step = { id: 'fix' } as Step;
 
 type Setup = { runDir: string; io: { stepDir: string; outputsDir: string }; ctx: RunContext };
 
-async function setup(o: { attempt?: number; prBody?: string; title?: string } = {}): Promise<Setup> {
+async function setup(o: { attempt?: number; prBody?: string; title?: string; notes?: { round: number; text: string }[] } = {}): Promise<Setup> {
   const runDir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-fork-'));
   const stepDir = path.join(runDir, 'steps', 'fix', String(o.attempt ?? 1));
   const outputsDir = path.join(stepDir, 'outputs');
@@ -35,6 +36,13 @@ async function setup(o: { attempt?: number; prBody?: string; title?: string } = 
     await fs.writeFile(path.join(runDir, rel), o.prBody);
     previousOutputs['patch'] = { pr_body: rel };
   }
+  const history: StepRecord[] = [];
+  for (const n of o.notes ?? []) {
+    const rel = `steps/review/${n.round}/outputs/notes.md`;
+    await fs.mkdir(path.join(runDir, 'steps', 'review', String(n.round), 'outputs'), { recursive: true });
+    await fs.writeFile(path.join(runDir, rel), n.text);
+    history.push({ stepId: 'review', attempt: n.round, startedAt: '', endedAt: '', status: 'pass', verifyRound: n.round, outputs: { notes: rel } });
+  }
   const graph = {
     steps: [
       { id: 'patch', stage: 'patch', role: 'slot', slotLast: true },
@@ -42,7 +50,7 @@ async function setup(o: { attempt?: number; prBody?: string; title?: string } = 
     ] as Step[],
     backEdges: {},
   } as unknown as Graph;
-  const ctx = { graph, state: { runId: 'r1', rounds: {}, groundVersions: {} }, previousOutputs } as unknown as RunContext;
+  const ctx = { graph, state: { runId: 'r1', rounds: {}, groundVersions: {}, history }, previousOutputs } as unknown as RunContext;
   return { runDir, io: { stepDir, outputsDir }, ctx };
 }
 
@@ -151,6 +159,17 @@ test('a malformed advisory id escalates', async () => {
     });
     assert.deepEqual(gh.calls, []);
     assert.deepEqual(pushes, []);
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('private fork exit adds the notes to the PR body', async () => {
+  const s = await setup({ prBody: 'Fixes it.', title: 'Overflow', notes: [{ round: 4, text: 'N4.' }] });
+  try {
+    const gh = new FakeGh({ readFile: readBody });
+    assert.equal((await mk(s, gh, [])(step, s.ctx, s.io)).status, 'pass');
+    assert.equal(gh.prs[0]!.body, 'Fixes it.\n\n## Noticed in review, not fixed\n\n### Round 4\n\nN4.\n');
   } finally {
     await rm(s.runDir);
   }

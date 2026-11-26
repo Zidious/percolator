@@ -6,8 +6,9 @@ import { writeFileAtomic } from '../../util/fs.ts';
 import type { Gh } from '../gh.ts';
 import { readIssueMeta } from '../intake.ts';
 import { escalate, latestOutput } from './latest.ts';
+import { noticedNotes } from './notes.ts';
 
-/** The `comment` exit: posts the latest `comment` output on the run's issue, once per run and step. */
+/** The `comment` exit: posts the latest `comment` output, then the verify rounds' notes, on the run's issue, once per run and step. */
 export function githubComment(o: { gh: Gh; runDir: string; runId: string }): StepHandler {
   return async (step, ctx, io) => {
     try {
@@ -19,7 +20,8 @@ export function githubComment(o: { gh: Gh; runDir: string; runId: string }): Ste
       const marker = `<!-- percolator:exit run=${o.runId} step=${step.id} -->`;
       await fs.mkdir(io.outputsDir, { recursive: true });
       const bodyFile = path.join(io.stepDir, 'comment-body.md');
-      await writeFileAtomic(bodyFile, `${text.trimEnd()}\n\n${marker}\n`);
+      const notes = await noticedNotes(ctx, o.runDir);
+      await writeFileAtomic(bodyFile, `${[text.trimEnd(), ...(notes ? [notes] : []), marker].join('\n\n')}\n`);
 
       // a crash after posting leaves the comment but no saved comment_url: find it by its marker and edit it
       const existing = await o.gh.findComment(issue.repo, issue.number, marker);
