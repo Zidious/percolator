@@ -1,30 +1,25 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { RunContext } from '../../engine/runtime.ts';
-import type { StepRecord } from '../../engine/state.ts';
 
 /**
  * The notes of every verify round (history entries with `verifyRound` and a `notes` output), one
  * `## Noticed in <stage>, not fixed` section per stage in order of first appearance, one `### Round <n>` per round.
- * Only the latest pass or fail of a step and round counts, so an escalated or re-run attempt is not repeated.
+ * Only pass and fail entries count, so an escalated attempt is not repeated; a round granted again after an enclosing
+ * loop jumped back keeps its place in history order, headed `(pass <n>)`. Line endings are read as LF.
  * Undefined when no verify round wrote notes; a missing or blank notes file is skipped.
  */
 export async function noticedNotes(ctx: RunContext, runDir: string): Promise<string | undefined> {
-  const latest = new Map<string, StepRecord>();
+  const byStage = new Map<string, string[]>();
+  const passes = new Map<string, number>();
   for (const h of ctx.state.history) {
     if (h.verifyRound === undefined || (h.status !== 'pass' && h.status !== 'fail')) continue;
-    const key = `${h.stepId}\n${h.verifyRound}`;
-    latest.delete(key);
-    latest.set(key, h);
-  }
-  const byStage = new Map<string, string[]>();
-  for (const h of latest.values()) {
     const rel = h.outputs['notes'];
     if (typeof rel !== 'string') continue;
     const file = path.join(runDir, rel);
     let text: string;
     try {
-      text = await fs.readFile(file, 'utf8');
+      text = (await fs.readFile(file, 'utf8')).replace(/\r\n?/g, '\n');
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === 'ENOENT') continue;
@@ -32,7 +27,11 @@ export async function noticedNotes(ctx: RunContext, runDir: string): Promise<str
     }
     if (text.trim() === '') continue;
     const stage = ctx.graph.steps.find((s) => s.id === h.stepId)?.stage ?? h.stepId;
-    const heading = h.stepId === stage ? `### Round ${h.verifyRound}` : `### ${h.stepId}, round ${h.verifyRound}`;
+    const key = `${h.stepId}\n${h.verifyRound}`;
+    const pass = (passes.get(key) ?? 0) + 1;
+    passes.set(key, pass);
+    const round = h.stepId === stage ? `### Round ${h.verifyRound}` : `### ${h.stepId}, round ${h.verifyRound}`;
+    const heading = pass === 1 ? round : `${round} (pass ${pass})`;
     const parts = byStage.get(stage) ?? [];
     parts.push(`${heading}\n\n${demoteHeadings(text.trim())}`);
     byStage.set(stage, parts);

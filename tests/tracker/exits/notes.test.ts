@@ -146,13 +146,31 @@ test('an escalated attempt of a verify round is left out for the attempt that re
   }
 });
 
-test('a re-run of the same verify round keeps only its latest notes', async () => {
+test('a round granted again after an enclosing loop jumps back keeps both passes, in history order', async () => {
   const { runDir, ctx } = await setup([
-    { stepId: 'review', round: 4, status: 'fail', notes: 'steps/review/4/outputs/notes.md', text: 'Old.' },
-    { stepId: 'review', round: 4, status: 'pass', notes: 'steps/review/5/outputs/notes.md', text: 'New.' },
+    { stepId: 'review', round: 4, status: 'pass', notes: 'steps/review/4/outputs/notes.md', text: 'A.' },
+    { stepId: 'review', round: 5, status: 'fail', notes: 'steps/review/5/outputs/notes.md', text: 'B.' },
+    { stepId: 'review', round: 4, status: 'pass', notes: 'steps/review/9/outputs/notes.md', text: 'C.' },
   ]);
   try {
-    assert.equal(await noticedNotes(ctx, runDir), '## Noticed in review, not fixed\n\n### Round 4\n\nNew.');
+    assert.equal(
+      await noticedNotes(ctx, runDir),
+      '## Noticed in review, not fixed\n\n### Round 4\n\nA.\n\n### Round 5\n\nB.\n\n### Round 4 (pass 2)\n\nC.',
+    );
+  } finally {
+    await rm(runDir);
+  }
+});
+
+test('a CRLF note has its headings demoted past a fence and comes out with LF only', async () => {
+  const { runDir, ctx } = await setup([
+    { stepId: 'review', round: 4, notes: rel('review', 4), text: '```\r\ncode\r\n```\r\n\r\n## Security\r\nText\r\n---\r\n' },
+  ]);
+  try {
+    assert.equal(
+      await noticedNotes(ctx, runDir),
+      '## Noticed in review, not fixed\n\n### Round 4\n\n```\ncode\n```\n\n##### Security\n##### Text',
+    );
   } finally {
     await rm(runDir);
   }
