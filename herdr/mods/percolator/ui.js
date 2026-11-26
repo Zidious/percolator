@@ -24,8 +24,8 @@ export const scrollY = (id, el) =>
     .child(el.id(id).min_h(0).overflow_y_scroll())
     .child(Scrollbar.vertical(id).absolute().inset_0());
 
-/** A small raised link-like control. */
-export function link(t, id, label, onClick) {
+/** A small raised link-like control; `disabled` dims it and takes no clicks. */
+export function link(t, id, label, onClick, { disabled = false } = {}) {
   return own(
     div()
       .id(id)
@@ -34,11 +34,10 @@ export function link(t, id, label, onClick) {
       .py(2)
       .rounded(4)
       .text_size(11)
-      .text_color(t.muted)
+      .text_color(disabled ? t.dim : t.muted)
       .bg(t.raised)
-      .cursor_pointer()
-      .hover((s) => s.text_color(t.foreground))
-      .on_click(onClick)
+      .when(!disabled, (el) => el.cursor_pointer().hover((s) => s.text_color(t.foreground)).on_click(onClick))
+      .when(disabled, (el) => el.cursor_not_allowed())
       .child(label),
   );
 }

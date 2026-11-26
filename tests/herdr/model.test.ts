@@ -107,6 +107,12 @@ import {
   startRepo,
   startRepos,
   linkedLine,
+  parentLink,
+  trackBackSpace,
+  spaceAfterDelete,
+  deleteView,
+  deleteFailures,
+  keyHints,
   pipelineOption,
   startedRun,
   startPick,
@@ -1699,6 +1705,79 @@ test('linkedLine on a routed fan-out parent says where it came from and its slic
   const rs = runs();
   const epic = { ...(rs.find((r) => r.id === EPIC) as Readable), parent: TRIAGE };
   assert.deepEqual(linkedLine(epic, [...rs.filter((r) => r.id !== EPIC), epic]), { text: '↳ from #21 · → 3 slices · 2 started', run: TRIAGE });
+});
+
+test('parentLink on a slice of a listed parent links back to it', () => {
+  const rs = runs();
+  const s2 = rs.find((r) => r.id === `${EPIC}-s2`)!;
+  assert.deepEqual(parentLink(s2, rs), { text: '↳ slice 2 of #23: Panel rows · back to parent', run: EPIC });
+  const parent = { ...(rs.find((r) => r.id === EPIC) as Readable), ticket: null };
+  assert.deepEqual(parentLink(s2, [s2, parent]), { text: '↳ slice 2 of epic: Panel rows · back to parent', run: EPIC });
+});
+
+test('parentLink is null for a non-slice child, a run with no parent, a slice whose parent is not listed and an unreadable run', () => {
+  const rs = runs();
+  const of = (id: string) => rs.find((r) => r.id === id)!;
+  assert.equal(parentLink(of(HOTFIX), rs), null);
+  assert.equal(parentLink(readable('t8'), rs), null);
+  assert.equal(parentLink(of(`${EPIC}-s2`), [of(`${EPIC}-s2`)]), null);
+  assert.equal(parentLink(byId('t5'), rs), null);
+});
+
+test('the key hints end with esc parent on a slice, else esc close', () => {
+  const rs = runs();
+  const base = '↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume';
+  assert.equal(keyHints(rs.find((r) => r.id === `${EPIC}-s2`)!, rs), `${base} · esc parent`);
+  assert.equal(keyHints(rs.find((r) => r.id === HOTFIX)!, rs), `${base} · esc close`);
+  assert.equal(keyHints(null, rs), `${base} · esc close`);
+});
+
+test('deleteView says Deleting… while the delete of the run runs, and Delete failed once it failed', () => {
+  const deleting = { ids: ['r1', 'r2'] };
+  assert.deepEqual(deleteView('r2', { busy: 'delete', deleting, deleteFailed: null }), { kind: 'deleting' });
+  assert.equal(deleteView('r2', { busy: null, deleting: { ...deleting, doneAt: 3 }, deleteFailed: null }), null);
+  assert.equal(deleteView('r2', { busy: 'delete', deleting: { ...deleting, doneAt: 3 }, deleteFailed: null }), null);
+  assert.equal(deleteView('r2', { busy: 'approve', deleting, deleteFailed: null }), null);
+  assert.equal(deleteView('r3', { busy: 'delete', deleting, deleteFailed: null }), null);
+  const deleteFailed = { r1: 'run r1: worktree w is still in use' };
+  assert.deepEqual(deleteView('r1', { busy: null, deleting: null, deleteFailed }), { kind: 'failed', error: 'run r1: worktree w is still in use' });
+  assert.equal(deleteView('r2', { busy: null, deleting: null, deleteFailed }), null);
+  assert.equal(deleteView('constructor', { busy: null, deleting: null, deleteFailed }), null);
+});
+
+test("deleteFailures gives each run the stderr line that names it, else every run the fallback", () => {
+  const stderr = 'run r2: boom two\nsomething else\nrun r9: not asked\nrun r3: boom three\nrun r2: later\n';
+  assert.deepEqual(deleteFailures(['r1', 'r2', 'r3'], stderr, 'run r2: boom two'), { r2: 'run r2: boom two', r3: 'run r3: boom three' });
+  assert.deepEqual(deleteFailures(['r1', 'r2'], 'gh: not logged in\r\n', 'gh: not logged in'), { r1: 'gh: not logged in', r2: 'gh: not logged in' });
+});
+
+const sp = (id: string, active = false) =>
+  ({ id, index: 1, name: '', named: false, folder: '/x', machine: null, branch: null, active, status: null, tabs: [] }) as SpaceInfo;
+const onSpace = (id: string, space: string) => ({ ...readable('t8'), id, driver: { ...readable('t8').driver, space } }) as RunStatusJson;
+const SPACE_RUNS = [onSpace('r1', 'w1:s8'), onSpace('r2', 'w1:s9')];
+
+test("trackBackSpace keeps the shown space unless it is a run's space", () => {
+  assert.equal(trackBackSpace(null, [sp('w1:s1', true), sp('w1:s8')], SPACE_RUNS), 'w1:s1');
+  assert.equal(trackBackSpace('w1:s1', [sp('w1:s1'), sp('w1:s8', true)], SPACE_RUNS), 'w1:s1');
+  assert.equal(trackBackSpace('w1:s1', [sp('w1:s2', true)], SPACE_RUNS), 'w1:s2');
+  assert.equal(trackBackSpace('w1:s1', [sp('w1:s2')], SPACE_RUNS), 'w1:s1');
+});
+
+test("spaceAfterDelete switches only when the deleted run's shown space closed", () => {
+  const open = [sp('w1:s1'), sp('w1:s9', true)];
+  // the shown space was not a deleted run's
+  assert.equal(spaceAfterDelete({ shown: 'w1:s1', back: 'w1:s1' }, open, SPACE_RUNS, ['r1']), null);
+  assert.equal(spaceAfterDelete({ shown: 'w1:s9', back: 'w1:s1' }, open, SPACE_RUNS, ['r1']), null);
+  // it is still open
+  assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: 'w1:s1' }, [...open, sp('w1:s8')], SPACE_RUNS, ['r1']), null);
+  assert.equal(spaceAfterDelete({ shown: null, back: 'w1:s1' }, open, SPACE_RUNS, ['r1']), null);
+  assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: 'w1:s1' }, open, SPACE_RUNS, ['r1']), 'w1:s1');
+});
+
+test('spaceAfterDelete falls back to the first open space that is no run\'s, else none', () => {
+  assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: 'w1:s5' }, [sp('w1:s9', true), sp('w1:s3'), sp('w1:s4')], SPACE_RUNS, ['r1']), 'w1:s3');
+  assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: null }, [sp('w1:s9', true), sp('w1:s3')], SPACE_RUNS, ['r1']), 'w1:s3');
+  assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: 'w1:s5' }, [sp('w1:s9', true)], SPACE_RUNS, ['r1']), null);
 });
 
 test("sliceRows shows each slice's step and PR", () => {

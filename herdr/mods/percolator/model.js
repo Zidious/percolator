@@ -860,6 +860,21 @@ export function linkedLine(run, runs) {
   return from ?? started;
 }
 
+/** The header's link from a fan-out slice back to its parent (Esc and Backspace follow it too); null for any other
+ *  run, or a slice whose parent is not listed. */
+export function parentLink(run, runs) {
+  if (run.status === 'unreadable' || !run.parent) return null;
+  const p = runs.find((r) => r.id === run.parent && r.status !== 'unreadable');
+  if (!p || !(p.children ?? []).some((c) => c.id === run.id && c.slice)) return null;
+  return { text: `${fromLine(run, runs).text} · back to parent`, run: p.id };
+}
+
+/** The wide panel's key hints for the selected run (null: none): Esc goes back to a slice's parent. */
+export function keyHints(run, runs) {
+  const esc = run && parentLink(run, runs) ? 'esc parent' : 'esc close';
+  return `↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · ${esc}`;
+}
+
 // ── the watcher (`perc watch`) ──
 
 /** How long after Start the panel waits for the watcher's first heartbeat, saying Starting… meanwhile. */
@@ -944,6 +959,47 @@ export function finishedNotice(notice, runs, asked) {
 /** The action error when a confirmed delete arrives while `busy` (another action) runs; null when free. */
 export function deleteBusyError(busy) {
   return busy ? 'Another action is running; try Delete again' : null;
+}
+
+const runSpaces = (runs) => new Set(runs.flatMap((r) => (r.status !== 'unreadable' && r.driver?.space ? [r.driver.space] : [])));
+
+/** The space to go back to after deleting a run: the shown one when it is no listed run's space, else still `prev`. */
+export function trackBackSpace(prev, spaces, runs) {
+  const shown = spaces.find((s) => s.active)?.id;
+  return shown !== undefined && !runSpaces(runs).has(shown) ? shown : prev;
+}
+
+/**
+ * The space to select once deleting `ids` closed the space that was shown (`o.shown`, one of theirs; Herdr then shows
+ * a neighbour, often another run's): `o.back` when it is still open, else the first open space that is no run's;
+ * null to leave Herdr's pick (nothing closed, or every open space is a run's).
+ */
+export function spaceAfterDelete(o, spaces, runs, ids) {
+  const deleted = runs.filter((r) => ids.includes(r.id) && r.status !== 'unreadable').map((r) => r.driver?.space);
+  if (o.shown === null || !deleted.includes(o.shown) || spaces.some((s) => s.id === o.shown)) return null;
+  if (o.back !== null && spaces.some((s) => s.id === o.back)) return o.back;
+  const taken = runSpaces(runs);
+  return spaces.find((s) => !taken.has(s.id))?.id ?? null;
+}
+
+/** What the run's header says about a delete of it: Deleting… while perc deletes it, Delete failed until the owner
+ *  retries, selects another run or a delete succeeds; null otherwise. */
+export function deleteView(runId, { busy, deleting, deleteFailed }) {
+  if (busy === 'delete' && deleting?.ids.includes(runId) && deleting.doneAt === undefined) return { kind: 'deleting' };
+  if (deleteFailed && Object.hasOwn(deleteFailed, runId)) return { kind: 'failed', error: deleteFailed[runId] };
+  return null;
+}
+
+/** A failed `perc delete` of `ids` → `{ <id>: why }`: each run its own `run <id>: …` stderr line; every run `fallback`
+ *  when no line names one of them. */
+export function deleteFailures(ids, stderr, fallback) {
+  const out = {};
+  for (const line of stderr.split(/\r?\n/)) {
+    const id = /^run (\S+): /.exec(line)?.[1];
+    if (id !== undefined && ids.includes(id) && !Object.hasOwn(out, id)) out[id] = line;
+  }
+  if (Object.keys(out).length === 0) for (const id of ids) out[id] = fallback;
+  return out;
 }
 
 /** The selection after `deletedIds` are gone: `selId` if it stays, else the next row left, else the previous, else null. */

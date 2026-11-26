@@ -139,6 +139,36 @@ test('editComment with no updated_at in the reply fails', async () => {
     { message: 'gh api comment edit returned no updated_at for comment 42' });
 });
 
+test('deleteComment sends DELETE to the comment\'s REST path', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { stdout: '' });
+  const gh = cliGh({ exec: rec.exec });
+  assert.equal(await gh.deleteComment('o/r', 7), true);
+  assert.equal(await gh.deleteComment('ghe.x/o/r', 7), true);
+  assert.deepEqual(rec.calls.map((c) => c.args), [
+    ['api', '-X', 'DELETE', 'repos/o/r/issues/comments/7'],
+    ['api', '--hostname', 'ghe.x', '-X', 'DELETE', 'repos/o/r/issues/comments/7'],
+  ]);
+});
+
+test('deleteComment of a comment already gone returns false', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { code: 1, stderr: 'gh: Not Found (HTTP 404)\n' });
+  assert.equal(await cliGh({ exec: rec.exec }).deleteComment('o/r', 7), false);
+});
+
+test('deleteComment fails on any other error', async () => {
+  const rec = new ExecRecorder();
+  rec.respond(() => true, { code: 1, stderr: 'HTTP 403: Resource not accessible\n' });
+  await assert.rejects(cliGh({ exec: rec.exec }).deleteComment('o/r', 7),
+    { name: 'GhError', message: 'gh api comment delete failed: HTTP 403: Resource not accessible' });
+});
+
+test('deleteComment refuses a dash-leading repo', async () => {
+  await assert.rejects(cliGh({ exec: new ExecRecorder().exec }).deleteComment('-x/r', 7),
+    { message: 'gh api comment delete: repo must not start with "-": -x/r' });
+});
+
 test('issue view reads labels', async () => {
   const rec = new ExecRecorder();
   rec.respond(() => true, {

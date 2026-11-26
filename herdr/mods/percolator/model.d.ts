@@ -27,6 +27,8 @@ export declare function askOf(run: RunStatusJson | null | undefined): Ask | null
 /** questions: per question its text or null (N/A); findings: per finding whether it is ticked */
 export declare function answerArgv(run: RunStatusJson, values: (string | null)[] | boolean[]): string[];
 export declare function linkedLine(run: RunStatusJson, runs: RunStatusJson[]): { text: string; run: string | null } | null;
+export declare function parentLink(run: RunStatusJson, runs: RunStatusJson[]): { text: string; run: string } | null;
+export declare function keyHints(run: RunStatusJson | null, runs: RunStatusJson[]): string;
 export type SliceRow = { index: number; title: string; id: string; status: RunStatusJson['status'] | 'pending'; stepLabel: string; prUrl?: string };
 export declare function sliceRows(run: RunStatusJson, runs: RunStatusJson[]): SliceRow[];
 export declare function fanOutRow(rows: PipeRow[]): number;
@@ -229,3 +231,15 @@ export declare function runNextChoices(
 /** Run-shaped (status 'pending', ticket null, plus `pipeline`) so the pipeline functions draw it. */
 export declare function previewRun(pipeline: Pipeline): Readable;
 export declare function previewSide(width: number): 'below' | 'right';
+export declare function deleteView(
+  runId: string,
+  s: { busy: string | null; deleting: { ids: string[]; doneAt?: number } | null; deleteFailed: Record<string, string> | null },
+): { kind: 'deleting' } | { kind: 'failed'; error: string } | null;
+export declare function deleteFailures(ids: string[], stderr: string, fallback: string): Record<string, string>;
+export declare function trackBackSpace(prev: string | null, spaces: SpaceInfo[], runs: RunStatusJson[]): string | null;
+export declare function spaceAfterDelete(
+  o: { shown: string | null; back: string | null },
+  spaces: SpaceInfo[],
+  runs: RunStatusJson[],
+  ids: string[],
+): string | null;

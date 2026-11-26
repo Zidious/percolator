@@ -4,7 +4,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { ago, canPick, driverPeek, fanOutRow, hookNote, nowTone, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, textTone, ticketTitle, took } from './model.js';
+import { ago, canPick, deleteView, driverPeek, fanOutRow, hookNote, nowTone, parentLink, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, textTone, ticketTitle, took } from './model.js';
 import { chip, inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
@@ -23,9 +23,11 @@ export function header(p, t, r, narrow) {
       .gap(5)
       .child(div().text_size(15).font_semibold().child(r.id))
       .child(div().text_size(11).text_color(t.muted).child('This run could not be read.'))
-      .child(h_flex().gap(6).items_center().child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx))));
+      .child(h_flex().gap(6).items_center().child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx), { disabled: Boolean(p.busy) })))
+      .when(deleteView(r.id, p) !== null, (el) => el.child(deleteState(p, t, r)));
   }
   const drv = driverPeek(r);
+  const up = parentLink(r, p.runs);
   const now = Date.now();
   return v_flex()
     .px(16)
@@ -39,6 +41,13 @@ export function header(p, t, r, narrow) {
         .child(div().min_w(0).text_size(15).truncate().child(ticketTitle(r)))
         .when(Boolean(pipelineChip(r)), (el) => el.child(chip(t, pipelineChip(r)))),
     )
+    .when(Boolean(up), (el) =>
+      el.child(
+        h_flex().child(
+          link(t, 'parent', up.text, (_e, cx) => p.toParent(cx)),
+        ),
+      ),
+    )
     .child(
       h_flex()
         .gap(6)
@@ -47,8 +56,8 @@ export function header(p, t, r, narrow) {
         .when(Boolean(r.pr?.url), (el) => el.child(link(t, 'pr', 'PR ↗', (_e, cx) => cx.open_url(r.pr.url))))
         .when(Boolean(drv), (el) => el.child(link(t, 'driver', drv.label, () => p.peekDriver())))
         // which pipelines it offers is asked of the repo when it opens: here only whether it can be offered at all
-        .when(runNextChoices(r, [], p.runs) !== null, (el) => el.child(link(t, 'run-next', '▸ Run next…', (_e, cx) => p.openRunNext(cx))))
-        .child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx)))
+        .when(runNextChoices(r, [], p.runs) !== null, (el) => el.child(link(t, 'run-next', '▸ Run next…', (_e, cx) => p.openRunNext(cx), { disabled: Boolean(p.busy) })))
+        .child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx), { disabled: Boolean(p.busy) }))
         .child(
           div()
             .min_w(0)
@@ -61,7 +70,20 @@ export function header(p, t, r, narrow) {
                 : `${r.branch ?? ''} · started ${ago(r.createdAt, now)} ago · ${short(r.id)}`,
             ),
         ),
-    );
+    )
+    .when(deleteView(r.id, p) !== null, (el) => el.child(deleteState(p, t, r)));
+}
+
+/** Under the header's links: Deleting… while perc deletes the run, or why the delete failed and Try again ↗. */
+function deleteState(p, t, r) {
+  const v = deleteView(r.id, p);
+  if (v.kind === 'deleting') return div().text_size(11).text_color(t.muted).child('Deleting…');
+  return h_flex()
+    .gap(8)
+    .items_center()
+    .child(div().min_w(0).truncate().text_size(11).text_color(t.blocked).child(`Delete failed: ${v.error}`))
+    // the owner confirmed this delete already; only this run, so a failed Delete finished doesn't retry the deleted ones
+    .child(link(t, 'delete-retry', 'Try again ↗', (_e, cx) => p.deleteRuns([r.id], cx), { disabled: Boolean(p.busy) }));
 }
 
 /** A loop span's line colour (dim before its loop is taken); its round pill's text reads the same tone via textTone. */

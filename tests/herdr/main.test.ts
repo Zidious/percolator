@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
+import { deleteView } from '../../herdr/mods/percolator/model.js';
 
 // main.js imports Herdr's host modules, which only exist inside the app: stand them in with exports that call the
 // test's fake in `fakes` (by name, `InputState.new` for a static) when it set one, and do nothing otherwise.
@@ -518,4 +519,309 @@ test('Run again starts the run and selects it once a refresh lists it', async ()
 test('the Run again button reads Run again', async () => {
   const { LABELS } = await import('../../herdr/mods/percolator/turn.js' as string);
   assert.deepEqual(LABELS['run-again'], ['Run again', 'ok']);
+});
+
+const EPIC = 't23-epic-20261121-090000-7c2a';
+const HOTFIX = 't21-hotfix-20261121-070000-4b5c';
+
+/** A panel over the fixture's runs with `sel` selected; fake `run` records the Herdr commands it sends. */
+async function panelOnFixture(sel: string) {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const all = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'status.json'), 'utf8')).runs;
+  const p = Object.create(Percolator.prototype);
+  Object.assign(p, {
+    runs: all, filter: 'all', files: {}, sel, stopSel: null, unfolded: [], start: null, rejecting: false, conn: 'perc', width: 900,
+    feedback: { set_value() {} }, boardScroll: { scroll_to_item() {} },
+  });
+  const sent: unknown[][] = [];
+  fakes.run = (...a: unknown[]) => sent.push(a);
+  return { p, cx: { notify() {}, spawn() {} }, sent };
+}
+
+for (const key of ['escape', 'backspace']) {
+  test(`${key} on a selected slice selects its parent`, async () => {
+    const { p, cx, sent } = await panelOnFixture(`${EPIC}-s2`);
+    try {
+      assert.equal(p.key(key, cx), true);
+      assert.equal(p.sel, EPIC);
+      assert.deepEqual(sent, []);
+    } finally {
+      delete fakes.run;
+    }
+  });
+}
+
+test('going to a failed parent from the Active tab switches to All and redraws', async () => {
+  const { p, cx } = await panelOnFixture(`${EPIC}-s2`);
+  try {
+    p.filter = 'active';
+    p.runs = p.runs.map((r: { id: string }) => (r.id === EPIC ? { ...r, status: 'failed', attention: null } : r));
+    let notified = 0;
+    assert.equal(p.toParent({ ...cx, notify: () => notified++ }), true);
+    assert.equal(p.sel, EPIC);
+    assert.equal(p.filter, 'all');
+    assert.ok(notified > 0, 'going to the parent must redraw the panel');
+  } finally {
+    delete fakes.run;
+  }
+});
+
+test('on a run that is not a slice, backspace does nothing and escape still hides the panel', async () => {
+  const { p, cx, sent } = await panelOnFixture(HOTFIX);
+  try {
+    assert.equal(p.key('backspace', cx), false);
+    assert.equal(p.sel, HOTFIX);
+    assert.equal(p.key('escape', cx), true);
+    assert.equal(p.sel, HOTFIX);
+    assert.deepEqual(sent, [['layout.hide', { id: 'percolator-panel' }]]);
+  } finally {
+    delete fakes.run;
+  }
+});
+
+test('escape on a slice with the stop strip open closes the strip and keeps the slice', async () => {
+  const { p, cx } = await panelOnFixture(`${EPIC}-s2`);
+  try {
+    p.stopSel = 'plan';
+    assert.equal(p.key('escape', cx), true);
+    assert.equal(p.stopSel, null);
+    assert.equal(p.sel, `${EPIC}-s2`);
+  } finally {
+    delete fakes.run;
+  }
+});
+
+const HELD_LINE = 'run r1: worktree w is still in use; close what holds it and run perc delete r1 again';
+
+/** A panel on perc with runs r1…r3, `sel` selected; `exec` answers perc; await `done()` for the spawned job. */
+function panelDeleting(sel: string | null, exec: (...a: unknown[]) => Promise<unknown>) {
+  const p = Object.create(Percolator.prototype);
+  Object.assign(p, {
+    conn: 'perc', perc: { node: 'node', cli: 'cli.ts' }, busy: null, actError: null, said: null, deleting: null, deleteFailed: null,
+    runs: [{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }], filter: 'all', files: {}, sel, fetches: 0, unfolded: [],
+    feedback: { set_value() {} }, refresh() {},
+  });
+  fakes.exec = exec;
+  const jobs: Promise<unknown>[] = [];
+  const cx = { notify() {}, spawn: (fn: (cx: unknown) => Promise<unknown>) => jobs.push(fn(cx)) };
+  const done = async () => {
+    while (jobs.length) await jobs.shift();
+  };
+  return { p, cx, done };
+}
+const failing = async () => ({ code: 1, stdout: '', stderr: `${HELD_LINE}\nmore\n` });
+const ok = async () => ({ code: 0, stdout: '', stderr: '' });
+const pending = () => new Promise(() => {});
+
+test('a failed delete shows Delete failed on the run and not as actError', async () => {
+  const { p, cx, done } = panelDeleting('r1', failing);
+  try {
+    p.deleteRuns(['r1'], cx);
+    await done();
+    assert.deepEqual(p.deleteFailed, { r1: HELD_LINE });
+    assert.equal(p.actError, null);
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('a timed-out delete is a failure', async () => {
+  const { p, cx, done } = panelDeleting('r1', async () => {
+    throw new Error('timed out after 120000 ms');
+  });
+  try {
+    p.deleteRuns(['r1'], cx);
+    await done();
+    assert.deepEqual(p.deleteFailed, { r1: 'timed out after 120000 ms' });
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('selecting another run clears Delete failed', async () => {
+  const { p, cx, done } = panelDeleting('r1', failing);
+  try {
+    p.deleteRuns(['r1'], cx);
+    await done();
+    p.select('r2', cx);
+    assert.equal(p.deleteFailed, null);
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('retrying the delete clears Delete failed when it starts', async () => {
+  const { p, cx, done } = panelDeleting('r1', failing);
+  try {
+    p.deleteRuns(['r1'], cx);
+    await done();
+    fakes.exec = pending;
+    p.deleteRuns(['r1'], cx);
+    assert.equal(p.deleteFailed, null);
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('a later successful delete clears Delete failed', async () => {
+  const { p, cx, done } = panelDeleting('r1', failing);
+  try {
+    p.deleteRuns(['r1'], cx);
+    await done();
+    p.busy = null;
+    // the run stays selected: clearing must come from the delete's success, not a new selection
+    p.deleting = null;
+    fakes.exec = ok;
+    p.deleteFailed = { r1: HELD_LINE };
+    p.perform('delete', ['delete', 'r2'], cx);
+    await done();
+    assert.equal(p.deleteFailed, null);
+    assert.equal(p.sel, 'r1');
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('a failed delete of runs not selected sets actError as before', async () => {
+  const { p, cx, done } = panelDeleting('r1', async () => ({ code: 1, stdout: '', stderr: 'run r2: boom\n' }));
+  try {
+    p.deleteRuns(['r2', 'r3'], cx);
+    await done();
+    assert.equal(p.actError, 'run r2: boom');
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('a delete of two runs that removes the selected one and fails on the other keeps the failure in view', async () => {
+  const stderr = 'run r2: worktree w2 is still in use; close what holds it and run perc delete r2 again\n';
+  const { p, cx, done } = panelDeleting('r1', async (_node: unknown, argv: unknown) =>
+    (argv as string[]).includes('status')
+      ? { code: 0, stdout: JSON.stringify({ schema: 2, runs: [{ id: 'r2' }, { id: 'r3' }] }), stderr: '' }
+      : { code: 1, stdout: 'deleted run r1: …\n', stderr },
+  );
+  fakes.terminals = () => [];
+  Object.assign(p, { refresh: Percolator.prototype.refresh, syncAsks() {}, syncReader() {}, revealRow() {}, openSpaces: () => [], notice: null, watchStartedAt: null, loading: false });
+  try {
+    p.deleteRuns(['r1', 'r2'], cx);
+    await done();
+    assert.equal(p.sel, 'r3');
+    assert.equal(p.actError, stderr.trim());
+    assert.deepEqual(deleteView('r2', p), { kind: 'failed', error: stderr.trim() });
+  } finally {
+    delete fakes.exec;
+    delete fakes.terminals;
+  }
+});
+
+test("a failed delete of several runs says each run's own reason in its header", async () => {
+  const stderr = 'run r2: boom two\nrun r3: boom three\n';
+  const { p, cx, done } = panelDeleting('r1', async () => ({ code: 1, stdout: '', stderr }));
+  try {
+    p.deleteRuns(['r1', 'r2', 'r3'], cx);
+    await done();
+    assert.equal(deleteView('r1', p), null);
+    assert.deepEqual(deleteView('r2', p), { kind: 'failed', error: 'run r2: boom two' });
+    assert.deepEqual(deleteView('r3', p), { kind: 'failed', error: 'run r3: boom three' });
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test("an action's error is cleared when the next action starts", () => {
+  const { p, cx } = panelDeleting('r1', pending);
+  try {
+    p.actError = 'invalid run id x';
+    p.perform('approve', ['approve', 'r1'], cx);
+    assert.equal(p.actError, null);
+    p.conn = 'fixtures';
+    p.busy = null;
+    p.actError = 'invalid run id x';
+    p.perform('approve', ['approve', 'r1'], cx);
+    assert.equal(p.actError, null);
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+const herdrSpace = (id: string, active = false) => ({ id, index: 1, name: '', named: false, folder: '/x', machine: null, branch: null, active, status: null, tabs: [] });
+
+/** A panel on perc whose run r1 lives in space w1:s8; `open` is what spaces() lists, fake `run` records commands. */
+function panelWithRunSpace(open: { list: ReturnType<typeof herdrSpace>[] }) {
+  const { p, cx, done } = panelDeleting('r1', ok);
+  p.runs = [{ id: 'r1', status: 'running', driver: { space: 'w1:s8' } }, { id: 'r2', status: 'running', driver: { space: 'w1:s9' } }];
+  const sent: unknown[][] = [];
+  fakes.run = (...a: unknown[]) => sent.push(a);
+  fakes.spaces = () => open.list;
+  return { p, cx, done, sent };
+}
+const cleanFakes = () => {
+  delete fakes.exec;
+  delete fakes.run;
+  delete fakes.spaces;
+};
+
+test("the panel remembers the last shown space that is no run's", () => {
+  const open = { list: [herdrSpace('w1:s1', true), herdrSpace('w1:s8')] };
+  const { p } = panelWithRunSpace(open);
+  try {
+    p.backSpace = null;
+    p.trackSpace();
+    assert.equal(p.backSpace, 'w1:s1');
+    open.list = [herdrSpace('w1:s1'), herdrSpace('w1:s8', true)];
+    p.trackSpace();
+    assert.equal(p.backSpace, 'w1:s1');
+  } finally {
+    cleanFakes();
+  }
+});
+
+test("deleting the shown run's space goes back to the space shown before it", async () => {
+  const open = { list: [herdrSpace('w1:s1'), herdrSpace('w1:s8', true), herdrSpace('w1:s9')] };
+  const { p, cx, done, sent } = panelWithRunSpace(open);
+  try {
+    p.backSpace = 'w1:s1';
+    fakes.exec = async () => {
+      // perc ended the space's shell: Herdr closed it and shows another run's space
+      open.list = [herdrSpace('w1:s1'), herdrSpace('w1:s9', true)];
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    p.deleteRuns(['r1'], cx);
+    await done();
+    assert.deepEqual(sent, [['space.select', { id: 'w1:s1' }]]);
+  } finally {
+    cleanFakes();
+  }
+});
+
+test("a delete while another space is shown does not switch spaces", async () => {
+  const open = { list: [herdrSpace('w1:s1', true), herdrSpace('w1:s8')] };
+  const { p, cx, done, sent } = panelWithRunSpace(open);
+  try {
+    p.backSpace = 'w1:s1';
+    fakes.exec = async () => {
+      open.list = [herdrSpace('w1:s1', true)];
+      return { code: 0, stdout: '', stderr: '' };
+    };
+    p.deleteRuns(['r1'], cx);
+    await done();
+    assert.deepEqual(sent, []);
+  } finally {
+    cleanFakes();
+  }
+});
+
+test('in fixtures mode a delete sends no space.select', async () => {
+  const open = { list: [herdrSpace('w1:s1'), herdrSpace('w1:s8', true)] };
+  const { p, cx, done, sent } = panelWithRunSpace(open);
+  try {
+    p.conn = 'fixtures';
+    p.backSpace = 'w1:s1';
+    p.deleteRuns(['r1'], cx);
+    await done();
+    assert.deepEqual(sent, []);
+  } finally {
+    cleanFakes();
+  }
 });

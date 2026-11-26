@@ -47,12 +47,15 @@ import {
   deleteCommandIds,
   deleteConfirm,
   deleteBusyError,
+  deleteFailures,
   deleteFinishedConfirm,
   finishedNotice,
   dragBoard,
   driverPeek,
   findNode,
+  keyHints,
   panelShape,
+  parentLink,
   titleLayout,
   unfoldAfterPick,
   moveRow,
@@ -67,6 +70,8 @@ import {
   runningCount,
   selectAfterDelete,
   selectAfterRefresh,
+  spaceAfterDelete,
+  trackBackSpace,
   showsHere,
   sortRuns,
   visibleRuns,
@@ -113,7 +118,9 @@ export default class Percolator extends View {
     this.actError = null;
     this.said = null;
     this.notice = null; // beside Delete finished runs ↗, seen with or without a selection
-    this.deleting = null; // { ids, next, doneAt? }: the delete the owner confirmed and the row to select after it
+    this.deleting = null; // { ids, next, shown, doneAt? }: the delete the owner confirmed and the row to select after it
+    this.backSpace = null; // the latest shown space that is no run's: where a delete of the shown run's space goes back to
+    this.deleteFailed = null; // { <id>: why }: the last delete failed; its runs' headers say so until retry or another pick
     this.fetches = 0;
     this.historyOpen = false;
     this.rejecting = false;
@@ -234,8 +241,12 @@ export default class Percolator extends View {
           this.select(this.startedId, cx);
           this.startedId = null;
           this.revealRow();
-        } else if (!this.current()) this.select(pick, cx);
-        else this.syncReader(cx); // the run moved on: new review files, or none
+        } else if (!this.current()) {
+          // the selected run is gone, deleted by a delete that failed on others: keep saying so
+          const { actError, deleteFailed } = this;
+          this.select(pick, cx);
+          if (deleteFailed) Object.assign(this, { actError, deleteFailed });
+        } else this.syncReader(cx); // the run moved on: new review files, or none
       } else {
         this.error = got.error; // keep the last good runs
       }
@@ -268,6 +279,7 @@ export default class Percolator extends View {
       this.rejecting = false;
       this.rejectError = null;
       this.actError = null;
+      this.deleteFailed = null;
       this.said = null;
       this.feedback.set_value('');
       this.unfolded = [];
@@ -441,8 +453,22 @@ export default class Percolator extends View {
       cx.notify();
       return;
     }
-    if (this.conn !== 'fixtures') this.deleting = { ids, next: selectAfterDelete(this.rows(), ids, this.sel) };
+    this.deleteFailed = null;
+    const shown = this.openSpaces().find((s) => s.active)?.id ?? null;
+    if (this.conn !== 'fixtures') this.deleting = { ids, next: selectAfterDelete(this.rows(), ids, this.sel), shown };
     this.perform('delete', deleteArgv(ids), cx);
+  }
+
+  /** Keeps the space to go back to after a delete: the latest shown one that is no run's (render calls it). */
+  trackSpace() {
+    this.backSpace = trackBackSpace(this.backSpace ?? null, this.openSpaces(), this.runs);
+  }
+
+  /** Once perc ended a deleted run's space while it was shown, shows the space the owner came from instead of the
+   *  one Herdr picked (often another run's); the deleted runs are still in `this.runs` until the refresh lands. */
+  spaceBack(d) {
+    const id = spaceAfterDelete({ shown: d.shown ?? null, back: this.backSpace ?? null }, this.openSpaces(), this.runs, d.ids);
+    if (id !== null) command('space.select', { id });
   }
 
   /** One form per run that asks (all unticked, nothing answered), kept while the same ask is listed. */
@@ -481,6 +507,7 @@ export default class Percolator extends View {
 
   perform(action, argv, cx) {
     if (!argv) return;
+    this.actError = null; // an earlier action's error is stale once another starts
     if (this.conn === 'fixtures') {
       this.said = `Fixtures: would run perc ${argv.join(' ')}`;
       if (action === 'reject') this.closeReject();
@@ -494,17 +521,26 @@ export default class Percolator extends View {
         stderr: String(e?.message ?? e),
       }));
       this.busy = null;
-      if (action === 'delete' && this.deleting) this.deleting.doneAt = this.fetches;
+      if (action === 'delete' && this.deleting) {
+        this.deleting.doneAt = this.fetches;
+        this.spaceBack(this.deleting);
+      }
       // a delete of several runs that exits 1 still removed some: refresh either way
       if (res.code === 0 || action === 'delete') this.refresh(cx);
       if (res.code === 0) {
+        this.actError = null;
+        if (action === 'delete') this.deleteFailed = null;
         if (action === 'reject') this.closeReject();
         // as Start does: the new run is selected once a refresh lists it
         if (action === 'run-again') this.startedId = startedRun(res.stdout);
       } else {
         const why = firstLine(res.stderr) || `perc ${argv[0]} exited ${res.code}`;
+        const ids = action === 'delete' ? (this.deleting?.ids ?? []) : [];
+        if (action === 'delete') this.deleteFailed = deleteFailures(ids, res.stderr, why);
         if (action === 'reject') this.rejectError = why;
-        else this.actError = why;
+        // the selected run's header says Delete failed: not again under its buttons; a delete of several may
+        // remove the selected run and fail on another, so that one's reason must stay in view
+        else if (!(ids.length === 1 && ids[0] === this.sel)) this.actError = why;
       }
       cx.notify();
     });
@@ -888,8 +924,22 @@ export default class Percolator extends View {
       if (this.start) this.closeStart();
       else if (this.rejecting) this.closeReject();
       else if (this.stopSel) this.pickStop(null, cx);
-      else this.hide();
-    } else return false;
+      else if (!this.toParent(cx)) this.hide();
+    } else if (key === 'backspace') return this.toParent(cx);
+    else return false;
+    return true;
+  }
+
+  /** A selected slice's parent: selects it; false when the run is not a slice whose parent is listed. */
+  toParent(cx) {
+    const r = this.current();
+    const up = r && parentLink(r, this.runs);
+    if (!up) return false;
+    // as a linked run's line does: a parent the tab hides is shown on All
+    if (!this.rows().some((x) => x.id === up.run)) this.filter = 'all';
+    this.select(up.run, cx);
+    this.revealRow();
+    cx.notify();
     return true;
   }
 
@@ -1110,7 +1160,7 @@ export default class Percolator extends View {
       .bg(t.chrome)
       .text_size(10.5)
       .text_color(t.muted)
-      .child(div().min_w(0).truncate().child('↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · esc close'));
+      .child(div().min_w(0).truncate().child(keyHints(this.current(), this.runs)));
   }
 
   /** The placeholder while nothing can be shown: not linked yet, or loading. */
@@ -1223,6 +1273,7 @@ export default class Percolator extends View {
     const t = theme();
     this.catchUp(cx);
     this.probeSpaces(cx);
+    this.trackSpace();
     this.followFocus(cx);
     const at = this.shape();
     const { narrow } = at;

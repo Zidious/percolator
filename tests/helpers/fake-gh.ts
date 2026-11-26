@@ -4,7 +4,7 @@ import type {
 } from '../../src/tracker/gh.ts';
 
 export type FakeGhMethod =
-  | 'issue' | 'comment' | 'editComment' | 'user' | 'findPr' | 'createPr' | 'editPr'
+  | 'issue' | 'comment' | 'editComment' | 'deleteComment' | 'user' | 'findPr' | 'createPr' | 'editPr'
   | 'createIssue' | 'myIssues' | 'findComment' | 'release' | 'createRelease' | 'prReviews' | 'postReview' | 'advisoryFork'
   | 'listIssues' | 'listPrs' | 'failedRuns';
 export type FakePr = {
@@ -122,6 +122,19 @@ export class FakeGh implements Gh {
     c.body = this.readFile(bodyFile);
     this.bodies.push(c.body);
     return this.now().toISOString();
+  }
+
+  async deleteComment(repo: string, id: number): Promise<boolean> {
+    this.enter('deleteComment', [repo, id]);
+    for (const [k, i] of this.issues) {
+      if (!k.startsWith(`${repo}#`)) continue;
+      const at = i.comments.findIndex((x) => x.id === id);
+      if (at >= 0) {
+        i.comments.splice(at, 1);
+        return true;
+      }
+    }
+    return false;
   }
 
   async user(): Promise<string> {
