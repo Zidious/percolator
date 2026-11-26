@@ -122,14 +122,105 @@ test('a non-review stage names itself, and several nodes name their step', async
   }
 });
 
-test('headings in a note are pushed down two levels, not inside code fences', async () => {
+test('headings in a note are pushed below its round heading, not inside code fences', async () => {
   const { runDir, ctx } = await setup([{ stepId: 'review', round: 4, notes: rel('review', 4), text: '## Big\n\n```\n## code\n```\n# Top' }]);
   try {
     assert.equal(
       await noticedNotes(ctx, runDir),
-      '## Noticed in review, not fixed\n\n### Round 4\n\n#### Big\n\n```\n## code\n```\n### Top',
+      '## Noticed in review, not fixed\n\n### Round 4\n\n##### Big\n\n```\n## code\n```\n#### Top',
     );
   } finally {
     await rm(runDir);
   }
+});
+
+test('an escalated attempt of a verify round is left out for the attempt that re-ran it', async () => {
+  const { runDir, ctx } = await setup([
+    { stepId: 'review', round: 4, status: 'escalate', notes: 'steps/review/4/outputs/notes.md', text: 'Stale.' },
+    { stepId: 'review', round: 4, status: 'pass', notes: 'steps/review/5/outputs/notes.md', text: 'Fresh.' },
+  ]);
+  try {
+    assert.equal(await noticedNotes(ctx, runDir), '## Noticed in review, not fixed\n\n### Round 4\n\nFresh.');
+  } finally {
+    await rm(runDir);
+  }
+});
+
+test('a re-run of the same verify round keeps only its latest notes', async () => {
+  const { runDir, ctx } = await setup([
+    { stepId: 'review', round: 4, status: 'fail', notes: 'steps/review/4/outputs/notes.md', text: 'Old.' },
+    { stepId: 'review', round: 4, status: 'pass', notes: 'steps/review/5/outputs/notes.md', text: 'New.' },
+  ]);
+  try {
+    assert.equal(await noticedNotes(ctx, runDir), '## Noticed in review, not fixed\n\n### Round 4\n\nNew.');
+  } finally {
+    await rm(runDir);
+  }
+});
+
+/** The section noticedNotes gives for one round-4 review note `text`. */
+async function demoted(text: string): Promise<string | undefined> {
+  const { runDir, ctx } = await setup([{ stepId: 'review', round: 4, notes: rel('review', 4), text }]);
+  try {
+    return await noticedNotes(ctx, runDir);
+  } finally {
+    await rm(runDir);
+  }
+}
+const section = (body: string) => `## Noticed in review, not fixed\n\n### Round 4\n\n${body}`;
+
+test('every note heading sits below its round heading', async () => {
+  assert.equal(await demoted('# One\n## Two\n### Three\n#### Four\n###### Six'), section('#### One\n##### Two\n###### Three\n###### Four\n###### Six'));
+});
+
+test('an indented heading and a bare # line are demoted', async () => {
+  assert.equal(await demoted('Text\n\n   ## Security\n#'), section('Text\n\n##### Security\n####'));
+});
+
+test('a heading needs a space after its #', async () => {
+  assert.equal(await demoted('#hashtag\n####### seven'), section('#hashtag\n####### seven'));
+});
+
+test('a setext heading becomes a demoted heading', async () => {
+  assert.equal(await demoted('Summary\n=======\n\nTwo lines\nof title\n---\n\nAfter.'), section('#### Summary\n\n##### Two lines of title\n\nAfter.'));
+});
+
+test('a rule after a blank line is not a setext heading', async () => {
+  assert.equal(await demoted('Text\n\n---\n\nMore.'), section('Text\n\n---\n\nMore.'));
+});
+
+test('a fence closes only on a bare fence line, so an info-string line stays inside', async () => {
+  assert.equal(
+    await demoted('```\n## a\n```ts\n## b\n```\n## c'),
+    section('```\n## a\n```ts\n## b\n```\n##### c'),
+  );
+});
+
+test('a line indented four spaces does not open a fence', async () => {
+  assert.equal(await demoted('Text\n\n    ```\n## real'), section('Text\n\n    ```\n##### real'));
+});
+
+test('a shorter or other-character fence line does not close a fence', async () => {
+  assert.equal(await demoted('````\n```\n~~~~\n## in\n````\n## out'), section('````\n```\n~~~~\n## in\n````\n##### out'));
+});
+
+test('an unreadable notes file escalates naming the step and what to do', async () => {
+  const { runDir, ctx } = await setup([{ stepId: 'review', round: 4, notes: rel('review', 4) }]);
+  try {
+    const file = path.join(runDir, rel('review', 4));
+    await fs.mkdir(file, { recursive: true });
+    await assert.rejects(noticedNotes(ctx, runDir), {
+      message: `cannot read the notes of review (${file}): EISDIR; fix or remove the file, then perc resume`,
+    });
+  } finally {
+    await rm(runDir);
+  }
+});
+
+test('a rule after a list item or a quote is not a setext heading', async () => {
+  assert.equal(await demoted('- item\nmore\n---\n> quote\n---\n1. one\n==='), section('- item\nmore\n---\n> quote\n---\n1. one\n==='));
+});
+
+test('a list item that interrupts a paragraph ends its setext content', async () => {
+  assert.equal(await demoted('Text\n- item\n---'), section('Text\n- item\n---'));
 });
