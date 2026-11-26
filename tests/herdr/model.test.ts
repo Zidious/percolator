@@ -2009,6 +2009,7 @@ test('reasonParts: splits the detail around the transcript path', () => {
 test('fileUrl: a file URL the system opens, spaces escaped', () => {
   assert.equal(fileUrl('C:\\Users\\John Doe\\t.txt'), 'file:///C:/Users/John%20Doe/t.txt');
   assert.equal(fileUrl('/home/me/t.txt'), 'file:///home/me/t.txt');
+  assert.equal(fileUrl('C:\\a#b\\t?.txt'), 'file:///C:/a%23b/t%3F.txt', '# and ? do not cut the URL');
 });
 
 test("notice: a paused run's toast keeps why it paused; a gate's body is its message", () => {

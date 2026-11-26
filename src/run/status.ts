@@ -537,7 +537,9 @@ async function attentionOf(o: {
       return { kind: 'cap', since: lastEnd, ...turn('cap', state.currentStep, { reason }), review: failing(from), actions: ['grant'] };
     }
     const reason = state.pausedReason ?? '';
-    const transcript = state.currentStep === undefined ? undefined : transcriptIn(reason, dir, state.currentStep);
+    const named = state.currentStep === undefined ? undefined : transcriptIn(reason, dir, state.currentStep);
+    // the runtime saves the screen best-effort: link it only when it was saved
+    const transcript = named !== undefined && (await fs.stat(named).then((s) => s.isFile(), () => false)) ? named : undefined;
     return {
       kind: 'paused',
       since: lastEnd,

@@ -1397,6 +1397,8 @@ test("paused with the agent's saved screen gives its transcript", async () => {
   try {
     const m = await e.prepare();
     const t = path.join(e.dir(m), 'steps', 'plan', '1', 'transcript.txt');
+    await fs.mkdir(path.dirname(t), { recursive: true });
+    await fs.writeFile(t, 'screen\n');
     await e.edit(m, (s) => {
       s.status = 'paused';
       s.currentStep = 'plan';
@@ -1407,6 +1409,25 @@ test("paused with the agent's saved screen gives its transcript", async () => {
     assert.equal(a?.message, 'plan paused');
     assert.equal(a?.detail, `agent exited with code 1 without a valid done.json; full screen in ${t}`);
     assert.equal(a?.transcript, t);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a transcript the runtime could not save is not given', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const t = path.join(e.dir(m), 'steps', 'plan', '1', 'transcript.txt');
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.pausedReason = `plan: agent exited; full screen in ${t}`;
+      s.history.push(rec('plan', 1, 'escalate'));
+    });
+    const a = ((await e.status(m)) as { attention?: AttentionJson }).attention;
+    assert.equal(a?.detail, `agent exited; full screen in ${t}`, 'the detail keeps the path');
+    assert.equal(a?.transcript, undefined);
   } finally {
     await e.cleanup();
   }
