@@ -349,7 +349,7 @@ async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: Driv
   if (waitingText) return waitingText;
   if (state.status === 'paused') return state.pausedReason ?? '';
   if (state.status === 'completed') return (await prUrl(dir, state)) ?? '';
-  if (state.status === 'failed' && state.failedReason !== undefined) return failedText(state.currentStep ?? '-', state.failedReason);
+  if (state.status === 'failed') return failedText(state.currentStep ?? '-', state.failedReason);
   return '';
 }
 

@@ -1070,7 +1070,7 @@ test('status <id> of a failed run says why it failed', async () => {
     s.status = 'failed';
     s.currentStep = 'lint';
     await saveState(e.dir(meta.runId), s);
-    assert.equal((await e.perc(['status', meta.runId])).out.split('\n')[7], '  detail ');
+    assert.equal((await e.perc(['status', meta.runId])).out.split('\n')[7], '  detail lint failed');
     s.failedReason = 'exit code 1';
     await saveState(e.dir(meta.runId), s);
     assert.equal((await e.perc(['status', meta.runId])).out.split('\n')[7], '  detail lint failed (exit code 1)');
