@@ -2928,7 +2928,7 @@
           "status": "pass",
           "attempts": 1,
           "outputs": {
-            "pick": "samples/findings.md"
+            "pick": "samples/pick.md"
           },
           "startedAt": "2026-11-21T06:58:03.000Z",
           "endedAt": "2026-11-21T06:59:40.000Z"
@@ -2995,7 +2995,7 @@
           "startedAt": "2026-11-21T06:58:03.000Z",
           "endedAt": "2026-11-21T06:59:40.000Z",
           "outputs": {
-            "pick": "samples/findings.md"
+            "pick": "samples/pick.md"
           }
         },
         {
@@ -3048,7 +3048,7 @@
           {
             "step": "route.1",
             "key": "pick",
-            "path": "samples/findings.md"
+            "path": "samples/pick.md"
           }
         ],
         "actions": [
@@ -3091,7 +3091,7 @@
           "status": "pass",
           "attempts": 1,
           "outputs": {
-            "pick": "samples/findings.md"
+            "pick": "samples/pick.md"
           },
           "startedAt": "2026-11-21T08:00:03.000Z",
           "endedAt": "2026-11-21T08:01:30.000Z"
@@ -3156,7 +3156,7 @@
           "startedAt": "2026-11-21T08:00:03.000Z",
           "endedAt": "2026-11-21T08:01:30.000Z",
           "outputs": {
-            "pick": "samples/findings.md"
+            "pick": "samples/pick.md"
           }
         },
         {

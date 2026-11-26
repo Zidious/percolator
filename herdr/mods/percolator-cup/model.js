@@ -550,14 +550,13 @@ export function readRatio(stored) {
   return stored != null && n > 0 && n < 1 ? n : BOARD_RATIO;
 }
 
-/** How the title bar fits `width` design px with `needs` runs needing you: ⧉ and ✕ always stay; + New run is an icon
- *  under 800px; the "N need you" chip shortens to "N" first, then the Active/All tabs move to a row of their own. */
-export function titleLayout(width, needs) {
+/** How the title bar fits `width` design px with `needs` runs needing you, on the `filter` tab: ⧉ and ✕ always stay;
+ *  + New run is an icon under 800px; the Active/All tabs (and on All, Delete finished runs ↗) move to a row of their
+ *  own first, and only under 270px does the "N need you" chip shorten to "N", so it never reads shorter when wider. */
+export function titleLayout(width, needs, filter) {
   const newRun = width >= 800 ? 'text' : 'icon';
-  if (needs === 0) return { tabs: width >= 330 ? 'inline' : 'below', chip: 'long', newRun };
-  if (width >= 400) return { tabs: 'inline', chip: 'long', newRun };
-  if (width >= 350) return { tabs: 'inline', chip: 'short', newRun };
-  return { tabs: 'below', chip: width >= 270 ? 'long' : 'short', newRun };
+  const inlineFrom = (needs > 0 ? 460 : 330) + (filter === 'all' ? (needs > 0 ? 160 : 190) : 0);
+  return { tabs: width >= inlineFrom ? 'inline' : 'below', chip: width < 270 ? 'short' : 'long', newRun };
 }
 
 // ── the cup (mods/percolator-cup carries a copy of this file) ──

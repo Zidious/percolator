@@ -617,17 +617,28 @@ test('readRatio: a stored ratio between 0 and 1, else the default', () => {
   assert.equal(BOARD_RATIO, 0.3);
 });
 
-test('titleLayout: the buttons always fit; the needs chip shortens, then the tabs move to a second row', () => {
-  // + New run is an icon under 800px (text from there): it takes ~30px, so the chip shortens and the tabs move sooner
-  assert.deepEqual(titleLayout(400, 2), { tabs: 'inline', chip: 'long', newRun: 'icon' });
-  assert.deepEqual(titleLayout(380, 2), { tabs: 'inline', chip: 'short', newRun: 'icon' }, 'the default 380px panel');
-  assert.deepEqual(titleLayout(350, 2), { tabs: 'inline', chip: 'short', newRun: 'icon' });
-  assert.deepEqual(titleLayout(340, 2), { tabs: 'below', chip: 'long', newRun: 'icon' });
-  assert.deepEqual(titleLayout(260, 2), { tabs: 'below', chip: 'short', newRun: 'icon' });
-  assert.deepEqual(titleLayout(330, 0), { tabs: 'inline', chip: 'long', newRun: 'icon' }, 'no chip: the tabs fit inline longer');
-  assert.deepEqual(titleLayout(320, 0), { tabs: 'below', chip: 'long', newRun: 'icon' });
-  assert.deepEqual(titleLayout(720, 2).newRun, 'icon');
-  assert.deepEqual(titleLayout(800, 2), { tabs: 'inline', chip: 'long', newRun: 'text' }, 'the window');
+test('titleLayout: the tabs move to their own row before the chip shortens; All needs room for Delete finished runs ↗', () => {
+  assert.deepEqual(titleLayout(380, 2, 'active'), { tabs: 'below', chip: 'long', newRun: 'icon' }, 'the default 380px panel reads N need you');
+  assert.deepEqual(titleLayout(460, 2, 'active'), { tabs: 'inline', chip: 'long', newRun: 'icon' });
+  assert.deepEqual(titleLayout(459, 2, 'active').tabs, 'below');
+  assert.deepEqual(titleLayout(380, 0, 'all'), { tabs: 'below', chip: 'long', newRun: 'icon' });
+  assert.deepEqual(titleLayout(520, 0, 'all').tabs, 'inline');
+  assert.deepEqual(titleLayout(519, 0, 'all').tabs, 'below');
+  assert.deepEqual(titleLayout(620, 2, 'all').tabs, 'inline');
+  assert.deepEqual(titleLayout(619, 2, 'all').tabs, 'below');
+  assert.deepEqual(titleLayout(330, 0, 'active').tabs, 'inline', 'unchanged');
+  assert.deepEqual(titleLayout(329, 0, 'active').tabs, 'below');
+  assert.deepEqual(titleLayout(270, 2, 'active').chip, 'long', 'the 280 panel');
+  assert.deepEqual(titleLayout(269, 2, 'active'), { tabs: 'below', chip: 'short', newRun: 'icon' });
+  assert.deepEqual(titleLayout(720, 2, 'all').newRun, 'icon');
+  assert.deepEqual(titleLayout(800, 2, 'all'), { tabs: 'inline', chip: 'long', newRun: 'text' }, 'the window');
+  // the chip never reads shorter at a wider width
+  for (const filter of ['active', 'all'] as const)
+    for (let w = 200, short = true; w <= 1000; w++) {
+      const s = titleLayout(w, 3, filter).chip === 'short';
+      assert.ok(!s || short, `chip short again at ${w} (${filter})`);
+      short = s;
+    }
 });
 
 const hhmm = (iso: string) => {

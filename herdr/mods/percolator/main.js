@@ -1103,8 +1103,8 @@ export default class Percolator extends View {
           .child(label),
       );
     const window = this.inWindow();
-    // ⧉ and ✕ never leave: the title truncates, the chip shortens to "N", then the tabs take a row of their own.
-    const fit = titleLayout(this.width / zoom(), needs);
+    // ⧉ and ✕ never leave: the title truncates, the tabs take a row of their own, and only under 270 does the chip shorten to "N".
+    const fit = titleLayout(this.width / zoom(), needs, this.filter);
     // inline, the tabs give way before ⧉ and ✕ do (a long notice, Delete finished runs ↗ beside a busy watcher)
     const tabs = h_flex()
       .flex_shrink_1()

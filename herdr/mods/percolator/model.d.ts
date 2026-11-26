@@ -107,7 +107,7 @@ export declare const BOARD_RATIO: number;
 export declare function boardHeight(ratio: number, area: number, min: number): number;
 export declare function dragBoard(startPx: number, dy: number, area: number, min: number): number;
 export declare function readRatio(stored: unknown): number;
-export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short'; newRun: 'icon' | 'text' };
+export declare function titleLayout(width: number, needs: number, filter: 'active' | 'all'): { tabs: 'inline' | 'below'; chip: 'long' | 'short'; newRun: 'icon' | 'text' };
 export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
 export declare function readerText(path: string, text: string): string;
 export declare function reasonParts(detail: string | undefined, transcript: string | undefined): { before: string; after: string } | null;
