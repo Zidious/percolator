@@ -8,6 +8,9 @@ import type { MaterializedMapping } from '../../src/workspace/run-dir.ts';
 import type { GraphFragment } from '../../src/config/schema.ts';
 import { buildGraph } from '../../src/graph/build.ts';
 import { mergeLayers } from '../../src/graph/merge.ts';
+import { runGraph } from '../../src/engine/engine.ts';
+import { newState } from '../../src/engine/state.ts';
+import { fail, FakeRuntime } from '../helpers/fake-runtime.ts';
 
 function step(over: Partial<Step> = {}): Step {
   return {
@@ -296,20 +299,14 @@ test("a gate in review's loop sends its feedback to implement", () => {
   assert.ok(!taskOf(g, 'plan', outs).includes('## Feedback'));
 });
 
-test('a reject back to intake gives its feedback to the first stage with an agent', () => {
-  for (const nodes of [{ 'approve-x': { kind: 'gate', after: 'intake' } }, { 'approve-x': { kind: 'gate', before: 'groom' } }] as const) {
-    const g = built(nodes);
-    const outs = { 'approve-x': { findings: 'steps/approve-x/1/outputs/findings.md' } };
-    const feedback = 'Gate approve-x rejected the last round. Address its feedback: findings (from approve-x) in the inputs.';
-    assert.ok(taskOf(g, 'groom', outs).includes(`## Feedback\n\n${feedback}`), JSON.stringify(nodes));
-    assert.ok(!taskOf(g, 'plan', outs).includes('## Feedback'), JSON.stringify(nodes));
-  }
-});
-
-test('a reject back to a script-only stage gives its feedback to the next stage with an agent', () => {
+test('in a run, a reject after a script-only stage reaches the agent of the stage it goes back to', async () => {
   const g = built({ check: { kind: 'gate', after: 'plan' } }, { plan: { command: ['pnpm', 'test'] } });
-  const outs = { check: { findings: 'steps/check/1/outputs/findings.md' } };
-  const feedback = 'Gate check rejected the last round. Address its feedback: findings (from check) in the inputs.';
-  assert.ok(taskOf(g, 'implement', outs).includes(`## Feedback\n\n${feedback}`), 'implement has no Feedback section');
-  for (const id of ['groom', 'review']) assert.ok(!taskOf(g, id, outs).includes('## Feedback'), id);
+  const rt = new FakeRuntime({ check: [fail('steps/check/1/outputs/findings.md')] });
+  const s = await runGraph(g, newState({ runId: 'r1', ticket: 'T-1', profile: 'default', groundVersions: {} }), { runtime: rt, save: async () => {} });
+  assert.equal(s.status, 'completed');
+  assert.deepEqual(rt.calls.slice(0, 7), ['intake', 'groom', 'approve-groom', 'plan', 'check', 'groom', 'approve-groom']);
+  const tasks = rt.calls.map((id, i) => (g.steps.find((x) => x.id === id)!.role === 'slot' ? taskOf(g, id, rt.previous[i]!) : ''));
+  const feedback = '## Feedback\n\nGate check rejected the last round. Address its feedback: findings (from check) in the inputs.';
+  assert.ok(tasks[5]!.includes(feedback), tasks[5]);
+  assert.deepEqual(tasks.map((t, i) => (t.includes('## Feedback') ? i : -1)).filter((i) => i >= 0), [5]);
 });

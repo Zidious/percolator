@@ -970,6 +970,42 @@ test('a gate without on_fail and nowhere to go back to is refused where it is at
   );
 });
 
+test('a gate without on_fail after a stage with no agent goes back to the nearest earlier stage with one', () => {
+  const script = { plan: { command: ['pnpm', 'test'] } };
+  const after = buildGraph(full({ nodes: { check: { kind: 'gate', after: 'plan' } } }, script));
+  assert.equal(after.backEdges.check!.toStepIndex, after.regionStart.groom);
+  const before = buildGraph(full({ nodes: { check: { kind: 'gate', before: 'implement' } } }, script));
+  assert.equal(before.backEdges.check!.toStepIndex, before.regionStart.groom);
+  const slot = buildGraph(full({}, { plan: [{ command: ['pnpm', 'test'] }, { kind: 'gate' }] }));
+  assert.equal(slot.backEdges['plan.1']!.toStepIndex, slot.regionStart.groom);
+});
+
+test('a gate without on_fail with no stage up to it that has an agent is refused where it is attached', () => {
+  const intake = { intake: { builtin: 'github.intake' } };
+  throwsAt(
+    () => buildGraph(fullAt({ 'nodes.x': 5, 'nodes.x.after': 6 }, { nodes: { x: { kind: 'gate', after: 'intake' } } }, intake)),
+    'g.yaml:6: nodes.x.after: gate "x" runs after intake, so a reject has no earlier stage with an agent to go back to; attach it after groom or a later stage, or remove it',
+    'nodes.x.after',
+  );
+  throwsAt(
+    () => buildGraph(fullAt({ 'nodes.x': 5, 'nodes.x.before': 6 }, { nodes: { x: { kind: 'gate', before: 'groom' } } }, intake)),
+    'g.yaml:6: nodes.x.before: gate "x" runs before groom, so a reject has no earlier stage with an agent to go back to; attach it after groom or a later stage, or remove it',
+    'nodes.x.before',
+  );
+  throwsAt(
+    () => buildGraph(fullAt({ 'bindings.groom': 3, 'bindings.groom.0': 4 }, {}, { ...intake, groom: [{ kind: 'gate' }, { agent: 'claude' }] })),
+    'g.yaml:4: bindings.groom.0: gate "groom.0" runs before groom, so a reject has no earlier stage with an agent to go back to; attach it after groom or a later stage, or remove it',
+    'bindings.groom.0',
+  );
+  const script = { command: ['s'] };
+  const scripts = { intake: { builtin: 'github.intake' }, groom: script, plan: script, implement: script, review: script };
+  throwsAt(
+    () => buildGraph(fullAt({ 'nodes.x': 5, 'nodes.x.after': 6 }, { nodes: { x: { kind: 'gate', after: 'plan' } } }, scripts)),
+    'g.yaml:6: nodes.x.after: gate "x" runs after plan, so a reject has no earlier stage with an agent to go back to; give it on_fail: { back_to: <stage>, max_rounds: <n> }, or remove it',
+    'nodes.x.after',
+  );
+});
+
 test('a gate without on_fail after the exit stage is refused, since a reject would deliver again', () => {
   throwsAt(
     () => buildGraph(fullAt({ 'nodes.post': 5, 'nodes.post.after': 6 }, { nodes: { post: { kind: 'gate', after: 'deliver' } } })),

@@ -1,6 +1,7 @@
 import { ConfigError } from '../config/load.ts';
 import { locate, slotKey } from '../config/locate.ts';
 import type { Locator, Where } from '../config/locate.ts';
+import { effectiveKind } from '../config/schema.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
 import { EXITS, EXIT_KINDS } from '../tracker/index.ts';
 import type { ExitKind } from '../tracker/index.ts';
@@ -517,9 +518,26 @@ function followsOwnStage(step: Step, steps: readonly Step[]): boolean {
 
 /**
  * The stage a gate without on_fail goes back to on reject: the stage it runs after (`after: X`, or a slot
- * gate after another node of its slot), else the stage before the one it opens. Refused when there is none.
+ * gate after another node of its slot), else the stage before the one it opens. A stage with no agent
+ * (intake, a script-only stage) could not act on the feedback, so the reject goes back to the nearest
+ * earlier stage that has one. Refused when there is none.
  */
 function implicitBackTo(step: Step, stages: readonly string[], steps: readonly Step[]): string {
+  const hasAgent = (stage: string) => steps.some((s) => s.role === 'slot' && s.stage === stage && effectiveKind(s.def) === 'agent');
+  const target = followedStage(step, stages, steps);
+  const back = stages.slice(0, stages.indexOf(target) + 1).findLast(hasAgent);
+  if (back !== undefined) return back;
+  const first = stages.find(hasAgent);
+  const followsOwn = followsOwnStage(step, steps);
+  const key = step.role === 'slot' ? stepKey(step) : `${stepKey(step)}.${followsOwn ? 'after' : 'before'}`;
+  throw new GraphError(
+    `gate "${step.id}" runs ${followsOwn ? 'after' : 'before'} ${step.stage}, so a reject has no earlier stage with an agent to go back to; ${first === undefined ? 'give it on_fail: { back_to: <stage>, max_rounds: <n> }' : `attach it after ${first} or a later stage`}, or remove it`,
+    locate(step.locator, 'config', key),
+  );
+}
+
+/** The stage a gate without on_fail follows: see implicitBackTo. */
+function followedStage(step: Step, stages: readonly string[], steps: readonly Step[]): string {
   const where = (key: string) => locate(step.locator, 'config', key);
   if (step.stage === 'before-all') {
     throw new GraphError(

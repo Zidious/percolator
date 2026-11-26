@@ -632,7 +632,7 @@ test("an agent prompt naming a declared optional input the run was not given ren
 });
 
 test('a gate on a ticketless run waits locally and says how to answer it', async () => {
-  const e = await setup(DD_ALERT.replace("          triage: { command: [triage-script, '{outputs_dir}'] }", "          triage: { command: [triage-script, '{outputs_dir}'] }\n        nodes:\n          sign-off: { kind: gate, after: triage }"));
+  const e = await setup(DD_ALERT.replace("          triage: { command: [triage-script, '{outputs_dir}'] }", "          triage: { command: [triage-script, '{outputs_dir}'] }\n        nodes:\n          sign-off: { kind: gate, after: triage, on_fail: { back_to: triage, max_rounds: 3 } }"));
   try {
     const meta = await prepareRun(
       { pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x' }, repoDir: e.root, configFile: e.configFile, profile: 'work' },
