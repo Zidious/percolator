@@ -26,6 +26,9 @@ export interface Gh {
   comment(repo: string, n: number, bodyFile: string): Promise<string>;
   /** PATCHes a comment's body from a file; returns the server's `updated_at`. */
   editComment(repo: string, id: number, bodyFile: string): Promise<string>;
+  /** Deletes a comment; false when it was already gone (HTTP 404). */
+  deleteComment(repo: string, id: number): Promise<boolean>;
+
   user(): Promise<string>;
   findPr(repo: string, head: string): Promise<{ number: number; url: string } | undefined>;
   createPr(repo: string, o: { base: string; head: string; title: string; bodyFile: string }): Promise<string>;
@@ -151,6 +154,14 @@ export function cliGh(o: { exec?: Exec; bin?: string } = {}): Gh {
       if (!at) throw new Error(`gh api comment edit returned no updated_at for comment ${id}`);
       return at;
     },
+    async deleteComment(repo, id) {
+      const { host, slug } = apiRepo('api comment delete', repo);
+      const r = await exec(bin, ['api', ...host, '-X', 'DELETE', `repos/${slug}/issues/comments/${id}`], { env: GH_ENV });
+      if (r.code === 0) return true;
+      if (/HTTP 404|Not Found/.test(r.stderr)) return false;
+      throw new GhError('api comment delete', r.stderr.trim().slice(0, 500));
+    },
+
     async user() {
       return (await call('api user', ['api', 'user', '--jq', '.login'])).trim();
     },
