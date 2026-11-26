@@ -233,8 +233,9 @@ export declare function previewRun(pipeline: Pipeline): Readable;
 export declare function previewSide(width: number): 'below' | 'right';
 export declare function deleteView(
   runId: string,
-  s: { busy: string | null; deleting: { ids: string[]; doneAt?: number } | null; deleteFailed: { ids: string[]; error: string } | null },
+  s: { busy: string | null; deleting: { ids: string[]; doneAt?: number } | null; deleteFailed: Record<string, string> | null },
 ): { kind: 'deleting' } | { kind: 'failed'; error: string } | null;
+export declare function deleteFailures(ids: string[], stderr: string, fallback: string): Record<string, string>;
 export declare function trackBackSpace(prev: string | null, spaces: SpaceInfo[], runs: RunStatusJson[]): string | null;
 export declare function spaceAfterDelete(
   o: { shown: string | null; back: string | null },

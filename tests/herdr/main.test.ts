@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
+import { deleteView } from '../../herdr/mods/percolator/model.js';
 
 // main.js imports Herdr's host modules, which only exist inside the app: stand them in with exports that call the
 // test's fake in `fakes` (by name, `InputState.new` for a static) when it set one, and do nothing otherwise.
@@ -603,7 +604,7 @@ test('a failed delete shows Delete failed on the run and not as actError', async
   try {
     p.deleteRuns(['r1'], cx);
     await done();
-    assert.deepEqual(p.deleteFailed, { ids: ['r1'], error: HELD_LINE });
+    assert.deepEqual(p.deleteFailed, { r1: HELD_LINE });
     assert.equal(p.actError, null);
   } finally {
     delete fakes.exec;
@@ -617,7 +618,7 @@ test('a timed-out delete is a failure', async () => {
   try {
     p.deleteRuns(['r1'], cx);
     await done();
-    assert.deepEqual(p.deleteFailed, { ids: ['r1'], error: 'timed out after 120000 ms' });
+    assert.deepEqual(p.deleteFailed, { r1: 'timed out after 120000 ms' });
   } finally {
     delete fakes.exec;
   }
@@ -657,7 +658,7 @@ test('a later successful delete clears Delete failed', async () => {
     // the run stays selected: clearing must come from the delete's success, not a new selection
     p.deleting = null;
     fakes.exec = ok;
-    p.deleteFailed = { ids: ['r1'], error: HELD_LINE };
+    p.deleteFailed = { r1: HELD_LINE };
     p.perform('delete', ['delete', 'r2'], cx);
     await done();
     assert.equal(p.deleteFailed, null);
@@ -673,6 +674,41 @@ test('a failed delete of runs not selected sets actError as before', async () =>
     p.deleteRuns(['r2', 'r3'], cx);
     await done();
     assert.equal(p.actError, 'run r2: boom');
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('a delete of two runs that removes the selected one and fails on the other keeps the failure in view', async () => {
+  const stderr = 'run r2: worktree w2 is still in use; close what holds it and run perc delete r2 again\n';
+  const { p, cx, done } = panelDeleting('r1', async (_node: unknown, argv: unknown) =>
+    (argv as string[]).includes('status')
+      ? { code: 0, stdout: JSON.stringify({ schema: 2, runs: [{ id: 'r2' }, { id: 'r3' }] }), stderr: '' }
+      : { code: 1, stdout: 'deleted run r1: …\n', stderr },
+  );
+  fakes.terminals = () => [];
+  Object.assign(p, { refresh: Percolator.prototype.refresh, syncAsks() {}, syncReader() {}, revealRow() {}, openSpaces: () => [], notice: null, watchStartedAt: null, loading: false });
+  try {
+    p.deleteRuns(['r1', 'r2'], cx);
+    await done();
+    assert.equal(p.sel, 'r3');
+    assert.equal(p.actError, stderr.trim());
+    assert.deepEqual(deleteView('r2', p), { kind: 'failed', error: stderr.trim() });
+  } finally {
+    delete fakes.exec;
+    delete fakes.terminals;
+  }
+});
+
+test("a failed delete of several runs says each run's own reason in its header", async () => {
+  const stderr = 'run r2: boom two\nrun r3: boom three\n';
+  const { p, cx, done } = panelDeleting('r1', async () => ({ code: 1, stdout: '', stderr }));
+  try {
+    p.deleteRuns(['r1', 'r2', 'r3'], cx);
+    await done();
+    assert.equal(deleteView('r1', p), null);
+    assert.deepEqual(deleteView('r2', p), { kind: 'failed', error: 'run r2: boom two' });
+    assert.deepEqual(deleteView('r3', p), { kind: 'failed', error: 'run r3: boom three' });
   } finally {
     delete fakes.exec;
   }

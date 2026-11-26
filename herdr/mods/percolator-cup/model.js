@@ -988,8 +988,20 @@ export function spaceAfterDelete(o, spaces, runs, ids) {
  *  retries, selects another run or a delete succeeds; null otherwise. */
 export function deleteView(runId, { busy, deleting, deleteFailed }) {
   if (busy === 'delete' && deleting?.ids.includes(runId) && deleting.doneAt === undefined) return { kind: 'deleting' };
-  if (deleteFailed?.ids.includes(runId)) return { kind: 'failed', error: deleteFailed.error };
+  if (deleteFailed && Object.hasOwn(deleteFailed, runId)) return { kind: 'failed', error: deleteFailed[runId] };
   return null;
+}
+
+/** A failed `perc delete` of `ids` → `{ <id>: why }`: each run its own `run <id>: …` stderr line; every run `fallback`
+ *  when no line names one of them. */
+export function deleteFailures(ids, stderr, fallback) {
+  const out = {};
+  for (const line of stderr.split(/\r?\n/)) {
+    const id = /^run (\S+): /.exec(line)?.[1];
+    if (id !== undefined && ids.includes(id) && !Object.hasOwn(out, id)) out[id] = line;
+  }
+  if (Object.keys(out).length === 0) for (const id of ids) out[id] = fallback;
+  return out;
 }
 
 /** The selection after `deletedIds` are gone: `selId` if it stays, else the next row left, else the previous, else null. */

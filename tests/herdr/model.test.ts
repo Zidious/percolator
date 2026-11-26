@@ -111,6 +111,7 @@ import {
   trackBackSpace,
   spaceAfterDelete,
   deleteView,
+  deleteFailures,
   keyHints,
   pipelineOption,
   startedRun,
@@ -1740,11 +1741,17 @@ test('deleteView says Deleting… while the delete of the run runs, and Delete f
   assert.equal(deleteView('r2', { busy: 'delete', deleting: { ...deleting, doneAt: 3 }, deleteFailed: null }), null);
   assert.equal(deleteView('r2', { busy: 'approve', deleting, deleteFailed: null }), null);
   assert.equal(deleteView('r3', { busy: 'delete', deleting, deleteFailed: null }), null);
-  const deleteFailed = { ids: ['r1'], error: 'run r1: worktree w is still in use' };
+  const deleteFailed = { r1: 'run r1: worktree w is still in use' };
   assert.deepEqual(deleteView('r1', { busy: null, deleting: null, deleteFailed }), { kind: 'failed', error: 'run r1: worktree w is still in use' });
   assert.equal(deleteView('r2', { busy: null, deleting: null, deleteFailed }), null);
+  assert.equal(deleteView('constructor', { busy: null, deleting: null, deleteFailed }), null);
 });
 
+test("deleteFailures gives each run the stderr line that names it, else every run the fallback", () => {
+  const stderr = 'run r2: boom two\nsomething else\nrun r9: not asked\nrun r3: boom three\nrun r2: later\n';
+  assert.deepEqual(deleteFailures(['r1', 'r2', 'r3'], stderr, 'run r2: boom two'), { r2: 'run r2: boom two', r3: 'run r3: boom three' });
+  assert.deepEqual(deleteFailures(['r1', 'r2'], 'gh: not logged in\r\n', 'gh: not logged in'), { r1: 'gh: not logged in', r2: 'gh: not logged in' });
+});
 
 const sp = (id: string, active = false) =>
   ({ id, index: 1, name: '', named: false, folder: '/x', machine: null, branch: null, active, status: null, tabs: [] }) as SpaceInfo;

@@ -47,6 +47,7 @@ import {
   deleteCommandIds,
   deleteConfirm,
   deleteBusyError,
+  deleteFailures,
   deleteFinishedConfirm,
   finishedNotice,
   dragBoard,
@@ -119,7 +120,7 @@ export default class Percolator extends View {
     this.notice = null; // beside Delete finished runs ↗, seen with or without a selection
     this.deleting = null; // { ids, next, shown, doneAt? }: the delete the owner confirmed and the row to select after it
     this.backSpace = null; // the latest shown space that is no run's: where a delete of the shown run's space goes back to
-    this.deleteFailed = null; // { ids, error }: the last delete failed; its runs' headers say so until retry or another pick
+    this.deleteFailed = null; // { <id>: why }: the last delete failed; its runs' headers say so until retry or another pick
     this.fetches = 0;
     this.historyOpen = false;
     this.rejecting = false;
@@ -240,8 +241,12 @@ export default class Percolator extends View {
           this.select(this.startedId, cx);
           this.startedId = null;
           this.revealRow();
-        } else if (!this.current()) this.select(pick, cx);
-        else this.syncReader(cx); // the run moved on: new review files, or none
+        } else if (!this.current()) {
+          // the selected run is gone, deleted by a delete that failed on others: keep saying so
+          const { actError, deleteFailed } = this;
+          this.select(pick, cx);
+          if (deleteFailed) Object.assign(this, { actError, deleteFailed });
+        } else this.syncReader(cx); // the run moved on: new review files, or none
       } else {
         this.error = got.error; // keep the last good runs
       }
@@ -531,10 +536,11 @@ export default class Percolator extends View {
       } else {
         const why = firstLine(res.stderr) || `perc ${argv[0]} exited ${res.code}`;
         const ids = action === 'delete' ? (this.deleting?.ids ?? []) : [];
-        if (action === 'delete') this.deleteFailed = { ids, error: why };
+        if (action === 'delete') this.deleteFailed = deleteFailures(ids, res.stderr, why);
         if (action === 'reject') this.rejectError = why;
-        // the selected run's header says Delete failed: not again under its buttons
-        else if (!ids.includes(this.sel)) this.actError = why;
+        // the selected run's header says Delete failed: not again under its buttons; a delete of several may
+        // remove the selected run and fail on another, so that one's reason must stay in view
+        else if (!(ids.length === 1 && ids[0] === this.sel)) this.actError = why;
       }
       cx.notify();
     });
