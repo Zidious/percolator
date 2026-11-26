@@ -915,12 +915,30 @@ test('implicit gate cap is clamped by max_rounds_ceiling', () => {
   assert.equal(buildGraph(merged).backEdges['approve-plan']!.maxRounds, 2);
 });
 
-test('gate in a loop stage routes to the loop', () => {
-  for (const point of ['after', 'before'] as const) {
-    const g = buildGraph(full({ nodes: { 'approve-x': { kind: 'gate', [point]: 'review' } } }));
-    assert.equal(g.backEdges['approve-x'], undefined);
-    assert.equal(g.failRoutes['approve-x'], 'review');
-  }
+test('gate in a loop stage after a node of it routes to the loop', () => {
+  const g = buildGraph(full({ nodes: { 'approve-x': { kind: 'gate', after: 'review' } } }));
+  assert.equal(g.backEdges['approve-x'], undefined);
+  assert.equal(g.failRoutes['approve-x'], 'review');
+  const slot = buildGraph(full({}, { review: [{ agent: 'claude' }, { kind: 'gate' }, { agent: 'codex' }] }));
+  assert.equal(slot.backEdges['review.1'], undefined);
+  assert.equal(slot.failRoutes['review.1'], 'review.2');
+});
+
+test('gate opening a loop stage goes back to the stage before at once, not after the stage has run', () => {
+  const g = buildGraph(full({ nodes: { 'approve-x': { kind: 'gate', before: 'review' } } }));
+  const at = g.steps.findIndex((s) => s.id === 'approve-x');
+  assert.deepEqual(g.backEdges['approve-x'], {
+    id: 'approve-x',
+    fromStepId: 'approve-x',
+    toStepIndex: g.regionStart.implement,
+    jumpAfterIndex: at,
+    maxRounds: 3,
+    onCap: 'escalate',
+  });
+  assert.equal(g.failRoutes['approve-x'], 'approve-x');
+  const slot = buildGraph(full({}, { review: [{ kind: 'gate' }, { agent: 'claude' }] }));
+  assert.equal(slot.backEdges['review.0']!.toStepIndex, slot.regionStart.implement);
+  assert.equal(slot.failRoutes['review.0'], 'review.0');
 });
 
 test('a gate without on_fail and nowhere to go back to is refused where it is attached', () => {

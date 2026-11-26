@@ -866,6 +866,20 @@ test("a failed step's reason is kept in failedReason", async () => {
   assert.ok(!('failedReason' in t));
 });
 
+test('a rejected gate before review goes back to implement without running review that round', async () => {
+  const g = graph({ 'approve-x': { kind: 'gate', before: 'review' } });
+  const rejected = { status: 'fail' as const, outputs: { findings: 'f' } };
+  const rt = new FakeRuntime({ 'approve-x': [rejected] });
+  const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'completed');
+  const review = g.steps.find((x) => x.role === 'slot' && x.stage === 'review')!.id;
+  const implement = g.steps.find((x) => x.role === 'slot' && x.stage === 'implement')!.id;
+  assert.deepEqual(
+    rt.calls.filter((id) => [implement, 'approve-x', review].includes(id)),
+    [implement, 'approve-x', implement, 'approve-x', review],
+  );
+});
+
 test('implicit gate edge escalates at its cap', async () => {
   const g = graph({ 'approve-plan': { kind: 'gate', after: 'plan' } });
   const rejected = { status: 'fail' as const, outputs: { findings: 'f' } };

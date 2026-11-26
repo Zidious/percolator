@@ -407,7 +407,7 @@ function buildWhole(
   for (const step of steps) {
     const onFail = step.def.on_fail;
     if (!onFail) {
-      if (isImplicitGate(step, loopStages)) {
+      if (isImplicitGate(step, loopStages, steps)) {
         const to = implicitBackTo(step, stages, steps);
         backEdges[step.id] = {
           id: step.id,
@@ -476,8 +476,10 @@ function buildWhole(
     };
     // any slot node's fail in a loop stage is a round of it; a step's own on_fail is more specific
     for (const s of steps) if (s.role === 'slot' && s.stage === stage) failRoutes[s.id] = last.id;
-    // so is a reject of a gate without on_fail attached to it
-    for (const s of steps) if (s.stage === stage && s.def.on_fail === undefined && s.def.kind === 'gate') failRoutes[s.id] = last.id;
+    // so is a reject of a gate without on_fail after a node of it (one opening the stage has its own edge)
+    for (const s of steps) {
+      if (s.stage === stage && s.def.on_fail === undefined && s.def.kind === 'gate' && followsOwnStage(s, steps)) failRoutes[s.id] = last.id;
+    }
   }
   for (const id of Object.keys(backEdges)) failRoutes[id] = id;
 
@@ -497,9 +499,20 @@ function buildWhole(
   return fan === undefined ? { graph } : { graph, fanStage: fan.stage };
 }
 
-/** A gate with no on_fail outside a loop stage: a reject sends the run back to the stage it follows. */
-function isImplicitGate(step: Step, loopStages: readonly string[]): boolean {
-  return step.def.on_fail === undefined && step.def.kind === 'gate' && !loopStages.includes(step.stage);
+/**
+ * A gate with no on_fail that gets its own edge: a reject sends the run back to the stage it follows. One after a
+ * node of a loop stage counts as a round of that loop instead; one opening a loop stage goes back at once, so a
+ * rejected round does not run the stage first.
+ */
+function isImplicitGate(step: Step, loopStages: readonly string[], steps: readonly Step[]): boolean {
+  if (step.def.on_fail !== undefined || step.def.kind !== 'gate') return false;
+  return !loopStages.includes(step.stage) || !followsOwnStage(step, steps);
+}
+
+/** The gate runs after its stage's work: `after: <stage>`, or a slot gate after another node of its slot. */
+function followsOwnStage(step: Step, steps: readonly Step[]): boolean {
+  if (step.role === 'hook') return step.def.after === step.stage;
+  return steps.some((s) => s.role === 'slot' && s.stage === step.stage && steps.indexOf(s) < steps.indexOf(step));
 }
 
 /**
@@ -521,8 +534,7 @@ function implicitBackTo(step: Step, stages: readonly string[], steps: readonly S
     );
   }
   const stage = step.stage;
-  const followsOwn =
-    step.role === 'hook' ? step.def.after === stage : steps.some((s) => s.role === 'slot' && s.stage === stage && steps.indexOf(s) < steps.indexOf(step));
+  const followsOwn = followsOwnStage(step, steps);
   if (followsOwn && stage === stages.at(-1)) {
     throw new GraphError(
       `gate "${step.id}" runs after ${stage}, the exit stage, so a reject would deliver again; attach it before ${stage}, or give it on_fail: { back_to: <stage>, max_rounds: <n> }`,
@@ -604,7 +616,7 @@ function sliceChild(g: Graph, sliceFrom: string): Graph {
         locate(step.locator, 'config', key),
       );
     }
-    if (isImplicitGate(step, g.loopStages)) {
+    if (isImplicitGate(step, g.loopStages, g.steps)) {
       throw new GraphError(
         `${step.id} goes back to ${target} on reject (a gate without on_fail returns to the stage it follows), which runs before the fan-out at ${sliceFrom}; attach it after ${sliceFrom} or later, or give it on_fail with back_to ${sliceFrom} or later`,
         locate(step.locator, 'config', key),
