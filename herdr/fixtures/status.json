@@ -901,7 +901,8 @@
       "attention": {
         "kind": "paused",
         "since": "2026-11-21T02:10:00.000Z",
-        "message": "plan paused: contract: plan finished without outputs/plan.md",
+        "message": "plan paused",
+        "detail": "contract: plan finished without outputs/plan.md",
         "review": [],
         "actions": [
           "resume"
@@ -951,6 +952,123 @@
           "kind": "agent",
           "status": "pending",
           "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "review",
+          "stage": "review",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "deliver",
+          "stage": "deliver",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [
+        {
+          "id": "review",
+          "from": "review",
+          "to": "implement",
+          "max": 3,
+          "atCap": "escalate",
+          "round": 0
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full"
+    },
+    {
+      "id": "t27-20261121-021500-4e8a",
+      "pipeline": "feature",
+      "inputs": {},
+      "profile": "default",
+      "config": null,
+      "ticket": {
+        "ref": "github.com/zidious/percolator#27",
+        "number": 27,
+        "title": "retry flaky gh calls with backoff",
+        "url": "https://github.com/Zidious/percolator/issues/27"
+      },
+      "parent": null,
+      "children": [],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t27-20261121-021500-4e8a",
+      "worktree": "/home/me/src/percolator/.worktrees/t27-20261121-021500-4e8a",
+      "createdAt": "2026-11-21T02:15:00.000Z",
+      "status": "paused",
+      "currentStep": "implement",
+      "driver": {
+        "alive": false,
+        "terminal": "t27_driver_a0_4d06",
+        "space": "w1:s27",
+        "shown": false
+      },
+      "attention": {
+        "kind": "paused",
+        "since": "2026-11-21T02:40:00.000Z",
+        "message": "implement paused",
+        "detail": "agent exited with code 1 without a valid done.json; last lines: \"Error: ENOENT: no such file or directory, open 'src/gh/retry.ts'\"; full screen in samples/transcript.txt",
+        "transcript": "samples/transcript.txt",
+        "review": [],
+        "actions": [
+          "resume"
+        ]
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "groom",
+          "stage": "groom",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "approve-groom",
+          "stage": "groom",
+          "role": "node",
+          "kind": "gate",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "plan",
+          "stage": "plan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {}
+        },
+        {
+          "id": "implement",
+          "stage": "implement",
+          "role": "core",
+          "kind": "agent",
+          "status": "escalate",
+          "attempts": 1,
           "outputs": {}
         },
         {

@@ -17,9 +17,11 @@ import {
   boxAsks,
   boxDriver,
   boxFiles,
+  fileUrl,
   historyLabel,
   outcomeOf,
   programInitial,
+  reasonParts,
   textTone,
   timelineRows,
 } from './model.js';
@@ -272,8 +274,8 @@ function agentBox(p, t, card, narrow) {
 }
 
 /** The box of a run that needs you: the tag, the message and its age, the detail, the file to review, the buttons.
- *  With `fill` (the right column of two) its reader takes the height left. */
-function attentionBox(p, t, r, kind, narrow, fill) {
+ *  It is as tall as its content: its reader scrolls past half the area, so the buttons sit right under the file. */
+function attentionBox(p, t, r, kind, narrow) {
   const a = r.attention;
   const acts = boxActions(r);
   const card = agentCard(r, terminals(), agents(), Date.now());
@@ -312,11 +314,10 @@ function attentionBox(p, t, r, kind, narrow, fill) {
     .when(Boolean(a.commentUrl), (el) => el.child(button(t, 'github', 'GitHub ↗', '', (_e, cx) => cx.open_url(a.commentUrl))))
     .when(live, (el) => el.child(button(t, 'open-terminal', 'Open terminal ↗', '', () => p.openAgent())))
     .when(Boolean(drv), (el) => el.child(button(t, 'box-driver', drv.label, '', () => p.peekDriver())));
-  const grow = fill && Boolean(p.boxFile);
   const files = boxFiles(r); // more than one: a tab per file above the reader
+  const why = reasonParts(a.detail, a.transcript); // a saved agent screen in the detail: drawn as a link
   const box = v_flex()
-    .when(grow, (el) => el.flex_1().min_h(0))
-    .when(!grow, (el) => el.flex_none())
+    .flex_none()
     .mt(2)
     .mb(8)
     .px(9)
@@ -338,7 +339,26 @@ function attentionBox(p, t, r, kind, narrow, fill) {
         .child(div().flex_none().text_size(11).text_color(t.muted).child(`${ago(a.since, Date.now())} ago`)),
     )
     .when(narrow, (el) => el.child(div().text_size(12.5).font_semibold().child(a.message)))
-    .when(Boolean(a.detail), (el) => el.child(div().text_size(11.5).text_color(t.muted).child(a.detail)))
+    .when(Boolean(a.detail) && !why, (el) => el.child(div().text_size(11.5).text_color(t.muted).child(a.detail)))
+    .when(Boolean(why), (el) =>
+      el.child(
+        v_flex()
+          .gap(4)
+          .text_size(11.5)
+          .text_color(t.muted)
+          .when(why.before.trim() !== '', (el) => el.child(div().child(why.before.trimEnd())))
+          .child(
+            h_flex()
+              .flex_wrap()
+              .gap(4)
+              .items_center()
+              .child(
+                link(t, 'transcript', 'transcript.txt ↗', (_e, cx) => cx.open_url(fileUrl(p.resolve(a.transcript)))).tooltip(a.transcript),
+              )
+              .when(why.after.trim() !== '', (el) => el.child(div().min_w(0).child(why.after.replace(/^[,;]\s*/, '').trim()))),
+          ),
+      ),
+    )
     .when(Boolean(card), (el) =>
       el.child(
         h_flex()
@@ -366,7 +386,7 @@ function attentionBox(p, t, r, kind, narrow, fill) {
           ),
       ),
     )
-    .when(Boolean(p.boxFile), (el) => el.child(inlineReader(p, t, p.boxFile, 'box-reader', grow)))
+    .when(Boolean(p.boxFile), (el) => el.child(inlineReader(p, t, p.boxFile, 'box-reader')))
     .when(kind === 'questions' || kind === 'findings', (el) => el.child(askForm(p, t, r)))
     .when(acts.length > 0 || Boolean(a.commentUrl) || live || Boolean(drv), (el) => el.child(buttons))
     .when(p.rejecting, (el) => el.child(rejectBox(p, t)));
@@ -374,8 +394,8 @@ function attentionBox(p, t, r, kind, narrow, fill) {
 }
 
 /** What shows under the active stop (main.js hands it to the pipeline as `p.activeSlot`), or at the top of the right
- *  column of two (`fill`: its reader takes the height left). */
-export function activeSlot(p, t, r, narrow, fill = false) {
+ *  column of two. */
+export function activeSlot(p, t, r, narrow) {
   const kind = activeBox(r);
   if (kind === null) return div();
   if (kind === 'agent') {
@@ -383,7 +403,7 @@ export function activeSlot(p, t, r, narrow, fill = false) {
     if (!card) return div().mt(2).mb(8).text_size(11).text_color(t.muted).child(agentNote(card));
     return agentBox(p, t, card, narrow);
   }
-  return attentionBox(p, t, r, kind, narrow, fill);
+  return attentionBox(p, t, r, kind, narrow);
 }
 
 /** How a run with nothing under its active stop stands: delivered, routed, done, unreadable, or its status. */
@@ -405,7 +425,7 @@ function outcome(t, r) {
 /** The lower half (one column) or the right column's body (two, `fill`): the parts detailParts puts there (the active
  *  box, how a finished run ended, the picked stop's strip), then the history fold. */
 export function turn(p, t, r, narrow, side, fill = false) {
-  const part = (x) => (x === 'box' ? activeSlot(p, t, r, narrow, fill) : x === 'outcome' ? outcome(t, r) : stopStrip(p, t, r, fill));
+  const part = (x) => (x === 'box' ? activeSlot(p, t, r, narrow) : x === 'outcome' ? outcome(t, r) : stopStrip(p, t, r, fill));
   const body = v_flex()
     .when(fill, (el) => el.flex_1().min_h(0))
     .when(!fill, (el) => el.flex_none())

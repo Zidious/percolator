@@ -15,6 +15,9 @@ import {
   dragBoard,
   titleLayout,
   catchUpStep,
+  readerText,
+  reasonParts,
+  fileUrl,
   readRatio,
   clock,
   timelineRows,
@@ -220,7 +223,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t26', 't24', 't25', 't22', 'dd', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 'audit', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t26', 't24', 't25', 't22', 'dd', 't27', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 'audit', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -228,7 +231,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't25', 't24', 't26', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't27', 't25', 't24', 't26', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -349,7 +352,7 @@ test('actionArgv refuses a reject without feedback', () => {
 });
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
-  assert.equal(needsCount(runs()), 10);
+  assert.equal(needsCount(runs()), 11);
   assert.equal(runningCount(runs()), 8);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
@@ -536,7 +539,7 @@ test('stepAttempts is one step attempts in order', () => {
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
-  assert.deepEqual(cupLabel(runs()), { text: '10 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel(runs()), { text: '11 need you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
   assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
@@ -1970,4 +1973,37 @@ test('catchUpStep: refreshes when the copy becomes shown, never while hidden or 
   assert.deepEqual(catchUpStep(false, true), { refresh: true, wasShown: true }, 'docked back');
   assert.deepEqual(catchUpStep(undefined, true), { refresh: true, wasShown: true }, 'first check');
   assert.deepEqual(catchUpStep(undefined, false), { refresh: false, wasShown: false });
+});
+
+test('readerText: pick.md fields each get a line of their own; other files are unchanged', () => {
+  const pick = 'pipeline: dry-ticket\nunsure: true\nThe ticket asks for a dry run.\nSecond line.';
+  assert.equal(readerText('C:\\runs\\x\\steps\\route.1\\1\\outputs\\pick.md', pick),
+    'pipeline: dry-ticket\n\nunsure: true\n\nThe ticket asks for a dry run.\nSecond line.');
+  assert.equal(readerText('/r/pick.md', 'pipeline: a\r\nunsure: false\r\nwhy'), 'pipeline: a\n\nunsure: false\n\nwhy');
+  assert.equal(readerText('/r/pick.md', 'pipeline: a\n\nunsure: false\n\nwhy'), 'pipeline: a\n\nunsure: false\n\nwhy', 'already apart');
+  assert.equal(readerText('/r/pick.md', 'pipeline: a\n'), 'pipeline: a\n', 'nothing after the fields');
+  assert.equal(readerText('/r/plan.md', 'a\nb'), 'a\nb');
+  assert.equal(readerText('/r/notpick.md', 'pipeline: a\nunsure: true'), 'pipeline: a\nunsure: true');
+});
+
+test('reasonParts: splits the detail around the transcript path', () => {
+  const p = 'C:\\Users\\John Doe\\.percolator\\runs\\r\\steps\\implement\\1\\transcript.txt';
+  assert.deepEqual(reasonParts(`agent exited; full screen in ${p}`, p), { before: 'agent exited; full screen in ', after: '' });
+  assert.deepEqual(reasonParts(`task was not delivered; check its screen in ${p}, then resume`, p),
+    { before: 'task was not delivered; check its screen in ', after: ', then resume' });
+  assert.equal(reasonParts('escalate: plan', undefined), null);
+  assert.equal(reasonParts('escalate: plan', p), null, 'the path is not in the text');
+});
+
+test('fileUrl: a file URL the system opens, spaces escaped', () => {
+  assert.equal(fileUrl('C:\\Users\\John Doe\\t.txt'), 'file:///C:/Users/John%20Doe/t.txt');
+  assert.equal(fileUrl('/home/me/t.txt'), 'file:///home/me/t.txt');
+});
+
+test("notice: a paused run's toast keeps why it paused; a gate's body is its message", () => {
+  const run = { ...readable('t12'), attention: { ...readable('t12').attention!, kind: 'paused' as const, message: 'plan paused', detail: 'escalate: plan' } };
+  assert.equal(notice(run).body, 'plan paused: escalate: plan');
+  const bare = { ...run, attention: { ...run.attention, detail: undefined } };
+  assert.equal(notice(bare).body, 'plan paused');
+  assert.equal(notice(readable('t2')).body, 'approve-groom is waiting for approval');
 });

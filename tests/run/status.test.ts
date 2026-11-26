@@ -9,8 +9,8 @@ import { listRuns, writeRunMeta } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
-import { attentionNext, driverAlive, runAgain, runStatusJson, statusJson, yourTurn } from '../../src/run/status.ts';
-import type { RunStatusJson, TimelineJson } from '../../src/run/status.ts';
+import { attentionNext, driverAlive, runAgain, runStatusJson, statusJson, transcriptIn, yourTurn } from '../../src/run/status.ts';
+import type { AttentionJson, RunStatusJson, TimelineJson } from '../../src/run/status.ts';
 import { NOW, setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
 
@@ -517,7 +517,7 @@ test('paused on escalate', async () => {
       expected(m, {
         status: 'paused',
         currentStep: 'plan',
-        attention: { kind: 'paused', since: T2, message: 'plan paused: escalate: plan', review: [], actions: ['resume'] },
+        attention: { kind: 'paused', since: T2, message: 'plan paused', detail: 'escalate: plan', review: [], actions: ['resume'] },
         steps: steps({ plan: { status: 'escalate', attempts: 1, startedAt: T1, endedAt: T2, outputs: {} } }),
       }),
     );
@@ -1364,9 +1364,68 @@ test('yourTurn cap', () => {
 
 test('yourTurn paused', () => {
   assert.deepEqual(yourTurn({ ...TURN, kind: 'paused', reason: 'escalate: groom' }), {
-    message: 'groom paused: escalate: groom',
+    message: 'groom paused',
+    detail: 'escalate: groom',
     next: ['perc resume r1'],
   });
+});
+
+test('yourTurn paused names the step once', () => {
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'paused', reason: 'groom: agent exited with code 1 without a valid done.json' }), {
+    message: 'groom paused',
+    detail: 'agent exited with code 1 without a valid done.json',
+    next: ['perc resume r1'],
+  });
+});
+
+test('yourTurn paused with no reason has no detail', () => {
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'paused', reason: '' }), { message: 'groom paused', next: ['perc resume r1'] });
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'paused', reason: 'groom: ' }), { message: 'groom paused', next: ['perc resume r1'] });
+});
+
+test('a transcript path with spaces is found whole', () => {
+  const runDir = path.join(os.tmpdir(), 'with space', 'runs', 'r1');
+  const t = path.join(runDir, 'steps', 'plan', '2', 'transcript.txt');
+  assert.equal(transcriptIn(`task was not delivered to x; check its screen in ${t}, then resume`, runDir, 'plan'), t);
+  assert.equal(transcriptIn(`plan: agent exited without a valid done.json; full screen in ${t}`, runDir, 'plan'), t);
+  assert.equal(transcriptIn('escalate: plan', runDir, 'plan'), undefined);
+  assert.equal(transcriptIn(`full screen in ${path.join(runDir, 'steps', 'groom', '1', 'transcript.txt')}`, runDir, 'plan'), undefined, 'another step');
+});
+
+test("paused with the agent's saved screen gives its transcript", async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const t = path.join(e.dir(m), 'steps', 'plan', '1', 'transcript.txt');
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.pausedReason = `plan: agent exited with code 1 without a valid done.json; full screen in ${t}`;
+      s.history.push(rec('plan', 1, 'escalate'));
+    });
+    const a = ((await e.status(m)) as { attention?: AttentionJson }).attention;
+    assert.equal(a?.message, 'plan paused');
+    assert.equal(a?.detail, `agent exited with code 1 without a valid done.json; full screen in ${t}`);
+    assert.equal(a?.transcript, t);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a transcript of another step is not given', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.pausedReason = `plan: agent exited; full screen in ${path.join(e.dir(m), 'steps', 'groom', '1', 'transcript.txt')}`;
+      s.history.push(rec('plan', 1, 'escalate'));
+    });
+    assert.equal(((await e.status(m)) as { attention?: AttentionJson }).attention?.transcript, undefined);
+  } finally {
+    await e.cleanup();
+  }
 });
 
 test('yourTurn failed', () => {
