@@ -955,6 +955,18 @@ test('pipelineRows shows a loop start that sent the run back, under its cap, as 
   assert.equal(row(pipelineRows(failed, WIDE), 'review').state, 'failed');
 });
 
+test('pipelineRows shows a gate rejected into its stage loop, under the cap, as past, not failed', () => {
+  const t16 = readable('t16');
+  const at = t16.steps.findIndex((s) => s.id === 'review');
+  const qa = { ...t16.steps[at]!, id: 'qa', role: 'node', kind: 'gate', status: 'fail' };
+  const steps = [...t16.steps.slice(0, at + 1), qa, ...t16.steps.slice(at + 1)];
+  const loop = { ...t16.loops[0]!, atCap: 'continue' };
+  const sent = { ...t16, steps, loops: [loop] } as RunStatusJson; // the owner rejected qa after review: round 2
+  assert.equal(row(pipelineRows(sent, WIDE), 'qa').state, 'past');
+  const untaken = { ...sent, loops: [{ ...loop, round: 0 }] } as RunStatusJson;
+  assert.equal(row(pipelineRows(untaken, WIDE), 'qa').state, 'failed');
+});
+
 test('pipelineRows has no active row for a completed run or a current step that is not listed', () => {
   assert.deepEqual(pipelineRows(byId('t3'), WIDE).filter((r) => r.state === 'active'), []);
   const lost = { ...readable('t8'), currentStep: 'nope' } as RunStatusJson;

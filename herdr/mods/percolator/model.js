@@ -293,9 +293,19 @@ const SIDE = { 'before-all': 'before', before: 'before', after: 'after', 'after-
 
 const FAILED = new Set(['fail', 'escalate', 'contract_error']);
 
-/** A loop start that sent the run back and is under its cap: its failure is the loop going on, not the run failing. */
-const sentBack = (run, step) =>
-  (run.loops ?? []).some((l) => l.from === step.id && roundOf(l).taken && !roundOf(l).atCap);
+/**
+ * A loop start that sent the run back and is under its cap: its failure is the loop going on, not the run failing.
+ * So is a step routed into its stage's `continue` loop (a gate after the stage's work), as `perc status` reads it.
+ */
+const sentBack = (run, step) => {
+  const stageOf = (id) => (run.steps ?? []).find((s) => s.id === id)?.stage;
+  return (run.loops ?? []).some(
+    (l) =>
+      (l.from === step.id || (l.atCap === 'continue' && step.stage !== undefined && stageOf(l.from) === step.stage)) &&
+      roundOf(l).taken &&
+      !roundOf(l).atCap,
+  );
+};
 
 function pipeState(run, step) {
   if (step.id === run.currentStep && run.status !== 'completed') return 'active';

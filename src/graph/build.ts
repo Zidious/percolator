@@ -408,7 +408,7 @@ function buildWhole(
   for (const step of steps) {
     const onFail = step.def.on_fail;
     if (!onFail) {
-      if (isImplicitGate(step, loopStages, steps)) {
+      if (!loopLast.has(step) && isImplicitGate(step, loopStages, steps)) {
         const to = implicitBackTo(step, stages, steps);
         backEdges[step.id] = {
           id: step.id,
@@ -479,7 +479,15 @@ function buildWhole(
     for (const s of steps) if (s.role === 'slot' && s.stage === stage) failRoutes[s.id] = last.id;
     // so is a reject of a gate without on_fail after a node of it (one opening the stage has its own edge)
     for (const s of steps) {
-      if (s.stage === stage && s.def.on_fail === undefined && s.def.kind === 'gate' && followsOwnStage(s, steps)) failRoutes[s.id] = last.id;
+      if (s.stage !== stage || s === last || s.def.on_fail !== undefined || s.def.kind !== 'gate' || !followsOwnStage(s, steps)) continue;
+      // its reject is a round of the loop, so the stage the loop goes back to must have an agent to act on it
+      if (!hasAgent(previous, steps)) {
+        throw new GraphError(
+          `gate "${s.id}" runs after ${stage}, whose loop goes back to ${previous}, a stage with no agent to act on a reject; give it on_fail: { back_to: <stage>, max_rounds: <n> }, or attach it before ${stage}`,
+          locate(s.locator, 'config', s.role === 'hook' ? `${stepKey(s)}.after` : stepKey(s)),
+        );
+      }
+      failRoutes[s.id] = last.id;
     }
   }
   for (const id of Object.keys(backEdges)) failRoutes[id] = id;
@@ -523,17 +531,21 @@ function followsOwnStage(step: Step, steps: readonly Step[]): boolean {
  * earlier stage that has one. Refused when there is none.
  */
 function implicitBackTo(step: Step, stages: readonly string[], steps: readonly Step[]): string {
-  const hasAgent = (stage: string) => steps.some((s) => s.role === 'slot' && s.stage === stage && effectiveKind(s.def) === 'agent');
   const target = followedStage(step, stages, steps);
-  const back = stages.slice(0, stages.indexOf(target) + 1).findLast(hasAgent);
+  const back = stages.slice(0, stages.indexOf(target) + 1).findLast((stage) => hasAgent(stage, steps));
   if (back !== undefined) return back;
-  const first = stages.find(hasAgent);
+  const first = stages.find((stage) => hasAgent(stage, steps));
   const followsOwn = followsOwnStage(step, steps);
   const key = step.role === 'slot' ? stepKey(step) : `${stepKey(step)}.${followsOwn ? 'after' : 'before'}`;
   throw new GraphError(
     `gate "${step.id}" runs ${followsOwn ? 'after' : 'before'} ${step.stage}, so a reject has no earlier stage with an agent to go back to; ${first === undefined ? 'give it on_fail: { back_to: <stage>, max_rounds: <n> }' : `attach it after ${first} or a later stage`}, or remove it`,
     locate(step.locator, 'config', key),
   );
+}
+
+/** The stage has an agent slot node, which can act on a reject's feedback. */
+function hasAgent(stage: string, steps: readonly Step[]): boolean {
+  return steps.some((s) => s.role === 'slot' && s.stage === stage && effectiveKind(s.def) === 'agent');
 }
 
 /** The stage a gate without on_fail follows: see implicitBackTo. */

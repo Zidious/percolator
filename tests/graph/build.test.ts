@@ -1006,6 +1006,32 @@ test('a gate without on_fail with no stage up to it that has an agent is refused
   );
 });
 
+test('a loop stage bound only to a gate builds, its gate being the stage loop', () => {
+  const script = { command: ['s'] };
+  const g = buildGraph(
+    full({}, { intake: { builtin: 'github.intake' }, groom: script, plan: script, implement: script, review: { kind: 'gate' } }),
+  );
+  assert.equal(g.backEdges.review!.onCap, 'continue');
+  assert.equal(g.backEdges.review!.toStepIndex, g.regionStart.implement);
+});
+
+test('a gate without on_fail routed into a stage loop that goes back to a stage with no agent is refused', () => {
+  const implement = { implement: { command: ['s'] } };
+  throwsAt(
+    () => buildGraph(fullAt({ 'nodes.qa': 5, 'nodes.qa.after': 6 }, { nodes: { qa: { kind: 'gate', after: 'review' } } }, implement)),
+    'g.yaml:6: nodes.qa.after: gate "qa" runs after review, whose loop goes back to implement, a stage with no agent to act on a reject; give it on_fail: { back_to: <stage>, max_rounds: <n> }, or attach it before review',
+    'nodes.qa.after',
+  );
+  throwsAt(
+    () => buildGraph(fullAt({ 'bindings.review': 3, 'bindings.review.1': 4 }, {}, { ...implement, review: [{ agent: 'claude' }, { kind: 'gate' }, { agent: 'codex' }] })),
+    'g.yaml:4: bindings.review.1: gate "review.1" runs after review, whose loop goes back to implement, a stage with no agent to act on a reject; give it on_fail: { back_to: <stage>, max_rounds: <n> }, or attach it before review',
+    'bindings.review.1',
+  );
+  // before the loop stage it has its own edge, to the nearest earlier stage with an agent
+  const before = buildGraph(full({ nodes: { qa: { kind: 'gate', before: 'review' } } }, implement));
+  assert.equal(before.backEdges.qa!.toStepIndex, before.regionStart.plan);
+});
+
 test('a gate without on_fail after the exit stage is refused, since a reject would deliver again', () => {
   throwsAt(
     () => buildGraph(fullAt({ 'nodes.post': 5, 'nodes.post.after': 6 }, { nodes: { post: { kind: 'gate', after: 'deliver' } } })),
