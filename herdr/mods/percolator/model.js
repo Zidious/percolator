@@ -121,22 +121,26 @@ export function actionArgv(action, run, feedback) {
     case 'clean':
       return ['clean', run.id];
     case 'run-again':
-      return runAgainArgv(run);
+      // an unreadable run has no pipeline or repo to start again
+      return run.status === 'unreadable' ? null : runAgainArgv(run);
     default:
       return null;
   }
 }
 
 /** The `perc run` argv that starts a failed run's kind of run again, in the order of perc's own line: its ticket,
- *  its pipeline (unless feature), each input as one `k=v` element, its repo. */
+ *  its pipeline (named even when feature, as a profile may mark another pipeline default), each input as one `k=v`
+ *  element, its repo, then its config file (unless the default) and its profile. */
 export function runAgainArgv(run) {
   return [
     'run',
     ...(run.ticket ? [run.ticket.ref] : []),
-    ...(run.pipeline && run.pipeline !== 'feature' ? ['--pipeline', run.pipeline] : []),
+    ...(run.pipeline ? ['--pipeline', run.pipeline] : []),
     ...Object.entries(run.inputs ?? {}).flatMap(([k, v]) => ['--input', `${k}=${v}`]),
     '--repo',
     run.repo,
+    ...(typeof run.config === 'string' ? ['--config', run.config] : []),
+    ...(typeof run.profile === 'string' ? ['--profile', run.profile] : []),
   ];
 }
 

@@ -1842,8 +1842,32 @@ test('itemLabel unwraps paired marks only, and strips a list marker only where t
 test('runAgainArgv starts the same kind of run, each input one unquoted argv element', () => {
   const t9 = readable('t9');
   const ticketless = { ...t9, ticket: null, pipeline: 'dry-fail', inputs: { note: 'a b', q: 'say "hi"' }, repo: '/r' } as Readable;
-  assert.deepEqual(runAgainArgv(ticketless), ['run', '--pipeline', 'dry-fail', '--input', 'note=a b', '--input', 'q=say "hi"', '--repo', '/r']);
+  assert.deepEqual(runAgainArgv(ticketless), ['run', '--pipeline', 'dry-fail', '--input', 'note=a b', '--input', 'q=say "hi"', '--repo', '/r', '--profile', 'default']);
   const feature = { ...t9, ticket: { ref: 'github.com/o/r#9', number: 9 }, pipeline: 'feature', inputs: {}, repo: '/r' } as Readable;
-  assert.deepEqual(runAgainArgv(feature), ['run', 'github.com/o/r#9', '--repo', '/r']);
+  assert.deepEqual(runAgainArgv(feature), ['run', 'github.com/o/r#9', '--pipeline', 'feature', '--repo', '/r', '--profile', 'default']);
   assert.deepEqual(actionArgv('run-again', ticketless), runAgainArgv(ticketless));
+});
+
+test('actionArgv run-again on an unreadable run is null: it has no pipeline or repo to start again', () => {
+  assert.equal(actionArgv('run-again', { id: 'x', status: 'unreadable', error: 'bad meta.json' }), null);
+});
+
+test('runAgainArgv names feature (a profile may mark another pipeline default) and keeps the profile and config of the run', () => {
+  const t9 = readable('t9');
+  const base = { ...t9, ticket: { ref: 'github.com/o/r#9', number: 9 }, pipeline: 'feature', inputs: {}, repo: '/r' };
+  const work = { ...base, profile: 'work', config: 'C:\My Configs\p.yaml' } as Readable;
+  assert.deepEqual(runAgainArgv(work), [
+    'run',
+    'github.com/o/r#9',
+    '--pipeline',
+    'feature',
+    '--repo',
+    '/r',
+    '--config',
+    'C:\My Configs\p.yaml',
+    '--profile',
+    'work',
+  ]);
+  const byDefault = { ...base, profile: 'default', config: null } as Readable;
+  assert.deepEqual(runAgainArgv(byDefault), ['run', 'github.com/o/r#9', '--pipeline', 'feature', '--repo', '/r', '--profile', 'default']);
 });

@@ -17,6 +17,7 @@ export declare function rowState(run: RunStatusJson): { tone: Tone; text: string
 export declare function outcomeOf(run: RunStatusJson): { tag: 'DELIVERED' | 'ROUTED' | 'DONE'; text: string };
 export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
 /** `feedback` is the reject feedback, or the picked pipeline for `pick`. */
+/** `run-again` on an unreadable run: null (it has no pipeline or repo to start again). */
 export declare function actionArgv(action: Action, run: RunStatusJson, feedback?: string): string[] | null;
 export declare function runAgainArgv(run: Readable): string[];
 export type AskItem = { n: number; label: string; text: string };

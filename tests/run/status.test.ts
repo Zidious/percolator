@@ -135,6 +135,8 @@ function expected(m: RunMeta, over: Record<string, unknown>): Record<string, unk
     id: m.runId,
     pipeline: 'feature',
     inputs: {},
+    profile: 'work',
+    config: m.configFile,
     ticket: { ref: TICKET, number: 5 },
     parent: null,
     children: [],
@@ -524,6 +526,24 @@ test('paused on escalate', async () => {
   }
 });
 
+test('a run started with the default config file has config null, and Run again leaves --config out', async () => {
+  const e = await setup();
+  try {
+    const m = { ...(await e.prepare()), configFile: path.join(e.home, '.percolator', 'config.yaml') };
+    await writeRunMeta(e.dir(m), m);
+    await e.edit(m, (s) => {
+      s.status = 'failed';
+      s.currentStep = 'implement';
+    });
+    const r = (await e.status(m)) as Extract<RunStatusJson, { pipeline: string }>;
+    assert.equal(r.config, null);
+    assert.equal(r.profile, 'work');
+    assert.deepEqual(r.attention?.commands, [`perc run ${TICKET} --pipeline feature --repo ${m.repoRoot} --profile work`]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('failed run with worktree → failed attention (clean)', async () => {
   const e = await setup();
   try {
@@ -547,7 +567,7 @@ test('failed run with worktree → failed attention (clean)', async () => {
           detail: "A failed run can't be resumed. Start a new run for the ticket, then delete this one (or clean it up to keep its record).",
           review: [{ step: 'implement', key: 'summary', path: path.join(e.dir(m), summary) }],
           actions: ['run-again', 'clean'],
-          commands: [`perc run ${TICKET} --repo ${m.repoRoot}`],
+          commands: [`perc run ${TICKET} --pipeline feature --repo ${m.repoRoot} --config ${m.configFile} --profile work`],
         },
         steps: steps({ implement: { status: 'fail', attempts: 1, startedAt: T1, endedAt: T2, outputs: { summary: path.join(e.dir(m), summary) } } }),
       }),
@@ -1006,7 +1026,7 @@ test('a failed ticketless run says how to start it again with its pipeline and i
       s.history.push(rec('implement', 1, 'fail'));
     });
     const r = (await e.status(m)) as Readable;
-    const again = `perc run --pipeline dd-alert --input alert_url=https://dd/x --repo ${m.repoRoot}`;
+    const again = `perc run --pipeline dd-alert --input alert_url=https://dd/x --repo ${m.repoRoot} --config ${m.configFile} --profile work`;
     assert.deepEqual(r.attention?.commands, [again]);
     assert.deepEqual(attentionNext(r.attention!, r), [again, `perc delete ${m.runId}`, `perc clean ${m.runId}`]);
   } finally {
@@ -1140,7 +1160,7 @@ test('a failed fan-out slice says to delete it and resume its parent, never to s
     // a routed child (a parent, no fanOut) still starts a new run
     const routed = await rewriteMeta(e, slice, { pipeline: 'hotfix' }, ['fanOut']);
     const rr = (await e.status(routed)) as Readable;
-    assert.deepEqual(rr.attention?.commands, [`perc run ${REPO}#6 --pipeline hotfix --repo ${routed.repoRoot}`]);
+    assert.deepEqual(rr.attention?.commands, [`perc run ${REPO}#6 --pipeline hotfix --repo ${routed.repoRoot} --config ${routed.configFile} --profile work`]);
   } finally {
     await e.cleanup();
   }
@@ -1351,7 +1371,16 @@ test('yourTurn failed on another pipeline starts it again with its inputs, quote
   const t = yourTurn({ ...ticketless, kind: 'failed', pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x', note: 'a b', q: 'say "hi"' } });
   assert.equal(t.next[0], `perc run --pipeline dd-alert --input alert_url=https://dd/x --input note="a b" --input q='say "hi"' --repo /repo`);
   assert.equal(yourTurn({ ...TURN, kind: 'failed', pipeline: 'hotfix', inputs: {} }).next[0], 'perc run github.com/o/r#5 --pipeline hotfix --repo /repo');
-  assert.equal(yourTurn({ ...TURN, kind: 'failed', pipeline: 'feature', inputs: {} }).next[0], 'perc run github.com/o/r#5 --repo /repo');
+  assert.equal(yourTurn({ ...TURN, kind: 'failed', pipeline: 'feature', inputs: {} }).next[0], 'perc run github.com/o/r#5 --pipeline feature --repo /repo');
+});
+
+test('runAgain always names the pipeline, and carries the profile and a config file other than the default', () => {
+  // a profile may mark another pipeline default: true, so feature is named too
+  assert.equal(runAgain({ ticket: 'o/r#1', pipeline: 'feature', repoRoot: '/repo' }), 'perc run o/r#1 --pipeline feature --repo /repo');
+  assert.equal(
+    runAgain({ ticket: 'o/r#1', pipeline: 'feature', repoRoot: '/repo', profile: 'work', config: 'C:\My Configs\p.yaml' }),
+    'perc run o/r#1 --pipeline feature --repo /repo --config "C:\My Configs\p.yaml" --profile work',
+  );
 });
 
 test('yourTurn gate on a ticketless run is answered here', () => {

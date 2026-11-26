@@ -20,6 +20,7 @@ import type { DriverDeps } from './prepare.ts';
 import { askedItems } from './answer.ts';
 import { parsePick } from './route.ts';
 import { watcherStatus } from '../watch/watch.ts';
+import { samePath } from '../util/paths.ts';
 
 export type AttentionKind = 'gate' | 'cap' | 'paused' | 'questions' | 'findings' | 'failed' | 'stalled' | 'agent';
 export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'answer' | 'clean' | 'open-pane' | 'run-again';
@@ -74,6 +75,10 @@ export type RunStatusJson =
       pipeline: string;
       /** the `--input` values the run was started with */
       inputs: Record<string, string>;
+      /** the profile the run was started with */
+      profile: string;
+      /** the config file the run was started with, null when it is perc's default (`~/.percolator/config.yaml`) */
+      config: string | null;
       /** null on a ticketless run */
       ticket: TicketJson | null;
       /** the run that started this one, else null */
@@ -250,6 +255,9 @@ export type YourTurnInput = {
   pipeline?: string;
   inputs?: Record<string, string>;
   repoRoot: string;
+  /** the run's profile and (unless the default) config file, so it starts under the same config */
+  profile?: string;
+  config?: string;
   reason?: string;
   decision?: 'approve' | 'reject';
   terminal?: string;
@@ -276,11 +284,16 @@ const quoted = (v: string): string => {
   return `'${v.replace(/'/g, "''")}'`;
 };
 
-/** The `perc run` that starts the same kind of run again: its ticket, its pipeline (unless feature) and its inputs. */
-export function runAgain(a: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs' | 'repoRoot'>): string {
-  const pipeline = a.pipeline !== undefined && a.pipeline !== 'feature' ? [`--pipeline ${a.pipeline}`] : [];
+/**
+ * The `perc run` that starts the same kind of run again: its ticket, its pipeline (named even when feature, as a
+ * profile may mark another pipeline default), its inputs, its repo, then its config file (unless the default) and profile.
+ */
+export function runAgain(a: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs' | 'repoRoot' | 'profile' | 'config'>): string {
+  const pipeline = a.pipeline !== undefined ? [`--pipeline ${a.pipeline}`] : [];
   const inputs = Object.entries(a.inputs ?? {}).map(([k, v]) => `--input ${k}=${quoted(v)}`);
-  return ['perc run', ...(a.ticket ? [a.ticket] : []), ...pipeline, ...inputs, `--repo ${quoted(a.repoRoot)}`].join(' ');
+  const config = a.config !== undefined ? [`--config ${quoted(a.config)}`] : [];
+  const profile = a.profile !== undefined ? [`--profile ${a.profile}`] : [];
+  return ['perc run', ...(a.ticket ? [a.ticket] : []), ...pipeline, ...inputs, `--repo ${quoted(a.repoRoot)}`, ...config, ...profile].join(' ');
 }
 
 /** A failed step, with why it failed when the run recorded it (`lint failed (exit code 1)`). */
@@ -356,9 +369,25 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
  */
 export function attentionNext(
   a: AttentionJson,
-  run: { id: string; ticket: { ref: string } | null; pipeline: string; inputs: Record<string, string>; repo: string; parent?: string | null },
+  run: {
+    id: string;
+    ticket: { ref: string } | null;
+    pipeline: string;
+    inputs: Record<string, string>;
+    repo: string;
+    parent?: string | null;
+    profile?: string;
+    config?: string | null;
+  },
 ): string[] {
-  const again = { ticket: run.ticket?.ref, pipeline: run.pipeline, inputs: run.inputs, repoRoot: run.repo };
+  const again = {
+    ticket: run.ticket?.ref,
+    pipeline: run.pipeline,
+    inputs: run.inputs,
+    repoRoot: run.repo,
+    ...(run.profile !== undefined ? { profile: run.profile } : {}),
+    ...(typeof run.config === 'string' ? { config: run.config } : {}),
+  };
   const slice = a.kind === 'failed' && a.commands === undefined && typeof run.parent === 'string' ? { sliceOf: run.parent } : {};
   const choices = a.choices !== undefined ? { choices: a.choices } : {};
   const none = a.kind === 'findings' && a.asked?.items.length === 0 ? { nothingToTick: true } : {};
@@ -398,10 +427,19 @@ async function attentionOf(o: {
   loops: RunGraphLoop[];
   /** graph.json was read: without it the loops are unknown, so a gate does not say where a reject goes */
   graphKnown: boolean;
+  /** the run's config file, null when it is the default */
+  config: string | null;
 }): Promise<AttentionJson | undefined> {
   const { dir, meta, state, waiting, alive } = o;
   const lastEnd = state.history.at(-1)?.endedAt || meta.createdAt;
-  const again = { ticket: meta.ticket, pipeline: meta.pipeline, inputs: meta.inputs, repoRoot: meta.repoRoot };
+  const again = {
+    ticket: meta.ticket,
+    pipeline: meta.pipeline,
+    inputs: meta.inputs,
+    repoRoot: meta.repoRoot,
+    profile: meta.profile,
+    ...(o.config !== null ? { config: o.config } : {}),
+  };
   const turn = (kind: AttentionKind, step: string | undefined, x: Partial<YourTurnInput> = {}) => {
     const t = yourTurn({ kind, runId: meta.runId, step: step ?? STAGES[0], ...again, ...x });
     return { message: t.message, ...(t.detail !== undefined ? { detail: t.detail } : {}) };
@@ -642,12 +680,15 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, list
       outputs: absOutputs(dir, h?.outputs ?? {}),
     };
   });
-  const attention = await attentionOf({ dir, meta, state, waiting, alive, steps: stepDefs, loops: loopDefs, graphKnown: graph !== undefined });
+  const config = samePath(meta.configFile, path.join(deps.home, '.percolator', 'config.yaml')) ? null : meta.configFile;
+  const attention = await attentionOf({ dir, meta, state, waiting, alive, steps: stepDefs, loops: loopDefs, graphKnown: graph !== undefined, config });
   const url = await prUrl(dir, state);
   return {
     id: meta.runId,
     pipeline: meta.pipeline,
     inputs: meta.inputs,
+    profile: meta.profile,
+    config,
     ticket: await readTicket(dir, meta),
     parent: meta.parent ?? null,
     children: await childrenOf(dir, meta, listed),

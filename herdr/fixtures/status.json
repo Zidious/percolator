@@ -5,6 +5,8 @@
       "id": "t8-20261121-091502-a41c",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#8",
         "number": 8,
@@ -303,6 +305,8 @@
       "id": "t3-20261120-142211-e012",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#3",
         "number": 3,
@@ -477,6 +481,8 @@
       "id": "t2-20261121-005347-f0ab",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#2",
         "number": 2,
@@ -635,6 +641,8 @@
       "id": "t4-20261121-061230-77ab",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#4",
         "number": 4,
@@ -867,6 +875,8 @@
       "id": "t12-20261121-020000-9b1d",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#12",
         "number": 12,
@@ -980,6 +990,8 @@
       "id": "t25-20261124-040000-a1b2",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#25",
         "number": 25,
@@ -1102,6 +1114,8 @@
       "id": "t24-20261124-050000-c3d4",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#24",
         "number": 24,
@@ -1342,6 +1356,8 @@
       "id": "t26-20261125-030000-ab12",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#26",
         "number": 26,
@@ -1491,6 +1507,8 @@
       "id": "t9-20261120-215502-c3d9",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#9",
         "number": 9,
@@ -1529,7 +1547,7 @@
           "clean"
         ],
         "commands": [
-          "perc run github.com/zidious/percolator#9 --repo /home/me/src/percolator"
+          "perc run github.com/zidious/percolator#9 --pipeline feature --repo /home/me/src/percolator --profile default"
         ]
       },
       "steps": [
@@ -1619,6 +1637,8 @@
       "id": "t11-20261121-001500-5e7f",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#11",
         "number": 11,
@@ -1732,6 +1752,8 @@
       "id": "t13-20261121-030000-0c2e",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#13",
         "number": 13,
@@ -1850,6 +1872,8 @@
       "id": "t14-20261121-032000-6a1f",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#14",
         "number": 14
@@ -1891,6 +1915,8 @@
       "id": "t15-20261121-013000-d2c4",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#15",
         "number": 15
@@ -2003,6 +2029,8 @@
       "id": "t16-20261121-040000-1a2b",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#16",
         "number": 16,
@@ -2276,6 +2304,8 @@
       "id": "t17-20261121-050000-3c4d",
       "pipeline": "feature",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#17",
         "number": 17,
@@ -2460,6 +2490,8 @@
       "inputs": {
         "alert_url": "https://app.datadoghq.com/monitors/12345678?group=service%3Aapi"
       },
+      "profile": "default",
+      "config": null,
       "ticket": null,
       "parent": null,
       "children": [],
@@ -2597,6 +2629,8 @@
       "id": "t21-hotfix-20261121-070000-4b5c",
       "pipeline": "hotfix",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#21",
         "number": 21,
@@ -2717,6 +2751,8 @@
       "id": "t21-triage-20261121-065800-9e3a",
       "pipeline": "triage",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#21",
         "number": 21,
@@ -2862,6 +2898,8 @@
       "id": "t22-triage-20261121-080000-5f1d",
       "pipeline": "triage",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#22",
         "number": 22,
@@ -3022,6 +3060,8 @@
       "id": "t23-epic-20261121-090000-7c2a",
       "pipeline": "epic",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#23",
         "number": 23,
@@ -3147,6 +3187,8 @@
       "id": "t23-epic-20261121-090000-7c2a-s1",
       "pipeline": "epic",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#23",
         "number": 23,
@@ -3271,6 +3313,8 @@
       "id": "t23-epic-20261121-090000-7c2a-s2",
       "pipeline": "epic",
       "inputs": {},
+      "profile": "default",
+      "config": null,
       "ticket": {
         "ref": "github.com/zidious/percolator#23",
         "number": 23,
@@ -3384,6 +3428,8 @@
       "inputs": {
         "scope": "src/run"
       },
+      "profile": "default",
+      "config": null,
       "ticket": null,
       "parent": null,
       "children": [],
