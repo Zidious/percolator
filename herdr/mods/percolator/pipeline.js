@@ -44,10 +44,7 @@ export function header(p, t, r, narrow) {
     .when(Boolean(up), (el) =>
       el.child(
         h_flex().child(
-          link(t, 'parent', up.text, (_e, cx) => {
-            p.select(up.run, cx);
-            p.revealRow();
-          }),
+          link(t, 'parent', up.text, (_e, cx) => p.toParent(cx)),
         ),
       ),
     )

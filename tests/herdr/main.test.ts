@@ -552,6 +552,21 @@ for (const key of ['escape', 'backspace']) {
   });
 }
 
+test('going to a failed parent from the Active tab switches to All and redraws', async () => {
+  const { p, cx } = await panelOnFixture(`${EPIC}-s2`);
+  try {
+    p.filter = 'active';
+    p.runs = p.runs.map((r: { id: string }) => (r.id === EPIC ? { ...r, status: 'failed', attention: null } : r));
+    let notified = 0;
+    assert.equal(p.toParent({ ...cx, notify: () => notified++ }), true);
+    assert.equal(p.sel, EPIC);
+    assert.equal(p.filter, 'all');
+    assert.ok(notified > 0, 'going to the parent must redraw the panel');
+  } finally {
+    delete fakes.run;
+  }
+});
+
 test('on a run that is not a slice, backspace does nothing and escape still hides the panel', async () => {
   const { p, cx, sent } = await panelOnFixture(HOTFIX);
   try {

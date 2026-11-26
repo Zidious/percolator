@@ -935,8 +935,11 @@ export default class Percolator extends View {
     const r = this.current();
     const up = r && parentLink(r, this.runs);
     if (!up) return false;
+    // as a linked run's line does: a parent the tab hides is shown on All
+    if (!this.rows().some((x) => x.id === up.run)) this.filter = 'all';
     this.select(up.run, cx);
     this.revealRow();
+    cx.notify();
     return true;
   }
 
