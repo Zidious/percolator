@@ -115,7 +115,8 @@ export default class Percolator extends View {
     this.actError = null;
     this.said = null;
     this.notice = null; // beside Delete finished runs ↗, seen with or without a selection
-    this.deleting = null; // { ids, next, doneAt? }: the delete the owner confirmed and the row to select after it
+    this.deleting = null; // { ids, next, shown, doneAt? }: the delete the owner confirmed and the row to select after it
+    this.deleteFailed = null; // { ids, error }: the last delete failed; its runs' headers say so until retry or another pick
     this.fetches = 0;
     this.historyOpen = false;
     this.rejecting = false;
@@ -270,6 +271,7 @@ export default class Percolator extends View {
       this.rejecting = false;
       this.rejectError = null;
       this.actError = null;
+      this.deleteFailed = null;
       this.said = null;
       this.feedback.set_value('');
       this.unfolded = [];
@@ -443,6 +445,7 @@ export default class Percolator extends View {
       cx.notify();
       return;
     }
+    this.deleteFailed = null;
     if (this.conn !== 'fixtures') this.deleting = { ids, next: selectAfterDelete(this.rows(), ids, this.sel) };
     this.perform('delete', deleteArgv(ids), cx);
   }
@@ -483,6 +486,7 @@ export default class Percolator extends View {
 
   perform(action, argv, cx) {
     if (!argv) return;
+    this.actError = null; // an earlier action's error is stale once another starts
     if (this.conn === 'fixtures') {
       this.said = `Fixtures: would run perc ${argv.join(' ')}`;
       if (action === 'reject') this.closeReject();
@@ -500,13 +504,18 @@ export default class Percolator extends View {
       // a delete of several runs that exits 1 still removed some: refresh either way
       if (res.code === 0 || action === 'delete') this.refresh(cx);
       if (res.code === 0) {
+        this.actError = null;
+        if (action === 'delete') this.deleteFailed = null;
         if (action === 'reject') this.closeReject();
         // as Start does: the new run is selected once a refresh lists it
         if (action === 'run-again') this.startedId = startedRun(res.stdout);
       } else {
         const why = firstLine(res.stderr) || `perc ${argv[0]} exited ${res.code}`;
+        const ids = action === 'delete' ? (this.deleting?.ids ?? []) : [];
+        if (action === 'delete') this.deleteFailed = { ids, error: why };
         if (action === 'reject') this.rejectError = why;
-        else this.actError = why;
+        // the selected run's header says Delete failed: not again under its buttons
+        else if (!ids.includes(this.sel)) this.actError = why;
       }
       cx.notify();
     });

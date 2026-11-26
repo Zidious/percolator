@@ -962,6 +962,14 @@ export function deleteBusyError(busy) {
   return busy ? 'Another action is running; try Delete again' : null;
 }
 
+/** What the run's header says about a delete of it: Deleting… while perc deletes it, Delete failed until the owner
+ *  retries, selects another run or a delete succeeds; null otherwise. */
+export function deleteView(runId, { busy, deleting, deleteFailed }) {
+  if (busy === 'delete' && deleting?.ids.includes(runId) && deleting.doneAt === undefined) return { kind: 'deleting' };
+  if (deleteFailed?.ids.includes(runId)) return { kind: 'failed', error: deleteFailed.error };
+  return null;
+}
+
 /** The selection after `deletedIds` are gone: `selId` if it stays, else the next row left, else the previous, else null. */
 export function selectAfterDelete(rows, deletedIds, selId) {
   const gone = new Set(deletedIds);

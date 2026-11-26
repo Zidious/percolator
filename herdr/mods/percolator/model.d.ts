@@ -231,3 +231,7 @@ export declare function runNextChoices(
 /** Run-shaped (status 'pending', ticket null, plus `pipeline`) so the pipeline functions draw it. */
 export declare function previewRun(pipeline: Pipeline): Readable;
 export declare function previewSide(width: number): 'below' | 'right';
+export declare function deleteView(
+  runId: string,
+  s: { busy: string | null; deleting: { ids: string[]; doneAt?: number } | null; deleteFailed: { ids: string[]; error: string } | null },
+): { kind: 'deleting' } | { kind: 'failed'; error: string } | null;

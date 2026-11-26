@@ -108,6 +108,7 @@ import {
   startRepos,
   linkedLine,
   parentLink,
+  deleteView,
   keyHints,
   pipelineOption,
   startedRun,
@@ -1727,6 +1728,19 @@ test('the key hints end with esc parent on a slice, else esc close', () => {
   assert.equal(keyHints(rs.find((r) => r.id === `${EPIC}-s2`)!, rs), `${base} · esc parent`);
   assert.equal(keyHints(rs.find((r) => r.id === HOTFIX)!, rs), `${base} · esc close`);
   assert.equal(keyHints(null, rs), `${base} · esc close`);
+});
+
+
+test('deleteView says Deleting… while the delete of the run runs, and Delete failed once it failed', () => {
+  const deleting = { ids: ['r1', 'r2'] };
+  assert.deepEqual(deleteView('r2', { busy: 'delete', deleting, deleteFailed: null }), { kind: 'deleting' });
+  assert.equal(deleteView('r2', { busy: null, deleting: { ...deleting, doneAt: 3 }, deleteFailed: null }), null);
+  assert.equal(deleteView('r2', { busy: 'delete', deleting: { ...deleting, doneAt: 3 }, deleteFailed: null }), null);
+  assert.equal(deleteView('r2', { busy: 'approve', deleting, deleteFailed: null }), null);
+  assert.equal(deleteView('r3', { busy: 'delete', deleting, deleteFailed: null }), null);
+  const deleteFailed = { ids: ['r1'], error: 'run r1: worktree w is still in use' };
+  assert.deepEqual(deleteView('r1', { busy: null, deleting: null, deleteFailed }), { kind: 'failed', error: 'run r1: worktree w is still in use' });
+  assert.equal(deleteView('r2', { busy: null, deleting: null, deleteFailed }), null);
 });
 
 

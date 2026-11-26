@@ -575,3 +575,121 @@ test('escape on a slice with the stop strip open closes the strip and keeps the 
     delete fakes.run;
   }
 });
+
+const HELD_LINE = 'run r1: worktree w is still in use; close what holds it and run perc delete r1 again';
+
+/** A panel on perc with runs r1…r3, `sel` selected; `exec` answers perc; await `done()` for the spawned job. */
+function panelDeleting(sel: string | null, exec: (...a: unknown[]) => Promise<unknown>) {
+  const p = Object.create(Percolator.prototype);
+  Object.assign(p, {
+    conn: 'perc', perc: { node: 'node', cli: 'cli.ts' }, busy: null, actError: null, said: null, deleting: null, deleteFailed: null,
+    runs: [{ id: 'r1' }, { id: 'r2' }, { id: 'r3' }], filter: 'all', files: {}, sel, fetches: 0, unfolded: [],
+    feedback: { set_value() {} }, refresh() {},
+  });
+  fakes.exec = exec;
+  const jobs: Promise<unknown>[] = [];
+  const cx = { notify() {}, spawn: (fn: (cx: unknown) => Promise<unknown>) => jobs.push(fn(cx)) };
+  const done = async () => {
+    while (jobs.length) await jobs.shift();
+  };
+  return { p, cx, done };
+}
+const failing = async () => ({ code: 1, stdout: '', stderr: `${HELD_LINE}\nmore\n` });
+const ok = async () => ({ code: 0, stdout: '', stderr: '' });
+const pending = () => new Promise(() => {});
+
+test('a failed delete shows Delete failed on the run and not as actError', async () => {
+  const { p, cx, done } = panelDeleting('r1', failing);
+  try {
+    p.deleteRuns(['r1'], cx);
+    await done();
+    assert.deepEqual(p.deleteFailed, { ids: ['r1'], error: HELD_LINE });
+    assert.equal(p.actError, null);
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('a timed-out delete is a failure', async () => {
+  const { p, cx, done } = panelDeleting('r1', async () => {
+    throw new Error('timed out after 120000 ms');
+  });
+  try {
+    p.deleteRuns(['r1'], cx);
+    await done();
+    assert.deepEqual(p.deleteFailed, { ids: ['r1'], error: 'timed out after 120000 ms' });
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('selecting another run clears Delete failed', async () => {
+  const { p, cx, done } = panelDeleting('r1', failing);
+  try {
+    p.deleteRuns(['r1'], cx);
+    await done();
+    p.select('r2', cx);
+    assert.equal(p.deleteFailed, null);
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('retrying the delete clears Delete failed when it starts', async () => {
+  const { p, cx, done } = panelDeleting('r1', failing);
+  try {
+    p.deleteRuns(['r1'], cx);
+    await done();
+    fakes.exec = pending;
+    p.deleteRuns(['r1'], cx);
+    assert.equal(p.deleteFailed, null);
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('a later successful delete clears Delete failed', async () => {
+  const { p, cx, done } = panelDeleting('r1', failing);
+  try {
+    p.deleteRuns(['r1'], cx);
+    await done();
+    p.busy = null;
+    // the run stays selected: clearing must come from the delete's success, not a new selection
+    p.deleting = null;
+    fakes.exec = ok;
+    p.deleteFailed = { ids: ['r1'], error: HELD_LINE };
+    p.perform('delete', ['delete', 'r2'], cx);
+    await done();
+    assert.equal(p.deleteFailed, null);
+    assert.equal(p.sel, 'r1');
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test('a failed delete of runs not selected sets actError as before', async () => {
+  const { p, cx, done } = panelDeleting('r1', async () => ({ code: 1, stdout: '', stderr: 'run r2: boom\n' }));
+  try {
+    p.deleteRuns(['r2', 'r3'], cx);
+    await done();
+    assert.equal(p.actError, 'run r2: boom');
+  } finally {
+    delete fakes.exec;
+  }
+});
+
+test("an action's error is cleared when the next action starts", () => {
+  const { p, cx } = panelDeleting('r1', pending);
+  try {
+    p.actError = 'invalid run id x';
+    p.perform('approve', ['approve', 'r1'], cx);
+    assert.equal(p.actError, null);
+    p.conn = 'fixtures';
+    p.busy = null;
+    p.actError = 'invalid run id x';
+    p.perform('approve', ['approve', 'r1'], cx);
+    assert.equal(p.actError, null);
+  } finally {
+    delete fakes.exec;
+  }
+});
