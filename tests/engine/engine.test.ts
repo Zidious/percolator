@@ -868,7 +868,7 @@ test("a failed step's reason is kept in failedReason", async () => {
 
 test('implicit gate edge escalates at its cap', async () => {
   const g = graph({ 'approve-plan': { kind: 'gate', after: 'plan' } });
-  const rejected = { status: 'fail' as const, outputs: { findings: 'f' }, reason: 'rejected by @zid: x' };
+  const rejected = { status: 'fail' as const, outputs: { findings: 'f' } };
   const rt = new FakeRuntime({ 'approve-plan': [rejected, rejected, rejected] });
   const s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
   assert.equal(s.status, 'paused');

@@ -743,11 +743,11 @@ test('a gate with when_output waits when a step wrote that output', async () => 
   }
 });
 
-test('a reject gives its outcome a one-line reason; an approval gives none', async () => {
-  for (const [decision, reason, findings] of [
-    [{ decision: 'reject', by: 'zid', feedback: 'tighten\n  scope' }, 'rejected by @zid: tighten scope', 'Rejected by @zid: tighten\n  scope\n'],
-    [{ decision: 'reject', by: 'zid', feedback: '' }, 'rejected by @zid: (no feedback given)', 'Rejected by @zid: (no feedback given)\n'],
-    [{ decision: 'approve', by: 'zid' }, undefined, undefined],
+test('a decision gives its outcome no reason: every gate loops back on reject, so it never fails the run', async () => {
+  for (const [decision, findings] of [
+    [{ decision: 'reject', by: 'zid', feedback: 'tighten\n  scope' }, 'Rejected by @zid: tighten\n  scope\n'],
+    [{ decision: 'reject', by: 'zid', feedback: '' }, 'Rejected by @zid: (no feedback given)\n'],
+    [{ decision: 'approve', by: 'zid' }, undefined],
   ] as const) {
     const e = await setup();
     try {
@@ -755,7 +755,7 @@ test('a reject gives its outcome a one-line reason; an approval gives none', asy
         if (n === 1) await writeDecision(e.runDir, decision);
       };
       const out = await githubGate({ gh: e.gh, runDir: e.runDir, runId: 'r1', ...e.opts })(e.step, e.ctx, e.io);
-      assert.equal(out.reason, reason);
+      assert.ok(!('reason' in out));
       if (findings !== undefined) assert.equal(await fsp.readFile(path.join(e.io.outputsDir, 'findings.md'), 'utf8'), findings);
     } finally {
       await rm(e.runDir);

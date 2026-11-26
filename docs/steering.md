@@ -18,7 +18,7 @@ Anything that needs you shows up in `perc status`, and in any [integration](inte
 | **Paused · audit at cap** | An `on_fail` back-edge used all its rounds. | `perc resume <id>` grants one more round |
 | **Paused · plan** | A step escalated: it timed out, or twice finished without the outputs its stage needs. | Read its step dir, then `perc resume <id>` re-runs the step (after a timeout it re-attaches to the step's still-running terminal; end that terminal first to start the step over) |
 | **Failed · implement** (a fan-out slice) | A step of a slice run failed: "Delete this slice (its branch stays), then resume <parent> to run it again". | `perc delete <id>`, then `perc resume <parent>` starts the slice again on its branch |
-| **Failed · implement** | A step failed and has no loop to go back through; the box says why (`lint failed (exit code 1)`, `approve-plan failed (rejected by @you: …)`). | A failed run can't be resumed: read its step dir, then start a new run with the `perc run …` line it prints (the panel's **Run again**), and `perc delete <id>` (or `perc clean <id>` to keep the record) |
+| **Failed · implement** | A step failed and has no loop to go back through; the box says why (`lint failed (exit code 1)`). | A failed run can't be resumed: read its step dir, then start a new run with the `perc run …` line it prints (the panel's **Run again**), and `perc delete <id>` (or `perc clean <id>` to keep the record) |
 | **Stalled · driver stopped** | The driver terminal exited mid-run. | `perc resume <id>` |
 | **agent blocked** (in `perc status` and in Herdr's own agent status; the Percolator panel counts the run as running) | The agent is asking something in its terminal. | Answer it in the agent's terminal |
 

@@ -1714,15 +1714,15 @@ test('a failed run says why it failed and offers to run again', async () => {
   const e = await setup();
   try {
     const m = await e.prepare();
-    await addToGraph(e, m, [{ id: 'approve-plan', stage: 'plan', role: 'node', kind: 'gate' }]);
+    await addToGraph(e, m, [{ id: 'lint', stage: 'implement', role: 'node', kind: 'script' }]);
     await e.edit(m, (s) => {
       s.status = 'failed';
-      s.currentStep = 'approve-plan';
-      s.failedReason = 'rejected by @zid: x';
-      s.history.push(rec('approve-plan', 1, 'fail'));
+      s.currentStep = 'lint';
+      s.failedReason = 'exit code 1';
+      s.history.push(rec('lint', 1, 'fail'));
     });
     const r = (await e.status(m)) as Readable;
-    assert.equal(r.attention?.message, 'approve-plan failed (rejected by @zid: x)');
+    assert.equal(r.attention?.message, 'lint failed (exit code 1)');
     assert.deepEqual(r.attention?.actions, ['run-again', 'clean']);
   } finally {
     await e.cleanup();
