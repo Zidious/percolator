@@ -1724,7 +1724,6 @@ test('parentLink is null for a non-slice child, a run with no parent, a slice wh
   assert.equal(parentLink(byId('t5'), rs), null);
 });
 
-
 test('the key hints end with esc parent on a slice, else esc close', () => {
   const rs = runs();
   const base = '↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume';
@@ -1732,7 +1731,6 @@ test('the key hints end with esc parent on a slice, else esc close', () => {
   assert.equal(keyHints(rs.find((r) => r.id === HOTFIX)!, rs), `${base} · esc close`);
   assert.equal(keyHints(null, rs), `${base} · esc close`);
 });
-
 
 test('deleteView says Deleting… while the delete of the run runs, and Delete failed once it failed', () => {
   const deleting = { ids: ['r1', 'r2'] };
@@ -1781,7 +1779,6 @@ test('spaceAfterDelete falls back to the first open space that is no run\'s, els
   assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: null }, [sp('w1:s9', true), sp('w1:s3')], SPACE_RUNS, ['r1']), 'w1:s3');
   assert.equal(spaceAfterDelete({ shown: 'w1:s8', back: 'w1:s5' }, [sp('w1:s9', true)], SPACE_RUNS, ['r1']), null);
 });
-
 
 test("sliceRows shows each slice's step and PR", () => {
   const rs = runs();

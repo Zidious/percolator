@@ -875,7 +875,6 @@ export function keyHints(run, runs) {
   return `↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · ${esc}`;
 }
 
-
 // ── the watcher (`perc watch`) ──
 
 /** How long after Start the panel waits for the watcher's first heartbeat, saying Starting… meanwhile. */
@@ -982,7 +981,6 @@ export function spaceAfterDelete(o, spaces, runs, ids) {
   const taken = runSpaces(runs);
   return spaces.find((s) => !taken.has(s.id))?.id ?? null;
 }
-
 
 /** What the run's header says about a delete of it: Deleting… while perc deletes it, Delete failed until the owner
  *  retries, selects another run or a delete succeeds; null otherwise. */

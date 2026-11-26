@@ -137,7 +137,6 @@ export class FakeGh implements Gh {
     return false;
   }
 
-
   async user(): Promise<string> {
     this.enter('user', []);
     return this.userLogin;
