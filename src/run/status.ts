@@ -20,9 +20,10 @@ import type { DriverDeps } from './prepare.ts';
 import { askedItems } from './answer.ts';
 import { parsePick } from './route.ts';
 import { watcherStatus } from '../watch/watch.ts';
+import { samePath } from '../util/paths.ts';
 
 export type AttentionKind = 'gate' | 'cap' | 'paused' | 'questions' | 'findings' | 'failed' | 'stalled' | 'agent';
-export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'answer' | 'clean' | 'open-pane';
+export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'answer' | 'clean' | 'open-pane' | 'run-again';
 export type ReviewItem = { step: string; key: string; path: string };
 export type AttentionJson = {
   kind: AttentionKind;
@@ -74,6 +75,10 @@ export type RunStatusJson =
       pipeline: string;
       /** the `--input` values the run was started with */
       inputs: Record<string, string>;
+      /** the profile the run was started with */
+      profile: string;
+      /** the config file the run was started with, null when it is perc's default (`~/.percolator/config.yaml`) */
+      config: string | null;
       /** null on a ticketless run */
       ticket: TicketJson | null;
       /** the run that started this one, else null */
@@ -250,6 +255,9 @@ export type YourTurnInput = {
   pipeline?: string;
   inputs?: Record<string, string>;
   repoRoot: string;
+  /** the run's profile and (unless the default) config file, so it starts under the same config */
+  profile?: string;
+  config?: string;
   reason?: string;
   decision?: 'approve' | 'reject';
   terminal?: string;
@@ -258,8 +266,11 @@ export type YourTurnInput = {
   sliceOf?: string;
   /** a pick-pipeline gate: the pipelines `perc approve --pipeline` may name */
   choices?: string[];
-  /** findings: the stage a granted round goes back to */
+  /** findings: the stage a granted round goes back to; gate: the stage a reject goes back to (none: a reject ends the run) */
   backTo?: string;
+  /** gate: its loop is on its last round, so a reject pauses at this cap of rounds (asking which findings to fix, for a stage loop) */
+  capRounds?: number;
+  capAsksFindings?: boolean;
   /** findings: the failing step wrote none, so the only answer is to move on */
   nothingToTick?: boolean;
 };
@@ -276,11 +287,32 @@ const quoted = (v: string): string => {
   return `'${v.replace(/'/g, "''")}'`;
 };
 
-/** The `perc run` that starts the same kind of run again: its ticket, its pipeline (unless feature) and its inputs. */
-export function runAgain(a: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs' | 'repoRoot'>): string {
-  const pipeline = a.pipeline !== undefined && a.pipeline !== 'feature' ? [`--pipeline ${a.pipeline}`] : [];
+/**
+ * The `perc run` that starts the same kind of run again: its ticket, its pipeline (named even when feature, as a
+ * profile may mark another pipeline default), its inputs, its repo, then its config file (unless the default) and profile.
+ */
+export function runAgain(a: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs' | 'repoRoot' | 'profile' | 'config'>): string {
+  const pipeline = a.pipeline !== undefined ? [`--pipeline ${a.pipeline}`] : [];
   const inputs = Object.entries(a.inputs ?? {}).map(([k, v]) => `--input ${k}=${quoted(v)}`);
-  return ['perc run', ...(a.ticket ? [a.ticket] : []), ...pipeline, ...inputs, `--repo ${quoted(a.repoRoot)}`].join(' ');
+  const config = a.config !== undefined ? [`--config ${quoted(a.config)}`] : [];
+  const profile = a.profile !== undefined ? [`--profile ${a.profile}`] : [];
+  return ['perc run', ...(a.ticket ? [a.ticket] : []), ...pipeline, ...inputs, `--repo ${quoted(a.repoRoot)}`, ...config, ...profile].join(' ');
+}
+
+/** Where a reject of a gate sends the run: back with the feedback, else to the cap of its loop on the last round. */
+function gateDetail(a: Pick<YourTurnInput, 'backTo' | 'capRounds' | 'capAsksFindings'>): string {
+  if (a.backTo === undefined) return "Rejecting ends the run; a failed run can't be resumed.";
+  if (a.capRounds !== undefined) {
+    return a.capAsksFindings === true
+      ? `Rejecting pauses the run at its cap (${a.capRounds} rounds) to ask which findings to fix.`
+      : `Rejecting pauses the run at its cap (${a.capRounds} rounds); perc resume grants one more.`;
+  }
+  return `Rejecting sends the run back to ${a.backTo} with your feedback.`;
+}
+
+/** A failed step, with why it failed when the run recorded it (`lint failed (exit code 1)`). */
+export function failedText(step: string, reason: string | undefined): string {
+  return reason === undefined ? `${step} failed` : `${step} failed (${reason})`;
 }
 
 /** What the owner has to do next, as one sentence plus the exact commands to type. Shared by `perc status` and the JSON. */
@@ -291,6 +323,7 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
       return {
         // a ticketless run has no issue for the gate to comment on
         message: a.ticket ? `${a.step} is waiting for approval` : 'approve or reject here (no issue to comment on)',
+        detail: gateDetail(a),
         next: [
           ...(a.choices !== undefined ? a.choices.map((c) => `perc approve ${a.runId} --pipeline ${c}`) : [`perc approve ${a.runId}`]),
           `perc reject ${a.runId} "<what to change>"`,
@@ -328,8 +361,8 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
         };
       }
       return {
-        message: `${a.step} failed`,
-        detail: "A failed run can't be resumed. Start a new run for the ticket, then delete this one (or clean it up to keep its record).",
+        message: failedText(a.step, a.reason),
+        detail: `A failed run can't be resumed. Start a new run ${a.ticket ? 'for the ticket' : `of pipeline ${a.pipeline ?? 'feature'}`}, then delete this one (or clean it up to keep its record).`,
         next: [runAgain(a), `perc delete ${a.runId}`, `perc clean ${a.runId}`],
       };
     case 'stalled':
@@ -350,9 +383,25 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
  */
 export function attentionNext(
   a: AttentionJson,
-  run: { id: string; ticket: { ref: string } | null; pipeline: string; inputs: Record<string, string>; repo: string; parent?: string | null },
+  run: {
+    id: string;
+    ticket: { ref: string } | null;
+    pipeline: string;
+    inputs: Record<string, string>;
+    repo: string;
+    parent?: string | null;
+    profile?: string;
+    config?: string | null;
+  },
 ): string[] {
-  const again = { ticket: run.ticket?.ref, pipeline: run.pipeline, inputs: run.inputs, repoRoot: run.repo };
+  const again = {
+    ticket: run.ticket?.ref,
+    pipeline: run.pipeline,
+    inputs: run.inputs,
+    repoRoot: run.repo,
+    ...(run.profile !== undefined ? { profile: run.profile } : {}),
+    ...(typeof run.config === 'string' ? { config: run.config } : {}),
+  };
   const slice = a.kind === 'failed' && a.commands === undefined && typeof run.parent === 'string' ? { sliceOf: run.parent } : {};
   const choices = a.choices !== undefined ? { choices: a.choices } : {};
   const none = a.kind === 'findings' && a.asked?.items.length === 0 ? { nothingToTick: true } : {};
@@ -361,12 +410,40 @@ export function attentionNext(
 
 const PICK_GATE = 'pick-pipeline';
 
+/** A pick gate's reject has the choose agent pick again, or pauses at its cap on the last round. */
+function pickDetail(g: Pick<YourTurnInput, 'backTo' | 'capRounds'>): { detail?: string } {
+  if (g.backTo === undefined) return {};
+  if (g.capRounds !== undefined) return { detail: gateDetail(g) };
+  return { detail: 'Rejecting has the agent pick again with your feedback.' };
+}
+
 /** The choose agent's latest valid pick among `choices`, if it made one (sure or not). */
 async function suggestion(dir: string, state: RunState, choices: string[]): Promise<string | undefined> {
   const rel = latest(state, 'route.1')?.outputs['pick'];
   if (rel === undefined) return undefined;
   const text = await fs.readFile(path.join(dir, rel), 'utf8').catch(() => '');
   return parsePick(text, choices).pipeline;
+}
+
+/**
+ * Where a reject of `gate` sends the run: the stage of the loop from the gate, else (a gate in a loop stage)
+ * of the stage loop from a step of its stage. None: an older graph whose gate has no loop; a reject ends the run.
+ */
+function gateBackTo(
+  gate: string,
+  steps: RunGraphStep[],
+  loops: RunGraphLoop[],
+  rounds: Record<string, number>,
+): Pick<YourTurnInput, 'backTo' | 'capRounds' | 'capAsksFindings'> {
+  const stageOf = (id: string | undefined) => steps.find((s) => s.id === id)?.stage;
+  const own = loops.find((l) => l.from === gate);
+  const stage = stageOf(gate);
+  const loop = own ?? loops.find((l) => l.atCap === 'continue' && stage !== undefined && stageOf(l.from) === stage);
+  const backTo = stageOf(loop?.to);
+  if (loop === undefined || backTo === undefined) return {};
+  // the engine's cap: a fail that brings the loop's rounds to its max pauses instead of going back
+  if ((rounds[loop.id] ?? 0) + 1 < loop.max) return { backTo };
+  return { backTo, capRounds: loop.max, ...(loop.atCap === 'continue' ? { capAsksFindings: true } : {}) };
 }
 
 async function attentionOf(o: {
@@ -377,10 +454,21 @@ async function attentionOf(o: {
   alive: boolean | null;
   steps: RunGraphStep[];
   loops: RunGraphLoop[];
+  /** graph.json was read: without it the loops are unknown, so a gate does not say where a reject goes */
+  graphKnown: boolean;
+  /** the run's config file, null when it is the default */
+  config: string | null;
 }): Promise<AttentionJson | undefined> {
   const { dir, meta, state, waiting, alive } = o;
   const lastEnd = state.history.at(-1)?.endedAt || meta.createdAt;
-  const again = { ticket: meta.ticket, pipeline: meta.pipeline, inputs: meta.inputs, repoRoot: meta.repoRoot };
+  const again = {
+    ticket: meta.ticket,
+    pipeline: meta.pipeline,
+    inputs: meta.inputs,
+    repoRoot: meta.repoRoot,
+    profile: meta.profile,
+    ...(o.config !== null ? { config: o.config } : {}),
+  };
   const turn = (kind: AttentionKind, step: string | undefined, x: Partial<YourTurnInput> = {}) => {
     const t = yourTurn({ kind, runId: meta.runId, step: step ?? STAGES[0], ...again, ...x });
     return { message: t.message, ...(t.detail !== undefined ? { detail: t.detail } : {}) };
@@ -398,16 +486,19 @@ async function attentionOf(o: {
         kind: 'gate',
         since: waiting.since,
         message: suggests === undefined ? 'pick the pipeline for this ticket' : `pick the pipeline for this ticket (the agent suggests ${suggests})`,
+        ...pickDetail(gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds)),
         ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
         review: gateReview(dir, waiting.stepId, o.steps, state),
         actions: ['pick', 'reject'],
         choices,
       };
     }
+    const { detail, ...gateTurn } = turn('gate', waiting.stepId, gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds));
     return {
       kind: 'gate',
       since: waiting.since,
-      ...turn('gate', waiting.stepId),
+      ...gateTurn,
+      ...(o.graphKnown && detail !== undefined ? { detail } : {}),
       ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
       review: gateReview(dir, waiting.stepId, o.steps, state),
       actions: ['approve', 'reject'],
@@ -449,9 +540,12 @@ async function attentionOf(o: {
     return {
       kind: 'failed',
       since: lastEnd,
-      ...turn('failed', state.currentStep, sliceOf !== undefined ? { sliceOf } : {}),
+      ...turn('failed', state.currentStep, {
+        ...(sliceOf !== undefined ? { sliceOf } : {}),
+        ...(state.failedReason !== undefined ? { reason: state.failedReason } : {}),
+      }),
       review: failing(state.currentStep),
-      actions: ['clean'],
+      actions: sliceOf === undefined ? ['run-again', 'clean'] : ['clean'],
       ...(sliceOf === undefined ? { commands: [runAgain(again)] } : {}),
     };
   }
@@ -616,12 +710,15 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, list
       outputs: absOutputs(dir, h?.outputs ?? {}),
     };
   });
-  const attention = await attentionOf({ dir, meta, state, waiting, alive, steps: stepDefs, loops: loopDefs });
+  const config = samePath(meta.configFile, path.join(deps.home, '.percolator', 'config.yaml')) ? null : meta.configFile;
+  const attention = await attentionOf({ dir, meta, state, waiting, alive, steps: stepDefs, loops: loopDefs, graphKnown: graph !== undefined, config });
   const url = await prUrl(dir, state);
   return {
     id: meta.runId,
     pipeline: meta.pipeline,
     inputs: meta.inputs,
+    profile: meta.profile,
+    config,
     ticket: await readTicket(dir, meta),
     parent: meta.parent ?? null,
     children: await childrenOf(dir, meta, listed),

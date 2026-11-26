@@ -103,7 +103,7 @@ export async function checkResumable(
     ...(meta.fanOut !== undefined ? { sliceFrom: meta.fanOut.from } : {}),
   });
   if (state.graphFingerprint !== undefined && state.graphFingerprint !== graphFingerprint(v.graph)) {
-    throw new Error(`run ${runId} was started with a different graph (config changed since); start a new run`);
+    throw new Error(`run ${runId} was started with a different graph (its config or the Percolator version changed since); start a new run`);
   }
   const changed = groundChanges(state.groundVersions, v.groundVersions);
   if (changed.length > 0) {

@@ -49,6 +49,8 @@ export type RunState = {
   history: StepRecord[];
   status: 'running' | 'paused' | 'failed' | 'completed';
   pausedReason?: string;
+  /** why the step that failed the run failed (its outcome's reason); absent when it gave none and in older states */
+  failedReason?: string;
   /** back-edge id when paused at an escalating cap; cleared when the run resumes */
   pausedCap?: string;
   /** back-edge whose extra round `grantRound` granted; `runGraph` jumps to its loop start on resume, then clears it */
@@ -88,6 +90,7 @@ function invalidField(s: Record<string, unknown>): string | undefined {
   if (s['granted'] !== undefined && !isNumberRecord(s['granted'])) return 'granted';
   if (s['graphFingerprint'] !== undefined && typeof s['graphFingerprint'] !== 'string') return 'graphFingerprint';
   if (s['pausedCap'] !== undefined && typeof s['pausedCap'] !== 'string') return 'pausedCap';
+  if (s['failedReason'] !== undefined && typeof s['failedReason'] !== 'string') return 'failedReason';
   if (s['currentStep'] !== undefined && typeof s['currentStep'] !== 'string') return 'currentStep';
   if (s['grantedRound'] !== undefined && typeof s['grantedRound'] !== 'string') return 'grantedRound';
   if (s['mappingsFingerprint'] !== undefined && typeof s['mappingsFingerprint'] !== 'string') return 'mappingsFingerprint';

@@ -148,6 +148,20 @@ export function buildTask(t: TaskInput): string {
   }
   if (inputs.length > 0) sections.push(`## Inputs\n\n${bullets(inputs)}`);
 
+  // gates whose latest record is a reject that sent the run back to this stage
+  const rejectedBy = isSlot
+    ? ctx.graph.steps.filter((g) => {
+        if (g.def?.kind !== 'gate' || typeof ctx.previousOutputs[g.id]?.findings !== 'string') return false;
+        const route = ctx.graph.failRoutes?.[g.id];
+        const edge = route === undefined ? undefined : ctx.graph.backEdges?.[route];
+        return edge !== undefined && edge.toStepIndex === ctx.graph.regionStart?.[step.stage];
+      })
+    : [];
+  if (rejectedBy.length > 0) {
+    const lines = rejectedBy.map((g) => `Gate ${g.id} rejected the last round. Address its feedback: findings (from ${g.id}) in the inputs.`);
+    sections.push(`## Feedback\n\n${lines.join('\n')}`);
+  }
+
   sections.push(`## Workspace\n\nWorktree: ${t.worktree} (branch ${t.branch}, base ${t.base}).`);
 
   let outputs = `## Outputs\n\nWrite each output as a Markdown file in ${t.outputsDir}, named <key>.md.`;

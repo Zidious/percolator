@@ -120,9 +120,28 @@ export function actionArgv(action, run, feedback) {
       return ['resume', run.id];
     case 'clean':
       return ['clean', run.id];
+    case 'run-again':
+      // an unreadable run has no pipeline or repo to start again
+      return run.status === 'unreadable' ? null : runAgainArgv(run);
     default:
       return null;
   }
+}
+
+/** The `perc run` argv that starts a failed run's kind of run again, in the order of perc's own line: its ticket,
+ *  its pipeline (named even when feature, as a profile may mark another pipeline default), each input as one `k=v`
+ *  element, its repo, then its config file (unless the default) and its profile. */
+export function runAgainArgv(run) {
+  return [
+    'run',
+    ...(run.ticket ? [run.ticket.ref] : []),
+    ...(run.pipeline ? ['--pipeline', run.pipeline] : []),
+    ...Object.entries(run.inputs ?? {}).flatMap(([k, v]) => ['--input', `${k}=${v}`]),
+    '--repo',
+    run.repo,
+    ...(typeof run.config === 'string' ? ['--config', run.config] : []),
+    ...(typeof run.profile === 'string' ? ['--profile', run.profile] : []),
+  ];
 }
 
 /** An asked item's label: its first non-empty line without a leading heading or list marker, `**`, `__` or backticks;
@@ -274,9 +293,19 @@ const SIDE = { 'before-all': 'before', before: 'before', after: 'after', 'after-
 
 const FAILED = new Set(['fail', 'escalate', 'contract_error']);
 
-/** A loop start that sent the run back and is under its cap: its failure is the loop going on, not the run failing. */
-const sentBack = (run, step) =>
-  (run.loops ?? []).some((l) => l.from === step.id && roundOf(l).taken && !roundOf(l).atCap);
+/**
+ * A loop start that sent the run back and is under its cap: its failure is the loop going on, not the run failing.
+ * So is a step routed into its stage's `continue` loop (a gate after the stage's work), as `perc status` reads it.
+ */
+const sentBack = (run, step) => {
+  const stageOf = (id) => (run.steps ?? []).find((s) => s.id === id)?.stage;
+  return (run.loops ?? []).some(
+    (l) =>
+      (l.from === step.id || (l.atCap === 'continue' && step.stage !== undefined && stageOf(l.from) === step.stage)) &&
+      roundOf(l).taken &&
+      !roundOf(l).atCap,
+  );
+};
 
 function pipeState(run, step) {
   if (step.id === run.currentStep && run.status !== 'completed') return 'active';

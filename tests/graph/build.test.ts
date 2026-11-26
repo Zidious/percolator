@@ -873,3 +873,191 @@ test('fan_out.stage cannot be intake or the exit stage', () => {
 test('a pipeline without fan_out builds whole for part parent', () => {
   assert.deepEqual(buildGraph(full(), undefined, { part: 'parent' }), buildGraph(full()));
 });
+
+const at = (g: ReturnType<typeof buildGraph>, id: string) => g.steps.findIndex((s) => s.id === id);
+
+test('gate after a stage without on_fail loops back to that stage', () => {
+  const g = buildGraph(full({ nodes: { 'approve-plan': { kind: 'gate', after: 'plan' } } }));
+  assert.deepEqual(g.backEdges['approve-plan'], {
+    id: 'approve-plan',
+    fromStepId: 'approve-plan',
+    toStepIndex: g.regionStart.plan,
+    jumpAfterIndex: at(g, 'approve-plan'),
+    maxRounds: 3,
+    onCap: 'escalate',
+  });
+  assert.equal(g.failRoutes['approve-plan'], 'approve-plan');
+});
+
+test('gate before a stage loops back to the stage before it', () => {
+  const g = buildGraph(full({ nodes: { 'approve-x': { kind: 'gate', before: 'implement' } } }));
+  assert.equal(g.backEdges['approve-x']!.toStepIndex, g.regionStart.plan);
+  assert.equal(g.backEdges['approve-x']!.jumpAfterIndex, at(g, 'approve-x'));
+});
+
+test('slot gate goes back to its own stage after another node, else to the stage before', () => {
+  const after = buildGraph(full({}, { plan: [{ agent: 'claude' }, { kind: 'gate' }] }));
+  assert.equal(after.backEdges['plan.1']!.toStepIndex, after.regionStart.plan);
+  assert.equal(after.failRoutes['plan.1'], 'plan.1');
+  const first = buildGraph(full({}, { plan: [{ kind: 'gate' }, { agent: 'claude' }] }));
+  assert.equal(first.backEdges['plan.0']!.toStepIndex, first.regionStart.groom);
+});
+
+test('explicit on_fail on a gate is kept', () => {
+  const g = buildGraph(full({ nodes: { 'approve-x': { kind: 'gate', after: 'implement', on_fail: { back_to: 'plan', max_rounds: 2 } } } }));
+  assert.equal(g.backEdges['approve-x']!.toStepIndex, g.regionStart.plan);
+  assert.equal(g.backEdges['approve-x']!.maxRounds, 2);
+});
+
+test('implicit gate cap is clamped by max_rounds_ceiling', () => {
+  const merged = full({ nodes: { 'approve-plan': { kind: 'gate', after: 'plan' } } }, { review: { agent: 'claude', max_rounds: 2 } });
+  merged.rules.push({ value: { max_rounds_ceiling: 2 }, source: 'r', locked: false });
+  assert.equal(buildGraph(merged).backEdges['approve-plan']!.maxRounds, 2);
+});
+
+test('gate in a loop stage after a node of it routes to the loop', () => {
+  const g = buildGraph(full({ nodes: { 'approve-x': { kind: 'gate', after: 'review' } } }));
+  assert.equal(g.backEdges['approve-x'], undefined);
+  assert.equal(g.failRoutes['approve-x'], 'review');
+  const slot = buildGraph(full({}, { review: [{ agent: 'claude' }, { kind: 'gate' }, { agent: 'codex' }] }));
+  assert.equal(slot.backEdges['review.1'], undefined);
+  assert.equal(slot.failRoutes['review.1'], 'review.2');
+});
+
+test('gate opening a loop stage goes back to the stage before at once, not after the stage has run', () => {
+  const g = buildGraph(full({ nodes: { 'approve-x': { kind: 'gate', before: 'review' } } }));
+  const at = g.steps.findIndex((s) => s.id === 'approve-x');
+  assert.deepEqual(g.backEdges['approve-x'], {
+    id: 'approve-x',
+    fromStepId: 'approve-x',
+    toStepIndex: g.regionStart.implement,
+    jumpAfterIndex: at,
+    maxRounds: 3,
+    onCap: 'escalate',
+  });
+  assert.equal(g.failRoutes['approve-x'], 'approve-x');
+  const slot = buildGraph(full({}, { review: [{ kind: 'gate' }, { agent: 'claude' }] }));
+  assert.equal(slot.backEdges['review.0']!.toStepIndex, slot.regionStart.implement);
+  assert.equal(slot.failRoutes['review.0'], 'review.0');
+});
+
+test('a gate without on_fail and nowhere to go back to is refused where it is attached', () => {
+  const cases: [Record<string, number>, GraphFragment['nodes'], string, string][] = [
+    [
+      { 'nodes.pre': 5, 'nodes.pre.before': 6 },
+      { pre: { kind: 'gate', before: 'all' } },
+      'g.yaml:6: nodes.pre.before: gate "pre" runs before all stages, so a reject has no stage to go back to; attach it before or after a stage, or remove it',
+      'nodes.pre.before',
+    ],
+    [
+      { 'nodes.post': 5, 'nodes.post.after': 6 },
+      { post: { kind: 'gate', after: 'all' } },
+      'g.yaml:6: nodes.post.after: gate "post" runs after all stages, so a reject has no stage to go back to; attach it after a stage, or give it on_fail: { back_to: <stage>, max_rounds: <n> }',
+      'nodes.post.after',
+    ],
+    [
+      { 'nodes.pre': 5, 'nodes.pre.before': 6 },
+      { pre: { kind: 'gate', before: 'intake' } },
+      'g.yaml:6: nodes.pre.before: gate "pre" runs before intake, so a reject has no earlier stage to go back to; attach it after intake or a later stage, or remove it',
+      'nodes.pre.before',
+    ],
+  ];
+  for (const [lines, nodes, message, p] of cases) throwsAt(() => buildGraph(fullAt(lines, { nodes })), message, p);
+  throwsAt(
+    () => buildGraph(fullAt({ 'bindings.intake': 3, 'bindings.intake.0': 4 }, {}, { intake: [{ kind: 'gate' }, { agent: 'claude' }] })),
+    'g.yaml:4: bindings.intake.0: gate "intake.0" runs before intake, so a reject has no earlier stage to go back to; attach it after intake or a later stage, or remove it',
+    'bindings.intake.0',
+  );
+});
+
+test('a gate without on_fail after a stage with no agent goes back to the nearest earlier stage with one', () => {
+  const script = { plan: { command: ['pnpm', 'test'] } };
+  const after = buildGraph(full({ nodes: { check: { kind: 'gate', after: 'plan' } } }, script));
+  assert.equal(after.backEdges.check!.toStepIndex, after.regionStart.groom);
+  const before = buildGraph(full({ nodes: { check: { kind: 'gate', before: 'implement' } } }, script));
+  assert.equal(before.backEdges.check!.toStepIndex, before.regionStart.groom);
+  const slot = buildGraph(full({}, { plan: [{ command: ['pnpm', 'test'] }, { kind: 'gate' }] }));
+  assert.equal(slot.backEdges['plan.1']!.toStepIndex, slot.regionStart.groom);
+});
+
+test('a gate without on_fail with no stage up to it that has an agent is refused where it is attached', () => {
+  const intake = { intake: { builtin: 'github.intake' } };
+  throwsAt(
+    () => buildGraph(fullAt({ 'nodes.x': 5, 'nodes.x.after': 6 }, { nodes: { x: { kind: 'gate', after: 'intake' } } }, intake)),
+    'g.yaml:6: nodes.x.after: gate "x" runs after intake, so a reject has no earlier stage with an agent to go back to; attach it after groom or a later stage, or remove it',
+    'nodes.x.after',
+  );
+  throwsAt(
+    () => buildGraph(fullAt({ 'nodes.x': 5, 'nodes.x.before': 6 }, { nodes: { x: { kind: 'gate', before: 'groom' } } }, intake)),
+    'g.yaml:6: nodes.x.before: gate "x" runs before groom, so a reject has no earlier stage with an agent to go back to; attach it after groom or a later stage, or remove it',
+    'nodes.x.before',
+  );
+  throwsAt(
+    () => buildGraph(fullAt({ 'bindings.groom': 3, 'bindings.groom.0': 4 }, {}, { ...intake, groom: [{ kind: 'gate' }, { agent: 'claude' }] })),
+    'g.yaml:4: bindings.groom.0: gate "groom.0" runs before groom, so a reject has no earlier stage with an agent to go back to; attach it after groom or a later stage, or remove it',
+    'bindings.groom.0',
+  );
+  const script = { command: ['s'] };
+  const scripts = { intake: { builtin: 'github.intake' }, groom: script, plan: script, implement: script, review: script };
+  throwsAt(
+    () => buildGraph(fullAt({ 'nodes.x': 5, 'nodes.x.after': 6 }, { nodes: { x: { kind: 'gate', after: 'plan' } } }, scripts)),
+    'g.yaml:6: nodes.x.after: gate "x" runs after plan, so a reject has no earlier stage with an agent to go back to; give it on_fail: { back_to: <stage>, max_rounds: <n> }, or remove it',
+    'nodes.x.after',
+  );
+});
+
+test('a loop stage bound only to a gate builds, its gate being the stage loop', () => {
+  const script = { command: ['s'] };
+  const g = buildGraph(
+    full({}, { intake: { builtin: 'github.intake' }, groom: script, plan: script, implement: script, review: { kind: 'gate' } }),
+  );
+  assert.equal(g.backEdges.review!.onCap, 'continue');
+  assert.equal(g.backEdges.review!.toStepIndex, g.regionStart.implement);
+});
+
+test('a gate without on_fail routed into a stage loop that goes back to a stage with no agent is refused', () => {
+  const implement = { implement: { command: ['s'] } };
+  throwsAt(
+    () => buildGraph(fullAt({ 'nodes.qa': 5, 'nodes.qa.after': 6 }, { nodes: { qa: { kind: 'gate', after: 'review' } } }, implement)),
+    'g.yaml:6: nodes.qa.after: gate "qa" runs after review, whose loop goes back to implement, a stage with no agent to act on a reject; give it on_fail: { back_to: <stage>, max_rounds: <n> }, or attach it before review',
+    'nodes.qa.after',
+  );
+  throwsAt(
+    () => buildGraph(fullAt({ 'bindings.review': 3, 'bindings.review.1': 4 }, {}, { ...implement, review: [{ agent: 'claude' }, { kind: 'gate' }, { agent: 'codex' }] })),
+    'g.yaml:4: bindings.review.1: gate "review.1" runs after review, whose loop goes back to implement, a stage with no agent to act on a reject; give it on_fail: { back_to: <stage>, max_rounds: <n> }, or attach it before review',
+    'bindings.review.1',
+  );
+  // before the loop stage it has its own edge, to the nearest earlier stage with an agent
+  const before = buildGraph(full({ nodes: { qa: { kind: 'gate', before: 'review' } } }, implement));
+  assert.equal(before.backEdges.qa!.toStepIndex, before.regionStart.plan);
+});
+
+test('a gate without on_fail after the exit stage is refused, since a reject would deliver again', () => {
+  throwsAt(
+    () => buildGraph(fullAt({ 'nodes.post': 5, 'nodes.post.after': 6 }, { nodes: { post: { kind: 'gate', after: 'deliver' } } })),
+    'g.yaml:6: nodes.post.after: gate "post" runs after deliver, the exit stage, so a reject would deliver again; attach it before deliver, or give it on_fail: { back_to: <stage>, max_rounds: <n> }',
+    'nodes.post.after',
+  );
+  throwsAt(
+    () => buildGraph(fullAt({ 'bindings.deliver': 3, 'bindings.deliver.1': 4 }, {}, { deliver: [{ builtin: 'github.open_pr' }, { kind: 'gate' }] })),
+    'g.yaml:4: bindings.deliver.1: gate "deliver.1" runs after deliver, the exit stage, so a reject would deliver again; attach it before deliver, or give it on_fail: { back_to: <stage>, max_rounds: <n> }',
+    'bindings.deliver.1',
+  );
+  const lines = { 'profiles.default.pipelines.triage.nodes.post.after': 9 };
+  throwsAt(
+    () => buildGraph(triage({ nodes: { post: { kind: 'gate', after: 'route' } } }, lines), undefined, { descriptions: {} }),
+    'c.yaml:9: profiles.default.pipelines.triage.nodes.post.after: gate "post" runs after route, the exit stage, so a reject would deliver again; attach it before route, or give it on_fail: { back_to: <stage>, max_rounds: <n> }',
+    'profiles.default.pipelines.triage.nodes.post.after',
+  );
+  // before the exit stage is fine: it goes back to review's loop or the stage before
+  assert.equal(buildGraph(full({ nodes: { pre: { kind: 'gate', before: 'deliver' } } })).failRoutes.pre, 'pre');
+});
+
+test('implicit gate edge across a fan-out is refused', () => {
+  const nodes = { 'approve-x': { kind: 'gate' as const, before: 'implement' } };
+  const lines = { 'profiles.default.pipelines.epic.nodes.approve-x': 14 };
+  const message =
+    'c.yaml:14: profiles.default.pipelines.epic.nodes.approve-x: approve-x goes back to plan on reject (a gate without on_fail returns to the stage it follows), which runs before the fan-out at implement; attach it after implement or later, or give it on_fail with back_to implement or later';
+  throwsAt(() => buildGraph(epic({ nodes }, lines), undefined, CHILD), message, 'profiles.default.pipelines.epic.nodes.approve-x');
+  throwsAt(() => buildGraph(epic({ nodes }, lines)), message, 'profiles.default.pipelines.epic.nodes.approve-x');
+});

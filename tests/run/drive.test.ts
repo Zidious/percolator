@@ -247,7 +247,7 @@ test('resume refuses a changed config', async () => {
     const meta = await e.prepare();
     await e.writeConfig(TRACKER, BINDINGS.map((l) => l.replace('groom-agent', 'other-agent')));
     await assert.rejects(drive(meta.runId, e.deps), {
-      message: `run ${meta.runId} was started with a different graph (config changed since); start a new run`,
+      message: `run ${meta.runId} was started with a different graph (its config or the Percolator version changed since); start a new run`,
     });
     assert.deepEqual(e.deps.hc.calls, [['get', meta.driver]]);
   } finally {
@@ -632,7 +632,7 @@ test("an agent prompt naming a declared optional input the run was not given ren
 });
 
 test('a gate on a ticketless run waits locally and says how to answer it', async () => {
-  const e = await setup(DD_ALERT.replace("          triage: { command: [triage-script, '{outputs_dir}'] }", "          triage: { command: [triage-script, '{outputs_dir}'] }\n        nodes:\n          sign-off: { kind: gate, after: triage }"));
+  const e = await setup(DD_ALERT.replace("          triage: { command: [triage-script, '{outputs_dir}'] }", "          triage: { command: [triage-script, '{outputs_dir}'] }\n        nodes:\n          sign-off: { kind: gate, after: triage, on_fail: { back_to: triage, max_rounds: 3 } }"));
   try {
     const meta = await prepareRun(
       { pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x' }, repoDir: e.root, configFile: e.configFile, profile: 'work' },

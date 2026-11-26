@@ -67,6 +67,7 @@ import {
   agentTone,
   textTone,
   boxActions,
+  runAgainArgv,
   boxOutside,
   columns,
   detailParts,
@@ -954,6 +955,18 @@ test('pipelineRows shows a loop start that sent the run back, under its cap, as 
   assert.equal(row(pipelineRows(failed, WIDE), 'review').state, 'failed');
 });
 
+test('pipelineRows shows a gate rejected into its stage loop, under the cap, as past, not failed', () => {
+  const t16 = readable('t16');
+  const at = t16.steps.findIndex((s) => s.id === 'review');
+  const qa = { ...t16.steps[at]!, id: 'qa', role: 'node', kind: 'gate', status: 'fail' };
+  const steps = [...t16.steps.slice(0, at + 1), qa, ...t16.steps.slice(at + 1)];
+  const loop = { ...t16.loops[0]!, atCap: 'continue' };
+  const sent = { ...t16, steps, loops: [loop] } as RunStatusJson; // the owner rejected qa after review: round 2
+  assert.equal(row(pipelineRows(sent, WIDE), 'qa').state, 'past');
+  const untaken = { ...sent, loops: [{ ...loop, round: 0 }] } as RunStatusJson;
+  assert.equal(row(pipelineRows(untaken, WIDE), 'qa').state, 'failed');
+});
+
 test('pipelineRows has no active row for a completed run or a current step that is not listed', () => {
   assert.deepEqual(pipelineRows(byId('t3'), WIDE).filter((r) => r.state === 'active'), []);
   const lost = { ...readable('t8'), currentStep: 'nope' } as RunStatusJson;
@@ -1144,6 +1157,7 @@ test('boxActions are the attention buttons without open-pane (Open terminal ↗ 
   const both = { ...readable('t4'), attention: { ...readable('t4').attention!, actions: ['grant', 'open-pane'] } } as Readable;
   assert.deepEqual(boxActions(both), ['grant']);
   assert.deepEqual(boxActions(byId('t8')), []);
+  assert.deepEqual(boxActions(byId('t9')), ['run-again', 'clean'], 'a failed run offers Run again');
 });
 
 test('boxFiles: one per reviewed file, labelled by step when the steps differ; none when the box asks nothing', () => {
@@ -1835,4 +1849,37 @@ test('itemLabel unwraps paired marks only, and strips a list marker only where t
   assert.equal(itemLabel('## __init__.py is missing', 1, 'findings'), '__init__.py is missing');
   assert.equal(itemLabel('    1. indented code, not a marker', 1, 'findings'), '1. indented code, not a marker');
   assert.equal(itemLabel('1. a stray ` stays', 1, 'findings'), 'a stray ` stays');
+});
+
+test('runAgainArgv starts the same kind of run, each input one unquoted argv element', () => {
+  const t9 = readable('t9');
+  const ticketless = { ...t9, ticket: null, pipeline: 'dry-fail', inputs: { note: 'a b', q: 'say "hi"' }, repo: '/r' } as Readable;
+  assert.deepEqual(runAgainArgv(ticketless), ['run', '--pipeline', 'dry-fail', '--input', 'note=a b', '--input', 'q=say "hi"', '--repo', '/r', '--profile', 'default']);
+  const feature = { ...t9, ticket: { ref: 'github.com/o/r#9', number: 9 }, pipeline: 'feature', inputs: {}, repo: '/r' } as Readable;
+  assert.deepEqual(runAgainArgv(feature), ['run', 'github.com/o/r#9', '--pipeline', 'feature', '--repo', '/r', '--profile', 'default']);
+  assert.deepEqual(actionArgv('run-again', ticketless), runAgainArgv(ticketless));
+});
+
+test('actionArgv run-again on an unreadable run is null: it has no pipeline or repo to start again', () => {
+  assert.equal(actionArgv('run-again', { id: 'x', status: 'unreadable', error: 'bad meta.json' }), null);
+});
+
+test('runAgainArgv names feature (a profile may mark another pipeline default) and keeps the profile and config of the run', () => {
+  const t9 = readable('t9');
+  const base = { ...t9, ticket: { ref: 'github.com/o/r#9', number: 9 }, pipeline: 'feature', inputs: {}, repo: '/r' };
+  const work = { ...base, profile: 'work', config: 'C:\My Configs\p.yaml' } as Readable;
+  assert.deepEqual(runAgainArgv(work), [
+    'run',
+    'github.com/o/r#9',
+    '--pipeline',
+    'feature',
+    '--repo',
+    '/r',
+    '--config',
+    'C:\My Configs\p.yaml',
+    '--profile',
+    'work',
+  ]);
+  const byDefault = { ...base, profile: 'default', config: null } as Readable;
+  assert.deepEqual(runAgainArgv(byDefault), ['run', 'github.com/o/r#9', '--pipeline', 'feature', '--repo', '/r', '--profile', 'default']);
 });

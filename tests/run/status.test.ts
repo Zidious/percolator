@@ -135,6 +135,8 @@ function expected(m: RunMeta, over: Record<string, unknown>): Record<string, unk
     id: m.runId,
     pipeline: 'feature',
     inputs: {},
+    profile: 'work',
+    config: m.configFile,
     ticket: { ref: TICKET, number: 5 },
     parent: null,
     children: [],
@@ -412,7 +414,7 @@ test('gate with live driver', async () => {
         status: 'waiting',
         currentStep: 'approve-groom',
         driver: { alive: true, terminal: m.driver, space: m.space, shown: false },
-        attention: { kind: 'gate', since: NOW.toISOString(), message: 'approve-groom is waiting for approval', commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
+        attention: { kind: 'gate', since: NOW.toISOString(), message: 'approve-groom is waiting for approval', detail: 'Rejecting sends the run back to groom with your feedback.', commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
         steps: gateSteps(e, m),
         terminals: { driver: m.driver },
       }),
@@ -432,7 +434,7 @@ test('dead-driver gate', async () => {
       expected(m, {
         status: 'waiting',
         currentStep: 'approve-groom',
-        attention: { kind: 'gate', since: NOW.toISOString(), message: 'approve-groom is waiting for approval', commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
+        attention: { kind: 'gate', since: NOW.toISOString(), message: 'approve-groom is waiting for approval', detail: 'Rejecting sends the run back to groom with your feedback.', commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
         steps: gateSteps(e, m),
       }),
     );
@@ -524,6 +526,24 @@ test('paused on escalate', async () => {
   }
 });
 
+test('a run started with the default config file has config null, and Run again leaves --config out', async () => {
+  const e = await setup();
+  try {
+    const m = { ...(await e.prepare()), configFile: path.join(e.home, '.percolator', 'config.yaml') };
+    await writeRunMeta(e.dir(m), m);
+    await e.edit(m, (s) => {
+      s.status = 'failed';
+      s.currentStep = 'implement';
+    });
+    const r = (await e.status(m)) as Extract<RunStatusJson, { pipeline: string }>;
+    assert.equal(r.config, null);
+    assert.equal(r.profile, 'work');
+    assert.deepEqual(r.attention?.commands, [`perc run ${TICKET} --pipeline feature --repo ${m.repoRoot} --profile work`]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('failed run with worktree → failed attention (clean)', async () => {
   const e = await setup();
   try {
@@ -546,8 +566,8 @@ test('failed run with worktree → failed attention (clean)', async () => {
           message: 'implement failed',
           detail: "A failed run can't be resumed. Start a new run for the ticket, then delete this one (or clean it up to keep its record).",
           review: [{ step: 'implement', key: 'summary', path: path.join(e.dir(m), summary) }],
-          actions: ['clean'],
-          commands: [`perc run ${TICKET} --repo ${m.repoRoot}`],
+          actions: ['run-again', 'clean'],
+          commands: [`perc run ${TICKET} --pipeline feature --repo ${m.repoRoot} --config ${m.configFile} --profile work`],
         },
         steps: steps({ implement: { status: 'fail', attempts: 1, startedAt: T1, endedAt: T2, outputs: { summary: path.join(e.dir(m), summary) } } }),
       }),
@@ -764,6 +784,7 @@ test('history only: a waiting gate with no history record yet is still a step', 
       expected(m, {
         status: 'waiting',
         currentStep: 'approve-groom',
+        // without graph.json the loops are unknown, so the gate does not say where a reject goes
         attention: { kind: 'gate', since: NOW.toISOString(), message: 'approve-groom is waiting for approval', commentUrl: URL, review: groomReview(e, m), actions: ['approve', 'reject'] },
         steps: [
           { id: 'intake', stage: 'intake', role: 'core', kind: 'agent', ...done() },
@@ -986,6 +1007,7 @@ test('a ticketless gate is answered here: no commentUrl, its own message', async
       kind: 'gate',
       since: NOW.toISOString(),
       message: 'approve or reject here (no issue to comment on)',
+      detail: 'Rejecting sends the run back to groom with your feedback.',
       review: groomReview(e, m),
       actions: ['approve', 'reject'],
     });
@@ -1004,7 +1026,7 @@ test('a failed ticketless run says how to start it again with its pipeline and i
       s.history.push(rec('implement', 1, 'fail'));
     });
     const r = (await e.status(m)) as Readable;
-    const again = `perc run --pipeline dd-alert --input alert_url=https://dd/x --repo ${m.repoRoot}`;
+    const again = `perc run --pipeline dd-alert --input alert_url=https://dd/x --repo ${m.repoRoot} --config ${m.configFile} --profile work`;
     assert.deepEqual(r.attention?.commands, [again]);
     assert.deepEqual(attentionNext(r.attention!, r), [again, `perc delete ${m.runId}`, `perc clean ${m.runId}`]);
   } finally {
@@ -1133,11 +1155,12 @@ test('a failed fan-out slice says to delete it and resume its parent, never to s
     const r = (await e.status(slice)) as Readable;
     assert.equal(r.attention?.detail, `Delete this slice (its branch stays), then resume ${parent.runId} to run it again`);
     assert.equal(r.attention?.commands, undefined);
+    assert.deepEqual(r.attention?.actions, ['clean']);
     assert.deepEqual(attentionNext(r.attention!, r), [`perc delete ${slice.runId}`, `perc resume ${parent.runId}`]);
     // a routed child (a parent, no fanOut) still starts a new run
     const routed = await rewriteMeta(e, slice, { pipeline: 'hotfix' }, ['fanOut']);
     const rr = (await e.status(routed)) as Readable;
-    assert.deepEqual(rr.attention?.commands, [`perc run ${REPO}#6 --pipeline hotfix --repo ${routed.repoRoot}`]);
+    assert.deepEqual(rr.attention?.commands, [`perc run ${REPO}#6 --pipeline hotfix --repo ${routed.repoRoot} --config ${routed.configFile} --profile work`]);
   } finally {
     await e.cleanup();
   }
@@ -1299,10 +1322,36 @@ function jsonError(text: string): string {
 const TURN = { runId: 'r1', step: 'groom', ticket: 'github.com/o/r#5', repoRoot: '/repo' };
 
 test('yourTurn gate', () => {
-  assert.deepEqual(yourTurn({ ...TURN, kind: 'gate', step: 'approve-groom' }), {
-    message: 'approve-groom is waiting for approval',
+  assert.deepEqual(yourTurn({ ...TURN, kind: 'gate', step: 'approve-plan', backTo: 'groom' }), {
+    message: 'approve-plan is waiting for approval',
+    detail: 'Rejecting sends the run back to groom with your feedback.',
     next: ['perc approve r1', 'perc reject r1 "<what to change>"'],
   });
+  assert.equal(yourTurn({ ...TURN, kind: 'gate', step: 'approve-plan' }).detail, "Rejecting ends the run; a failed run can't be resumed.");
+});
+
+test('yourTurn gate on the last round of its loop says a reject pauses at the cap', () => {
+  const gate = { ...TURN, kind: 'gate' as const, step: 'sign-off', backTo: 'plan', capRounds: 3 };
+  assert.equal(yourTurn(gate).detail, 'Rejecting pauses the run at its cap (3 rounds); perc resume grants one more.');
+  assert.equal(
+    yourTurn({ ...gate, capAsksFindings: true }).detail,
+    'Rejecting pauses the run at its cap (3 rounds) to ask which findings to fix.',
+  );
+});
+
+test('a gate on the last round of its loop says a reject pauses at the cap', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.waitAtGate(m);
+    await e.edit(m, (s) => {
+      s.rounds['approve-groom'] = 2;
+    });
+    const r = (await e.status(m)) as Readable;
+    assert.equal(r.attention?.detail, 'Rejecting pauses the run at its cap (3 rounds); perc resume grants one more.');
+  } finally {
+    await e.cleanup();
+  }
 });
 
 test('yourTurn cap', () => {
@@ -1328,12 +1377,34 @@ test('yourTurn failed', () => {
   });
 });
 
+test('yourTurn failed says why the step failed', () => {
+  assert.equal(yourTurn({ ...TURN, kind: 'failed', reason: 'exit code 1', step: 'lint' }).message, 'lint failed (exit code 1)');
+  assert.equal(yourTurn({ ...TURN, kind: 'failed' }).message, 'groom failed');
+});
+
+test('yourTurn failed on a ticketless run starts a new run of its pipeline', () => {
+  const { ticket: _t, ...ticketless } = TURN;
+  assert.equal(
+    yourTurn({ ...ticketless, kind: 'failed', pipeline: 'dry-fail', inputs: {} }).detail,
+    "A failed run can't be resumed. Start a new run of pipeline dry-fail, then delete this one (or clean it up to keep its record).",
+  );
+});
+
 test('yourTurn failed on another pipeline starts it again with its inputs, quoted when they hold a blank or a quote', () => {
   const { ticket: _t, ...ticketless } = TURN;
   const t = yourTurn({ ...ticketless, kind: 'failed', pipeline: 'dd-alert', inputs: { alert_url: 'https://dd/x', note: 'a b', q: 'say "hi"' } });
   assert.equal(t.next[0], `perc run --pipeline dd-alert --input alert_url=https://dd/x --input note="a b" --input q='say "hi"' --repo /repo`);
   assert.equal(yourTurn({ ...TURN, kind: 'failed', pipeline: 'hotfix', inputs: {} }).next[0], 'perc run github.com/o/r#5 --pipeline hotfix --repo /repo');
-  assert.equal(yourTurn({ ...TURN, kind: 'failed', pipeline: 'feature', inputs: {} }).next[0], 'perc run github.com/o/r#5 --repo /repo');
+  assert.equal(yourTurn({ ...TURN, kind: 'failed', pipeline: 'feature', inputs: {} }).next[0], 'perc run github.com/o/r#5 --pipeline feature --repo /repo');
+});
+
+test('runAgain always names the pipeline, and carries the profile and a config file other than the default', () => {
+  // a profile may mark another pipeline default: true, so feature is named too
+  assert.equal(runAgain({ ticket: 'o/r#1', pipeline: 'feature', repoRoot: '/repo' }), 'perc run o/r#1 --pipeline feature --repo /repo');
+  assert.equal(
+    runAgain({ ticket: 'o/r#1', pipeline: 'feature', repoRoot: '/repo', profile: 'work', config: 'C:\My Configs\p.yaml' }),
+    'perc run o/r#1 --pipeline feature --repo /repo --config "C:\My Configs\p.yaml" --profile work',
+  );
 });
 
 test('yourTurn gate on a ticketless run is answered here', () => {
@@ -1405,6 +1476,7 @@ test("a pick-pipeline gate asks you to pick from the router's pipelines, naming 
       kind: 'gate',
       since: NOW.toISOString(),
       message: 'pick the pipeline for this ticket (the agent suggests hotfix)',
+      detail: 'Rejecting has the agent pick again with your feedback.',
       commentUrl: URL,
       review: [{ step: 'route.1', key: 'pick', path: path.join(e.dir(m), rel('route.1', 1, 'pick')) }],
       actions: ['pick', 'reject'],
@@ -1611,4 +1683,48 @@ test('yourTurn questions and findings, and attentionNext gives the same', () => 
   const run = { id: 'r1', ticket: null, pipeline: 'feature', inputs: {}, repo: '/repo' };
   assert.deepEqual(attentionNext({ kind: 'questions', since: T1, message: '', actions: ['answer'] }, run), q.next);
   assert.deepEqual(attentionNext({ kind: 'findings', since: T1, message: '', actions: ['answer'] }, run), f.next);
+});
+
+/** Adds steps and loops to the run's graph.json. */
+async function addToGraph(e: Env, m: RunMeta, steps: Step[], loops: Step[] = []): Promise<void> {
+  const file = path.join(e.dir(m), 'graph.json');
+  const g = JSON.parse(await fs.readFile(file, 'utf8'));
+  g.steps.push(...steps);
+  g.loops.push(...loops);
+  await fs.writeFile(file, JSON.stringify(g));
+}
+
+test('a gate in a loop stage says a reject goes back to the stage the loop returns to', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await addToGraph(e, m, [{ id: 'approve-x', stage: 'review', role: 'node', kind: 'gate' }]);
+    await e.edit(m, (s) => {
+      s.currentStep = 'approve-x';
+    });
+    await writeJson(path.join(e.dir(m), 'waiting.json'), { stepId: 'approve-x', stepDir: path.join(e.dir(m), 'steps', 'approve-x', '1'), since: NOW.toISOString() });
+    const r = (await e.status(m)) as Readable;
+    assert.equal(r.attention?.detail, 'Rejecting sends the run back to implement with your feedback.');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a failed run says why it failed and offers to run again', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await addToGraph(e, m, [{ id: 'lint', stage: 'implement', role: 'node', kind: 'script' }]);
+    await e.edit(m, (s) => {
+      s.status = 'failed';
+      s.currentStep = 'lint';
+      s.failedReason = 'exit code 1';
+      s.history.push(rec('lint', 1, 'fail'));
+    });
+    const r = (await e.status(m)) as Readable;
+    assert.equal(r.attention?.message, 'lint failed (exit code 1)');
+    assert.deepEqual(r.attention?.actions, ['run-again', 'clean']);
+  } finally {
+    await e.cleanup();
+  }
 });
