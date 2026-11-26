@@ -23,7 +23,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
   // a resume against another graph would map cursor/rounds onto the wrong steps (and could skip a gate)
   const fingerprint = graphFingerprint(graph);
   if (state.graphFingerprint !== undefined && state.graphFingerprint !== fingerprint) {
-    throw new Error('run state was recorded against a different graph (config changed since this run started); start a new run');
+    throw new Error('run state was recorded against a different graph (its config or the Percolator version changed since this run started); start a new run');
   }
   if (state.pendingJump && !graph.backEdges[state.pendingJump.edgeId]) {
     throw new Error(`run state has a pending jump on back-edge "${state.pendingJump.edgeId}", which is not in this graph`);

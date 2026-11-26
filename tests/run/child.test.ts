@@ -166,7 +166,7 @@ test('a child that cannot resume is not relaunched; the error names the child', 
     await saveState(dir, { ...(await loadState(dir)), graphFingerprint: 'other' });
     e.deps.hc.terminals.get(child.driver)!.state = 'finished';
     await assert.rejects(startLinkedRun({ parent, pipeline: 'hotfix', ticket: parent.ticket!, runId: 'child-1' }, e.deps), {
-      message: 'linked run child-1 cannot be resumed: run child-1 was started with a different graph (config changed since); start a new run',
+      message: 'linked run child-1 cannot be resumed: run child-1 was started with a different graph (its config or the Percolator version changed since); start a new run',
     });
     assert.equal(runCalls(e).length, 1);
   } finally {

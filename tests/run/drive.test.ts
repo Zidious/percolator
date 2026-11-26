@@ -247,7 +247,7 @@ test('resume refuses a changed config', async () => {
     const meta = await e.prepare();
     await e.writeConfig(TRACKER, BINDINGS.map((l) => l.replace('groom-agent', 'other-agent')));
     await assert.rejects(drive(meta.runId, e.deps), {
-      message: `run ${meta.runId} was started with a different graph (config changed since); start a new run`,
+      message: `run ${meta.runId} was started with a different graph (its config or the Percolator version changed since); start a new run`,
     });
     assert.deepEqual(e.deps.hc.calls, [['get', meta.driver]]);
   } finally {

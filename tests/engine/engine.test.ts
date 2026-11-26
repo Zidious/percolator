@@ -588,7 +588,7 @@ test('resuming against a changed graph throws before running anything', async ()
     (e: Error) => {
       assert.equal(
         e.message,
-        'run state was recorded against a different graph (config changed since this run started); start a new run',
+        'run state was recorded against a different graph (its config or the Percolator version changed since this run started); start a new run',
       );
       return true;
     },

@@ -765,7 +765,7 @@ test('resume refuses a changed config before launching', async () => {
     await e.writeConfig(TRACKER, BINDINGS.map((l) => l.replace('groom-script', 'other-script')));
     const r = await e.perc(['resume', meta.runId]);
     assert.equal(r.code, 1);
-    assert.equal(r.err, `run ${meta.runId} was started with a different graph (config changed since); start a new run\n`);
+    assert.equal(r.err, `run ${meta.runId} was started with a different graph (its config or the Percolator version changed since); start a new run\n`);
     assert.deepEqual(runCalls(e.deps.hc), []);
   } finally {
     await e.cleanup();
