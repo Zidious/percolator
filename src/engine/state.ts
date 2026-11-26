@@ -10,6 +10,8 @@ export type StepRecord = {
   endedAt: string;
   status: 'pass' | 'fail' | 'escalate' | 'contract_error';
   outputs: Record<string, string>;
+  /** the round, when the step ran in a round granted at a findings loop's cap (`RunContext.verify`) */
+  verifyRound?: number;
 };
 
 /** What a paused run asks the owner: a step's questions, or which findings left at a stage loop's cap to fix. */
