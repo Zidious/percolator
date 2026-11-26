@@ -109,6 +109,7 @@ export declare function dragBoard(startPx: number, dy: number, area: number, min
 export declare function readRatio(stored: unknown): number;
 export declare function titleLayout(width: number, needs: number): { tabs: 'inline' | 'below'; chip: 'long' | 'short'; newRun: 'icon' | 'text' };
 export declare function showsHere(place: unknown, inWindow: boolean, blockShown: boolean): boolean;
+export declare function catchUpStep(wasShown: boolean | undefined, now: boolean): { refresh: boolean; wasShown: boolean };
 export declare function terminalAddress(live: { address: string; name?: string | null }[], term: string | null | undefined): string | null;
 export declare function activeBox(run: RunStatusJson): 'agent' | 'gate' | 'cap' | 'paused' | 'questions' | 'findings' | 'failed' | 'stalled' | null;
 export declare function agentCard(

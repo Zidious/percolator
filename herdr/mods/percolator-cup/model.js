@@ -614,6 +614,12 @@ export function showsHere(place, inWindow, blockShown) {
   return ownsCommands(place, inWindow) && (inWindow || blockShown);
 }
 
+/** One check of whether this copy is shown: refresh when it has just become shown (`now` after a check that saw it
+ *  hidden, or the first check), and remember `now` for the next check. */
+export function catchUpStep(wasShown, now) {
+  return { refresh: now && !wasShown, wasShown: now };
+}
+
 /** perc names terminals (`hc` names); Herdr's terminals() lists `{ address, name }`. The live terminal's address for a
  *  name or an address, or null when none is live. */
 export function terminalAddress(live, term) {

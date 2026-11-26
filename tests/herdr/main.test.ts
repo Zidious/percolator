@@ -825,3 +825,52 @@ test('in fixtures mode a delete sends no space.select', async () => {
     cleanFakes();
   }
 });
+
+/** A docked panel copy whose place and block visibility the test sets; refresh only counts. */
+function dockedCopy() {
+  const state = { place: 'window' as string, hidden: true };
+  fakes.props = () => ({});
+  fakes.shared = (key: string) => (key === 'percolator.place' ? state.place : undefined);
+  fakes.layout = () => ({ id: 'root', children: [{ id: 'percolator-panel', hidden: state.hidden }] });
+  const p = Object.create(Percolator.prototype);
+  let refreshes = 0;
+  Object.assign(p, { conn: 'fixtures', refresh() { refreshes++; } });
+  const done = () => { delete fakes.props; delete fakes.shared; delete fakes.layout; };
+  return { p, state, refreshes: () => refreshes, done };
+}
+
+test('the docked copy refreshes when it is shown again, without a render', () => {
+  const { p, state, refreshes, done } = dockedCopy();
+  try {
+    p.wasShown = true; // shown before the window popped out, and never rendered while hidden
+    p.catchUp({}); // the timer's check while the window is the place
+    assert.equal(refreshes(), 0);
+    state.place = 'panel';
+    state.hidden = false;
+    p.catchUp({});
+    assert.equal(refreshes(), 1, 'docked back: refreshed at once');
+    p.catchUp({});
+    assert.equal(refreshes(), 1, 'already shown: no second fetch');
+  } finally {
+    done();
+  }
+});
+
+test('the panel checks whether it is shown on a 250ms timer', () => {
+  const { p, state, refreshes, done } = dockedCopy();
+  try {
+    const timers: [number, (cx: unknown) => void][] = [];
+    const cx = { timer: { every: (ms: number, f: (cx: unknown) => void) => timers.push([ms, f]) } };
+    p.wasShown = true;
+    p.watchShown(cx);
+    const tick = timers.find(([ms]) => ms === 250)?.[1];
+    assert.ok(tick, 'a 250ms timer');
+    tick(cx);
+    state.place = 'panel';
+    state.hidden = false;
+    tick(cx);
+    assert.equal(refreshes(), 1);
+  } finally {
+    done();
+  }
+});

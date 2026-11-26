@@ -14,6 +14,7 @@ import {
   boardHeight,
   dragBoard,
   titleLayout,
+  catchUpStep,
   readRatio,
   clock,
   timelineRows,
@@ -1961,4 +1962,12 @@ test('runAgainArgv names feature (a profile may mark another pipeline default) a
   ]);
   const byDefault = { ...base, profile: 'default', config: null } as Readable;
   assert.deepEqual(runAgainArgv(byDefault), ['run', 'github.com/o/r#9', '--pipeline', 'feature', '--repo', '/r', '--profile', 'default']);
+});
+
+test('catchUpStep: refreshes when the copy becomes shown, never while hidden or already shown', () => {
+  assert.deepEqual(catchUpStep(true, true), { refresh: false, wasShown: true });
+  assert.deepEqual(catchUpStep(true, false), { refresh: false, wasShown: false }, 'hidden: remembered, no fetch');
+  assert.deepEqual(catchUpStep(false, true), { refresh: true, wasShown: true }, 'docked back');
+  assert.deepEqual(catchUpStep(undefined, true), { refresh: true, wasShown: true }, 'first check');
+  assert.deepEqual(catchUpStep(undefined, false), { refresh: false, wasShown: false });
 });
