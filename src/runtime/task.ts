@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { STAGES } from '../config/schema.ts';
 import type { FeatureStage } from '../config/schema.ts';
-import type { LoopRound, RunContext } from '../engine/runtime.ts';
+import type { LoopRound, RunContext, VerifyRound } from '../engine/runtime.ts';
 import type { Step } from '../graph/build.ts';
 import type { MaterializedMapping } from '../workspace/run-dir.ts';
 
@@ -69,6 +69,11 @@ function customBrief(stage: string, pipeline: string, required: string[]): strin
   return `${brief} Write ${required.map((k) => `${k}.md`).join(', ')} to the outputs directory.`;
 }
 
+/** The stage contract of a round the owner granted at a findings loop's cap: verify the ticked findings only. */
+export function verifyBrief(stage: string, v: VerifyRound): string {
+  return `This round was granted by the owner at the cap of ${stage} (round ${v.round}, after cap ${v.maxRounds}): verify the ticked findings, do not review the whole change again. The findings the owner ticked are the findings inputs from the ${stage} stage (an empty findings file means none of that step's findings were ticked). Check that each ticked finding is fixed and that its fix broke nothing nearby. Write to findings.md only a ticked finding that is not fixed or a regression its fix caused, one "## <title>" section per finding, with its detail under it. If there are none, write "No findings." and finish with status pass; otherwise finish with status fail. Write anything else you notice to notes.md, never to findings.md: notes are not ticked and do not start another round. Where the task below asks for a full review, this contract wins.`;
+}
+
 /**
  * The header's round: `round r/cap` (`round r (g granted after cap cap)` past it) of the one loop around the step;
  * with nested loops the outermost's, named by its step, then each inner one past round 1.
@@ -109,7 +114,9 @@ export function buildTask(t: TaskInput): string {
   ];
 
   if (isSlot) {
-    const brief = hasBrief(t.pipeline, step.stage)
+    const brief = ctx.verify
+      ? verifyBrief(step.stage, ctx.verify)
+      : hasBrief(t.pipeline, step.stage)
       ? renderTemplate(STAGE_BRIEFS[step.stage], vars)
       : customBrief(step.stage, t.pipeline, required);
     sections.push(`## Stage contract\n\n${brief}`);
@@ -129,7 +136,9 @@ export function buildTask(t: TaskInput): string {
   const policies = t.mappings.filter((m) => m.as === 'policy').map((m) => m.runPath);
   if (policies.length > 0) {
     const check =
-      step.stage === 'review' && isSlot
+      isSlot && ctx.verify
+        ? ' A breach the fix caused is a finding, its own "## " section naming the policy; write any other breach to notes.md.'
+        : step.stage === 'review' && isSlot
         ? ' Check the change against each one: each breach is a finding, its own "## " section naming the policy; write nothing about the policies the change keeps.'
         : '';
     sections.push(`## Policies (binding)\n\nFollow every policy below.${check}\n\n${bullets(policies)}`);
@@ -168,6 +177,7 @@ export function buildTask(t: TaskInput): string {
   if (step.slotLast && isSlot && required.length > 0) {
     outputs += `\n\nRequired: ${required.map((k) => `${k}.md`).join(', ')}`;
   }
+  if (isSlot && ctx.verify) outputs += '\n\nOptional: notes.md (anything you noticed that is not a ticked finding)';
   sections.push(outputs);
 
   let finish =

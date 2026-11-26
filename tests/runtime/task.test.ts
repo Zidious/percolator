@@ -3,7 +3,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { RunContext } from '../../src/engine/runtime.ts';
 import type { Step } from '../../src/graph/build.ts';
-import { buildTask, renderTemplate, STAGE_BRIEFS, TemplateError, type TaskInput } from '../../src/runtime/task.ts';
+import { buildTask, renderTemplate, STAGE_BRIEFS, TemplateError, verifyBrief, type TaskInput } from '../../src/runtime/task.ts';
 import type { MaterializedMapping } from '../../src/workspace/run-dir.ts';
 import type { GraphFragment } from '../../src/config/schema.ts';
 import { buildGraph } from '../../src/graph/build.ts';
@@ -309,4 +309,44 @@ test('in a run, a reject after a script-only stage reaches the agent of the stag
   const feedback = '## Feedback\n\nGate check rejected the last round. Address its feedback: findings (from check) in the inputs.';
   assert.ok(tasks[5]!.includes(feedback), tasks[5]);
   assert.deepEqual(tasks.map((t, i) => (t.includes('## Feedback') ? i : -1)).filter((i) => i >= 0), [5]);
+});
+
+const verify = { edgeId: 'review', round: 4, maxRounds: 3 };
+
+test('verifyBrief text', () => {
+  assert.equal(
+    verifyBrief('review', verify),
+    'This round was granted by the owner at the cap of review (round 4, after cap 3): verify the ticked findings, do not review the whole change again. The findings the owner ticked are the findings inputs from the review stage (an empty findings file means none of that step\'s findings were ticked). Check that each ticked finding is fixed and that its fix broke nothing nearby. Write to findings.md only a ticked finding that is not fixed or a regression its fix caused, one "## <title>" section per finding, with its detail under it. If there are none, write "No findings." and finish with status pass; otherwise finish with status fail. Write anything else you notice to notes.md, never to findings.md: notes are not ticked and do not start another round. Where the task below asks for a full review, this contract wins.',
+  );
+});
+
+test('a verify round replaces the review brief with the verify brief', () => {
+  const out = buildTask(input({ ctx: ctx({ verify }) }));
+  assert.ok(out.includes(`## Stage contract\n\n${verifyBrief('review', verify)}`));
+  assert.ok(!out.includes('Review the branch diff'));
+});
+
+test('a round before the cap keeps the review brief', () => {
+  const out = buildTask(input());
+  assert.ok(out.includes('## Stage contract\n\nReview the branch diff (git diff main...HEAD)'));
+  assert.ok(!out.includes('verify the ticked findings'));
+});
+
+test('a custom max_rounds stage gets the same verify brief', () => {
+  const v = { edgeId: 'audit', round: 4, maxRounds: 3 };
+  const out = buildTask(input({ step: step({ id: 'audit', stage: 'audit' }), pipeline: 'secaudit', ctx: ctx({ verify: v }) }));
+  assert.ok(out.includes(`## Stage contract\n\n${verifyBrief('audit', v)}`));
+  assert.ok(!out.includes('Carry out the "audit" stage'));
+});
+
+test('a verify round asks for notes.md as an optional output', () => {
+  const out = buildTask(input({ ctx: ctx({ verify }) }));
+  assert.ok(out.includes('Required: findings.md\n\nOptional: notes.md (anything you noticed that is not a ticked finding)'));
+  assert.ok(!buildTask(input()).includes('notes.md'));
+});
+
+test("a verify round's policy check makes only breaches the fix caused findings", () => {
+  const out = buildTask(input({ ctx: ctx({ verify }) }));
+  assert.ok(out.includes('Follow every policy below. A breach the fix caused is a finding, its own "## " section naming the policy; write any other breach to notes.md.\n\n'));
+  assert.ok(!out.includes('each breach is a finding'));
 });

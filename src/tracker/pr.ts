@@ -6,16 +6,21 @@ import type { StepHandler } from '../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../runtime/outcome.ts';
 import { writeFileAtomic } from '../util/fs.ts';
 import type { Gh } from './gh.ts';
+import { noticedNotes } from './exits/notes.ts';
 import { issueMetaIfAny } from './intake.ts';
 
 /**
- * `Closes #<n>` (none without an issue), then the trimmed description. A fan-out slice's PR is one of several
+ * `Closes #<n>` (none without an issue), then the trimmed description, then the notes of the verify rounds. A fan-out slice's PR is one of several
  * for the issue: it says `Part of #<n>`, so merging it leaves the issue open for the other slices.
  */
-export function prBody(issueNumber: number | undefined, description?: string, o: { slice?: boolean } = {}): string {
+export function prBody(issueNumber: number | undefined, description?: string, o: { slice?: boolean; notes?: string } = {}): string {
   const text = description?.trim();
   const ref = o.slice === true ? 'Part of' : 'Closes';
-  const parts = [...(issueNumber !== undefined ? [`${ref} #${issueNumber}`] : []), ...(text ? [text] : [])];
+  const parts = [
+    ...(issueNumber !== undefined ? [`${ref} #${issueNumber}`] : []),
+    ...(text ? [text] : []),
+    ...(o.notes ? [o.notes] : []),
+  ];
   return parts.length === 0 ? '' : `${parts.join('\n\n')}\n`;
 }
 
@@ -60,7 +65,8 @@ export function githubOpenPr(o: {
         return rel ? readOptional(path.join(o.runDir, rel)) : undefined;
       };
       const description = await latest('pr_body');
-      const body = prBody(issue?.number, description, { slice: o.slice !== undefined });
+      const notes = await noticedNotes(ctx, o.runDir);
+      const body = prBody(issue?.number, description, { slice: o.slice !== undefined, ...(notes ? { notes } : {}) });
       const fallback =
         o.slice !== undefined ? `${issue?.title ?? o.pipeline}: ${o.slice.title}` : (issue?.title ?? `${o.pipeline}: ${o.runId}`);
       const title = (await latest('pr_title'))?.trim() || fallback;

@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import type { StepRecord } from '../../src/engine/state.ts';
 import type { RunContext } from '../../src/engine/runtime.ts';
 import type { Graph, Step } from '../../src/graph/build.ts';
 import { githubOpenPr, prBody } from '../../src/tracker/pr.ts';
@@ -32,7 +33,9 @@ const MISSING = '<missing>';
 
 type Setup = { runDir: string; io: { stepDir: string; outputsDir: string }; ctx: RunContext };
 
-async function setup(o: { unresolved?: string; prBody?: { step: string; text: string }[] } = {}): Promise<Setup> {
+async function setup(
+  o: { unresolved?: string; prBody?: { step: string; text: string }[]; notes?: { round: number; text: string }[] } = {},
+): Promise<Setup> {
   const runDir = await fs.mkdtemp(path.join(os.tmpdir(), 'perc-pr-'));
   const stepDir = path.join(runDir, 'steps', 'deliver');
   const outputsDir = path.join(stepDir, 'outputs');
@@ -58,6 +61,13 @@ async function setup(o: { unresolved?: string; prBody?: { step: string; text: st
     }
     previousOutputs[e.step] = { pr_body: rel };
   }
+  const history: StepRecord[] = [];
+  for (const n of o.notes ?? []) {
+    const rel = `steps/review/${n.round}/outputs/notes.md`;
+    await fs.mkdir(path.join(runDir, 'steps', 'review', String(n.round), 'outputs'), { recursive: true });
+    await fs.writeFile(path.join(runDir, rel), n.text);
+    history.push({ stepId: 'review', attempt: n.round, startedAt: '', endedAt: '', status: 'pass', verifyRound: n.round, outputs: { notes: rel } });
+  }
   const graph = {
     steps: [
       { id: 'implement.0', stage: 'implement', role: 'slot', slotLast: false },
@@ -78,6 +88,7 @@ async function setup(o: { unresolved?: string; prBody?: { step: string; text: st
       runId: 'r1',
       rounds: { review: 1 },
       groundVersions: { g: 'local' },
+      history,
       ...(unresolvedFindings ? { unresolvedFindings } : {}),
     },
     previousOutputs,
@@ -285,6 +296,38 @@ test('open_pr of a fan-out slice without an issue titles the PR <pipeline>: <sli
     });
     assert.equal((await h(step, s.ctx, s.io)).status, 'pass');
     assert.equal(gh.prs[0]!.title, 'split: Parser');
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('prBody puts the notes after the description', () => {
+  assert.equal(
+    prBody(7, 'Adds X.', { notes: '## Noticed in review, not fixed\n\n### Round 4\n\nN.' }),
+    'Closes #7\n\nAdds X.\n\n## Noticed in review, not fixed\n\n### Round 4\n\nN.\n',
+  );
+});
+
+test('open_pr adds the notes of every verify round to the body', async () => {
+  const s = await setup({ notes: [{ round: 4, text: 'N4.' }, { round: 5, text: 'N5.\n' }] });
+  try {
+    const gh = new FakeGh({ readFile: readBody });
+    assert.equal((await mk(s, gh)(step, s.ctx, s.io)).status, 'pass');
+    assert.equal(gh.prs[0]!.body, 'Closes #7\n\n## Noticed in review, not fixed\n\n### Round 4\n\nN4.\n\n### Round 5\n\nN5.\n');
+  } finally {
+    await rm(s.runDir);
+  }
+});
+
+test('open_pr rerun keeps one notes section', async () => {
+  const s = await setup({ prBody: [{ step: 'pr-description', text: 'A' }], notes: [{ round: 4, text: 'N4.' }] });
+  try {
+    const gh = new FakeGh({ readFile: readBody });
+    const h = mk(s, gh);
+    await h(step, s.ctx, s.io);
+    assert.equal((await h(step, s.ctx, s.io)).status, 'pass');
+    assert.equal(gh.prs.length, 1);
+    assert.equal(gh.prs[0]!.body, 'Closes #7\n\nA\n\n## Noticed in review, not fixed\n\n### Round 4\n\nN4.\n');
   } finally {
     await rm(s.runDir);
   }

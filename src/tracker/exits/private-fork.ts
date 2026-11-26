@@ -9,6 +9,7 @@ import { checkGhsa } from '../gh.ts';
 import type { AdvisoryFork, Gh } from '../gh.ts';
 import { prBody } from '../pr.ts';
 import { errText, latestOutput } from './latest.ts';
+import { noticedNotes } from './notes.ts';
 
 /** `<stepDir>/fork.json`: the temporary private fork this step created for the advisory. */
 type SavedFork = AdvisoryFork & { advisory: string };
@@ -92,7 +93,8 @@ export function githubPrivateForkPr(o: {
           (typeof issueTitle === 'string' && issueTitle.trim() !== '' ? issueTitle : `Fix for ${advisory}`);
         // no "Closes #n": a PR in the advisory fork must not close (or point at) the public issue
         const bodyFile = path.join(io.stepDir, 'pr-body.md');
-        await writeFileAtomic(bodyFile, prBody(undefined, await latestOutput(ctx, o.runDir, 'pr_body')));
+        const notes = await noticedNotes(ctx, o.runDir);
+        await writeFileAtomic(bodyFile, prBody(undefined, await latestOutput(ctx, o.runDir, 'pr_body'), notes ? { notes } : {}));
         url = await o.gh.createPr(forkRepo, { base: o.base.replace(/^origin\//, ''), head: o.branch, title, bodyFile });
       }
       await fs.mkdir(io.outputsDir, { recursive: true });

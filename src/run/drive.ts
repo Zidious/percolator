@@ -217,7 +217,7 @@ async function driveHeld(
         ...(meta.fanOut !== undefined ? { slice: { title: meta.fanOut.title } } : {}),
       }),
       'github.comment': githubComment({ gh: deps.gh, runDir: dir, runId }),
-      'percolator.report': percolatorReport(),
+      'percolator.report': percolatorReport({ runDir: dir }),
       'github.open_issues': githubOpenIssues({ gh: deps.gh, runDir: dir, runId, repo: meta.repo, ...nextRuns(v.pipeline.next) }),
       'github.release': githubRelease({
         gh: deps.gh,

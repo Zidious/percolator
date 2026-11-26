@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
-import { graphFingerprint, runGraph } from '../../src/engine/engine.ts';
+import { graphFingerprint, runGraph, verifyRoundOf } from '../../src/engine/engine.ts';
 import { answerFindings, answerQuestions, grantRound, newState } from '../../src/engine/state.ts';
 import type { RunState } from '../../src/engine/state.ts';
 import type { GraphFragment, Pipeline } from '../../src/config/schema.ts';
@@ -891,4 +891,69 @@ test('implicit gate edge escalates at its cap', async () => {
   assert.equal(rt.calls.filter((id) => id === 'plan.0').length, 3);
   assert.equal(s.cursor, g.steps.findIndex((x) => x.id === 'approve-plan'));
   assert.ok(!('failedReason' in s));
+});
+
+test('a round granted at a findings cap is a verify round for the stage steps', async () => {
+  const g = graph();
+  const rt = new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3'), fail('f4'), fail('f5')] });
+  let s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  for (let i = 0; i < 2; i++) {
+    answerFindings(s, g, 'f');
+    s.status = 'running';
+    s = await runGraph(g, s, { runtime: rt, save: saver().save });
+  }
+  assert.deepEqual(rt.verifyOf('review'), [undefined, undefined, undefined, { edgeId: 'review', round: 4, maxRounds: 3 }, { edgeId: 'review', round: 5, maxRounds: 3 }]);
+  assert.deepEqual(rt.verifyOf('implement'), [undefined, undefined, undefined, undefined, undefined]);
+  assert.deepEqual(
+    s.history.filter((h) => h.stepId === 'review').map((h) => h.verifyRound),
+    [undefined, undefined, undefined, 4, 5],
+  );
+  assert.ok(!s.history.filter((h) => h.stepId === 'review').slice(0, 3).some((h) => 'verifyRound' in h));
+});
+
+test('a round granted on an on_fail cap is not a verify round', async () => {
+  const g = qaGraph();
+  const s1 = await runGraph(g, newState(init), { runtime: new FakeRuntime({ qa: [fail('q1'), fail('q2')] }), save: saver().save });
+  grantRound(s1);
+  s1.status = 'running';
+  const rt = new FakeRuntime({ qa: [fail('q3')] });
+  const s2 = await runGraph(g, s1, { runtime: rt, save: saver().save });
+  assert.deepEqual(rt.calls, ['implement', 'review', 'qa']);
+  assert.deepEqual(rt.verifyOf('qa'), [undefined]);
+  assert.deepEqual(rt.verifyOf('review'), [undefined]);
+  assert.ok(!s2.history.some((h) => 'verifyRound' in h));
+});
+
+test('verifyRoundOf ignores a slot step whose fail routes to an escalating edge with granted rounds', () => {
+  const g = qaGraph();
+  const routed = { ...g, failRoutes: { ...g.failRoutes, review: 'qa' } };
+  const s = newState(init);
+  s.granted = { qa: 1 };
+  const review = g.steps.find((x) => x.id === 'review')!;
+  assert.equal(verifyRoundOf(routed, s, review), undefined);
+  s.granted = { review: 1 };
+  assert.deepEqual(verifyRoundOf(g, s, review), { edgeId: 'review', round: 4, maxRounds: 3 });
+});
+
+test('notes from a verify round are not offered as findings at the cap', async () => {
+  const g = graph();
+  let s = await runGraph(g, newState(init), { runtime: new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3')] }), save: saver().save });
+  answerFindings(s, g, 'f');
+  s.status = 'running';
+  const rt = new FakeRuntime({ review: [{ status: 'fail', outputs: { findings: 'f4', notes: 'n4' } }] });
+  s = await runGraph(g, s, { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'paused');
+  assert.equal(s.asking?.kind === 'findings' && s.asking.findings, 'f4');
+  assert.ok(!JSON.stringify(s.asking).includes('n4'));
+});
+
+test('a verify round ends when an enclosing loop jumps back', async () => {
+  const g = qaGraph();
+  const rt = new FakeRuntime({ review: [fail('f1'), fail('f2'), fail('f3'), pass({ findings: '' }), pass({ findings: '' })], qa: [fail('q1')] });
+  let s = await runGraph(g, newState(init), { runtime: rt, save: saver().save });
+  answerFindings(s, g, 'f');
+  s.status = 'running';
+  s = await runGraph(g, s, { runtime: rt, save: saver().save });
+  assert.equal(s.status, 'completed');
+  assert.deepEqual(rt.verifyOf('review'), [undefined, undefined, undefined, { edgeId: 'review', round: 4, maxRounds: 3 }, undefined]);
 });

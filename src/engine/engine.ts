@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { BackEdge, Graph, Step } from '../graph/build.ts';
-import type { LoopRound, NodeOutcome, RunContext, Runtime } from './runtime.ts';
+import type { LoopRound, NodeOutcome, RunContext, Runtime, VerifyRound } from './runtime.ts';
 import type { FindingSource, RunState } from './state.ts';
 
 export type RunDeps = {
@@ -67,7 +67,8 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       continue;
     }
 
-    const ctx: RunContext = { state, graph, ...roundAt(i), previousOutputs: latestOutputs(state) };
+    const verify = verifyRoundOf(graph, state, step);
+    const ctx: RunContext = { state, graph, ...roundAt(i), ...(verify ? { verify } : {}), previousOutputs: latestOutputs(state) };
     const startedAt = now();
     const outcome = await deps.runtime.executeStep(step, ctx);
     const endedAt = now();
@@ -88,6 +89,7 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       endedAt,
       status: missing.length > 0 ? 'contract_error' : outcome.status,
       outputs: outcome.outputs,
+      ...(verify ? { verifyRound: verify.round } : {}),
     });
 
     if (missing.length > 0) {
@@ -245,6 +247,20 @@ export async function runGraph(graph: Graph, state: RunState, deps: RunDeps): Pr
       state.pausedCap = edge.id;
     }
   }
+}
+
+/**
+ * The round a slot step runs in when the owner granted it at the cap of the findings loop (`onCap: 'continue'`) its
+ * fail routes to; undefined before the cap, outside such a loop, and for rounds granted on an escalating edge.
+ */
+export function verifyRoundOf(graph: Graph, state: RunState, step: Step): VerifyRound | undefined {
+  if (step.role !== 'slot') return undefined;
+  const route = graph.failRoutes[step.id];
+  const edge = route === undefined ? undefined : graph.backEdges[route];
+  if (!edge || edge.onCap !== 'continue') return undefined;
+  const granted = state.granted?.[edge.id] ?? 0;
+  if (granted <= 0) return undefined;
+  return { edgeId: edge.id, round: edge.maxRounds + granted, maxRounds: edge.maxRounds };
 }
 
 export function graphFingerprint(graph: Graph): string {
