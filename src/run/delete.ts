@@ -6,6 +6,8 @@ import { loadState } from '../engine/state.ts';
 import type { Terminal } from '../herdr/hc.ts';
 import type { RunState } from '../engine/state.ts';
 import { runGit } from '../grounds/git.ts';
+import type { Gh } from '../tracker/gh.ts';
+import { parseGateComment } from '../tracker/gate-comment.ts';
 import { sweepTerminals } from '../runtime/herdr-runtime.ts';
 import { isInside } from '../util/paths.ts';
 import { runDir } from '../workspace/run-dir.ts';
@@ -133,6 +135,31 @@ async function retryHeld(meta: RunMeta, deps: DriverDeps, o: DeleteOptions, acti
   }
 }
 
+/**
+ * Removes the run's gate comments on its ticket that still wait for approval; returns how many.
+ * Approved ones stay: they are history, and a later run reuses an approved groom.
+ */
+async function removeGateComments(meta: RunMeta, gh: Gh): Promise<number> {
+  if (meta.issue === undefined) return 0;
+  // an issue deleted or transferred away holds no comment of ours to remove
+  const issue = await gh.issue(meta.repo, meta.issue).catch((err: unknown) => {
+    if (/Could not resolve to an issue/.test((err as Error).message)) return undefined;
+    throw err;
+  });
+  if (issue === undefined) return 0;
+  const open = issue.comments.filter((c) => {
+    const g = parseGateComment(c.body);
+    return g?.runId === meta.runId && g.approvedBy === undefined;
+  });
+  if (open.length === 0) return 0;
+  const self = (await gh.user()).toLowerCase();
+  let n = 0;
+  for (const c of open) {
+    if (c.author.toLowerCase() === self && (await gh.deleteComment(meta.repo, c.id))) n++;
+  }
+  return n;
+}
+
 /** Drops stale worktree entries; the note to add to the report when the repo can't be pruned. */
 async function prune(repoRoot: string): Promise<string> {
   try {
@@ -184,15 +211,23 @@ export async function deleteRun(plan: DeletePlan, deps: DriverDeps, o: DeleteOpt
     await herdr(deps.hc.rm(t.address));
     n++;
   }
+  // after the driver is gone (it can't re-post the comment), before the worktree and the record
+  let gates = '';
+  if (meta !== undefined) {
+    const removed = await removeGateComments(meta, deps.gh).catch((err: unknown) => {
+      throw new Error(`run ${id}: ${(err as Error).message}; check gh auth status and run perc delete ${id} again`);
+    });
+    if (removed > 0) gates = `, ${removed} gate comment(s)`;
+  }
 
   let line: string;
   if (meta === undefined) {
-    line = `deleted run ${id}: ${n} terminal(s); its worktree is unknown, check <repo>/${WORKTREES_DIR}/${id}; kept branch percolator/${id}`;
+    line = `deleted run ${id}: ${n} terminal(s)${gates}; its worktree is unknown, check <repo>/${WORKTREES_DIR}/${id}; kept branch percolator/${id}`;
   } else if (!(await exists(meta.repoRoot))) {
-    line = `deleted run ${id}: ${n} terminal(s); repo ${meta.repoRoot} not found, worktree ${meta.worktree} left as is; kept branch ${meta.branch}`;
+    line = `deleted run ${id}: ${n} terminal(s)${gates}; repo ${meta.repoRoot} not found, worktree ${meta.worktree} left as is; kept branch ${meta.branch}`;
   } else if (!(await exists(meta.worktree))) {
     // removed by hand leaves a stale entry; after perc clean prune finds nothing
-    line = `deleted run ${id}: ${n} terminal(s), worktree already removed${await prune(meta.repoRoot)}; kept branch ${meta.branch}`;
+    line = `deleted run ${id}: ${n} terminal(s)${gates}, worktree already removed${await prune(meta.repoRoot)}; kept branch ${meta.branch}`;
   } else if ((await exists(path.join(meta.repoRoot, '.git'))) && (await exists(path.join(meta.worktree, '.git')))) {
     const remove = o.removeWorktree ?? removeWorktree;
     await retryHeld(meta, deps, o, async () => {
@@ -201,11 +236,11 @@ export async function deleteRun(plan: DeletePlan, deps: DriverDeps, o: DeleteOpt
         await fs.rm(meta.worktree, { recursive: true, force: true });
       }
     });
-    line = `deleted run ${id}: ${n} terminal(s), worktree ${meta.worktree}; kept branch ${meta.branch}`;
+    line = `deleted run ${id}: ${n} terminal(s)${gates}, worktree ${meta.worktree}; kept branch ${meta.branch}`;
   } else {
     // git can't remove a dir whose .git is gone, or one in a repo that is no longer a git repo
     await retryHeld(meta, deps, o, () => fs.rm(meta.worktree, { recursive: true, force: true }));
-    line = `deleted run ${id}: ${n} terminal(s), worktree ${meta.worktree}${await prune(meta.repoRoot)}; kept branch ${meta.branch}`;
+    line = `deleted run ${id}: ${n} terminal(s)${gates}, worktree ${meta.worktree}${await prune(meta.repoRoot)}; kept branch ${meta.branch}`;
   }
 
   await fs.rm(plan.dir, { recursive: true, force: true, maxRetries: 5 });

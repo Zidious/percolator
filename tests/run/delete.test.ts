@@ -9,6 +9,7 @@ import { deleteRun, isFinished, planDelete } from '../../src/run/delete.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { statusJson } from '../../src/run/status.ts';
+import { renderGateComment } from '../../src/tracker/gate-comment.ts';
 import { removeWorktree } from '../../src/workspace/worktree.ts';
 import { git } from '../helpers/git-repo.ts';
 import { NOW, setupRunEnv } from '../helpers/run-env.ts';
@@ -34,7 +35,11 @@ async function setup(): Promise<Env> {
   return {
     ...base,
     dir,
-    prepare: () => prepareRun({ ticket: '#5', repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps),
+    prepare: async () => {
+      const m = await prepareRun({ ticket: '#5', repoDir: base.root, configFile: base.configFile, profile: 'work' }, base.deps);
+      base.deps.gh.addIssue(m.repo, 5);
+      return m;
+    },
     edit,
     liveDriver: (m) => {
       base.deps.hc.add({ name: m.driver, labels: { 'percolator.run': m.runId, 'percolator.role': 'driver' } });
@@ -193,6 +198,109 @@ test('deleteRun keeps the record when it fails before removing the run dir, and 
     await e.cleanup();
   }
 });
+
+const gate = (runId: string, approvedBy?: string) =>
+  renderGateComment({
+    runId, stepId: 'approve-groom', round: 1, outputs: '', rejected: [], ...(approvedBy !== undefined ? { approvedBy } : {}),
+  });
+const comments = async (e: Env, m: RunMeta) => (await e.deps.gh.issue(m.repo, 5)).comments.map((c) => c.body);
+const deleteCalls = (e: Env) => e.deps.gh.calls.filter((c) => c.method === 'deleteComment').length;
+
+test('deleteRun removes the run\'s open gate comment and says so', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    e.deps.gh.addComment(m.repo, 5, 'perc-bot', gate(m.runId));
+    assert.equal(
+      await del(e, m),
+      `deleted run ${m.runId}: 0 terminal(s), 1 gate comment(s), worktree ${m.worktree}; kept branch ${m.branch}`,
+    );
+    assert.equal((await comments(e, m)).some((b) => b.includes(`run=${m.runId}`)), false);
+    await assertDeleted(e, m);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('deleteRun leaves approved gate comments, other runs\' gate comments and other authors\' comments', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const kept = [gate(m.runId, 'owner'), gate('t5-other-run')];
+    e.deps.gh.addComment(m.repo, 5, 'perc-bot', kept[0]!);
+    e.deps.gh.addComment(m.repo, 5, 'PERC-BOT', kept[1]!);
+    e.deps.gh.addComment(m.repo, 5, 'someone', gate(m.runId));
+    const before = await comments(e, m);
+    assert.equal(await del(e, m), line(m, 0));
+    assert.deepEqual(await comments(e, m), before);
+    assert.equal(deleteCalls(e), 0);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('deleteRun of a ticketed run with no gate comment deletes as before', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    assert.equal(await del(e, m), line(m, 0));
+    assert.equal(deleteCalls(e), 0);
+    await assertDeleted(e, m);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a rerun after a partial delete whose gate comment is already gone finishes', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    e.deps.gh.addComment(m.repo, 5, 'perc-bot', gate(m.runId));
+    await assert.rejects(
+      del(e, m, {
+        removeWorktree: async () => {
+          throw new Error('boom');
+        },
+      }),
+      { message: `run ${m.runId}: boom` },
+    );
+    assert.equal(await exists(e.dir(m)), true);
+    assert.equal(await del(e, m), line(m, 0));
+    assert.equal(deleteCalls(e), 1);
+    await assertDeleted(e, m);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('deleteRun of a run whose issue no longer exists deletes as before', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    e.deps.gh.issues.clear();
+    assert.equal(await del(e, m), line(m, 0));
+    await assertDeleted(e, m);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+
+test('deleteRun keeps the record when gh fails', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    e.deps.gh.fail('issue', 'network down');
+    await assert.rejects(del(e, m), {
+      message: `run ${m.runId}: gh issue failed: network down; check gh auth status and run perc delete ${m.runId} again`,
+    });
+    assert.equal(await exists(e.dir(m)), true);
+    assert.equal(await exists(m.worktree), true);
+  } finally {
+    await e.cleanup();
+  }
+});
+
 
 test('deleteRun retries a held worktree and then gives up', async () => {
   const e = await setup();
