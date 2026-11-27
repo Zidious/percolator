@@ -118,7 +118,7 @@ export default class Percolator extends View {
     this.busy = null;
     this.actError = null;
     this.said = null;
-    this.notice = null; // beside Delete finished runs ↗, seen with or without a selection
+    this.notice = null; // beside Delete Finished Runs ↗, seen with or without a selection
     this.deleting = null; // { ids, next, shown, doneAt? }: the delete the owner confirmed and the row to select after it
     this.backSpace = null; // the latest shown space that is no run's: where a delete of the shown run's space goes back to
     this.deleteFailed = null; // { <id>: why }: the last delete failed; its runs' headers say so until retry or another pick
@@ -239,7 +239,7 @@ export default class Percolator extends View {
         this.notice = finishedNotice(this.notice, this.runs, false);
         this.error = null;
         this.loaded = true;
-        const pick = selectAfterRefresh(this.runs, this.rows(), this.sel, this.deleting);
+        const pick = selectAfterRefresh(this.rows(), this.sel, this.deleting);
         // a fetch started after the delete finished has seen all of it
         if (this.deleting?.doneAt !== undefined && seq > this.deleting.doneAt) this.deleting = null;
         if (this.startedId && this.runs.some((r) => r.id === this.startedId)) {
@@ -247,8 +247,9 @@ export default class Percolator extends View {
           this.select(this.startedId, cx);
           this.startedId = null;
           this.revealRow();
-        } else if (!this.current()) {
-          // the selected run is gone, deleted by a delete that failed on others: keep saying so
+        } else if (pick !== this.sel) {
+          // the selected run left the rows (it finished, on Active) or is gone, deleted by a delete that failed on
+          // others: keep saying so
           const { actError, deleteFailed } = this;
           this.select(pick, cx);
           if (deleteFailed) Object.assign(this, { actError, deleteFailed });
@@ -431,7 +432,7 @@ export default class Percolator extends View {
     this.perform(action, actionArgv(action, r), cx);
   }
 
-  /** The All tab's Delete finished runs ↗: one confirm listing them, or a line saying there are none. */
+  /** The All tab's Delete Finished Runs ↗: one confirm listing them, or a line saying there are none. */
   deleteFinished(cx) {
     if (this.busy) return;
     this.actError = null;
@@ -1103,9 +1104,9 @@ export default class Percolator extends View {
           .child(label),
       );
     const window = this.inWindow();
-    // ⧉ and ✕ never leave: the title truncates, the tabs take a row of their own, and only under 270 does the chip shorten to "N".
-    const fit = titleLayout(this.width / zoom(), needs, this.filter);
-    // inline, the tabs give way before ⧉ and ✕ do (a long notice, Delete finished runs ↗ beside a busy watcher)
+    // ⧉ and ✕ never leave: the title truncates, and only under 270 does the chip shorten to "N".
+    const fit = titleLayout(this.width / zoom());
+    // the tabs' own row, under the bar
     const tabs = h_flex()
       .flex_shrink_1()
       .min_w(0)
@@ -1114,7 +1115,7 @@ export default class Percolator extends View {
       .items_center()
       .child(tab('active', 'Active'))
       .child(tab('all', 'All'))
-      .when(this.filter === 'all', (el) => el.child(link(t, 'delete-finished', 'Delete finished runs ↗', (_e, cx) => this.deleteFinished(cx)).flex_shrink_1().min_w(0).truncate()))
+      .when(this.filter === 'all', (el) => el.child(link(t, 'delete-finished', 'Delete Finished Runs ↗', (_e, cx) => this.deleteFinished(cx)).flex_shrink_1().min_w(0).truncate()))
       .when(Boolean(this.notice), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(this.notice)));
     const bar = h_flex()
       .h(38)
@@ -1128,7 +1129,6 @@ export default class Percolator extends View {
         el.child(chip(fit.chip === 'short' ? String(needs) : `${needs} need${needs === 1 ? 's' : ''} you`, t.blocked)),
       )
       .when(running > 0 && !narrow, (el) => el.child(chip(`${running} running`, t.working)))
-      .when(fit.tabs === 'inline', (el) => el.child(div().flex_none().w(4)).child(tabs))
       .child(div().flex_1())
       .when(this.conn !== 'missing', (el) =>
         el.child(
@@ -1137,7 +1137,7 @@ export default class Percolator extends View {
             : link(t, 'new-run', '+ New run', (_e, cx) => this.openStart(cx)),
         ),
       )
-      .when(Boolean(this.watcher), (el) => el.child(this.watcherChip(t, narrow || fit.tabs === 'below')))
+      .when(Boolean(this.watcher), (el) => el.child(this.watcherChip(t, narrow)))
       .when(this.conn === 'fixtures' && !narrow, (el) => el.child(div().flex_none().text_size(10).text_color(t.muted).child('Fixtures')))
       .child(
         icon('place', '⧉', window ? 'Dock in the side panel' : 'Pop out into a window', () =>
@@ -1151,7 +1151,7 @@ export default class Percolator extends View {
       .border_color(t.border)
       .bg(t.chrome)
       .child(bar)
-      .when(fit.tabs === 'below', (el) => el.child(h_flex().h(28).px(12).pb(4).items_center().child(tabs)));
+      .child(h_flex().h(28).px(12).pb(4).items_center().child(tabs));
   }
 
   hints(t) {

@@ -84,7 +84,7 @@ function deleteState(p, t, r) {
     .gap(8)
     .items_center()
     .child(div().min_w(0).truncate().text_size(11).text_color(t.blocked).child(`Delete failed: ${v.error}`))
-    // the owner confirmed this delete already; only this run, so a failed Delete finished doesn't retry the deleted ones
+    // the owner confirmed this delete already; only this run, so a failed Delete Finished Runs doesn't retry the deleted ones
     .child(link(t, 'delete-retry', 'Try again ↗', (_e, cx) => p.deleteRuns([r.id], cx), { disabled: Boolean(p.busy) }));
 }
 
