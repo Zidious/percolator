@@ -12,7 +12,7 @@ import { sweepTerminals } from '../runtime/herdr-runtime.ts';
 import { isInside } from '../util/paths.ts';
 import { runDir } from '../workspace/run-dir.ts';
 import { WORKTREES_DIR, removeWorktree, worktreeDirty } from '../workspace/worktree.ts';
-import { liveness } from './drive.ts';
+import { liveness } from './lock.ts';
 import { lockIsLive, readDriverLock } from './lock.ts';
 import type { DriverLock } from './lock.ts';
 import { readRunMeta } from './meta.ts';

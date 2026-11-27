@@ -5,15 +5,13 @@ import type { StepHandler } from '../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../runtime/outcome.ts';
 import { writeFileAtomic } from '../util/fs.ts';
 import type { Gh, Issue } from './gh.ts';
-import { DECISION_MARKER, findPriorGroom } from './prior-groom.ts';
+import { DECISION_MARKER, GATE_MARKER } from './markers.ts';
+import { findPriorGroom } from './prior-groom.ts';
 import type { PriorGroom } from './prior-groom.ts';
 import type { TicketRef } from './ticket.ts';
 
 /** `issue.json`: the run's issue; absent on a ticketless run. `labels` is absent in runs from before pipelines. */
 export type IssueMeta = { repo: string; number: number; title: string; url: string; labels?: string[] };
-
-/** Gate comments start with this marker; intake leaves them out of `ticket.md`. */
-export const GATE_MARKER = '<!-- percolator:gate';
 
 export async function readIssueMeta(runDir: string): Promise<IssueMeta> {
   let text: string;

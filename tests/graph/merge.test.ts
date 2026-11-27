@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeLayers, mergePipelines, LockViolation } from '../../src/graph/merge.ts';
+import { HEADER_KEYS, mergeLayers, mergePipelines, LockViolation } from '../../src/graph/merge.ts';
+import { PipelineSchema } from '../../src/config/schema.ts';
 import { CORE_STAGES, STAGE_CONTRACTS, CORE_GROOM_GATE } from '../../src/graph/core.ts';
 import type { Layer } from '../../src/grounds/mappings.ts';
 import { buildGraph } from '../../src/graph/build.ts';
@@ -410,4 +411,10 @@ test('after a merged header lock, changing an earlier layer key is a lock violat
       ]),
     { message: 'repo: pipelines.docs: locked by profile:w (required: true); remove this pipeline or restate it exactly' },
   );
+});
+
+test('every pipeline key but bindings, nodes, rules, use and required is a header key, so no layer drops it', () => {
+  const notHeader = ['bindings', 'nodes', 'rules', 'use', 'required'];
+  const schemaKeys = Object.keys(PipelineSchema.shape).filter((k) => !notHeader.includes(k));
+  assert.deepEqual([...HEADER_KEYS].sort(), schemaKeys.sort());
 });

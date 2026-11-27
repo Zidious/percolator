@@ -3,7 +3,7 @@ import { loadState } from '../engine/state.ts';
 import { foreignTerminal } from '../runtime/herdr-runtime.ts';
 import { exists } from '../util/fs.ts';
 import { runDir } from '../workspace/run-dir.ts';
-import { checkResumable } from './drive.ts';
+import { checkResumable } from './resumable.ts';
 import { listRuns, readRunMeta } from './meta.ts';
 import type { FanOutMeta, RunListing, RunMeta } from './meta.ts';
 import { launchDriver, prepareRun } from './prepare.ts';

@@ -15,9 +15,6 @@ export function parseCommand(body: string): { decision: 'approve' | 'reject'; fe
 export type PriorDecision = { decision: 'approve' | 'reject'; by: string; url: string; feedback?: string };
 export type PriorGroom = { text: string; gateUrl: string; decision?: PriorDecision };
 
-/** Decision notes start with this marker; intake leaves them out of `ticket.md`. */
-export const DECISION_MARKER = '<!-- percolator:decision';
-
 const GROOM_GATE = /^<!-- percolator:gate run=(\S+) step=approve-groom round=(\d+) -->/;
 const NOTE = /^<!-- percolator:decision run=(\S+) step=(\S+) round=(\d+) decision=(approve|reject) -->\n(?:Approved|Rejected) locally by @(\S+) via `perc (?:approve|reject)`(?:: ([\s\S]*?))?\.?\n?$/;
 const SECTION = '### groomed_ticket\n\n';

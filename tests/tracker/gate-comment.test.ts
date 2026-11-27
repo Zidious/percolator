@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { gateMarker } from '../../src/tracker/markers.ts';
 import {
-  gateMarker,
   parseGateComment,
   renderGateComment,
   withRejection,

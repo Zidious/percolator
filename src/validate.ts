@@ -153,6 +153,16 @@ async function validatePipeline(l: Loaded, pipelineName: string, sliceFrom?: str
   };
 }
 
+/** The graph fragment keys a profile sets, `use` aside (it is the layer's own mappings); derived from the schema so a new key is not dropped. */
+export function profileFragment(p: Profile): LayerRoot['fragment'] {
+  const fragment: Record<string, unknown> = {};
+  for (const k of Object.keys(GraphFragmentSchema.shape)) {
+    const value = (p as Record<string, unknown>)[k];
+    if (k !== 'use' && value) fragment[k] = value;
+  }
+  return fragment as LayerRoot['fragment'];
+}
+
 async function load(opts: ValidateOptions): Promise<Loaded> {
   const git = opts.git ?? cliGit;
   const { data: config, lines } = await loadLocated(opts.configFile, UserConfigSchema);
@@ -190,12 +200,7 @@ async function load(opts: ValidateOptions): Promise<Loaded> {
     source: `profile:${n}`,
     locator: { file: opts.configFile, lines, prefix: `profiles.${n}` },
     use: p.use ?? [],
-    fragment: {
-      ...(p.bindings ? { bindings: p.bindings } : {}),
-      ...(p.nodes ? { nodes: p.nodes } : {}),
-      ...(p.rules ? { rules: p.rules } : {}),
-      ...(p.pipelines ? { pipelines: p.pipelines } : {}),
-    },
+    fragment: profileFragment(p),
   });
   // every profile's extends is checked, so a broken one shows up whichever profile is selected
   for (const [n, p] of Object.entries(config.profiles)) {

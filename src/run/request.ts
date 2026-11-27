@@ -1,7 +1,8 @@
 import type { PipelineSpec } from '../config/pipelines.ts';
+import { UsageError } from '../util/errors.ts';
 
 /** A run request that does not fit its pipeline; the CLI reports it like a usage error (exit 2). */
-export class InputError extends Error {
+export class InputError extends UsageError {
   constructor(message: string) {
     super(message);
     this.name = 'InputError';

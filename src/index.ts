@@ -50,7 +50,8 @@ export { HerdrRuntime, sweepTerminals, terminalName } from './runtime/herdr-runt
 export type { HerdrRuntimeOptions, StepHandler, Attention } from './runtime/herdr-runtime.ts';
 export { mappingsFor } from './grounds/mappings.ts';
 
-export { drive, checkResumable } from './run/drive.ts';
+export { drive } from './run/drive.ts';
+export { checkResumable } from './run/resumable.ts';
 export { prepareRun, launchDriver } from './run/prepare.ts';
 export type { DriverDeps } from './run/prepare.ts';
 export { cliGh, GhError } from './tracker/gh.ts';

@@ -36,6 +36,15 @@ export type Asking =
 /** A step that failed in a stage loop's last round, with its findings output. */
 export type FindingSource = { stepId: string; attempt: number; findings: string };
 
+/** A run's status in `state.json`. */
+export const RUN_STATUSES = ['running', 'paused', 'failed', 'completed'] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+/** Done for good: completed or failed. */
+export const isFinished = (status: RunStatus | undefined): boolean => status === 'completed' || status === 'failed';
+/** Still going: running, or paused until the owner answers. */
+export const isLive = (status: RunStatus): boolean => status === 'running' || status === 'paused';
+
 export type RunState = {
   version: 1;
   runId: string;
@@ -49,7 +58,7 @@ export type RunState = {
   granted?: Record<string, number>;
   executed: Record<string, number>;
   history: StepRecord[];
-  status: 'running' | 'paused' | 'failed' | 'completed';
+  status: RunStatus;
   pausedReason?: string;
   /** why the step that failed the run failed (its outcome's reason); absent when it gave none and in older states */
   failedReason?: string;

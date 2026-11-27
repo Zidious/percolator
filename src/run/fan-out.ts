@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { PipelineSpec } from '../config/pipelines.ts';
-import { loadState } from '../engine/state.ts';
+import { isFinished, loadState } from '../engine/state.ts';
 import type { RunState } from '../engine/state.ts';
 import type { StepHandler } from '../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../runtime/outcome.ts';
@@ -10,7 +10,7 @@ import { exists, writeFileAtomic } from '../util/fs.ts';
 import { splitSections } from '../util/sections.ts';
 import { runDir as runDirOf } from '../workspace/run-dir.ts';
 import { startLinkedRun } from './child.ts';
-import { prUrl } from './drive.ts';
+import { prUrl } from './outputs.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 
@@ -65,8 +65,6 @@ export function percolatorSeed(o: { runDir: string; meta: RunMeta; home: string;
     }
   };
 }
-
-const finished = (s: RunState['status'] | undefined): boolean => s === 'completed' || s === 'failed';
 
 /**
  * The fan-out step: splits the slices output into `fanout.json` (once; a resume reuses it), keeps at most
@@ -126,10 +124,10 @@ export function fanOut(o: {
           const dir = runDirOf(o.deps.home, c.id);
           status[c.id] = (await exists(path.join(dir, 'run.json'))) ? (await loadState(dir)).status : undefined;
         }
-        let active = children.filter((c) => status[c.id] !== undefined && !finished(status[c.id])).length;
+        let active = children.filter((c) => status[c.id] !== undefined && !isFinished(status[c.id])).length;
         // an unfinished slice from an earlier drive: relaunched when its driver is gone
         for (const c of children) {
-          if (status[c.id] !== undefined && !finished(status[c.id]) && !launched.has(c.id)) {
+          if (status[c.id] !== undefined && !isFinished(status[c.id]) && !launched.has(c.id)) {
             await start(c);
             launched.add(c.id);
           }
@@ -143,7 +141,7 @@ export function fanOut(o: {
           status[c.id] = 'running';
           active++;
         }
-        if (children.every((c) => finished(status[c.id]) || (status[c.id] === undefined && launched.has(c.id)))) break;
+        if (children.every((c) => isFinished(status[c.id]) || (status[c.id] === undefined && launched.has(c.id)))) break;
         // a paused slice waits for its owner: once none is running, nothing moves until they answer it
         const paused = children.filter((c) => status[c.id] === 'paused').map((c) => c.id);
         if (paused.length > 0 && !children.some((c) => status[c.id] === 'running')) {

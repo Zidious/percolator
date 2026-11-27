@@ -5,6 +5,7 @@ import { collectOutputs } from '../../runtime/outcome.ts';
 import { writeFileAtomic } from '../../util/fs.ts';
 import type { Gh } from '../gh.ts';
 import { readIssueMeta } from '../intake.ts';
+import { exitMarker } from '../markers.ts';
 import { escalate, latestOutput } from './latest.ts';
 import { noticedNotes } from './notes.ts';
 
@@ -17,7 +18,7 @@ export function githubComment(o: { gh: Gh; runDir: string; runId: string }): Ste
         return escalate('github.comment: no step wrote a comment output; write comment.md in the stage before the exit');
       }
       const issue = await readIssueMeta(o.runDir);
-      const marker = `<!-- percolator:exit run=${o.runId} step=${step.id} -->`;
+      const marker = exitMarker(o.runId, step.id);
       await fs.mkdir(io.outputsDir, { recursive: true });
       const bodyFile = path.join(io.stepDir, 'comment-body.md');
       const notes = await noticedNotes(ctx, o.runDir);

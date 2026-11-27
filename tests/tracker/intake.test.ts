@@ -5,7 +5,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { RunContext } from '../../src/engine/runtime.ts';
 import type { Step } from '../../src/graph/build.ts';
-import { GATE_MARKER, githubIntake, readIssueMeta } from '../../src/tracker/intake.ts';
+import { githubIntake, readIssueMeta } from '../../src/tracker/intake.ts';
+import { GATE_MARKER } from '../../src/tracker/markers.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 
 const REPO = 'github.com/o/r';

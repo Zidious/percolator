@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
-import { answerFindings, answerQuestions, grantRound, loadState, newState, saveState } from '../../src/engine/state.ts';
+import { answerFindings, answerQuestions, grantRound, isFinished, isLive, loadState, newState, RUN_STATUSES, saveState } from '../../src/engine/state.ts';
 import type { RunState } from '../../src/engine/state.ts';
 import type { Graph } from '../../src/graph/build.ts';
 
@@ -264,4 +264,13 @@ test('answerFindings with agreed findings counts a grant; with none it does not'
   const t = askingFindings('f');
   answerFindings(t, loopGraph, undefined);
   assert.equal(t.granted, undefined);
+});
+
+test('isFinished is true for completed and failed runs, isLive for running and paused ones', () => {
+  assert.deepEqual(RUN_STATUSES.map((s) => [s, isFinished(s), isLive(s)]), [
+    ['running', false, true],
+    ['paused', false, true],
+    ['failed', true, false],
+    ['completed', true, false],
+  ]);
 });

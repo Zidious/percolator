@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { loadState, saveState } from '../../src/engine/state.ts';
 import { childrenOf, startLinkedRun } from '../../src/run/child.ts';
-import { checkResumable } from '../../src/run/drive.ts';
+import { checkResumable } from '../../src/run/resumable.ts';
 import { readRunGraph } from '../../src/run/graph-file.ts';
 import { readRunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';

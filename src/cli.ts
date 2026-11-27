@@ -15,13 +15,15 @@ import { cliHc } from './herdr/hc.ts';
 import { herdrAppHome, linkHerdr } from './herdr/link.ts';
 import { deleteRun, isFinished, planDelete } from './run/delete.ts';
 import type { DeletePlan } from './run/delete.ts';
-import { checkResumable, drive, prUrl } from './run/drive.ts';
+import { drive } from './run/drive.ts';
+import { prUrl } from './run/outputs.ts';
+import { checkResumable } from './run/resumable.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
 import { pipelinesJson, pipelinesText } from './run/pipelines-json.ts';
 import type { RunMeta } from './run/meta.ts';
-import { AnswerError, applyAnswer, askedItems, checkAnswer } from './run/answer.ts';
+import { applyAnswer, askedItems, checkAnswer } from './run/answer.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
-import { InputError, parseInputs } from './run/request.ts';
+import { parseInputs } from './run/request.ts';
 import type { DriverDeps } from './run/prepare.ts';
 import { attentionNext, driverLiveness, failedText, readAttention, runStatusJson, statusJson } from './run/status.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
@@ -29,10 +31,12 @@ import { deciderLogin, readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
 import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
+import { UsageError } from './util/errors.ts';
 import { validate, validateAll } from './validate.ts';
 import { pidAlive } from './run/lock.ts';
 import { otherWatcher, requestStop, stopFile, stoppableWatcher, WATCH_STOP_TIMEOUT_S, WATCH_TERMINAL, WATCHER_LABELS, waitForWatcherExit, watchFile, watchLoop } from './watch/watch.ts';
 import type { Graph } from './graph/build.ts';
+import { PICK_GATE } from './graph/core.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
 import { pipeWriter } from './util/pipe.ts';
@@ -79,8 +83,6 @@ commands:
 options:
   -h, --help   show this help
 `;
-
-class UsageError extends Error {}
 
 type Options = Record<string, { type: 'string' | 'boolean'; multiple?: boolean }>;
 
@@ -426,7 +428,7 @@ async function runDecide(decision: 'approve' | 'reject', args: string[], deps: D
   const waiting = await readWaiting(dir);
   if (waiting === undefined) throw new Error(`run ${runId} is not waiting at a gate; see where it is with perc status ${runId}`);
   if (pipeline !== undefined) {
-    if (waiting.stepId !== 'pick-pipeline') {
+    if (waiting.stepId !== PICK_GATE) {
       throw new Error(`--pipeline only answers a pick-pipeline gate; run ${runId} is waiting at ${waiting.stepId}`);
     }
     const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile, pipeline: meta.pipeline });
@@ -755,7 +757,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     io.stderr(`unknown command: ${command}\n\n${USAGE}`);
     return 2;
   } catch (err) {
-    if (err instanceof UsageError || err instanceof InputError || err instanceof AnswerError) {
+    if (err instanceof UsageError) {
       io.stderr(`${err.message}\n\n${USAGE}`);
       return 2;
     }

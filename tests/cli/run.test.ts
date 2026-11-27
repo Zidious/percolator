@@ -12,7 +12,7 @@ import type { RunMeta } from '../../src/run/meta.ts';
 import type { DriverDeps } from '../../src/run/prepare.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
-import { GATE_MARKER } from '../../src/tracker/intake.ts';
+import { GATE_MARKER } from '../../src/tracker/markers.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { FakeHc } from '../helpers/fake-hc.ts';
 import type { FakeTerminal } from '../helpers/fake-hc.ts';
