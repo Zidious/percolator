@@ -3,6 +3,7 @@ import path from 'node:path';
 import { answerFindings, answerQuestions, saveState } from '../engine/state.ts';
 import type { Asking, RunState } from '../engine/state.ts';
 import type { Graph } from '../graph/build.ts';
+import { UsageError } from '../util/errors.ts';
 import { writeFileAtomic } from '../util/fs.ts';
 import { splitListItems, splitSections } from '../util/sections.ts';
 import { stepDir } from '../workspace/run-dir.ts';
@@ -14,7 +15,7 @@ export type Answer = { kind: 'questions'; answers: (string | null)[] } | { kind:
 export type AnswerFlags = { answer: string[]; na: string[]; agree: string[] };
 
 /** An answer that does not fit what the run asks: a usage error (exit 2). */
-export class AnswerError extends Error {}
+export class AnswerError extends UsageError {}
 
 /** Leading h1 title lines (`# Title`) and blank lines between them: the file's title, not a finding. */
 const LEADING_H1 = /^(?:[ \t]*\r?\n| {0,3}#(?:[ \t][^\n]*)?(?:\r?\n|$))+/;

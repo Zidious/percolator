@@ -21,9 +21,9 @@ import { checkResumable } from './run/resumable.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
 import { pipelinesJson, pipelinesText } from './run/pipelines-json.ts';
 import type { RunMeta } from './run/meta.ts';
-import { AnswerError, applyAnswer, askedItems, checkAnswer } from './run/answer.ts';
+import { applyAnswer, askedItems, checkAnswer } from './run/answer.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
-import { InputError, parseInputs } from './run/request.ts';
+import { parseInputs } from './run/request.ts';
 import type { DriverDeps } from './run/prepare.ts';
 import { attentionNext, driverLiveness, failedText, readAttention, runStatusJson, statusJson } from './run/status.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
@@ -31,6 +31,7 @@ import { deciderLogin, readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
 import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
+import { UsageError } from './util/errors.ts';
 import { validate, validateAll } from './validate.ts';
 import { pidAlive } from './run/lock.ts';
 import { otherWatcher, requestStop, stopFile, stoppableWatcher, WATCH_STOP_TIMEOUT_S, WATCH_TERMINAL, WATCHER_LABELS, waitForWatcherExit, watchFile, watchLoop } from './watch/watch.ts';
@@ -82,8 +83,6 @@ commands:
 options:
   -h, --help   show this help
 `;
-
-class UsageError extends Error {}
 
 type Options = Record<string, { type: 'string' | 'boolean'; multiple?: boolean }>;
 
@@ -758,7 +757,7 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     io.stderr(`unknown command: ${command}\n\n${USAGE}`);
     return 2;
   } catch (err) {
-    if (err instanceof UsageError || err instanceof InputError || err instanceof AnswerError) {
+    if (err instanceof UsageError) {
       io.stderr(`${err.message}\n\n${USAGE}`);
       return 2;
     }
