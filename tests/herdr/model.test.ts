@@ -617,28 +617,12 @@ test('readRatio: a stored ratio between 0 and 1, else the default', () => {
   assert.equal(BOARD_RATIO, 0.3);
 });
 
-test('titleLayout: the tabs move to their own row before the chip shortens; All needs room for Delete finished runs ↗', () => {
-  assert.deepEqual(titleLayout(380, 2, 'active'), { tabs: 'below', chip: 'long', newRun: 'icon' }, 'the default 380px panel reads N need you');
-  assert.deepEqual(titleLayout(460, 2, 'active'), { tabs: 'inline', chip: 'long', newRun: 'icon' });
-  assert.deepEqual(titleLayout(459, 2, 'active').tabs, 'below');
-  assert.deepEqual(titleLayout(380, 0, 'all'), { tabs: 'below', chip: 'long', newRun: 'icon' });
-  assert.deepEqual(titleLayout(520, 0, 'all').tabs, 'inline');
-  assert.deepEqual(titleLayout(519, 0, 'all').tabs, 'below');
-  assert.deepEqual(titleLayout(620, 2, 'all').tabs, 'inline');
-  assert.deepEqual(titleLayout(619, 2, 'all').tabs, 'below');
-  assert.deepEqual(titleLayout(330, 0, 'active').tabs, 'inline', 'unchanged');
-  assert.deepEqual(titleLayout(329, 0, 'active').tabs, 'below');
-  assert.deepEqual(titleLayout(270, 2, 'active').chip, 'long', 'the 280 panel');
-  assert.deepEqual(titleLayout(269, 2, 'active'), { tabs: 'below', chip: 'short', newRun: 'icon' });
-  assert.deepEqual(titleLayout(720, 2, 'all').newRun, 'icon');
-  assert.deepEqual(titleLayout(800, 2, 'all'), { tabs: 'inline', chip: 'long', newRun: 'text' }, 'the window');
-  // the chip never reads shorter at a wider width
-  for (const filter of ['active', 'all'] as const)
-    for (let w = 200, short = true; w <= 1000; w++) {
-      const s = titleLayout(w, 3, filter).chip === 'short';
-      assert.ok(!s || short, `chip short again at ${w} (${filter})`);
-      short = s;
-    }
+test('titleLayout: + New run is an icon under 800px; the "N need you" chip shortens to "N" only under 270px', () => {
+  assert.deepEqual(titleLayout(380), { chip: 'long', newRun: 'icon' }, 'the default 380px panel reads N need you');
+  assert.deepEqual(titleLayout(270).chip, 'long', 'the 280 panel');
+  assert.deepEqual(titleLayout(269), { chip: 'short', newRun: 'icon' });
+  assert.deepEqual(titleLayout(799).newRun, 'icon');
+  assert.deepEqual(titleLayout(800), { chip: 'long', newRun: 'text' }, 'the window');
 });
 
 const hhmm = (iso: string) => {
@@ -799,18 +783,18 @@ test('selectAfterDelete moves to the next row, else the previous, else none; an 
   assert.equal(selectAfterDelete(rows, ['b'], null), null);
 });
 
-test('selectAfterRefresh keeps a listed selection, else takes the one planned at the delete, else the first row', () => {
+test('selectAfterRefresh keeps a selection the rows list, else takes the one planned at the delete, else the first row', () => {
   const rows = (...ids: string[]) => ids.map((id) => ({ id }) as RunStatusJson);
   // the deleted run is gone from fresh runs: the row planned when the owner confirmed, not the first row
-  assert.equal(selectAfterRefresh(rows('a', 'c'), rows('a', 'c'), 'b', { ids: ['b'], next: 'c' }), 'c');
+  assert.equal(selectAfterRefresh(rows('a', 'c'), 'b', { ids: ['b'], next: 'c' }), 'c');
   // a refresh that still lists the deleted run keeps it selected until it goes
-  assert.equal(selectAfterRefresh(rows('a', 'b', 'c'), rows('a', 'b', 'c'), 'b', { ids: ['b'], next: 'c' }), 'b');
+  assert.equal(selectAfterRefresh(rows('a', 'b', 'c'), 'b', { ids: ['b'], next: 'c' }), 'b');
   // the planned row went too: the first row
-  assert.equal(selectAfterRefresh(rows('a'), rows('a'), 'b', { ids: ['b'], next: 'c' }), 'a');
-  assert.equal(selectAfterRefresh(rows('a', 'c'), rows('a', 'c'), 'b', null), 'a');
-  assert.equal(selectAfterRefresh([], [], 'b', null), null);
-  // listed in all runs but filtered out of the rows: still the selection, as before
-  assert.equal(selectAfterRefresh(rows('a', 'b'), rows('a'), 'b', null), 'b');
+  assert.equal(selectAfterRefresh(rows('a'), 'b', { ids: ['b'], next: 'c' }), 'a');
+  assert.equal(selectAfterRefresh(rows('a', 'c'), 'b', null), 'a');
+  assert.equal(selectAfterRefresh([], 'b', null), null);
+  // a run that left the rows (it finished, on Active) is no longer the selection: the first row, else none
+  assert.equal(selectAfterRefresh(rows('a'), 'b', null), 'a');
 });
 
 test('roundOf counts the round the engine is in', () => {

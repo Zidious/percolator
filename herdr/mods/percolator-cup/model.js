@@ -550,13 +550,10 @@ export function readRatio(stored) {
   return stored != null && n > 0 && n < 1 ? n : BOARD_RATIO;
 }
 
-/** How the title bar fits `width` design px with `needs` runs needing you, on the `filter` tab: ⧉ and ✕ always stay;
- *  + New run is an icon under 800px; the Active/All tabs (and on All, Delete finished runs ↗) move to a row of their
- *  own first, and only under 270px does the "N need you" chip shorten to "N", so it never reads shorter when wider. */
-export function titleLayout(width, needs, filter) {
-  const newRun = width >= 800 ? 'text' : 'icon';
-  const inlineFrom = (needs > 0 ? 460 : 330) + (filter === 'all' ? (needs > 0 ? 160 : 190) : 0);
-  return { tabs: width >= inlineFrom ? 'inline' : 'below', chip: width < 270 ? 'short' : 'long', newRun };
+/** How the title bar fits `width` design px: ⧉ and ✕ always stay; + New run is an icon under 800px; only under
+ *  270px does the "N need you" chip shorten to "N". The Active/All tabs always have a row of their own. */
+export function titleLayout(width) {
+  return { chip: width < 270 ? 'short' : 'long', newRun: width >= 800 ? 'text' : 'icon' };
 }
 
 // ── the cup (mods/percolator-cup carries a copy of this file) ──
@@ -981,7 +978,7 @@ export function deleteFinishedConfirm(runs) {
 }
 
 /**
- * The notice beside Delete finished runs ↗: "No finished runs" when it was just pressed (`asked`) with none;
+ * The notice beside Delete Finished Runs ↗: "No finished runs" when it was just pressed (`asked`) with none;
  * on a refresh, kept until a finished run is listed.
  */
 export function finishedNotice(notice, runs, asked) {
@@ -1047,11 +1044,12 @@ export function selectAfterDelete(rows, deletedIds, selId) {
 }
 
 /**
- * The selection once fresh runs arrive: `selId` while it is still listed; else `pending.next`, the row worked out
- * when the owner confirmed a delete (later rows no longer hold the deleted ones), if listed; else the first row.
+ * The selection once fresh rows arrive: `selId` while the rows still list it (a run that finished leaves Active);
+ * else `pending.next`, the row worked out when the owner confirmed a delete (later rows no longer hold the deleted
+ * ones), if listed; else the first row.
  */
-export function selectAfterRefresh(runs, rows, selId, pending) {
-  if (runs.some((r) => r.id === selId)) return selId;
+export function selectAfterRefresh(rows, selId, pending) {
+  if (rows.some((r) => r.id === selId)) return selId;
   if (pending && rows.some((r) => r.id === pending.next)) return pending.next;
   return rows[0]?.id ?? null;
 }
