@@ -176,6 +176,7 @@ async function pollRepo(
         ...(f.ticket !== undefined ? { ticket: f.ticket } : {}),
         pipeline: f.pipeline,
         inputs: f.inputs,
+        ...(f.trigger !== undefined ? { trigger: f.trigger } : {}),
         runId,
         repoDir,
         configFile: o.configFile,
@@ -207,6 +208,7 @@ async function pollRepo(
             pipeline: entry.pipeline,
             ...(entry.ticket !== undefined ? { ticket: entry.ticket } : {}),
             inputs: entry.inputs ?? {},
+            ...(entry.trigger !== undefined ? { trigger: entry.trigger } : {}),
           };
           await start(f, runId);
           log(`${key} → run ${runId}`);

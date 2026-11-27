@@ -3,11 +3,16 @@ import type { PipelineSpec } from '../config/pipelines.ts';
 import type { Trigger } from '../config/schema.ts';
 import { ISSUE_LIST_LIMIT, PR_LIST_LIMIT } from '../tracker/gh.ts';
 import type { Gh, PrRef } from '../tracker/gh.ts';
+import { TRIGGER_KINDS } from '../run/meta.ts';
+import type { RunTrigger } from '../run/meta.ts';
 import { latestTick, parseCron } from '../util/cron.ts';
 import type { Ledger } from './ledger.ts';
 
-/** One run a trigger asks for; `key` is what the ledger records so it fires once. */
-export type Firing = { key: string; pipeline: string; ticket?: string; inputs: Record<string, string> };
+/**
+ * One run a trigger asks for; `key` is what the ledger records so it fires once. `trigger` names the trigger
+ * that asked (a poll always sets it; a firing recovered from a ledger entry older than it has none).
+ */
+export type Firing = { key: string; pipeline: string; ticket?: string; inputs: Record<string, string>; trigger?: RunTrigger };
 
 const DEPENDABOT = new Set(['dependabot[bot]', 'app/dependabot']);
 
@@ -21,14 +26,12 @@ const canonical = (v: unknown): unknown =>
       ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical((v as Record<string, unknown>)[k])]))
       : v;
 
-const KINDS = ['schedule', 'label', 'pr_opened', 'dependabot', 'check_failed'] as const;
-
 /**
  * A trigger's identity in the ledger: its kind and a short hash of its config (JSON with sorted keys), so
  * reordering triggers keeps each one's marks and editing one makes it a new trigger, polled for the first time.
  */
 export function triggerId(trigger: Trigger): string {
-  const kind = KINDS.find((k) => k in trigger) ?? 'trigger';
+  const kind = TRIGGER_KINDS.find((k) => k in trigger) ?? 'trigger';
   const hash = createHash('sha1').update(JSON.stringify(canonical(trigger))).digest('hex').slice(0, 8);
   return `${kind}-${hash}`;
 }
@@ -87,7 +90,15 @@ export async function pollTriggers(o: {
         ledger.lastPoll[mark] = o.now.toISOString();
         if (after === undefined) continue;
         const tick = latestTick(parseCron(trigger.schedule), new Date(after), o.now, trigger.timezone);
-        if (tick) add({ key: `schedule:${repo}:${pipeline}:${id}:${tick.key}`, pipeline, inputs: { ...trigger.inputs } });
+        const detail = trigger.timezone === undefined ? trigger.schedule : `${trigger.schedule} ${trigger.timezone}`;
+        if (tick) {
+          add({
+            key: `schedule:${repo}:${pipeline}:${id}:${tick.key}`,
+            pipeline,
+            inputs: { ...trigger.inputs },
+            trigger: { kind: 'schedule', detail },
+          });
+        }
       } else if ('label' in trigger) {
         // no first-poll seeding here: labelling an issue is asking for a run, and the label stays on
         // the issue, so one labelled before the watcher started is still a request to answer
@@ -103,9 +114,10 @@ export async function pollTriggers(o: {
             ledger.fired[key] = { runId: '', at: o.now.toISOString() };
             continue;
           }
-          add({ key, pipeline, ticket: issue.url, inputs: {} });
+          add({ key, pipeline, ticket: issue.url, inputs: {}, trigger: { kind: 'label', detail: trigger.label } });
         }
       } else if ('pr_opened' in trigger || 'dependabot' in trigger) {
+        const kind = 'dependabot' in trigger ? 'dependabot' : 'pr_opened';
         const wanted =
           'dependabot' in trigger
             ? (pr: PrRef) => DEPENDABOT.has(pr.author)
@@ -113,7 +125,9 @@ export async function pollTriggers(o: {
         const open = await openPrs();
         prKeys ??= open.length >= PR_LIST_LIMIT ? undefined : new Set(open.map((pr) => `pr:${repo}:${pipeline}:${pr.number}`));
         for (const pr of open) {
-          if (wanted(pr)) seen({ key: `pr:${repo}:${pipeline}:${pr.number}`, pipeline, inputs: { pr: pr.url } });
+          if (wanted(pr)) {
+            seen({ key: `pr:${repo}:${pipeline}:${pr.number}`, pipeline, inputs: { pr: pr.url }, trigger: { kind, detail: `#${pr.number}` } });
+          }
         }
         ledger.lastPoll[mark] = o.now.toISOString();
       } else {
@@ -124,7 +138,12 @@ export async function pollTriggers(o: {
           // a re-run keeps its id: a later attempt that fails again is a new failure (attempt 1 keeps the bare id)
           const attempt = run.attempt > 1 ? `${run.databaseId}.${run.attempt}` : `${run.databaseId}`;
           checkKeys.add(`check:${repo}:${pipeline}:${attempt}`);
-          seen({ key: `check:${repo}:${pipeline}:${attempt}`, pipeline, inputs: { branch, run_url: run.url } });
+          seen({
+            key: `check:${repo}:${pipeline}:${attempt}`,
+            pipeline,
+            inputs: { branch, run_url: run.url },
+            trigger: { kind: 'check_failed', detail: branch },
+          });
         }
         ledger.lastPoll[mark] = o.now.toISOString();
       }

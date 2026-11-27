@@ -159,6 +159,31 @@ test('readRunMeta refuses a fanOut without a slice number', async () => {
   }
 });
 
+test('trigger round-trips in run.json', async () => {
+  const { dir, cleanup } = await tmp();
+  try {
+    const m: RunMeta = { ...meta('r1', '2026-01-01T00:00:00.000Z'), trigger: { kind: 'label', detail: 'ready' } };
+    await writeRunMeta(dir, m);
+    assert.deepEqual(await readRunMeta(dir), m);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('readRunMeta refuses a trigger of an unknown kind or with a non-string detail', async () => {
+  const { dir, cleanup } = await tmp();
+  try {
+    for (const trigger of [{ kind: 'cron' }, { kind: 'label', detail: 3 }, 'label']) {
+      await fs.writeFile(path.join(dir, 'run.json'), JSON.stringify({ ...meta('r1', 'x'), trigger }));
+      await assert.rejects(readRunMeta(dir), {
+        message: `Run metadata ${path.join(dir, 'run.json')} is missing or invalid: trigger`,
+      });
+    }
+  } finally {
+    await cleanup();
+  }
+});
+
 test('driverName uses terminalName with @driver, attempt 0', () => {
   assert.equal(driverName('r1', 'o/r#7'), terminalName('r1', 'o/r#7', '@driver', 0));
 });

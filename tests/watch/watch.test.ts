@@ -79,6 +79,7 @@ test('one poll starts a run for a label trigger', async () => {
     const meta = await readRunMeta(runPath(e, runId!));
     assert.equal(meta.pipeline, 'triage');
     assert.equal(meta.ticket, `${REPO}#7`);
+    assert.deepEqual(meta.trigger, { kind: 'label', detail: 'triage' });
     const driver = e.deps.hc.terminals.get(meta.driver);
     assert.deepEqual(driver?.argv.slice(-2), ['drive', runId]);
     assert.equal(driver?.labels['percolator.role'], 'driver');
@@ -222,6 +223,44 @@ test('a restarted watcher prepares a firing it recorded but never started, with 
     const lines = await loop(e);
     assert.deepEqual(lines, [`watch: ${key} → run t7-triage-20261122-100000-abcd`]);
     assert.equal((await readRunMeta(runPath(e, 't7-triage-20261122-100000-abcd'))).ticket, `${REPO}#7`);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a restarted watcher starts a recorded firing with the trigger the ledger kept', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    const key = `schedule:${HOURLY}:2026-11-22T10:00`;
+    const id = 'triage-20261122-100000-abcd';
+    const trigger = { kind: 'schedule', detail: '0 * * * * UTC' } as const;
+    await saveLedger(pdir(e), {
+      version: 1,
+      fired: { [key]: { runId: id, at: '2026-11-22T10:00:30.000Z', pipeline: 'triage', inputs: {}, trigger } },
+      lastPoll: { [HOURLY]: '2026-11-22T10:00:30.000Z' },
+    });
+    await loop(e);
+    assert.deepEqual((await readRunMeta(runPath(e, id))).trigger, trigger);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a restarted watcher starts a firing recorded without a trigger as a run with no trigger', async () => {
+  const e = await setupRunEnv();
+  try {
+    await e.writeConfig(TRIAGE);
+    const key = `schedule:${HOURLY}:2026-11-22T10:00`;
+    const id = 'triage-20261122-100000-abcd';
+    await saveLedger(pdir(e), {
+      version: 1,
+      fired: { [key]: { runId: id, at: '2026-11-22T10:00:30.000Z', pipeline: 'triage', inputs: {} } },
+      lastPoll: { [HOURLY]: '2026-11-22T10:00:30.000Z' },
+    });
+    await loop(e);
+    const raw = JSON.parse(await fs.readFile(path.join(runPath(e, id), 'run.json'), 'utf8')) as Record<string, unknown>;
+    assert.equal(Object.hasOwn(raw, 'trigger'), false);
   } finally {
     await e.cleanup();
   }

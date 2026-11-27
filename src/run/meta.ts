@@ -24,6 +24,8 @@ export type RunMeta = {
   parent?: string;
   /** a fan-out slice: the parent run, the slice's 1-based index, the stage it starts from and its title */
   fanOut?: FanOutMeta;
+  /** the `perc watch` trigger that started the run; absent on a manual run */
+  trigger?: RunTrigger;
   /** local clone the run was started from (status JSON's `repo`) */
   repoRoot: string;
   configFile: string;
@@ -38,6 +40,15 @@ export type RunMeta = {
 };
 
 export type FanOutMeta = { parent: string; slice: number; from: string; title: string };
+
+/** The trigger kinds `perc watch` polls, as a trigger's config key names them. */
+export const TRIGGER_KINDS = ['schedule', 'label', 'pr_opened', 'dependabot', 'check_failed'] as const;
+
+/**
+ * The trigger that started a run; `detail` is ready to show: the cron (and time zone) of a schedule, the
+ * label, `#<n>` of a PR, the branch of a failed check.
+ */
+export type RunTrigger = { kind: (typeof TRIGGER_KINDS)[number]; detail?: string };
 
 /**
  * The Herdr space name: repo, issue (or the pipeline of a ticketless run), and the run id's suffix,
@@ -70,6 +81,12 @@ function isFanOut(v: unknown): boolean {
   return typeof f.parent === 'string' && isInt(f.slice) && typeof f.from === 'string' && typeof f.title === 'string';
 }
 
+function isTrigger(v: unknown): boolean {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const t = v as Record<string, unknown>;
+  return (TRIGGER_KINDS as readonly unknown[]).includes(t.kind) && (t.detail === undefined || typeof t.detail === 'string');
+}
+
 function invalidField(r: Record<string, unknown>): string | undefined {
   if (r.version !== 1 && r.version !== 2) return 'version';
   for (const k of STRINGS) if (typeof r[k] !== 'string') return k;
@@ -85,6 +102,7 @@ function invalidField(r: Record<string, unknown>): string | undefined {
     if ((r.ticket === undefined) !== (r.issue === undefined)) return r.ticket === undefined ? 'ticket' : 'issue';
     if (r.parent !== undefined && typeof r.parent !== 'string') return 'parent';
     if (r.fanOut !== undefined && !isFanOut(r.fanOut)) return 'fanOut';
+    if (r.trigger !== undefined && !isTrigger(r.trigger)) return 'trigger';
   }
   if (typeof r.keepTerminals !== 'boolean') return 'keepTerminals';
   if (r.space !== undefined && typeof r.space !== 'string') return 'space';

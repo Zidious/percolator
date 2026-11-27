@@ -449,3 +449,15 @@ test('a linked child run is exempt from its parent and siblings, and keeps a giv
     await e.cleanup();
   }
 });
+
+test('prepareRun records the trigger that started the run in run.json', async () => {
+  const e = await setup();
+  try {
+    const trigger = { kind: 'label', detail: 'ready' } as const;
+    const meta = await prepareRun({ ticket: '#5', repoDir: e.root, configFile: e.configFile, profile: 'work', trigger }, e.deps);
+    assert.deepEqual(meta.trigger, trigger);
+    assert.deepEqual((await readRunMeta(path.join(e.home, '.percolator', 'runs', meta.runId))).trigger, trigger);
+  } finally {
+    await e.cleanup();
+  }
+});
