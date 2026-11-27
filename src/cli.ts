@@ -44,41 +44,122 @@ import { removeWorktree } from './workspace/worktree.ts';
 
 export type Io = { stdout(s: string): void; stderr(s: string): void };
 
-const USAGE = `usage: perc <command> [options]
+/** What a command gets: the output streams, the deps given to main, and the driver deps built from them on first use. */
+type CommandContext = { io: Io; home: string; driver: () => DriverDeps };
+
+/**
+ * One perc command: its name, its help (the usage line, then description lines; none when another command's
+ * entry shows it) and what it runs. The help and main's dispatch both come from COMMANDS, so a new command is
+ * one entry here.
+ */
+export type Command = { name: string; usage?: readonly string[]; run(args: string[], c: CommandContext): Promise<number> };
+
+export const COMMANDS: readonly Command[] = [
+  {
+    name: 'init',
+    usage: ['init [--config <file>] [--force]', 'write the recommended config (default: ~/.percolator/config.yaml)'],
+    run: (args, c) => runInit(args, c.io),
+  },
+  {
+    name: 'validate',
+    usage: [
+      'validate [--config <file>] [--profile <name>] [--pipeline <name>] [--update]',
+      'load the config, resolve grounds and mappings, and check the graph of each pipeline',
+      '(--pipeline: that one only)',
+      '(default config: ~/.percolator/config.yaml)',
+    ],
+    run: (args, c) => runValidate(args, c.io),
+  },
+  {
+    name: 'schema',
+    usage: ['schema [--out <file>]', 'write the JSON schema for the config (default: schema/percolator.schema.json)'],
+    run: (args, c) => runSchema(args, c.io),
+  },
+  {
+    name: 'pipelines',
+    usage: [
+      'pipelines [--repo <dir>] [--config <file>] [--profile <name>] [--json]',
+      "list the pipelines a run in the repo can use, one line each (--json: the panel's contract)",
+    ],
+    run: (args, c) => runPipelines(args, c.io, c.home),
+  },
+  {
+    name: 'watch',
+    usage: [
+      'watch [--repo <dir>]... [--config <file>] [--profile <name>] [--interval <s>] [--foreground] | watch stop',
+      "start runs from the pipelines' triggers, polling each repo every --interval seconds (default 60, at least 15)",
+      'in hc terminal percolator-watch (--foreground: in this one); watch stop ends it',
+    ],
+    run: (args, c) => runWatch(args, c.driver()),
+  },
+  {
+    name: 'run',
+    usage: [
+      'run [<ticket>] [--pipeline <name>] [--input key=value]... [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]',
+      "start a run of a pipeline (default: the profile's; feature: groom, approval, plan, implement, review, PR)",
+      'in its own hc terminal (--foreground: in this one)',
+    ],
+    run: (args, c) => runRun(args, c.driver()),
+  },
+  {
+    name: 'resume',
+    usage: ['resume <run-id> [--foreground]', 'continue a paused or interrupted run (grants one more round at a cap)'],
+    run: (args, c) => runResume(args, c.driver()),
+  },
+  {
+    name: 'answer',
+    usage: [
+      'answer <run-id> [--answer <n>=<text>]... [--na <n>]... [--agree <n>[,<n>…]]... [--foreground]',
+      'answer the questions or the findings a paused run is asking about (perc status <run-id> lists them)',
+    ],
+    run: (args, c) => runAnswer(args, c.driver()),
+  },
+  {
+    name: 'status',
+    usage: ['status [<run-id>] [--json]', 'list runs, or show one (--json: the stable JSON contract)'],
+    run: (args, c) => runStatus(args, c.driver()),
+  },
+  {
+    name: 'approve',
+    usage: [
+      'approve <run-id> [--pipeline <name>] | reject <run-id> <feedback>',
+      'answer the approval gate a run is waiting at (--pipeline: the pipeline a pick-pipeline gate goes with)',
+    ],
+    run: (args, c) => runDecide('approve', args, c.driver()),
+  },
+  { name: 'reject', run: (args, c) => runDecide('reject', args, c.driver()) },
+  {
+    name: 'clean',
+    usage: [
+      'clean <run-id> [--force]',
+      "remove a finished run's terminals and worktree (keeps the branch and the run record; perc delete removes it all)",
+    ],
+    run: (args, c) => runClean(args, c.driver()),
+  },
+  {
+    name: 'delete',
+    usage: [
+      'delete <run-id>... [--yes] | delete --finished [--yes]',
+      'remove a run entirely: stop it, its terminals, worktree and record (keeps the branch)',
+    ],
+    run: (args, c) => runDelete(args, c.driver(), c.io),
+  },
+  {
+    name: 'herdr',
+    usage: ['herdr link', 'tell the Percolator Herdr panel how to run perc (writes perc.json)'],
+    run: (args, c) => runHerdr(args, c.io, c.home),
+  },
+  {
+    name: 'drive',
+    usage: ['drive <run-id>', "internal: what a run's driver terminal executes"],
+    run: (args, c) => runDrive(args, c.driver()),
+  },
+];
+
+export const USAGE = `usage: perc <command> [options]
 
 commands:
-  init [--config <file>] [--force]
-      write the recommended config (default: ~/.percolator/config.yaml)
-  validate [--config <file>] [--profile <name>] [--pipeline <name>] [--update]
-      load the config, resolve grounds and mappings, and check the graph of each pipeline
-      (--pipeline: that one only)
-      (default config: ~/.percolator/config.yaml)
-  schema [--out <file>]
-      write the JSON schema for the config (default: schema/percolator.schema.json)
-  pipelines [--repo <dir>] [--config <file>] [--profile <name>] [--json]
-      list the pipelines a run in the repo can use, one line each (--json: the panel's contract)
-  watch [--repo <dir>]... [--config <file>] [--profile <name>] [--interval <s>] [--foreground] | watch stop
-      start runs from the pipelines' triggers, polling each repo every --interval seconds (default 60, at least 15)
-      in hc terminal percolator-watch (--foreground: in this one); watch stop ends it
-  run [<ticket>] [--pipeline <name>] [--input key=value]... [--repo <dir>] [--config <file>] [--profile <name>] [--foreground]
-      start a run of a pipeline (default: the profile's; feature: groom, approval, plan, implement, review, PR)
-      in its own hc terminal (--foreground: in this one)
-  resume <run-id> [--foreground]
-      continue a paused or interrupted run (grants one more round at a cap)
-  answer <run-id> [--answer <n>=<text>]... [--na <n>]... [--agree <n>[,<n>…]]... [--foreground]
-      answer the questions or the findings a paused run is asking about (perc status <run-id> lists them)
-  status [<run-id>] [--json]
-      list runs, or show one (--json: the stable JSON contract)
-  approve <run-id> [--pipeline <name>] | reject <run-id> <feedback>
-      answer the approval gate a run is waiting at (--pipeline: the pipeline a pick-pipeline gate goes with)
-  clean <run-id> [--force]
-      remove a finished run's terminals and worktree (keeps the branch and the run record; perc delete removes it all)
-  delete <run-id>... [--yes] | delete --finished [--yes]
-      remove a run entirely: stop it, its terminals, worktree and record (keeps the branch)
-  herdr link
-      tell the Percolator Herdr panel how to run perc (writes perc.json)
-  drive <run-id>
-      internal: what a run's driver terminal executes
+${COMMANDS.flatMap((c) => (c.usage === undefined ? [] : [`  ${c.usage[0]}`, ...c.usage.slice(1).map((l) => `      ${l}`)])).join('\n')}
 
 options:
   -h, --help   show this help
@@ -739,21 +820,8 @@ export async function main(argv: string[], io: Io, deps: Partial<DriverDeps> = {
     return 0;
   }
   try {
-    if (command === 'init') return await runInit(rest, io);
-    if (command === 'validate') return await runValidate(rest, io);
-    if (command === 'schema') return await runSchema(rest, io);
-    if (command === 'pipelines') return await runPipelines(rest, io, deps.home ?? os.homedir());
-    if (command === 'herdr') return await runHerdr(rest, io, deps.home ?? os.homedir());
-    const d = () => driverDeps(io, deps);
-    if (command === 'run') return await runRun(rest, d());
-    if (command === 'resume') return await runResume(rest, d());
-    if (command === 'answer') return await runAnswer(rest, d());
-    if (command === 'status') return await runStatus(rest, d());
-    if (command === 'approve' || command === 'reject') return await runDecide(command, rest, d());
-    if (command === 'clean') return await runClean(rest, d());
-    if (command === 'delete') return await runDelete(rest, d(), io);
-    if (command === 'drive') return await runDrive(rest, d());
-    if (command === 'watch') return await runWatch(rest, d());
+    const found = COMMANDS.find((c) => c.name === command);
+    if (found !== undefined) return await found.run(rest, { io, home: deps.home ?? os.homedir(), driver: () => driverDeps(io, deps) });
     io.stderr(`unknown command: ${command}\n\n${USAGE}`);
     return 2;
   } catch (err) {
