@@ -1,13 +1,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { StepHandler } from '../../runtime/herdr-runtime.ts';
-import { collectOutputs } from '../../runtime/outcome.ts';
 import { writeFileAtomic } from '../../util/fs.ts';
 import { splitSections } from '../../util/sections.ts';
 import type { Gh } from '../gh.ts';
 import { issueMarker } from '../markers.ts';
 import { formatTicket, parseTicket } from '../ticket.ts';
-import { escalate, latestOutput } from './latest.ts';
+import { defineExit } from './define.ts';
+import type { ExitResult } from './define.ts';
+import { latestOutput } from './latest.ts';
 
 /** The issues a run opened, from its `issue_urls` output; `ref` is the `formatTicket` form, lines that are not issue URLs are skipped. */
 export function openedIssues(text: string): { ref: string; url: string }[] {
@@ -61,46 +62,38 @@ export function githubOpenIssues(o: {
   repo: string;
   next?: { newId: (url: string) => string; start: (url: string, child: string) => Promise<unknown> };
 }): StepHandler {
-  return async (_step, ctx, io) => {
-    try {
-      const text = await latestOutput(ctx, o.runDir, 'issues');
-      const items = text === undefined ? [] : splitSections(text);
-      if (items.length === 0) return { status: 'pass', outputs: {} };
-      // checked before opening any: gh refuses an empty title, which would leave the drafts half opened
-      const untitled = items.findIndex((i) => i.title === '');
-      if (untitled >= 0) {
-        return escalate(`github.open_issues: draft ${untitled + 1} in issues.md has no title (a bare "## " heading); give it a title and resume`);
-      }
-
-      await fs.mkdir(io.outputsDir, { recursive: true });
-      const createdFile = path.join(io.stepDir, 'created.json');
-      const created = await readCreated(path.dirname(io.stepDir));
-      const urls: string[] = [];
-      for (const [k, item] of items.entries()) {
-        const n = String(k + 1);
-        let url: string | undefined = created[n]?.url;
-        if (!url) {
-          // a crash between create and record leaves the issue unrecorded: find it by its marker first
-          const marker = issueMarker(o.runId, n);
-          url = (await o.gh.myIssues(o.repo)).find((i) => i.body.includes(marker))?.url;
-          if (!url) {
-            const bodyFile = path.join(io.stepDir, `issue-${n}.md`);
-            await writeFileAtomic(bodyFile, `${item.body}\n\n${marker}\n`);
-            url = await o.gh.createIssue(o.repo, { title: item.title, bodyFile });
-          }
-        }
-        const child = o.next !== undefined ? (created[n]?.child ?? o.next.newId(url)) : created[n]?.child;
-        created[n] = { url, ...(child !== undefined ? { child } : {}) };
-        await writeFileAtomic(createdFile, `${JSON.stringify(created, null, 2)}\n`);
-        if (o.next !== undefined) await o.next.start(url, child!);
-        urls.push(url);
-      }
-      await writeFileAtomic(path.join(io.outputsDir, 'issue_urls.md'), `${urls.join('\n')}\n`);
-      const collected = await collectOutputs(io.outputsDir, o.runDir);
-      if ('error' in collected) return escalate(`github.open_issues: ${collected.error}`);
-      return { status: 'pass', outputs: collected.outputs };
-    } catch (err) {
-      return escalate(`github.open_issues: ${err instanceof Error ? err.message : String(err)}`);
+  return defineExit('github.open_issues', o.runDir, async (_step, ctx, io): Promise<ExitResult> => {
+    const text = await latestOutput(ctx, o.runDir, 'issues');
+    const items = text === undefined ? [] : splitSections(text);
+    if (items.length === 0) return { write: {} };
+    // checked before opening any: gh refuses an empty title, which would leave the drafts half opened
+    const untitled = items.findIndex((i) => i.title === '');
+    if (untitled >= 0) {
+      return { escalate: `draft ${untitled + 1} in issues.md has no title (a bare "## " heading); give it a title and resume` };
     }
-  };
+
+    const createdFile = path.join(io.stepDir, 'created.json');
+    const created = await readCreated(path.dirname(io.stepDir));
+    const urls: string[] = [];
+    for (const [k, item] of items.entries()) {
+      const n = String(k + 1);
+      let url: string | undefined = created[n]?.url;
+      if (!url) {
+        // a crash between create and record leaves the issue unrecorded: find it by its marker first
+        const marker = issueMarker(o.runId, n);
+        url = (await o.gh.myIssues(o.repo)).find((i) => i.body.includes(marker))?.url;
+        if (!url) {
+          const bodyFile = path.join(io.stepDir, `issue-${n}.md`);
+          await writeFileAtomic(bodyFile, `${item.body}\n\n${marker}\n`);
+          url = await o.gh.createIssue(o.repo, { title: item.title, bodyFile });
+        }
+      }
+      const child = o.next !== undefined ? (created[n]?.child ?? o.next.newId(url)) : created[n]?.child;
+      created[n] = { url, ...(child !== undefined ? { child } : {}) };
+      await writeFileAtomic(createdFile, `${JSON.stringify(created, null, 2)}\n`);
+      if (o.next !== undefined) await o.next.start(url, child!);
+      urls.push(url);
+    }
+    return { write: { issue_urls: urls.join('\n') } };
+  });
 }
