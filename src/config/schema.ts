@@ -85,6 +85,18 @@ const StageOrAllSchema = z.string().refine((v) => v === 'all' || STAGE_NAME.test
 
 const AGENT_ONLY = ['agent', 'model', 'skill', 'skills', 'effort'] as const;
 
+/** An agent's reasoning effort: the levels shared by agent nodes and a router's choose agent. */
+const EffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
+
+/** A task prompt: inline text, or a file in a ground. */
+const PromptSchema = z.union([
+  z.string(),
+  z.strictObject({
+    from: z.string().describe('Name of the ground the prompt file comes from.'),
+    file: z.string().describe('Prompt file inside the ground.'),
+  }),
+]);
+
 export const NodeDefSchema = z
   .strictObject({
     kind: z
@@ -93,21 +105,11 @@ export const NodeDefSchema = z
       .describe('agent, builtin, script or gate; inferred from agent, builtin or command when left out.'),
     agent: z.string().optional().describe('Which agent runs the step (agent nodes only).'),
     model: z.string().optional().describe("Model the agent uses (agent nodes only); default the agent's own."),
-    effort: z
-      .enum(['low', 'medium', 'high', 'xhigh', 'max'])
-      .optional()
+    effort: EffortSchema.optional()
       .describe("Reasoning effort for the agent (agent nodes only, claude only); default the agent's own."),
     skill: z.string().optional().describe('One skill the agent loads (agent nodes only).'),
     skills: z.array(z.string()).optional().describe('Skills the agent loads (agent nodes only).'),
-    prompt: z
-      .union([
-        z.string(),
-        z.strictObject({
-          from: z.string().describe('Name of the ground the prompt file comes from.'),
-          file: z.string().describe('Prompt file inside the ground.'),
-        }),
-      ])
-      .optional()
+    prompt: PromptSchema.optional()
       .describe(
         "Task prompt for an agent node: inline text, or { from: <ground>, file: … }; {{run_id}}, {{worktree}} and the other task variables are filled in; default: carry out the stage contract (bindings) or the node's purpose (hooks).",
       ),
@@ -374,9 +376,7 @@ export const PipelineSchema = z.strictObject({
     .strictObject({
       agent: z.string().describe('Which agent picks the pipeline.'),
       model: z.string().optional().describe("Model the agent uses; default the agent's own."),
-      effort: z
-        .enum(['low', 'medium', 'high', 'xhigh', 'max'])
-        .optional()
+      effort: EffortSchema.optional()
         .describe("Reasoning effort for the agent (claude only); default the agent's own."),
       skill: z.string().optional().describe('One skill the agent loads.'),
       skills: z.array(z.string()).optional().describe('Skills the agent loads.'),
@@ -384,15 +384,7 @@ export const PipelineSchema = z.strictObject({
         .array(z.string())
         .optional()
         .describe('Argv array, never a shell string: the program for agent: command; passed as given ({run_dir}, {outputs_dir}, {worktree} are not filled in).'),
-      prompt: z
-        .union([
-          z.string(),
-          z.strictObject({
-            from: z.string().describe('Name of the ground the prompt file comes from.'),
-            file: z.string().describe('Prompt file inside the ground.'),
-          }),
-        ])
-        .optional()
+      prompt: PromptSchema.optional()
         .describe('Task prompt for the agent; default: pick one of from and write pick.md (pipeline and whether it is unsure).'),
       from: z.array(z.string()).min(1).describe('Pipelines the agent may pick from.'),
       confirm: z
