@@ -8,6 +8,8 @@ import type { ExitKind } from '../tracker/index.ts';
 import { checkRequest } from '../run/request.ts';
 import { knownTimeZone, parseCron } from '../util/cron.ts';
 import type { Trigger } from './schema.ts';
+import { onTrigger } from './triggers.ts';
+import type { TriggerKind } from './triggers.ts';
 import { ConfigError } from './load.ts';
 import { locate } from './locate.ts';
 import type { Where } from './locate.ts';
@@ -133,45 +135,52 @@ function exitKind(spec: PipelineSpec, merged: MergedPipeline): ExitKind | undefi
 function checkTrigger(spec: PipelineSpec, t: Trigger, at: (key: string) => Where): void {
   const p = spec.name;
   const has = (k: string): boolean => Object.hasOwn(spec.inputs, k);
-  if ('schedule' in t) {
-    try {
-      parseCron(t.schedule);
-    } catch (err) {
-      throw fail((err as Error).message, at('.schedule'));
-    }
-    if (t.timezone !== undefined && !knownTimeZone(t.timezone)) {
-      throw fail(`timezone "${t.timezone}" is not known; use an IANA name like Europe/London`, at('.timezone'));
-    }
+  /** A trigger that starts runs without a ticket: refused by a pipeline that needs one. */
+  const ticketless = (kind: TriggerKind): void => {
     if (spec.ticket === 'required') {
-      throw fail(`a schedule trigger starts runs without a ticket, but pipeline "${p}" needs one; set ticket: none or optional`, at(''));
+      throw fail(`a ${kind} trigger starts runs without a ticket; set ticket: none or ticket: optional`, at(''));
     }
-    try {
-      checkRequest(spec, undefined, t.inputs ?? {});
-    } catch (err) {
-      throw fail(`schedule trigger: ${(err as Error).message}`, at('.inputs'));
-    }
-    return;
-  }
-  if ('label' in t) {
-    if (spec.ticket === 'none') {
-      throw fail(`a label trigger starts runs on issues, but pipeline "${p}" has ticket: none; set ticket: required or optional`, at(''));
-    }
-    passes('label', []);
-    return;
-  }
-  const kind = 'pr_opened' in t ? 'pr_opened' : 'dependabot' in t ? 'dependabot' : 'check_failed';
-  if (spec.ticket === 'required') {
-    throw fail(`a ${kind} trigger starts runs without a ticket; set ticket: none or ticket: optional`, at(''));
-  }
-  if (kind === 'check_failed') {
-    if (!has('branch') || !has('run_url')) {
-      throw fail(`trigger check_failed passes inputs branch and run_url; declare them under pipelines.${p}.inputs`, at(''));
-    }
-    passes(kind, ['branch', 'run_url']);
-  } else {
+  };
+  const prTrigger = (kind: TriggerKind): void => {
+    ticketless(kind);
     if (!has('pr')) throw fail(`trigger ${kind} passes input pr; declare it under pipelines.${p}.inputs`, at(''));
     passes(kind, ['pr']);
-  }
+  };
+  onTrigger(t, {
+    schedule: (s) => {
+      try {
+        parseCron(s.schedule);
+      } catch (err) {
+        throw fail((err as Error).message, at('.schedule'));
+      }
+      if (s.timezone !== undefined && !knownTimeZone(s.timezone)) {
+        throw fail(`timezone "${s.timezone}" is not known; use an IANA name like Europe/London`, at('.timezone'));
+      }
+      if (spec.ticket === 'required') {
+        throw fail(`a schedule trigger starts runs without a ticket, but pipeline "${p}" needs one; set ticket: none or optional`, at(''));
+      }
+      try {
+        checkRequest(spec, undefined, s.inputs ?? {});
+      } catch (err) {
+        throw fail(`schedule trigger: ${(err as Error).message}`, at('.inputs'));
+      }
+    },
+    label: () => {
+      if (spec.ticket === 'none') {
+        throw fail(`a label trigger starts runs on issues, but pipeline "${p}" has ticket: none; set ticket: required or optional`, at(''));
+      }
+      passes('label', []);
+    },
+    pr_opened: () => prTrigger('pr_opened'),
+    dependabot: () => prTrigger('dependabot'),
+    check_failed: () => {
+      ticketless('check_failed');
+      if (!has('branch') || !has('run_url')) {
+        throw fail(`trigger check_failed passes inputs branch and run_url; declare them under pipelines.${p}.inputs`, at(''));
+      }
+      passes('check_failed', ['branch', 'run_url']);
+    },
+  });
 
   /** The run request a firing makes fits the pipeline: every required input is one the trigger passes. */
   function passes(kind: string, given: string[]): void {

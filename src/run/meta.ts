@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { TRIGGER_KINDS } from '../config/triggers.ts';
+import type { TriggerKind } from '../config/triggers.ts';
 import { loadState } from '../engine/state.ts';
 import type { RunState } from '../engine/state.ts';
 import { runGit } from '../grounds/git.ts';
@@ -41,14 +43,11 @@ export type RunMeta = {
 
 export type FanOutMeta = { parent: string; slice: number; from: string; title: string };
 
-/** The trigger kinds `perc watch` polls, as a trigger's config key names them. */
-export const TRIGGER_KINDS = ['schedule', 'label', 'pr_opened', 'dependabot', 'check_failed'] as const;
-
 /**
  * The trigger that started a run; `detail` is ready to show: the cron (and time zone) of a schedule, the
  * label, `#<n>` of a PR, the branch of a failed check.
  */
-export type RunTrigger = { kind: (typeof TRIGGER_KINDS)[number]; detail?: string };
+export type RunTrigger = { kind: TriggerKind; detail?: string };
 
 /**
  * The Herdr space name: repo, issue (or the pipeline of a ticketless run), and the run id's suffix,
