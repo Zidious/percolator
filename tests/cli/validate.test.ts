@@ -6,7 +6,9 @@ import { after, before, test } from 'node:test';
 import { ConfigError } from '../../src/config/load.ts';
 import { RuleViolationError } from '../../src/graph/rules.ts';
 import { EXIT_KINDS, EXITS } from '../../src/tracker/index.ts';
-import { groundVersion, validate, validateAll } from '../../src/validate.ts';
+import { groundVersion, profileFragment, validate, validateAll } from '../../src/validate.ts';
+import { GraphFragmentSchema } from '../../src/config/schema.ts';
+import type { Profile } from '../../src/config/schema.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
 import { FakeGit } from '../helpers/fake-git.ts';
 
@@ -768,4 +770,11 @@ test('a top-level require_skills naming a stage no pipeline has is a violation',
       });
     },
   );
+});
+
+test('profileFragment carries every graph fragment key a profile sets, but use (its layer mapping)', () => {
+  const keys = Object.keys(GraphFragmentSchema.shape).filter((k) => k !== 'use');
+  const profile = Object.fromEntries([...keys, 'use', 'runtime'].map((k) => [k, { marker: k }])) as unknown as Profile;
+  assert.deepEqual(profileFragment(profile), Object.fromEntries(keys.map((k) => [k, { marker: k }])));
+  assert.deepEqual(profileFragment({} as Profile), {});
 });
