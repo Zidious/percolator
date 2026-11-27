@@ -10,7 +10,7 @@ import { exists, writeFileAtomic } from '../util/fs.ts';
 import { splitSections } from '../util/sections.ts';
 import { runDir as runDirOf } from '../workspace/run-dir.ts';
 import { startLinkedRun } from './child.ts';
-import { prUrl } from './drive.ts';
+import { prUrl } from './outputs.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 

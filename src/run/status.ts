@@ -7,7 +7,8 @@ import { loadState } from '../engine/state.ts';
 import { openedIssues } from '../tracker/exits/issues.ts';
 import { readWaiting } from '../tracker/gate.ts';
 import type { Waiting } from '../tracker/gate.ts';
-import { liveness, prUrl } from './drive.ts';
+import { liveness } from './lock.ts';
+import { prUrl, readLatest } from './outputs.ts';
 import { readRunGraph } from './graph-file.ts';
 import type { RunGraphLoop, RunGraphStep } from './graph-file.ts';
 import { lockIsLive, pidAlive, readDriverLock } from './lock.ts';
@@ -697,27 +698,14 @@ async function childrenOf(dir: string, meta: RunMeta, listed: RunListing[]): Pro
 
 /** The issues parsed from the latest history record with an `issue_urls` output; none when there is none. */
 async function openedOf(dir: string, state: RunState): Promise<{ ref: string; url: string }[]> {
-  const rel = state.history.findLast((h) => h.outputs['issue_urls'] !== undefined)?.outputs['issue_urls'];
-  if (rel === undefined) return [];
-  try {
-    return openedIssues(await fs.readFile(path.join(dir, rel), 'utf8'));
-  } catch {
-    // a removed output file only means nothing to list
-    return [];
-  }
+  const text = await readLatest(dir, state, 'issue_urls');
+  return text === undefined ? [] : openedIssues(text);
 }
 
 /** The URL in the latest history record's `comment_url` output; null when there is none, or its file is gone or blank. */
 async function commentOf(dir: string, state: RunState): Promise<{ url: string } | null> {
-  const rel = state.history.findLast((h) => h.outputs['comment_url'] !== undefined)?.outputs['comment_url'];
-  if (rel === undefined) return null;
-  try {
-    const url = (await fs.readFile(path.join(dir, rel), 'utf8')).trim();
-    return url === '' ? null : { url };
-  } catch {
-    // a removed output file only means no link
-    return null;
-  }
+  const url = await readLatest(dir, state, 'comment_url');
+  return url === undefined ? null : { url };
 }
 
 async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, listed: RunListing[]): Promise<RunStatusJson> {

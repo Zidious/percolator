@@ -8,6 +8,14 @@ export type DriverLock = { pid: number; host: string; terminal: string | null; s
 /** How liveness is judged; injectable for tests. */
 export type Liveness = { pid?: number; pidAlive?: (pid: number) => boolean };
 
+/** `pid`/`pidAlive` from the deps, without undefined keys. */
+export function liveness(deps: Liveness): Liveness {
+  return {
+    ...(deps.pid !== undefined ? { pid: deps.pid } : {}),
+    ...(deps.pidAlive !== undefined ? { pidAlive: deps.pidAlive } : {}),
+  };
+}
+
 const lockFile = (dir: string) => path.join(dir, 'driver.json');
 
 /** `process.kill(pid, 0)`: only ESRCH means dead (EPERM is a live process of another user). */
