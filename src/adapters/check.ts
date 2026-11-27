@@ -35,14 +35,7 @@ export async function checkAgents(graph: Graph, mappings: ResolvedMapping[], con
       continue;
     }
     const adapter = ADAPTERS[agent as keyof typeof ADAPTERS];
-    if (agent === 'command') {
-      const command = step.def.command;
-      if (command === undefined || command.length === 0) {
-        report('agent "command" needs "command" (the program to run); add command: [program, ...args]');
-      } else if (command[0]!.startsWith('-')) {
-        report('command must not start with "-"; put the program first', 'command');
-      }
-    }
+    for (const p of adapter.check?.(step.def) ?? []) report(p.message, p.key);
     if (!adapter.effort && step.def.effort !== undefined) {
       report(`agent "${agent}" does not take "effort"; remove it or use agent "claude"`, 'effort');
     }

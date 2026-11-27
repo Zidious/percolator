@@ -517,8 +517,8 @@ test('Run again starts the run and selects it once a refresh lists it', async ()
 });
 
 test('the Run again button reads Run again', async () => {
-  const { LABELS } = await import('../../herdr/mods/percolator/turn.js' as string);
-  assert.deepEqual(LABELS['run-again'], ['Run again', 'ok']);
+  const { ACTIONS } = await import('../../herdr/mods/percolator/model.js' as string);
+  assert.deepEqual(ACTIONS['run-again'], { label: 'Run again', style: 'ok' });
 });
 
 const EPIC = 't23-epic-20261121-090000-7c2a';

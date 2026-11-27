@@ -26,8 +26,11 @@ export type Exit = {
   verb: string;
   /** the output key the exit writes, part of the exit stage's contract (none: it may write nothing) */
   output?: string;
-  /** what the pipeline must declare for this exit; checked at validate */
-  needs?: { ticket?: true; input?: string };
+  /**
+   * what the pipeline must declare for this exit, checked at validate: a required ticket, a required input
+   * (`is` says what it is, for the error that asks for it), or a tag (an input or an earlier stage's output)
+   */
+  needs?: { ticket?: true; input?: { name: string; is: string }; tag?: true };
 };
 
 export const EXITS: Readonly<Record<ExitKind, Exit>> = Object.freeze({
@@ -35,7 +38,7 @@ export const EXITS: Readonly<Record<ExitKind, Exit>> = Object.freeze({
   comment: { builtin: 'github.comment', verb: 'posts the comment', output: 'comment_url', needs: { ticket: true } },
   issue: { builtin: 'github.open_issues', verb: 'opens the issues' },
   none: { builtin: 'percolator.report', verb: 'ends the run' },
-  release: { builtin: 'github.release', verb: 'tags the release', output: 'release_url' },
-  pr_review: { builtin: 'github.pr_review', verb: 'posts the review', output: 'review_url', needs: { input: 'pr' } },
-  private_fork_pr: { builtin: 'github.private_fork_pr', verb: 'opens the PR', output: 'pr_url', needs: { input: 'advisory' } },
+  release: { builtin: 'github.release', verb: 'tags the release', output: 'release_url', needs: { tag: true } },
+  pr_review: { builtin: 'github.pr_review', verb: 'posts the review', output: 'review_url', needs: { input: { name: 'pr', is: 'the pull request to review' } } },
+  private_fork_pr: { builtin: 'github.private_fork_pr', verb: 'opens the PR', output: 'pr_url', needs: { input: { name: 'advisory', is: 'the GHSA id' } } },
 });

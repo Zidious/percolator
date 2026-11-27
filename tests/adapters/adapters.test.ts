@@ -52,3 +52,19 @@ test('command argv appends the message to the configured program', () => {
   assert.equal(ADAPTERS.command.nativeSkills, false);
   assert.equal(ADAPTERS.command.plugins, false);
 });
+
+test('the command adapter checks its own config: a command, whose program does not start with "-"', () => {
+  const check = ADAPTERS.command.check!;
+  assert.deepEqual(check({ agent: 'command' }), [
+    { message: 'agent "command" needs "command" (the program to run); add command: [program, ...args]' },
+  ]);
+  assert.deepEqual(check({ agent: 'command', command: [] }), [
+    { message: 'agent "command" needs "command" (the program to run); add command: [program, ...args]' },
+  ]);
+  assert.deepEqual(check({ agent: 'command', command: ['-x'] }), [{ message: 'command must not start with "-"; put the program first', key: 'command' }]);
+  assert.deepEqual(check({ agent: 'command', command: ['node', 'x.js'] }), []);
+});
+
+test('only the command adapter has config of its own to check', () => {
+  assert.deepEqual(Object.values(ADAPTERS).filter((a) => a.check !== undefined).map((a) => a.name), ['command']);
+});

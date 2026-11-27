@@ -1,11 +1,11 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { NodeOutcome } from '../engine/runtime.ts';
 import { runGit } from '../grounds/git.ts';
 import type { StepHandler } from '../runtime/herdr-runtime.ts';
-import { collectOutputs } from '../runtime/outcome.ts';
 import { writeFileAtomic } from '../util/fs.ts';
 import type { Gh } from './gh.ts';
+import { defineExit } from './exits/define.ts';
+import type { ExitResult } from './exits/define.ts';
+import { latestOutput } from './exits/latest.ts';
 import { noticedNotes } from './exits/notes.ts';
 import { issueMetaIfAny } from './intake.ts';
 
@@ -22,17 +22,6 @@ export function prBody(issueNumber: number | undefined, description?: string, o:
     ...(o.notes ? [o.notes] : []),
   ];
   return parts.length === 0 ? '' : `${parts.join('\n\n')}\n`;
-}
-
-const escalate = (reason: string): NodeOutcome => ({ status: 'escalate', outputs: {}, reason });
-
-async function readOptional(file: string): Promise<string | undefined> {
-  try {
-    return await fs.readFile(file, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw err;
-  }
 }
 
 const defaultPush = async (worktree: string, branch: string): Promise<void> => {
@@ -53,49 +42,35 @@ export function githubOpenPr(o: {
   slice?: { title: string };
   push?: (worktree: string, branch: string) => Promise<void>;
 }): StepHandler {
-  return async (_step, ctx, io) => {
-    try {
-      const issue = await issueMetaIfAny(o.runDir);
-      const repo = issue?.repo ?? o.repo;
-      if (repo === undefined) return escalate('github.open_pr: the run has no issue and no repository to open the PR in');
-      // the latest output `key` in graph order, as text
-      const latest = async (key: string): Promise<string | undefined> => {
-        const last = ctx.graph.steps.findLast((s) => ctx.previousOutputs[s.id]?.[key]);
-        const rel = last ? ctx.previousOutputs[last.id]?.[key] : undefined;
-        return rel ? readOptional(path.join(o.runDir, rel)) : undefined;
-      };
-      const description = await latest('pr_body');
-      const notes = await noticedNotes(ctx, o.runDir);
-      const body = prBody(issue?.number, description, { slice: o.slice !== undefined, ...(notes ? { notes } : {}) });
-      const fallback =
-        o.slice !== undefined ? `${issue?.title ?? o.pipeline}: ${o.slice.title}` : (issue?.title ?? `${o.pipeline}: ${o.runId}`);
-      const title = (await latest('pr_title'))?.trim() || fallback;
+  return defineExit('github.open_pr', o.runDir, async (_step, ctx, io): Promise<ExitResult> => {
+    const issue = await issueMetaIfAny(o.runDir);
+    const repo = issue?.repo ?? o.repo;
+    if (repo === undefined) return { escalate: 'the run has no issue and no repository to open the PR in' };
+    const description = await latestOutput(ctx, o.runDir, 'pr_body');
+    const notes = await noticedNotes(ctx, o.runDir);
+    const body = prBody(issue?.number, description, { slice: o.slice !== undefined, ...(notes ? { notes } : {}) });
+    const fallback =
+      o.slice !== undefined ? `${issue?.title ?? o.pipeline}: ${o.slice.title}` : (issue?.title ?? `${o.pipeline}: ${o.runId}`);
+    const title = (await latestOutput(ctx, o.runDir, 'pr_title'))?.trim() || fallback;
 
-      await (o.push ?? defaultPush)(o.worktree, o.branch);
-      await fs.mkdir(io.outputsDir, { recursive: true });
-      const bodyFile = path.join(io.stepDir, 'pr-body.md');
-      await writeFileAtomic(bodyFile, body);
+    await (o.push ?? defaultPush)(o.worktree, o.branch);
+    const bodyFile = path.join(io.stepDir, 'pr-body.md');
+    await writeFileAtomic(bodyFile, body);
 
-      // a crash after createPr leaves the PR but no saved pr_url: look it up first, then edit
-      const existing = await o.gh.findPr(repo, o.branch);
-      let url: string;
-      if (existing) {
-        await o.gh.editPr(repo, existing.number, bodyFile);
-        url = existing.url;
-      } else {
-        url = await o.gh.createPr(repo, {
-          base: o.base.replace(/^origin\//, ''),
-          head: o.branch,
-          title,
-          bodyFile,
-        });
-      }
-      await writeFileAtomic(path.join(io.outputsDir, 'pr_url.md'), `${url}\n`);
-      const collected = await collectOutputs(io.outputsDir, o.runDir);
-      if ('error' in collected) return escalate(`github.open_pr: ${collected.error}`);
-      return { status: 'pass', outputs: collected.outputs };
-    } catch (err) {
-      return escalate(`github.open_pr: ${err instanceof Error ? err.message : String(err)}`);
+    // a crash after createPr leaves the PR but no saved pr_url: look it up first, then edit
+    const existing = await o.gh.findPr(repo, o.branch);
+    let url: string;
+    if (existing) {
+      await o.gh.editPr(repo, existing.number, bodyFile);
+      url = existing.url;
+    } else {
+      url = await o.gh.createPr(repo, {
+        base: o.base.replace(/^origin\//, ''),
+        head: o.branch,
+        title,
+        bodyFile,
+      });
     }
-  };
+    return { write: { pr_url: url } };
+  });
 }

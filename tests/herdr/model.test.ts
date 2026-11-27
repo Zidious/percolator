@@ -4,6 +4,9 @@ import path from 'node:path';
 import { test } from 'node:test';
 import {
   STAGES,
+  ACTIONS,
+  ATTENTION,
+  actionForKey,
   actionArgv,
   answerArgv,
   askOf,
@@ -2104,4 +2107,43 @@ test('inputRows lists each input as a history row: name, value on one line, the 
 test('historyLabel counts attempts only, not inputs', () => {
   const run = { ...readable('t3'), inputs: { a: 'b' }, timeline: [], steps: readable('t3').steps.map((st) => ({ ...st, status: 'pending', attempts: 0 })) } as RunStatusJson;
   assert.equal(historyLabel(run, false), 'History ▸');
+});
+
+test('ATTENTION has one entry per attention kind a box shows: its tag, whether it asks (a form), whether it offers the driver', () => {
+  assert.deepEqual(
+    Object.entries(ATTENTION).map(([k, v]) => [k, v.tag, v.asks === true, v.driver === true]),
+    [
+      ['gate', 'GATE', false, false],
+      ['cap', 'PAUSED', false, false],
+      ['paused', 'PAUSED', false, false],
+      ['questions', 'QUESTIONS', true, false],
+      ['findings', 'FINDINGS', true, false],
+      ['failed', 'FAILED', false, true],
+      ['stalled', 'STALLED', false, true],
+    ],
+  );
+});
+
+test('ACTIONS gives each action its button label and style, and the key that takes it', () => {
+  assert.deepEqual(
+    Object.entries(ACTIONS).map(([k, v]) => [k, v.label, v.style, v.key ?? null]),
+    [
+      ['approve', 'Approve', 'ok', 'a'],
+      ['reject', 'Reject…', 'no', 'r'],
+      ['grant', 'Grant a round & resume', 'ok', 'g'],
+      ['resume', 'Resume', 'ok', 'g'],
+      ['answer', 'Submit', 'ok', null],
+      ['clean', 'Clean up', '', null],
+      ['run-again', 'Run again', 'ok', null],
+    ],
+  );
+});
+
+test('actionForKey picks the offered action a key takes, grant before resume', () => {
+  assert.equal(actionForKey('a', ['approve', 'reject']), 'approve');
+  assert.equal(actionForKey('r', ['approve', 'reject']), 'reject');
+  assert.equal(actionForKey('g', ['resume']), 'resume');
+  assert.equal(actionForKey('g', ['resume', 'grant']), 'grant');
+  assert.equal(actionForKey('a', ['reject']), undefined);
+  assert.equal(actionForKey('x', ['approve']), undefined);
 });
