@@ -78,11 +78,12 @@ export function rowState(run) {
   return { tone: 'muted', text: sentence(run.status) };
 }
 
-/** How a completed run ended: its PR, where a router sent it, done (nothing delivered to a tracker), or delivered. */
+/** How a completed run ended: its PR, where a router sent it, the comment its exit posted, done (nothing delivered to a tracker), or delivered. */
 function completedAs(run) {
   const pr = run.pr?.url;
   if (pr) return { kind: 'pr', pr };
   if ((run.steps ?? []).some((s) => s.stage === 'route')) return { kind: 'routed', to: (run.children ?? []).find((c) => !c.slice)?.pipeline };
+  if (run.comment?.url) return { kind: 'commented', url: run.comment.url };
   // a ticketless run with no PR and no opened issues delivered nothing to a tracker (report, none)
   return { kind: run.ticket === null && (run.opened ?? []).length === 0 ? 'done' : 'delivered' };
 }
@@ -93,6 +94,7 @@ export function outcomeOf(run) {
   if (end.kind === 'pr') return { tag: 'DELIVERED', text: `Opened ${end.pr.replace(/^https:\/\/github\.com\//, '')}` };
   if (end.kind === 'routed') return { tag: 'ROUTED', text: end.to ? `→ ${end.to}` : '' };
   if (end.kind === 'done') return { tag: 'DONE', text: '' };
+  if (end.kind === 'commented') return { tag: 'COMMENTED', text: run.ticket ? `#${run.ticket.number} ↗` : 'Comment ↗', url: end.url };
   return { tag: 'DELIVERED', text: 'Done.' };
 }
 
@@ -256,16 +258,20 @@ export function roundOf(loop) {
   return { n: Math.min(1 + loop.round, loop.max), max: loop.max, taken: loop.round > 0, atCap: loop.round >= loop.max };
 }
 
-function loopTone(r) {
+/** A finished run's loops and caps are history: muted, never an alarm. */
+function loopTone(r, run) {
+  if (isFinished(run)) return 'dim';
   return r.atCap ? 'blocked' : r.taken ? 'working' : 'dim';
 }
 
-/** The pill on the step a loop starts from; null when no loop starts there. */
+/** The pill on the step a loop starts from; null when no loop starts there, or that step has not run and is not current. */
 export function roundPill(run, stepId) {
   const loop = (run.loops ?? []).find((l) => l.from === stepId);
   if (!loop) return null;
+  const step = (run.steps ?? []).find((s) => s.id === stepId);
+  if (step?.status === 'pending' && run.currentStep !== stepId) return null;
   const r = roundOf(loop);
-  return { text: `Round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r) };
+  return { text: `Round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r, run) };
 }
 
 /** The engine's round of a loop that goes back to `stepId`, past round 1; null otherwise. */
@@ -285,7 +291,7 @@ export function roundNote(run, stepId, now) {
 
 /** Every loop, taken or not, with its tone. */
 export function loopSpans(run) {
-  return (run.loops ?? []).map((l) => ({ id: l.id, from: l.from, to: l.to, tone: loopTone(roundOf(l)) }));
+  return (run.loops ?? []).map((l) => ({ id: l.id, from: l.from, to: l.to, tone: loopTone(roundOf(l), run) }));
 }
 
 const ALL = new Set(['before-all', 'after-all']);
@@ -503,7 +509,7 @@ export function timelineRows(run, now) {
         ? {
             key: `cap:${e.loop}`,
             mark: '↺',
-            tone: 'blocked',
+            tone: isFinished(run) ? 'dim' : 'blocked',
             step: e.from,
             round: '',
             status: 'cap',
@@ -1265,4 +1271,43 @@ export function sliceRows(run, runs) {
  *  there is none). */
 export function fanOutRow(rows) {
   return rows.findLastIndex((r) => r.type === 'stage');
+}
+
+/** A pipeline row's label: the stage of a `<stage>.<n>` step (the router's `route.3` reads `route`), else the step id. */
+export function stageName(step) {
+  const m = /^(.+)\.\d+$/.exec(step.id);
+  return m && m[1] === step.stage ? step.stage : step.id;
+}
+
+const TRIGGER_WORDS = {
+  schedule: 'schedule',
+  label: 'label',
+  pr_opened: 'PR',
+  dependabot: 'Dependabot PR',
+  check_failed: 'failed check on',
+};
+
+/** The header's line for a run a trigger started ("Started by label ready"); null for a manual run. */
+export function triggerLine(run) {
+  const t = run?.trigger;
+  const words = t ? TRIGGER_WORDS[t.kind] : undefined;
+  if (!words) return null;
+  const head = t.kind === 'check_failed' && !t.detail ? 'failed check' : words;
+  return t.detail ? `Started by ${head} ${t.detail}` : `Started by ${head}`;
+}
+
+/** The history's rows for the run's inputs, in input order: the name, the value on one line, the full value on hover. */
+export function inputRows(run) {
+  return Object.entries(run?.inputs ?? {}).map(([name, value]) => ({
+    key: `input:${name}`,
+    mark: '·',
+    tone: 'dim',
+    step: name,
+    round: '',
+    status: '',
+    started: '',
+    took: '',
+    note: value.replace(/\s*[\r\n]+\s*/g, ' '),
+    title: value,
+  }));
 }

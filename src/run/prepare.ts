@@ -20,7 +20,7 @@ import { writeRunGraph } from './graph-file.ts';
 import { checkRequest } from './request.ts';
 import { detectBase, driverName, liveRunOn, newRunId, spaceName, writeRunMeta } from './meta.ts';
 import { pipelineFor } from './pick-pipeline.ts';
-import type { FanOutMeta, RunMeta } from './meta.ts';
+import type { FanOutMeta, RunMeta, RunTrigger } from './meta.ts';
 
 export type DriverDeps = {
   hc: Hc;
@@ -76,6 +76,8 @@ export async function prepareRun(
     fanOut?: FanOutMeta;
     /** the base branch (a fan-out slice uses its parent's); default runtime.base, else detected */
     base?: string;
+    /** the `perc watch` trigger that starts the run, recorded in run.json */
+    trigger?: RunTrigger;
   },
   deps: DriverDeps,
 ): Promise<RunMeta> {
@@ -193,6 +195,7 @@ export async function prepareRun(
     repo,
     ...(o.parent !== undefined ? { parent: o.parent } : {}),
     ...(o.fanOut !== undefined ? { fanOut: o.fanOut } : {}),
+    ...(o.trigger !== undefined ? { trigger: o.trigger } : {}),
     repoRoot,
     configFile,
     profile: v.profile,

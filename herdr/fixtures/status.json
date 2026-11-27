@@ -299,7 +299,9 @@
         "review": "t8_review_a2_49a6"
       },
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t3-20261120-142211-e012",
@@ -475,7 +477,9 @@
       "pr": {
         "url": "https://github.com/Zidious/percolator/pull/7"
       },
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t2-20261121-005347-f0ab",
@@ -635,7 +639,9 @@
         "driver": "t2_driver_a0_b90e"
       },
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t4-20261121-061230-77ab",
@@ -869,7 +875,9 @@
       ],
       "terminals": {},
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t12-20261121-020000-9b1d",
@@ -985,7 +993,9 @@
       ],
       "terminals": {},
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t27-20261121-021500-4e8a",
@@ -1102,7 +1112,9 @@
       ],
       "terminals": {},
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t25-20261124-040000-a1b2",
@@ -1226,7 +1238,9 @@
       ],
       "terminals": {},
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t24-20261124-050000-c3d4",
@@ -1468,7 +1482,9 @@
       ],
       "terminals": {},
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t26-20261125-030000-ab12",
@@ -1619,7 +1635,9 @@
       ],
       "terminals": {},
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t9-20261120-215502-c3d9",
@@ -1749,7 +1767,9 @@
       ],
       "terminals": {},
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t11-20261121-001500-5e7f",
@@ -1864,7 +1884,9 @@
       ],
       "terminals": {},
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t13-20261121-030000-0c2e",
@@ -1984,7 +2006,9 @@
         "groom": "t13_groom_a1_cc4e"
       },
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t14-20261121-032000-6a1f",
@@ -2027,7 +2051,9 @@
         "driver": "t14_driver_a0_915f"
       },
       "pr": null,
-      "graph": "history"
+      "graph": "history",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t15-20261121-013000-d2c4",
@@ -2141,7 +2167,9 @@
       ],
       "terminals": {},
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t16-20261121-040000-1a2b",
@@ -2416,7 +2444,9 @@
         "implement": "t16_implement_a2_4a92"
       },
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t17-20261121-050000-3c4d",
@@ -2600,7 +2630,9 @@
         "implement.1": "t17_implement-1_a1_0641"
       },
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "dd-alert-20261121-060000-7e3a",
@@ -2741,7 +2773,9 @@
         "driver": "dd-alert_driver_a0_6e1b"
       },
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t21-hotfix-20261121-070000-4b5c",
@@ -2863,7 +2897,9 @@
         "driver": "t21_driver_a0_43f3"
       },
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t21-triage-20261121-065800-9e3a",
@@ -3010,7 +3046,9 @@
       ],
       "terminals": {},
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t22-triage-20261121-080000-5f1d",
@@ -3172,7 +3210,9 @@
         "driver": "t22_driver_a0_9a55"
       },
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t23-epic-20261121-090000-7c2a",
@@ -3299,7 +3339,9 @@
         "driver": "t23_driver_a0_0878"
       },
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t23-epic-20261121-090000-7c2a-s1",
@@ -3425,7 +3467,9 @@
       "pr": {
         "url": "https://github.com/Zidious/percolator/pull/31"
       },
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "t23-epic-20261121-090000-7c2a-s2",
@@ -3538,7 +3582,9 @@
         "driver": "t23_driver_a0_61b1"
       },
       "pr": null,
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
     },
     {
       "id": "audit-20261120-180000-2d7c",
@@ -3642,7 +3688,198 @@
         }
       ],
       "terminals": {},
-      "graph": "full"
+      "graph": "full",
+      "trigger": null,
+      "comment": null
+    },
+    {
+      "id": "t47-ask-20261126-090000-c0e1",
+      "pipeline": "ask",
+      "inputs": {},
+      "profile": "default",
+      "config": null,
+      "ticket": {
+        "ref": "github.com/zidious/percolator#47",
+        "number": 47,
+        "title": "how do triggers pick a pipeline?",
+        "url": "https://github.com/Zidious/percolator/issues/47"
+      },
+      "parent": null,
+      "children": [],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/t47-ask-20261126-090000-c0e1",
+      "worktree": "/home/me/src/percolator/.worktrees/t47-ask-20261126-090000-c0e1",
+      "createdAt": "2026-11-26T09:00:00.000Z",
+      "status": "completed",
+      "driver": {
+        "alive": false,
+        "terminal": "t47_driver_a0_c292",
+        "space": "w1:s14",
+        "shown": false
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-26T09:00:01.000Z",
+          "endedAt": "2026-11-26T09:00:02.000Z"
+        },
+        {
+          "id": "answer",
+          "stage": "answer",
+          "role": "core",
+          "kind": "agent",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {
+            "answer": "samples/findings.md"
+          },
+          "startedAt": "2026-11-26T09:00:03.000Z",
+          "endedAt": "2026-11-26T09:04:10.000Z"
+        },
+        {
+          "id": "comment",
+          "stage": "comment",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pass",
+          "attempts": 1,
+          "outputs": {},
+          "startedAt": "2026-11-26T09:04:11.000Z",
+          "endedAt": "2026-11-26T09:04:13.000Z"
+        }
+      ],
+      "loops": [],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-26T09:00:01.000Z",
+          "endedAt": "2026-11-26T09:00:02.000Z",
+          "outputs": {}
+        },
+        {
+          "kind": "attempt",
+          "step": "answer",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-26T09:00:03.000Z",
+          "endedAt": "2026-11-26T09:04:10.000Z",
+          "outputs": {
+            "answer": "samples/findings.md"
+          }
+        },
+        {
+          "kind": "attempt",
+          "step": "comment",
+          "attempt": 1,
+          "status": "pass",
+          "startedAt": "2026-11-26T09:04:11.000Z",
+          "endedAt": "2026-11-26T09:04:13.000Z",
+          "outputs": {}
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full",
+      "trigger": {
+        "kind": "label",
+        "detail": "question"
+      },
+      "comment": {
+        "url": "https://github.com/Zidious/percolator/issues/47#issuecomment-3601"
+      }
+    },
+    {
+      "id": "nightly-20261126-060000-5c4d",
+      "pipeline": "nightly",
+      "inputs": {
+        "scope": "src/run",
+        "note": "Look at the status JSON first,\nthen the panel model; skip the docs."
+      },
+      "profile": "default",
+      "config": null,
+      "ticket": null,
+      "parent": null,
+      "children": [],
+      "opened": [],
+      "repo": "/home/me/src/percolator",
+      "branch": "percolator/nightly-20261126-060000-5c4d",
+      "worktree": "/home/me/src/percolator/.worktrees/nightly-20261126-060000-5c4d",
+      "createdAt": "2026-11-26T06:00:00.000Z",
+      "status": "running",
+      "currentStep": "intake",
+      "driver": {
+        "alive": false,
+        "terminal": "nightly_driver_a0_0b7a",
+        "space": "w1:s15",
+        "shown": false
+      },
+      "attention": {
+        "kind": "stalled",
+        "since": "2026-11-26T06:00:00.000Z",
+        "message": "the driver stopped while intake was running",
+        "detail": "Nothing is driving this run. Resume picks up at intake.",
+        "actions": [
+          "resume"
+        ]
+      },
+      "steps": [
+        {
+          "id": "intake",
+          "stage": "intake",
+          "role": "core",
+          "kind": "builtin",
+          "status": "running",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "scan",
+          "stage": "scan",
+          "role": "core",
+          "kind": "agent",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        },
+        {
+          "id": "report",
+          "stage": "report",
+          "role": "core",
+          "kind": "builtin",
+          "status": "pending",
+          "attempts": 0,
+          "outputs": {}
+        }
+      ],
+      "loops": [],
+      "timeline": [
+        {
+          "kind": "attempt",
+          "step": "intake",
+          "attempt": 1,
+          "status": "running",
+          "startedAt": "2026-11-26T06:00:00.000Z",
+          "outputs": {}
+        }
+      ],
+      "terminals": {},
+      "pr": null,
+      "graph": "full",
+      "trigger": {
+        "kind": "schedule",
+        "detail": "0 6 * * * Europe/London"
+      },
+      "comment": null
     },
     {
       "id": "t5-20261119-120000-dead",

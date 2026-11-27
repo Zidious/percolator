@@ -15,7 +15,7 @@ import type { DriverLock } from './lock.ts';
 import { readFanOut } from './fan-out.ts';
 import type { FanOutFile } from './fan-out.ts';
 import { listRuns } from './meta.ts';
-import type { RunListing, RunMeta } from './meta.ts';
+import type { RunListing, RunMeta, RunTrigger } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 import { askedItems } from './answer.ts';
 import { parsePick } from './route.ts';
@@ -94,6 +94,7 @@ export type RunStatusJson =
       worktree: string;
       createdAt: string;
       status: 'running' | 'waiting' | 'paused' | 'failed' | 'completed';
+      /** the step the run is at; before any step has run, its first step; absent once completed */
       currentStep?: string;
       driver: { alive: boolean | null; terminal: string; space?: string; shown: boolean };
       attention?: AttentionJson;
@@ -104,6 +105,10 @@ export type RunStatusJson =
       terminals: Record<string, string>;
       pr: { url: string } | null;
       graph: 'full' | 'history';
+      /** the `perc watch` trigger that started the run, null on a manual run (or one from before triggers were recorded) */
+      trigger: RunTrigger | null;
+      /** the comment the run's exit posted, from its latest `comment_url` output */
+      comment: { url: string } | null;
     }
   | { id: string; status: 'unreadable'; error: string };
 /** Whether `perc watch` runs (same host, live pid, fresh heartbeat), since when, and the repos it watches. */
@@ -464,8 +469,10 @@ async function attentionOf(o: {
   graphKnown: boolean;
   /** the run's config file, null when it is the default */
   config: string | null;
+  /** the step the run is at (its first step before any has run) */
+  current: string | undefined;
 }): Promise<AttentionJson | undefined> {
-  const { dir, meta, state, waiting, alive } = o;
+  const { dir, meta, state, waiting, alive, current } = o;
   const lastEnd = state.history.at(-1)?.endedAt || meta.createdAt;
   const again = {
     ticket: meta.ticket,
@@ -532,20 +539,20 @@ async function attentionOf(o: {
       };
     }
     if (state.pausedCap !== undefined) {
-      const from = o.loops.find((l) => l.id === state.pausedCap)?.from ?? state.currentStep;
+      const from = o.loops.find((l) => l.id === state.pausedCap)?.from ?? current;
       const reason = (state.pausedReason ?? '').replace(/^cap: /, '');
-      return { kind: 'cap', since: lastEnd, ...turn('cap', state.currentStep, { reason }), review: failing(from), actions: ['grant'] };
+      return { kind: 'cap', since: lastEnd, ...turn('cap', current, { reason }), review: failing(from), actions: ['grant'] };
     }
     const reason = state.pausedReason ?? '';
-    const named = state.currentStep === undefined ? undefined : transcriptIn(reason, dir, state.currentStep);
+    const named = current === undefined ? undefined : transcriptIn(reason, dir, current);
     // the runtime saves the screen best-effort: link it only when it was saved
     const transcript = named !== undefined && (await fs.stat(named).then((s) => s.isFile(), () => false)) ? named : undefined;
     return {
       kind: 'paused',
       since: lastEnd,
-      ...turn('paused', state.currentStep, { reason }),
+      ...turn('paused', current, { reason }),
       ...(transcript !== undefined ? { transcript } : {}),
-      review: failing(state.currentStep),
+      review: failing(current),
       actions: ['resume'],
     };
   }
@@ -557,24 +564,24 @@ async function attentionOf(o: {
     return {
       kind: 'failed',
       since: lastEnd,
-      ...turn('failed', state.currentStep, {
+      ...turn('failed', current, {
         ...(sliceOf !== undefined ? { sliceOf } : {}),
         ...(state.failedReason !== undefined ? { reason: state.failedReason } : {}),
       }),
-      review: failing(state.currentStep),
+      review: failing(current),
       actions: sliceOf === undefined ? ['run-again', 'clean'] : ['clean'],
       ...(sliceOf === undefined ? { commands: [runAgain(again)] } : {}),
     };
   }
   if (state.status !== 'running') return undefined;
-  if (alive === false) return { kind: 'stalled', since: lastEnd, ...turn('stalled', state.currentStep), actions: ['resume'] };
+  if (alive === false) return { kind: 'stalled', since: lastEnd, ...turn('stalled', current), actions: ['resume'] };
   if (alive !== true) return undefined;
   const a = await readAttention(dir);
-  if (a === undefined || a.stepId !== state.currentStep || typeof a.terminal !== 'string') return undefined;
+  if (a === undefined || a.stepId !== current || typeof a.terminal !== 'string') return undefined;
   return {
     kind: 'agent',
     since: typeof a.at === 'string' ? a.at : lastEnd,
-    ...turn('agent', state.currentStep, { terminal: a.terminal, agentState: typeof a.kind === 'string' ? a.kind : 'waiting' }),
+    ...turn('agent', current, { terminal: a.terminal, agentState: typeof a.kind === 'string' ? a.kind : 'waiting' }),
     terminal: a.terminal,
     ...(typeof a.kind === 'string' ? { agentState: a.kind } : {}),
     actions: ['open-pane'],
@@ -606,6 +613,8 @@ async function timelineOf(o: {
   waiting: Waiting | undefined;
   steps: RunGraphStep[];
   loops: RunGraphLoop[];
+  /** the step the run is at (its first step before any has run) */
+  current: string | undefined;
 }): Promise<TimelineJson[]> {
   const { dir, meta, state, waiting } = o;
   const gates = new Set(o.steps.filter((s) => s.kind === 'gate').map((s) => s.id));
@@ -635,8 +644,7 @@ async function timelineOf(o: {
     out.splice(at + 1, 0, { kind: 'cap', loop: lp.id, from: lp.from, to: lp.to, max: lp.max, at: last.endedAt });
   }
   const live = waiting !== undefined ? { step: waiting.stepId, status: 'waiting' as const, startedAt: waiting.since } : undefined;
-  // a fresh run has no current step yet: it is running the first stage
-  const step = state.currentStep ?? (state.history.length === 0 ? STAGES[0] : undefined);
+  const step = o.current;
   const running =
     live === undefined && state.status === 'running' && step !== undefined
       ? { step, status: 'running' as const, startedAt: state.history.at(-1)?.endedAt || meta.createdAt }
@@ -699,6 +707,19 @@ async function openedOf(dir: string, state: RunState): Promise<{ ref: string; ur
   }
 }
 
+/** The URL in the latest history record's `comment_url` output; null when there is none, or its file is gone or blank. */
+async function commentOf(dir: string, state: RunState): Promise<{ url: string } | null> {
+  const rel = state.history.findLast((h) => h.outputs['comment_url'] !== undefined)?.outputs['comment_url'];
+  if (rel === undefined) return null;
+  try {
+    const url = (await fs.readFile(path.join(dir, rel), 'utf8')).trim();
+    return url === '' ? null : { url };
+  } catch {
+    // a removed output file only means no link
+    return null;
+  }
+}
+
 async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, listed: RunListing[]): Promise<RunStatusJson> {
   const { dir, meta } = l;
   const state = l.state ?? (await loadState(dir));
@@ -711,12 +732,14 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, list
   const finished = state.status === 'completed' || state.status === 'failed';
   const alive = finished ? false : await driverAlive(dir, meta, deps);
   const liveT = finished ? { names: {} as Record<string, string> } : await liveTerminals(meta, deps);
+  // before any step has run the engine has no current step yet: the run is at its first step (a slice's fanned stage)
+  const current = state.currentStep ?? (state.history.length === 0 ? (stepDefs[0]?.id ?? STAGES[0]) : undefined);
   const steps: StepJson[] = stepDefs.map((s) => {
     const h = latest(state, s.id);
     const status: StepJson['status'] =
       waiting?.stepId === s.id
         ? 'waiting'
-        : state.status === 'running' && state.currentStep === s.id
+        : state.status === 'running' && current === s.id
           ? 'running'
           : (h?.status ?? 'pending');
     return {
@@ -728,7 +751,7 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, list
     };
   });
   const config = samePath(meta.configFile, path.join(deps.home, '.percolator', 'config.yaml')) ? null : meta.configFile;
-  const attention = await attentionOf({ dir, meta, state, waiting, alive, steps: stepDefs, loops: loopDefs, graphKnown: graph !== undefined, config });
+  const attention = await attentionOf({ dir, meta, state, waiting, alive, steps: stepDefs, loops: loopDefs, graphKnown: graph !== undefined, config, current });
   const url = await prUrl(dir, state);
   return {
     id: meta.runId,
@@ -745,7 +768,7 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, list
     worktree: meta.worktree,
     createdAt: meta.createdAt,
     status: waiting !== undefined ? 'waiting' : state.status,
-    ...(state.currentStep !== undefined && state.status !== 'completed' ? { currentStep: state.currentStep } : {}),
+    ...(current !== undefined && state.status !== 'completed' ? { currentStep: current } : {}),
     driver: {
       alive,
       terminal: meta.driver,
@@ -755,10 +778,12 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, list
     ...(attention !== undefined ? { attention } : {}),
     steps,
     loops: loopDefs.map((lp) => ({ ...lp, round: state.rounds[lp.id] ?? 0 })),
-    timeline: await timelineOf({ dir, meta, state, waiting, steps: stepDefs, loops: loopDefs }),
+    timeline: await timelineOf({ dir, meta, state, waiting, steps: stepDefs, loops: loopDefs, current }),
     terminals: liveT.names,
     pr: url === undefined ? null : { url },
     graph: graph === undefined ? 'history' : 'full',
+    trigger: meta.trigger ?? null,
+    comment: await commentOf(dir, state),
   };
 }
 
