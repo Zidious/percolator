@@ -7,6 +7,8 @@ import { agents, terminals } from 'herdr';
 import {
   activeBox,
   agentAddress,
+  ACTIONS,
+  ATTENTION,
   agentCard,
   agentNote,
   agentTone,
@@ -28,16 +30,6 @@ import {
 } from './model.js';
 import { stopStrip } from './pipeline.js';
 import { button, inlineReader, link, own, scrollY } from './ui.js';
-
-export const LABELS = {
-  approve: ['Approve', 'ok'],
-  reject: ['Reject…', 'no'],
-  grant: ['Grant a round & resume', 'ok'],
-  resume: ['Resume', 'ok'],
-  answer: ['Submit', 'ok'],
-  clean: ['Clean up', ''],
-  'run-again': ['Run again', 'ok'],
-};
 
 /** A tick box and its label, a click toggles it (`on`). */
 function tick(t, id, on, label, onClick, disabled) {
@@ -308,13 +300,13 @@ function attentionBox(p, t, r, kind, narrow) {
             )
           : x === 'answer'
             ? [
-                button(t, 'act-answer', LABELS.answer[0], LABELS.answer[1], (_e, cx) => p.submitAnswer(cx), {
+                button(t, 'act-answer', ACTIONS.answer.label, ACTIONS.answer.style, (_e, cx) => p.submitAnswer(cx), {
                   busy: p.busy === 'answer',
                   disabled: Boolean(p.busy),
                 }),
               ]
             : [
-              button(t, `act-${x}`, LABELS[x]?.[0] ?? x, LABELS[x]?.[1] ?? '', (_e, cx) => p.act(x, cx), {
+              button(t, `act-${x}`, ACTIONS[x]?.label ?? x, ACTIONS[x]?.style ?? '', (_e, cx) => p.act(x, cx), {
                 busy: p.busy === x,
                 disabled: Boolean(p.busy) && p.busy !== x,
               }),
@@ -397,7 +389,7 @@ function attentionBox(p, t, r, kind, narrow) {
       ),
     )
     .when(Boolean(p.boxFile), (el) => el.child(inlineReader(p, t, p.boxFile, 'box-reader')))
-    .when(kind === 'questions' || kind === 'findings', (el) => el.child(askForm(p, t, r)))
+    .when(ATTENTION[kind]?.asks === true, (el) => el.child(askForm(p, t, r)))
     .when(acts.length > 0 || Boolean(a.commentUrl) || live || Boolean(drv), (el) => el.child(buttons))
     .when(p.rejecting, (el) => el.child(rejectBox(p, t)));
   return said(p, t, box);

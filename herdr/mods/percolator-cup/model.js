@@ -41,29 +41,30 @@ export function visibleRuns(runs, filter) {
 /** `text` with its first letter capitalised: the panel's labels are in sentence case. */
 const sentence = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
+/**
+ * Every attention kind that shows a box (agent shows the agent card instead): the tag before its message, its board
+ * row's state line (`step`: the run's current step), whether it asks something the box answers in a form, and whether
+ * its box offers the driver peek. A new kind is one entry here.
+ */
+export const ATTENTION = {
+  gate: { tag: 'GATE', row: (step) => `Your turn · ${step}` },
+  cap: { tag: 'PAUSED', row: (step) => `Paused · ${step} at cap` },
+  paused: { tag: 'PAUSED', row: (step) => `Paused · ${step}` },
+  questions: { tag: 'QUESTIONS', asks: true, row: (step, a) => `Your turn · ${a.asked?.step ?? step} has questions` },
+  findings: { tag: 'FINDINGS', asks: true, row: (step, a) => `Your turn · ${a.asked?.step ?? step} findings at cap` },
+  failed: { tag: 'FAILED', driver: true, row: (step) => `Failed · ${step}` },
+  stalled: { tag: 'STALLED', driver: true, row: () => 'Stalled · driver stopped' },
+};
+
+/** The ATTENTION entry of `kind`, or undefined for agent, none, or a kind this panel does not know. */
+const attentionOf = (kind) => (typeof kind === 'string' && Object.hasOwn(ATTENTION, kind) ? ATTENTION[kind] : undefined);
+
 /** The board row's state line and its tone. */
 export function rowState(run) {
   const a = run.attention;
   const step = run.currentStep;
-  if (a && a.kind !== 'agent') {
-    const blocked = (text) => ({ tone: 'blocked', text });
-    switch (a.kind) {
-      case 'gate':
-        return blocked(`Your turn · ${step}`);
-      case 'cap':
-        return blocked(`Paused · ${step} at cap`);
-      case 'paused':
-        return blocked(`Paused · ${step}`);
-      case 'questions':
-        return blocked(`Your turn · ${a.asked?.step ?? step} has questions`);
-      case 'findings':
-        return blocked(`Your turn · ${a.asked?.step ?? step} findings at cap`);
-      case 'failed':
-        return blocked(`Failed · ${step}`);
-      case 'stalled':
-        return blocked('Stalled · driver stopped');
-    }
-  }
+  const known = attentionOf(a?.kind);
+  if (known) return { tone: 'blocked', text: known.row(step, a) };
   if (run.status === 'running') {
     const loop = (run.loops ?? []).find((l) => l.from === step && l.round > 0);
     return loop ? { tone: 'working', text: `${step}`, round: `Round ${roundOf(loop).n}/${loop.max}` } : { tone: 'working', text: `${step}` };
@@ -107,6 +108,25 @@ export function newlyNeeding(prev, next) {
 
 /** The `perc` argv for an action, or null when it needs no perc call (open-pane). Feedback stays one element; `pick`
  *  takes the picked pipeline in its place. */
+/**
+ * What each action a box offers looks like and which key takes it (the key hints list them in this order); its perc
+ * argv comes from actionArgv. A new action is one entry here, plus its argv.
+ */
+export const ACTIONS = {
+  approve: { label: 'Approve', style: 'ok', key: 'a' },
+  reject: { label: 'Reject…', style: 'no', key: 'r' },
+  grant: { label: 'Grant a round & resume', style: 'ok', key: 'g' },
+  resume: { label: 'Resume', style: 'ok', key: 'g' },
+  answer: { label: 'Submit', style: 'ok' },
+  clean: { label: 'Clean up', style: '' },
+  'run-again': { label: 'Run again', style: 'ok' },
+};
+
+/** The action among `offered` that `key` takes, the first in ACTIONS order (grant before resume); undefined when none. */
+export function actionForKey(key, offered) {
+  return Object.keys(ACTIONS).find((a) => ACTIONS[a].key === key && offered.includes(a));
+}
+
 export function actionArgv(action, run, feedback) {
   switch (action) {
     case 'approve':
@@ -166,7 +186,7 @@ export function itemLabel(text, n, kind) {
  *  with every new ask, so a form's state is not carried over. Null when it asks nothing. */
 export function askOf(run) {
   const a = run?.attention;
-  if (!a || (a.kind !== 'questions' && a.kind !== 'findings') || !a.asked) return null;
+  if (!a || !attentionOf(a.kind)?.asks || !a.asked) return null;
   const { step, attempt, items } = a.asked;
   return {
     kind: a.kind,
@@ -246,11 +266,9 @@ export function resolvePath(base, p) {
   return ABSOLUTE.test(p) ? p : `${base.replace(/[\\/]+$/, '')}/${p}`;
 }
 
-const TAGS = { gate: 'GATE', cap: 'PAUSED', paused: 'PAUSED', questions: 'QUESTIONS', findings: 'FINDINGS', failed: 'FAILED', stalled: 'STALLED' };
-
 /** The tag shown before an attention message. */
 export function attentionTag(kind) {
-  return TAGS[kind] ?? 'NEEDS YOU';
+  return attentionOf(kind)?.tag ?? 'NEEDS YOU';
 }
 
 /** The round the engine is in: `round` counts back-edges already taken, the engine's round is one more, up to the cap. */
@@ -658,14 +676,12 @@ export function terminalAddress(live, term) {
   return live.find((x) => x.address === term || x.name === term)?.address ?? null;
 }
 
-const BOXES = ['gate', 'cap', 'paused', 'questions', 'findings', 'failed', 'stalled'];
-
 /** What shows under the run's active stop: the attention box for its kind, the agent card while an agent works, else
  *  nothing. */
 export function activeBox(run) {
   if (!run || run.status === 'unreadable') return null;
   const kind = run.attention?.kind;
-  if (BOXES.includes(kind)) return kind;
+  if (attentionOf(kind)) return kind;
   if (kind === 'agent') return 'agent';
   return run.status === 'running' && run.terminals?.[run.currentStep] ? 'agent' : null;
 }
@@ -794,7 +810,7 @@ export function slotOpensAgent(run, live) {
 
 /** Whether the active box asks you something (gate, cap, paused, failed, stalled): it carries the action errors. */
 export function boxAsks(run) {
-  return BOXES.includes(activeBox(run));
+  return attentionOf(activeBox(run)) !== undefined;
 }
 
 /** Whether the lower half says how the run stands (delivered, unreadable, its status): nothing is under its stop and
@@ -815,8 +831,7 @@ export function agentNote(card) {
 
 /** The driver peek a failed or stalled box offers (its last screen often says why), else null. */
 export function boxDriver(run) {
-  const kind = activeBox(run);
-  return kind === 'failed' || kind === 'stalled' ? driverPeek(run) : null;
+  return attentionOf(activeBox(run))?.driver ? driverPeek(run) : null;
 }
 
 /** The History fold's label: its arrow and how many attempts the history holds (loop-cap rows are not attempts). */
@@ -909,7 +924,15 @@ export function parentLink(run, runs) {
 /** The wide panel's key hints for the selected run (null: none): Esc goes back to a slice's parent. */
 export function keyHints(run, runs) {
   const esc = run && parentLink(run, runs) ? 'esc parent' : 'esc close';
-  return `↑↓ runs · ←→ stops · ⏎ open agent · a approve · r reject · g grant / resume · ${esc}`;
+  const keys = [];
+  for (const [action, { key }] of Object.entries(ACTIONS)) {
+    if (key === undefined) continue;
+    const same = keys.find((k) => k.key === key);
+    if (same) same.actions.push(action);
+    else keys.push({ key, actions: [action] });
+  }
+  const acts = keys.map((k) => `${k.key} ${k.actions.join(' / ')}`).join(' · ');
+  return `↑↓ runs · ←→ stops · ⏎ open agent · ${acts} · ${esc}`;
 }
 
 // ── the watcher (`perc watch`) ──

@@ -18,6 +18,9 @@ export declare function outcomeOf(run: RunStatusJson): { tag: 'DELIVERED' | 'ROU
 export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
 /** `feedback` is the reject feedback, or the picked pipeline for `pick`. */
 /** `run-again` on an unreadable run: null (it has no pipeline or repo to start again). */
+export declare const ACTIONS: Record<string, { label: string; style: string; key?: string }>;
+export declare function actionForKey(key: string, offered: string[]): string | undefined;
+export declare const ATTENTION: Record<string, { tag: string; row: (step: string | undefined, a: NonNullable<RunStatusJson['attention']>) => string; asks?: true; driver?: true }>;
 export declare function actionArgv(action: Action, run: RunStatusJson, feedback?: string): string[] | null;
 export declare function runAgainArgv(run: Readable): string[];
 export type AskItem = { n: number; label: string; text: string };

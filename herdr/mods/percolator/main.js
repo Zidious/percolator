@@ -25,6 +25,7 @@ import {
 import {
   BOARD_RATIO,
   actionArgv,
+  actionForKey,
   answerArgv,
   askOf,
   canStart,
@@ -922,10 +923,7 @@ export default class Percolator extends View {
       }
     } else if ((key === 'left' || key === 'right') && r) {
       this.pickStop(moveStop(r, this.stopSel, key === 'left' ? -1 : 1, this.unfolded, this.shape().fold), cx);
-    } else if (key === 'a' && acts.includes('approve')) this.act('approve', cx);
-    else if (key === 'r' && acts.includes('reject')) this.act('reject', cx);
-    else if (key === 'g' && acts.includes('grant')) this.act('grant', cx);
-    else if (key === 'g' && acts.includes('resume')) this.act('resume', cx);
+    } else if (actionForKey(key, acts)) this.act(actionForKey(key, acts), cx);
     else if (key === 'enter' && r && activeBox(r) === 'agent') this.openAgent();
     else if (key === 'escape') {
       if (this.start) this.closeStart();
