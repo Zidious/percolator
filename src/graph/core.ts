@@ -26,6 +26,9 @@ export const CORE_GROOM_GATE: Readonly<{ name: 'approve-groom'; def: Readonly<No
   def: { kind: 'gate', after: 'groom', required: true, on_fail: { back_to: 'groom', max_rounds: 3 } } as NodeDef,
 });
 
+/** Rounds a stage loop (review, or a stage whose last slot node sets max_rounds) runs before it asks the owner. */
+export const DEFAULT_MAX_ROUNDS = 3;
+
 /** A router's choose agent: the first step of its route stage. */
 export const ROUTE_CHOOSE = 'route.1';
 /** The gate after a router's choose agent, which asks the owner when the agent is unsure. */

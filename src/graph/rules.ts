@@ -3,13 +3,11 @@ import { formatIssue, locate, place, slotKey } from '../config/locate.ts';
 import type { Locator, Where } from '../config/locate.ts';
 import { effectiveKind } from '../config/schema.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
-import { CORE_GROOM_GATE, CORE_STAGES } from './core.ts';
+import { CORE_GROOM_GATE, CORE_STAGES, DEFAULT_MAX_ROUNDS } from './core.ts';
 import type { Merged, MergedPipeline } from './merge.ts';
 
 /** `message` is the body only; `where` is the offending key's file, line and path (see formatIssue). */
 export type Violation = { rule: string; source: string; target: string; message: string; where: Where };
-
-const DEFAULT_REVIEW_ROUNDS = 3;
 
 type Entry = {
   target: string;
@@ -182,7 +180,7 @@ export function checkRules(merged: Merged | MergedPipeline, stages: readonly str
         // enforced on the core gate by buildGraph clamping its back-edge, not here.
         if (core) continue;
         if (stage === 'review') {
-          const rounds = node.max_rounds ?? DEFAULT_REVIEW_ROUNDS;
+          const rounds = node.max_rounds ?? DEFAULT_MAX_ROUNDS;
           if (rounds > ceiling && !exceededEarlier(rounds)) {
             out.push({
               rule: 'max_rounds_ceiling',

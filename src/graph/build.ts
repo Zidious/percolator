@@ -5,7 +5,7 @@ import { effectiveKind } from '../config/schema.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
 import { EXITS, EXIT_KINDS } from '../tracker/index.ts';
 import type { ExitKind } from '../tracker/index.ts';
-import { CORE_GROOM_GATE, FEATURE, PICK_GATE, ROUTE_CHOOSE, STAGE_CONTRACTS } from './core.ts';
+import { CORE_GROOM_GATE, DEFAULT_MAX_ROUNDS, FEATURE, PICK_GATE, ROUTE_CHOOSE, STAGE_CONTRACTS } from './core.ts';
 import type { PipelineHeader } from './core.ts';
 import type { Merged, MergedPipeline, Sourced } from './merge.ts';
 
@@ -471,7 +471,7 @@ function buildWhole(
       toStepIndex: regionStart[previous]!,
       // after-hooks of the stage run every round, so the jump happens after the stage's last step
       jumpAfterIndex: steps.findLastIndex((s) => s.stage === stage),
-      maxRounds: last.def.max_rounds ?? 3,
+      maxRounds: last.def.max_rounds ?? DEFAULT_MAX_ROUNDS,
       onCap: 'continue',
     };
     // any slot node's fail in a loop stage is a round of it; a step's own on_fail is more specific
