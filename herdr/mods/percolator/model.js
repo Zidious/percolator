@@ -256,16 +256,20 @@ export function roundOf(loop) {
   return { n: Math.min(1 + loop.round, loop.max), max: loop.max, taken: loop.round > 0, atCap: loop.round >= loop.max };
 }
 
-function loopTone(r) {
+/** A finished run's loops and caps are history: muted, never an alarm. */
+function loopTone(r, run) {
+  if (isFinished(run)) return 'dim';
   return r.atCap ? 'blocked' : r.taken ? 'working' : 'dim';
 }
 
-/** The pill on the step a loop starts from; null when no loop starts there. */
+/** The pill on the step a loop starts from; null when no loop starts there, or that step has not run and is not current. */
 export function roundPill(run, stepId) {
   const loop = (run.loops ?? []).find((l) => l.from === stepId);
   if (!loop) return null;
+  const step = (run.steps ?? []).find((s) => s.id === stepId);
+  if (step?.status === 'pending' && run.currentStep !== stepId) return null;
   const r = roundOf(loop);
-  return { text: `Round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r) };
+  return { text: `Round ${r.n}/${r.max}${r.atCap ? ' · cap' : ''}`, tone: loopTone(r, run) };
 }
 
 /** The engine's round of a loop that goes back to `stepId`, past round 1; null otherwise. */
@@ -285,7 +289,7 @@ export function roundNote(run, stepId, now) {
 
 /** Every loop, taken or not, with its tone. */
 export function loopSpans(run) {
-  return (run.loops ?? []).map((l) => ({ id: l.id, from: l.from, to: l.to, tone: loopTone(roundOf(l)) }));
+  return (run.loops ?? []).map((l) => ({ id: l.id, from: l.from, to: l.to, tone: loopTone(roundOf(l), run) }));
 }
 
 const ALL = new Set(['before-all', 'after-all']);
@@ -503,7 +507,7 @@ export function timelineRows(run, now) {
         ? {
             key: `cap:${e.loop}`,
             mark: '↺',
-            tone: 'blocked',
+            tone: isFinished(run) ? 'dim' : 'blocked',
             step: e.from,
             round: '',
             status: 'cap',
@@ -1267,4 +1271,10 @@ export function sliceRows(run, runs) {
  *  there is none). */
 export function fanOutRow(rows) {
   return rows.findLastIndex((r) => r.type === 'stage');
+}
+
+/** A pipeline row's label: the stage of a `<stage>.<n>` step (the router's `route.3` reads `route`), else the step id. */
+export function stageName(step) {
+  const m = /^(.+)\.\d+$/.exec(step.id);
+  return m && m[1] === step.stage ? step.stage : step.id;
 }

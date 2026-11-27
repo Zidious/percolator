@@ -49,6 +49,7 @@ export declare function stepTone(status: string): 'done' | 'working' | 'blocked'
 export declare function resolvePath(base: string, p: string): string;
 export declare function attentionTag(kind: string): string;
 export declare function roundOf(loop: Loop): { n: number; max: number; taken: boolean; atCap: boolean };
+export declare function stageName(step: { id: string; stage: string }): string;
 export declare function roundPill(run: RunStatusJson, stepId: string): { text: string; tone: 'dim' | 'working' | 'blocked' } | null;
 export declare function loopSpans(run: RunStatusJson): { id: string; from: string; to: string; tone: 'dim' | 'working' | 'blocked' }[];
 export declare function canPick(step: { status: string }): boolean;

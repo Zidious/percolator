@@ -4,7 +4,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { ago, canPick, deleteView, driverPeek, fanOutRow, hookNote, nowTone, parentLink, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, textTone, ticketTitle, took } from './model.js';
+import { ago, canPick, deleteView, driverPeek, fanOutRow, hookNote, nowTone, parentLink, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, stageName, textTone, ticketTitle, took } from './model.js';
 import { chip, inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
@@ -205,6 +205,7 @@ function stageLabel(t, r, row) {
   const now = Date.now();
   // a loop's target past round 1 says its round and its latest attempt's time
   const spent = roundNote(r, st.id, now) || (row.state === 'past' ? took(st, now) : '');
+  const label = stageName(st);
   return h_flex()
     .flex_1()
     .min_w(0)
@@ -212,7 +213,16 @@ function stageLabel(t, r, row) {
     .py(6)
     .gap(8)
     .items_center()
-    .child(div().flex_none().text_size(11.5).font_semibold().text_color(c).child(st.id.toUpperCase()))
+    .child(
+      div()
+        .flex_none()
+        .text_size(11.5)
+        .font_semibold()
+        .text_color(c)
+        // the stage name; the step id on hover tells rows of one stage apart
+        .when(label !== st.id, (el) => el.tooltip(st.id))
+        .child(label.toUpperCase()),
+    )
     .when(Boolean(spent), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(spent)))
     .when(row.folded.length > 0, (el) =>
       el.child(

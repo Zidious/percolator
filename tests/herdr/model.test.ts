@@ -40,6 +40,7 @@ import {
   roundOf,
   roundPill,
   loopSpans,
+  stageName,
   moveRow,
   canPick,
   moveStop,
@@ -821,7 +822,7 @@ test('roundOf counts the round the engine is in', () => {
 });
 
 test('roundPill sits on the loop from step', () => {
-  assert.deepEqual(roundPill(byId('t2'), 'review'), { text: 'Round 1/3', tone: 'dim' });
+  assert.equal(roundPill(byId('t2'), 'review'), null); // review has not run yet
   assert.deepEqual(roundPill(byId('t16'), 'review'), { text: 'Round 2/3', tone: 'working' });
   assert.deepEqual(roundPill(byId('t4'), 'review'), { text: 'Round 3/3 · cap', tone: 'blocked' });
   assert.equal(roundPill(byId('t4'), 'implement'), null);
@@ -2018,4 +2019,52 @@ test("notice: a paused run's toast keeps why it paused; a gate's body is its mes
   const bare = { ...run, attention: { ...run.attention, detail: undefined } };
   assert.equal(notice(bare).body, 'plan paused');
   assert.equal(notice(readable('t2')).body, 'approve-groom is waiting for approval');
+});
+
+/** `run` with `over` merged in, and its step `id` set to `status`. */
+const withStep = (run: Readable, id: string, status: string, over: Record<string, unknown> = {}) =>
+  ({ ...run, ...over, steps: run.steps.map((st) => (st.id === id ? { ...st, status } : st)) }) as RunStatusJson;
+
+test('roundPill and loopSpans draw a finished run muted, at its cap or not', () => {
+  const t4 = readable('t4'); // review at its cap, escalated
+  for (const status of ['completed', 'failed'] as const) {
+    const done = { ...t4, status } as RunStatusJson;
+    assert.deepEqual(roundPill(done, 'review'), { text: 'Round 3/3 · cap', tone: 'dim' }, status);
+    assert.deepEqual(loopSpans(done).map((l) => l.tone), ['dim'], status);
+    const taken = { ...readable('t16'), status } as RunStatusJson; // round 2/3, review failed
+    assert.deepEqual(roundPill(taken, 'review'), { text: 'Round 2/3', tone: 'dim' }, status);
+    assert.deepEqual(loopSpans(taken).map((l) => l.tone), ['dim'], status);
+  }
+  assert.equal(roundPill(byId('t4'), 'review')!.tone, 'blocked');
+  assert.equal(roundPill(byId('t16'), 'review')!.tone, 'working');
+  assert.deepEqual(loopSpans(byId('t16')).map((l) => l.tone), ['working']);
+});
+
+test('timelineRows draws a cap row muted on a finished run', () => {
+  const capOf = (run: RunStatusJson) => timelineRows(run, 0).find((x) => x.status === 'cap')!;
+  assert.equal(capOf({ ...readable('t4'), status: 'completed' } as RunStatusJson).tone, 'dim');
+  assert.equal(capOf({ ...readable('t4'), status: 'failed' } as RunStatusJson).tone, 'dim');
+  assert.equal(capOf({ ...readable('t4'), status: 'running' } as RunStatusJson).tone, 'blocked');
+});
+
+test("a failed run's failed step still reads failed", () => {
+  const failed = withStep(readable('t4'), 'review', 'fail', { status: 'failed', currentStep: 'deliver' });
+  assert.equal(row(pipelineRows(failed, WIDE), 'review').state, 'failed');
+});
+
+test('roundPill shows no round on a loop start until it has run or is the current step', () => {
+  const t3 = readable('t3');
+  const running = { ...t3, status: 'running', currentStep: 'implement' } as Readable;
+  assert.equal(roundPill(withStep(running, 'review', 'pending'), 'review'), null);
+  assert.deepEqual(roundPill(withStep(running, 'review', 'running', { currentStep: 'review' }), 'review'), { text: 'Round 1/3', tone: 'dim' });
+  assert.deepEqual(roundPill(withStep(running, 'review', 'pass'), 'review'), { text: 'Round 1/3', tone: 'dim' });
+  assert.deepEqual(roundPill(withStep(running, 'review', 'fail'), 'review'), { text: 'Round 1/3', tone: 'dim' });
+});
+
+test('stageName is the stage of a <stage>.<n> step, else the step id', () => {
+  assert.equal(stageName({ id: 'route.3', stage: 'route' }), 'route');
+  assert.equal(stageName({ id: 'implement.0', stage: 'implement' }), 'implement');
+  assert.equal(stageName({ id: 'pick-pipeline', stage: 'route' }), 'pick-pipeline');
+  assert.equal(stageName({ id: 'review', stage: 'review' }), 'review');
+  assert.equal(stageName({ id: 'lint.2', stage: 'implement' }), 'lint.2');
 });
