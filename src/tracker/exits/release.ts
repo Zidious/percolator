@@ -6,6 +6,7 @@ import type { StepHandler } from '../../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../../runtime/outcome.ts';
 import { writeFileAtomic } from '../../util/fs.ts';
 import type { Gh } from '../gh.ts';
+import { releaseMarker } from '../markers.ts';
 import { errText, latestOutput } from './latest.ts';
 
 const TAG = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
@@ -43,7 +44,7 @@ export function githubRelease(o: {
       await (o.push ?? defaultPush)(o.worktree, o.branch);
       // a crash after createRelease leaves the release but no saved release_url: look it up first,
       // and take it only when its notes carry this run's marker
-      const marker = `<!-- percolator:release run=${ctx.state.runId} -->`;
+      const marker = releaseMarker(ctx.state.runId);
       const existing = await o.gh.release(o.repo, tag);
       if (existing !== undefined && !existing.body.includes(marker)) {
         return escalate(`tag "${tag}" already has a release (${existing.url}); pick another tag and resume`);

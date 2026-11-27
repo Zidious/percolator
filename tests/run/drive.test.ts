@@ -12,7 +12,7 @@ import { prepareRun } from '../../src/run/prepare.ts';
 import { statusJson } from '../../src/run/status.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
 import { writeDecision } from '../../src/tracker/gate.ts';
-import { GATE_MARKER } from '../../src/tracker/intake.ts';
+import { GATE_MARKER } from '../../src/tracker/markers.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { FakeHc } from '../helpers/fake-hc.ts';
 import type { FakeTerminal } from '../helpers/fake-hc.ts';

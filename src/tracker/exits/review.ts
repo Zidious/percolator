@@ -5,6 +5,7 @@ import type { StepHandler } from '../../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../../runtime/outcome.ts';
 import { writeFileAtomic } from '../../util/fs.ts';
 import type { Gh } from '../gh.ts';
+import { reviewMarker } from '../markers.ts';
 import { parsePr } from '../ticket.ts';
 import { errText, latestOutput } from './latest.ts';
 
@@ -23,7 +24,7 @@ export function githubPrReview(o: {
       const pr = parsePr(o.inputs['pr'] ?? '', o.repo);
       const text = await latestOutput(ctx, o.runDir, 'review');
       if (text === undefined) return escalate('no step wrote a review output; write review.md in the stage before the exit');
-      const marker = `<!-- percolator:review run=${o.runId} -->`;
+      const marker = reviewMarker(o.runId);
       // a crash after postReview leaves the review but no saved review_url: look for the marker first
       let url = (await o.gh.prReviews(pr.repo, pr.number)).find((r) => r.body.includes(marker))?.url;
       if (url === undefined) {

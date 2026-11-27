@@ -5,6 +5,7 @@ import { collectOutputs } from '../../runtime/outcome.ts';
 import { writeFileAtomic } from '../../util/fs.ts';
 import { splitSections } from '../../util/sections.ts';
 import type { Gh } from '../gh.ts';
+import { issueMarker } from '../markers.ts';
 import { formatTicket, parseTicket } from '../ticket.ts';
 import { escalate, latestOutput } from './latest.ts';
 
@@ -80,7 +81,7 @@ export function githubOpenIssues(o: {
         let url: string | undefined = created[n]?.url;
         if (!url) {
           // a crash between create and record leaves the issue unrecorded: find it by its marker first
-          const marker = `<!-- percolator:issue run=${o.runId} n=${n} -->`;
+          const marker = issueMarker(o.runId, n);
           url = (await o.gh.myIssues(o.repo)).find((i) => i.body.includes(marker))?.url;
           if (!url) {
             const bodyFile = path.join(io.stepDir, `issue-${n}.md`);
