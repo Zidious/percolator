@@ -74,9 +74,6 @@ export class GraphError extends ConfigError {
   }
 }
 
-/** What each input an exit needs is, for the error that asks for it. */
-const NEEDED_INPUT: Record<string, string> = { pr: 'the pull request to review', advisory: 'the GHSA id' };
-
 /**
  * Output keys each stage of a pipeline must write. feature keeps the core contracts; other pipelines
  * take their `outputs`, falling back to the core contract of a stage named like a feature stage, and
@@ -279,20 +276,21 @@ function buildWhole(
           at(''),
         );
       }
-      if (needs?.input !== undefined && header.inputs?.[needs.input] === undefined) {
+      const input = needs?.input;
+      if (input !== undefined && header.inputs?.[input.name] === undefined) {
         throw new GraphError(
-          `exit ${exit} needs input "${needs.input}" (${NEEDED_INPUT[needs.input]}); declare it under pipelines.${name}.inputs`,
+          `exit ${exit} needs input "${input.name}" (${input.is}); declare it under pipelines.${name}.inputs`,
           at(''),
         );
       }
-      if (needs?.input !== undefined && header.inputs?.[needs.input]?.required !== true) {
+      if (input !== undefined && header.inputs?.[input.name]?.required !== true) {
         throw new GraphError(
-          `exit ${exit} needs input "${needs.input}" (${NEEDED_INPUT[needs.input]}) on every run, but pipeline "${name}" makes it optional; set required: true on pipelines.${name}.inputs.${needs.input}`,
+          `exit ${exit} needs input "${input.name}" (${input.is}) on every run, but pipeline "${name}" makes it optional; set required: true on pipelines.${name}.inputs.${input.name}`,
           at(''),
         );
       }
-      if (exit === 'release' && header.inputs?.tag === undefined && !stages.slice(0, -1).some((s) => header.outputs?.[s]?.includes('tag'))) {
-        throw new GraphError('exit release needs a tag: declare input "tag" or list "tag" under outputs of an earlier stage', at(''));
+      if (needs?.tag && header.inputs?.tag === undefined && !stages.slice(0, -1).some((s) => header.outputs?.[s]?.includes('tag'))) {
+        throw new GraphError(`exit ${exit} needs a tag: declare input "tag" or list "tag" under outputs of an earlier stage`, at(''));
       }
     }
   }
