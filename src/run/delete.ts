@@ -19,7 +19,7 @@ import { readRunMeta } from './meta.ts';
 import type { RunListing, RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 import { runStatusJson } from './status.ts';
-import type { RunStatusJson } from './status.ts';
+import type { RunStatusJson } from './status-json.ts';
 
 export type DeletePlan = {
   id: string;

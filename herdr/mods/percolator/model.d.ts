@@ -1,6 +1,6 @@
 // Types for model.js, so `pnpm typecheck` covers tests/herdr/model.test.ts. The run shape is the
 // `perc status --json` contract (src/run/status.ts).
-import type { Action, RunStatusJson, StatusJson } from '../../../src/run/status.ts';
+import type { Action, RunStatusJson, StatusJson } from '../../../src/run/status-json.ts';
 
 type Readable = Exclude<RunStatusJson, { status: 'unreadable' }>;
 export type Step = Readable['steps'][number];

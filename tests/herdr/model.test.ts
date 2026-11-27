@@ -102,7 +102,7 @@ import {
   took,
   visibleRuns,
 } from '../../herdr/mods/percolator/model.js';
-import type { RunStatusJson, StatusJson } from '../../src/run/status.ts';
+import type { RunStatusJson, StatusJson } from '../../src/run/status-json.ts';
 import type { Loop, PipeRow } from '../../herdr/mods/percolator/model.d.ts';
 import { driverName } from '../../src/run/meta.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';

@@ -9,8 +9,9 @@ import { listRuns, writeRunMeta } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
-import { attentionNext, driverAlive, runAgain, runStatusJson, statusJson, transcriptIn, yourTurn } from '../../src/run/status.ts';
-import type { AttentionJson, RunStatusJson, TimelineJson } from '../../src/run/status.ts';
+import { driverAlive, runStatusJson, statusJson, transcriptIn } from '../../src/run/status.ts';
+import { attentionNext, runAgain, yourTurn } from '../../src/run/next-steps.ts';
+import type { AttentionJson, RunStatusJson, TimelineJson } from '../../src/run/status-json.ts';
 import { NOW, setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
 
