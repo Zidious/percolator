@@ -49,17 +49,17 @@ Read the module before changing it.
 
 | Dir | What |
 |---|---|
-| `src/cli.ts` | `perc` entry: arg parsing, commands, exit codes (0 ok, 1 error/failed run, 2 usage) |
-| `src/config/` | zod schema (single source for config keys), YAML loading with located errors, profiles; `pipelines.ts`: pipeline specs, the default pipeline, checks across pipelines (routes, next, triggers) |
+| `src/cli.ts` | `perc` entry: arg parsing, commands, exit codes (0 ok, 1 error/failed run, 2 usage); `COMMANDS` builds both the help and the dispatch (a new command is one entry) |
+| `src/config/` | zod schema (single source for config keys), YAML loading with located errors, profiles; `pipelines.ts`: pipeline specs, the default pipeline, checks across pipelines (routes, next, triggers); `triggers.ts`: trigger kinds, and `onTrigger`, through which everything that treats kinds differently goes (a kind without a handler fails typecheck) |
 | `src/grounds/` | git grounds: resolve and pin (`percolator.lock`), layers, mappings |
 | `src/graph/` | core stages and contracts, layer merge with locks, rules, graph build |
 | `src/engine/` | `runGraph`, run state, `Runtime` interface |
 | `src/runtime/` | `HerdrRuntime`: task rendering, terminal lifecycle, outputs collection |
 | `src/run/` | run lifecycle: prepare, launch/drive, driver lock, metadata; `request.ts`: `--input` parsing and the run request checked against its pipeline; `pick-pipeline.ts`: the pipeline a ticket asks for (label, `/percolator run` comment); `child.ts`: linked child runs; `route.ts`: a router's decision (`route.json`) and handoff; `fan-out.ts`: the fan-out and seed builtins (`fanout.json`, slice runs); `pipelines-json.ts`: `perc pipelines`; `answer.ts`: what a paused run asks and the owner's answer (`perc answer`); `builtins.ts`: the handler of every builtin, typed by `BUILTIN_NAMES` (a new builtin gets its entry there); `resumable.ts`: the checks before a run is driven again; `outputs.ts`: the latest output of a key |
 | `src/tracker/` | GitHub: tickets, `gh` client, intake, approval gate, PRs; `BUILTIN_NAMES` is the single source of builtin node names, `EXITS` of exit kinds; `markers.ts`: the hidden markers in everything posted (their text must not change) |
-| `src/tracker/exits/` | one handler per exit builtin (comment, issues, report, release, review, private fork PR) |
+| `src/tracker/exits/` | one handler per exit builtin (comment, issues, report, release, review, private fork PR), each built with `defineExit` (outputs, collection and the `<builtin>: ` escalation prefix); what an exit needs from its pipeline goes in its `EXITS` entry |
 | `src/herdr/` | clients for `hc` and `herdr-app` |
-| `src/adapters/` | agent argv builders (`claude`, `codex`, `command`) |
+| `src/adapters/` | agent argv builders (`claude`, `codex`, `command`); rules only one agent has go in its adapter's `check` |
 | `src/workspace/` | worktrees, run/step dirs, ground materialization, skill plugins |
 | `src/util/` | paths, atomic fs, argv-only exec; `cron.ts` (cron with time zones, Intl only), `sections.ts` (`## ` sections of drafted issues and slices), `errors.ts` (`UsageError`) |
 | `src/watch/` | `perc watch`: trigger polling, the firing ledger (`~/.percolator/watch/fired.json`), the watch loop and its heartbeat (`watch.json`) |
@@ -67,7 +67,7 @@ Read the module before changing it.
 | `templates/` | recommended config written by `perc init` |
 | `skills/` | agent-agnostic skills shipped in the package |
 | `scripts/` | repo tooling run by package scripts (`herdr-sync.ts`); typechecked, tested under `tests/scripts/` |
-| `herdr/` | Herdr panel (`mods/percolator/`, plain JS, pure logic in `model.js`, the start picker in `start.js`) and status-bar cup (`mods/percolator-cup/`), layout, fixtures |
+| `herdr/` | Herdr panel (`mods/percolator/`, plain JS, pure logic in `model.js` with its `ATTENTION` and `ACTIONS` tables (a new attention kind or action is one entry), the start picker in `start.js`) and status-bar cup (`mods/percolator-cup/`), layout, fixtures |
 | `docs/` | user-facing topic pages linked from `README.md` (how it works, configuration, pipelines, steering, integrations, development); `docs/superpowers/` is local scratch, never committed |
 
 ## Conventions
