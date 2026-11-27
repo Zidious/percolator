@@ -78,11 +78,12 @@ export function rowState(run) {
   return { tone: 'muted', text: sentence(run.status) };
 }
 
-/** How a completed run ended: its PR, where a router sent it, done (nothing delivered to a tracker), or delivered. */
+/** How a completed run ended: its PR, where a router sent it, the comment its exit posted, done (nothing delivered to a tracker), or delivered. */
 function completedAs(run) {
   const pr = run.pr?.url;
   if (pr) return { kind: 'pr', pr };
   if ((run.steps ?? []).some((s) => s.stage === 'route')) return { kind: 'routed', to: (run.children ?? []).find((c) => !c.slice)?.pipeline };
+  if (run.comment?.url) return { kind: 'commented', url: run.comment.url };
   // a ticketless run with no PR and no opened issues delivered nothing to a tracker (report, none)
   return { kind: run.ticket === null && (run.opened ?? []).length === 0 ? 'done' : 'delivered' };
 }
@@ -93,6 +94,7 @@ export function outcomeOf(run) {
   if (end.kind === 'pr') return { tag: 'DELIVERED', text: `Opened ${end.pr.replace(/^https:\/\/github\.com\//, '')}` };
   if (end.kind === 'routed') return { tag: 'ROUTED', text: end.to ? `→ ${end.to}` : '' };
   if (end.kind === 'done') return { tag: 'DONE', text: '' };
+  if (end.kind === 'commented') return { tag: 'COMMENTED', text: run.ticket ? `#${run.ticket.number} ↗` : 'Comment ↗', url: end.url };
   return { tag: 'DELIVERED', text: 'Done.' };
 }
 
@@ -1277,4 +1279,37 @@ export function fanOutRow(rows) {
 export function stageName(step) {
   const m = /^(.+)\.\d+$/.exec(step.id);
   return m && m[1] === step.stage ? step.stage : step.id;
+}
+
+const TRIGGER_WORDS = {
+  schedule: 'schedule',
+  label: 'label',
+  pr_opened: 'PR',
+  dependabot: 'Dependabot PR',
+  check_failed: 'failed check on',
+};
+
+/** The header's line for a run a trigger started ("Started by label ready"); null for a manual run. */
+export function triggerLine(run) {
+  const t = run?.trigger;
+  const words = t ? TRIGGER_WORDS[t.kind] : undefined;
+  if (!words) return null;
+  const head = t.kind === 'check_failed' && !t.detail ? 'failed check' : words;
+  return t.detail ? `Started by ${head} ${t.detail}` : `Started by ${head}`;
+}
+
+/** The history's rows for the run's inputs, in input order: the name, the value on one line, the full value on hover. */
+export function inputRows(run) {
+  return Object.entries(run?.inputs ?? {}).map(([name, value]) => ({
+    key: `input:${name}`,
+    mark: '·',
+    tone: 'dim',
+    step: name,
+    round: '',
+    status: '',
+    started: '',
+    took: '',
+    note: value.replace(/\s*[\r\n]+\s*/g, ' '),
+    title: value,
+  }));
 }

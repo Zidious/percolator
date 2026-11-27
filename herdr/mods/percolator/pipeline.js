@@ -4,7 +4,7 @@
 import { div, svg } from 'gpui-kit';
 import { v_flex, h_flex } from 'gpui-base';
 import { terminals } from 'herdr';
-import { ago, canPick, deleteView, driverPeek, fanOutRow, hookNote, nowTone, parentLink, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, stageName, textTone, ticketTitle, took } from './model.js';
+import { ago, canPick, deleteView, driverPeek, fanOutRow, hookNote, nowTone, parentLink, pipelineChip, pipelineMarks, pipelineRows, pipelineSpans, roundNote, roundView, runNextChoices, sliceRows, slotOpensAgent, stageName, textTone, ticketTitle, took, triggerLine } from './model.js';
 import { chip, inlineReader, link, own } from './ui.js';
 
 const GUTTER = 26; // loop spans
@@ -28,6 +28,7 @@ export function header(p, t, r, narrow) {
   }
   const drv = driverPeek(r);
   const up = parentLink(r, p.runs);
+  const started = triggerLine(r);
   const now = Date.now();
   return v_flex()
     .px(16)
@@ -48,6 +49,7 @@ export function header(p, t, r, narrow) {
         ),
       ),
     )
+    .when(started !== null, (el) => el.child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child(started)))
     .child(
       h_flex()
         .gap(6)

@@ -19,6 +19,7 @@ import {
   boxFiles,
   fileUrl,
   historyLabel,
+  inputRows,
   outcomeOf,
   programInitial,
   reasonParts,
@@ -112,12 +113,13 @@ const tag = (label, c) =>
 /** The run history's rows, newest first. */
 function historyList(t, r) {
   const rows = timelineRows(r, Date.now());
+  // the run's inputs sit at the bottom, the oldest end of a history listed newest first
+  const inputs = inputRows(r);
   return v_flex()
     .py(4)
-    .children(
-      rows.length === 0
-        ? [div().px(12).py(3).text_size(11.5).text_color(t.muted).child('Nothing has run yet.')]
-        : rows.map((x) =>
+    .children([
+      ...(rows.length === 0 ? [div().px(12).py(3).text_size(11.5).text_color(t.muted).child('Nothing has run yet.')] : []),
+      ...[...rows, ...inputs].map((x) =>
             h_flex()
               .px(12)
               .py(3)
@@ -129,9 +131,17 @@ function historyList(t, r) {
               .child(div().w(90).flex_none().text_color(t[textTone(x.tone)]).child(x.status))
               .child(div().w(50).flex_none().text_color(t.muted).child(x.started))
               .child(div().w(50).flex_none().text_color(t.muted).child(x.took))
-              .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(x.note)),
+              .child(
+                div()
+                  .flex_1()
+                  .min_w(0)
+                  .truncate()
+                  .text_color(t.muted)
+                  .when(Boolean(x.title), (el) => el.tooltip(x.title))
+                  .child(x.note),
+              ),
           ),
-    );
+    ]);
 }
 
 /** "History ▸ N attempts" under the pipeline, closed by default; open, the run history in a box that scrolls past 200px. */
@@ -414,7 +424,8 @@ function outcome(t, r) {
       .gap(8)
       .items_center()
       .child(tag(o.tag, t.done))
-      .when(o.text !== '', (el) => el.child(div().min_w(0).truncate().text_size(12.5).child(o.text)));
+      .when(Boolean(o.url), (el) => el.child(link(t, 'outcome-link', o.text, (_e, cx) => cx.open_url(o.url)).tooltip(o.url)))
+      .when(!o.url && o.text !== '', (el) => el.child(div().min_w(0).truncate().text_size(12.5).child(o.text)));
   }
   if (r.status === 'unreadable') {
     return h_flex().gap(8).items_center().child(tag('UNREADABLE', t.muted)).child(div().min_w(0).text_size(12.5).truncate().child(r.error));

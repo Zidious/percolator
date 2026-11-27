@@ -41,6 +41,8 @@ import {
   roundPill,
   loopSpans,
   stageName,
+  triggerLine,
+  inputRows,
   moveRow,
   canPick,
   moveStop,
@@ -224,7 +226,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t26', 't24', 't25', 't22', 'dd', 't27', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 'audit', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['nightly', 't26', 't24', 't25', 't22', 'dd', 't27', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't47', 't23', 't21', 't15', 'audit', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -232,7 +234,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't27', 't25', 't24', 't26', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't27', 't25', 't24', 't26', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 'nightly', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -353,7 +355,7 @@ test('actionArgv refuses a reject without feedback', () => {
 });
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
-  assert.equal(needsCount(runs()), 11);
+  assert.equal(needsCount(runs()), 12);
   assert.equal(runningCount(runs()), 8);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
@@ -493,8 +495,8 @@ test('moveRow moves the selection within the shown rows and stays at the ends', 
   assert.equal(moveRow([], 'gone', 1), null);
 });
 
-test('the fixture has timelines for t8, t3, t2, t4, t24, t16, t17, dd-alert, t21 (hotfix and triage), t22, t23 (epic and two slices) and audit, and none for the rest (an older perc)', () => {
-  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't24', 't16', 't17', 'dd', 't21', 't21', 't22', 't23', 't23', 't23', 'audit']);
+test('the fixture has timelines for t8, t3, t2, t4, t24, t16, t17, dd-alert, t21 (hotfix and triage), t22, t23 (epic and two slices), audit, t47 and nightly, and none for the rest (an older perc)', () => {
+  assert.deepEqual(runs().filter((r) => 'timeline' in r).map((r) => r.id.split('-')[0]), ['t8', 't3', 't2', 't4', 't24', 't16', 't17', 'dd', 't21', 't21', 't22', 't23', 't23', 't23', 'audit', 't47', 'nightly']);
 });
 
 test('roundView defaults to the latest round and marks it running', () => {
@@ -540,7 +542,7 @@ test('stepAttempts is one step attempts in order', () => {
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
-  assert.deepEqual(cupLabel(runs()), { text: '11 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel(runs()), { text: '12 need you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
   assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
@@ -738,7 +740,7 @@ test('deleteCommand carries the confirmed ids, and deleteCommandIds reads them b
 test('isFinished is true for completed and failed runs only', () => {
   assert.deepEqual(
     runs().filter(isFinished).map((r) => r.id.split('-')[0]),
-    ['t3', 't9', 't15', 't21', 't23', 'audit'],
+    ['t3', 't9', 't15', 't21', 't23', 'audit', 't47'],
   );
 });
 
@@ -768,10 +770,11 @@ test('deleteFinishedConfirm lists the finished runs, or is null when there are n
   const d = 't21-triage-20261121-065800-9e3a';
   const s = 't23-epic-20261121-090000-7c2a-s1';
   const e = 'audit-20261120-180000-2d7c';
+  const f = 't47-ask-20261126-090000-c0e1';
   assert.deepEqual(deleteFinishedConfirm(runs()), {
-    title: 'Delete 6 finished run(s)?',
-    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15), ${d} (#21), ${s} (#23), ${e} (audit): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
-    ids: [a, b, c, d, s, e],
+    title: 'Delete 7 finished run(s)?',
+    detail: `Deletes ${a} (#3), ${b} (#9), ${c} (#15), ${d} (#21), ${s} (#23), ${e} (audit), ${f} (#47): their terminals, worktrees and records. Uncommitted changes are lost; their branches are kept.`,
+    ids: [a, b, c, d, s, e, f],
   });
   assert.equal(deleteFinishedConfirm(runs().filter((r) => !isFinished(r))), null);
 });
@@ -2067,4 +2070,49 @@ test('stageName is the stage of a <stage>.<n> step, else the step id', () => {
   assert.equal(stageName({ id: 'pick-pipeline', stage: 'route' }), 'pick-pipeline');
   assert.equal(stageName({ id: 'review', stage: 'review' }), 'review');
   assert.equal(stageName({ id: 'lint.2', stage: 'implement' }), 'lint.2');
+});
+
+const COMMENT = 'https://github.com/Zidious/percolator/issues/47#issuecomment-1';
+
+test('a completed run whose exit posted a comment is COMMENTED, with a link to it', () => {
+  const run = { ...readable('t3'), pr: null, ticket: { ref: 'github.com/zidious/percolator#47', number: 47 }, comment: { url: COMMENT } } as RunStatusJson;
+  assert.deepEqual(outcomeOf(run), { tag: 'COMMENTED', text: '#47 ↗', url: COMMENT });
+  assert.deepEqual(rowState(run), { tone: 'muted', text: 'Commented' });
+  assert.deepEqual(outcomeOf({ ...run, comment: null } as RunStatusJson), { tag: 'DELIVERED', text: 'Done.' });
+  // a PR wins over a comment
+  assert.deepEqual(outcomeOf({ ...readable('t3'), comment: { url: COMMENT } } as RunStatusJson), { tag: 'DELIVERED', text: 'Opened Zidious/percolator/pull/7' });
+});
+
+test('triggerLine names the trigger that started the run, with its detail', () => {
+  const line = (trigger: unknown) => triggerLine({ ...readable('t3'), trigger } as RunStatusJson);
+  assert.equal(line({ kind: 'schedule', detail: '0 9 * * 1' }), 'Started by schedule 0 9 * * 1');
+  assert.equal(line({ kind: 'schedule', detail: '0 9 * * 1 Europe/London' }), 'Started by schedule 0 9 * * 1 Europe/London');
+  assert.equal(line({ kind: 'label', detail: 'ready' }), 'Started by label ready');
+  assert.equal(line({ kind: 'pr_opened', detail: '#12' }), 'Started by PR #12');
+  assert.equal(line({ kind: 'dependabot', detail: '#12' }), 'Started by Dependabot PR #12');
+  assert.equal(line({ kind: 'check_failed', detail: 'main' }), 'Started by failed check on main');
+  assert.equal(line({ kind: 'label' }), 'Started by label');
+  assert.equal(line({ kind: 'check_failed' }), 'Started by failed check');
+  assert.equal(line(null), null);
+  assert.equal(line({ kind: 'cron', detail: 'x' }), null);
+  const { trigger: _t, ...noKey } = readable('t3') as Readable & { trigger?: unknown };
+  assert.equal(triggerLine(noKey as RunStatusJson), null);
+  assert.equal(triggerLine(byId('t5')), null);
+});
+
+test('inputRows lists each input as a history row: name, value on one line, the full value on hover', () => {
+  const run = { ...readable('t3'), inputs: { pr: 'https://github.com/o/r/pull/12', note: 'a\nb' } } as RunStatusJson;
+  assert.deepEqual(inputRows(run), [
+    { key: 'input:pr', mark: '·', tone: 'dim', step: 'pr', round: '', status: '', started: '', took: '', note: 'https://github.com/o/r/pull/12', title: 'https://github.com/o/r/pull/12' },
+    { key: 'input:note', mark: '·', tone: 'dim', step: 'note', round: '', status: '', started: '', took: '', note: 'a b', title: 'a\nb' },
+  ]);
+  assert.deepEqual(inputRows({ ...readable('t3'), inputs: {} } as RunStatusJson), []);
+  const { inputs: _i, ...noKey } = readable('t3');
+  assert.deepEqual(inputRows(noKey as RunStatusJson), []);
+  assert.deepEqual(inputRows(byId('t5')), []);
+});
+
+test('historyLabel counts attempts only, not inputs', () => {
+  const run = { ...readable('t3'), inputs: { a: 'b' }, timeline: [], steps: readable('t3').steps.map((st) => ({ ...st, status: 'pending', attempts: 0 })) } as RunStatusJson;
+  assert.equal(historyLabel(run, false), 'History ▸');
 });
