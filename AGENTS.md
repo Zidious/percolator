@@ -55,13 +55,13 @@ Read the module before changing it.
 | `src/graph/` | core stages and contracts, layer merge with locks, rules, graph build |
 | `src/engine/` | `runGraph`, run state, `Runtime` interface |
 | `src/runtime/` | `HerdrRuntime`: task rendering, terminal lifecycle, outputs collection |
-| `src/run/` | run lifecycle: prepare, launch/drive, driver lock, metadata; `request.ts`: `--input` parsing and the run request checked against its pipeline; `pick-pipeline.ts`: the pipeline a ticket asks for (label, `/percolator run` comment); `child.ts`: linked child runs; `route.ts`: a router's decision (`route.json`) and handoff; `fan-out.ts`: the fan-out and seed builtins (`fanout.json`, slice runs); `pipelines-json.ts`: `perc pipelines`; `answer.ts`: what a paused run asks and the owner's answer (`perc answer`) |
-| `src/tracker/` | GitHub: tickets, `gh` client, intake, approval gate, PRs; `BUILTIN_NAMES` is the single source of builtin node names, `EXITS` of exit kinds |
+| `src/run/` | run lifecycle: prepare, launch/drive, driver lock, metadata; `request.ts`: `--input` parsing and the run request checked against its pipeline; `pick-pipeline.ts`: the pipeline a ticket asks for (label, `/percolator run` comment); `child.ts`: linked child runs; `route.ts`: a router's decision (`route.json`) and handoff; `fan-out.ts`: the fan-out and seed builtins (`fanout.json`, slice runs); `pipelines-json.ts`: `perc pipelines`; `answer.ts`: what a paused run asks and the owner's answer (`perc answer`); `builtins.ts`: the handler of every builtin, typed by `BUILTIN_NAMES` (a new builtin gets its entry there); `resumable.ts`: the checks before a run is driven again; `outputs.ts`: the latest output of a key |
+| `src/tracker/` | GitHub: tickets, `gh` client, intake, approval gate, PRs; `BUILTIN_NAMES` is the single source of builtin node names, `EXITS` of exit kinds; `markers.ts`: the hidden markers in everything posted (their text must not change) |
 | `src/tracker/exits/` | one handler per exit builtin (comment, issues, report, release, review, private fork PR) |
 | `src/herdr/` | clients for `hc` and `herdr-app` |
 | `src/adapters/` | agent argv builders (`claude`, `codex`, `command`) |
 | `src/workspace/` | worktrees, run/step dirs, ground materialization, skill plugins |
-| `src/util/` | paths, atomic fs, argv-only exec; `cron.ts` (cron with time zones, Intl only), `sections.ts` (`## ` sections of drafted issues and slices) |
+| `src/util/` | paths, atomic fs, argv-only exec; `cron.ts` (cron with time zones, Intl only), `sections.ts` (`## ` sections of drafted issues and slices), `errors.ts` (`UsageError`) |
 | `src/watch/` | `perc watch`: trigger polling, the firing ledger (`~/.percolator/watch/fired.json`), the watch loop and its heartbeat (`watch.json`) |
 | `src/validate.ts` | config → graph validation pipeline |
 | `templates/` | recommended config written by `perc init` |
@@ -74,9 +74,9 @@ Read the module before changing it.
 
 - **Test fakes:** never spawn the real `hc`, `herdr-app` or `gh`: use `FakeHc`, `FakeHerdrApp`, `FakeGh`, `ExecRecorder` (`tests/helpers/`). Unit tests use `FakeGit`; real git only via `makeRepo()` / `setupRunEnv()`. Engine tests use `FakeRuntime`.
 - **No prompts:** git and gh run with prompt-free env (`gitEnv`, the gh client's env); credentials in URLs are redacted from errors.
-- **Errors:** one line, name the file or run, say what to do next; tests assert the exact text.
+- **Errors:** one line, name the file or run, say what to do next; tests assert the exact text. A mistake in how perc was called subclasses `UsageError` (`src/util/errors.ts`): the CLI prints it with the usage and exits 2.
 - **Panel contract:** `perc status --json` and `herdr/mods/percolator/model.js` (its only reader) change together; so do `perc pipelines --json` (`src/run/pipelines-json.ts`) and the start picker's reader in `model.js`. After changing either mod, run `pnpm herdr:sync` so the running app shows it (Herdr does not follow symlinks or junctions). Herdr refuses cross-mod imports, so the cup carries copies of the panel's `model.js`, `mark.js`, `source.js`; re-copy them, and `tests/herdr/cup.test.ts` keeps them equal.
-- **Resume-safe:** run ids, terminal names and posted comments are deterministic or marked so a resume finds them instead of duplicating them.
+- **Resume-safe:** run ids, terminal names and posted comments are deterministic or marked (`src/tracker/markers.ts`) so a resume finds them instead of duplicating them.
 - **Docs stay true:** `README.md` (the newcomer path) and `docs/*.md` (the topic pages it links) are the user-facing docs. A change that makes anything in them wrong (requirements, stages, the example config in `docs/configuration.md`, config keys, statuses and how to answer them, integrations, setup) updates them in the same commit, including the diagrams in `assets/diagram-*-{light,dark}.svg` (both themes). A new integration gets a row in the Integrations table and its own `##` section in `docs/integrations.md`. New reference material goes in the docs page it belongs to, not the README. `tests/docs.test.ts` checks their links. Check them before calling the work done.
 
 ## Design decisions to keep
