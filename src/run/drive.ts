@@ -6,31 +6,20 @@ import type { RunState } from '../engine/state.ts';
 import type { Runtime } from '../engine/runtime.ts';
 import { HerdrRuntime, sweepTerminals } from '../runtime/herdr-runtime.ts';
 import type { Attention } from '../runtime/herdr-runtime.ts';
-import { githubComment } from '../tracker/exits/comment.ts';
-import { githubOpenIssues } from '../tracker/exits/issues.ts';
-import { githubPrivateForkPr } from '../tracker/exits/private-fork.ts';
-import { githubRelease } from '../tracker/exits/release.ts';
-import { percolatorReport } from '../tracker/exits/report.ts';
-import { githubPrReview } from '../tracker/exits/review.ts';
 import { githubGate } from '../tracker/gate.ts';
-import { githubIntake } from '../tracker/intake.ts';
-import { githubOpenPr } from '../tracker/pr.ts';
-import { parseTicket } from '../tracker/ticket.ts';
 import { sweepLeftovers, writeFileAtomic } from '../util/fs.ts';
 import type { ValidateResult } from '../validate.ts';
 import { materializeGrounds, runDir } from '../workspace/run-dir.ts';
 import { ensureWorktree } from '../workspace/worktree.ts';
 import { numberFindings } from './answer.ts';
+import { builtinHandlers } from './builtins.ts';
 import { acquireDriverLock, liveness } from './lock.ts';
-import { startLinkedRun } from './child.ts';
-import { fanOut, percolatorSeed } from './fan-out.ts';
-import { newRunId } from './meta.ts';
 import type { RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 import { reusePriorGroom } from './reuse-groom.ts';
 import { prUrl } from './outputs.ts';
 import { checkResumable } from './resumable.ts';
-import { routeHandoff, routeRules, skipDecidedRoute } from './route.ts';
+import { skipDecidedRoute } from './route.ts';
 
 /**
  * Drive run `runId` from its saved state until it completes, fails or pauses, after `checkResumable`.
@@ -73,17 +62,6 @@ async function driveHeld(
     deps.out(`${a.stepId}: working again`);
     attentionWrite = attentionWrite.then(() => fs.rm(attentionFile, { force: true })).catch(() => {});
   };
-  const ticket = meta.ticket === undefined ? undefined : parseTicket(meta.ticket);
-  // an issue exit's `next`: one linked run of that pipeline per issue it opened
-  const nextRuns = (next: string | undefined) =>
-    next === undefined
-      ? {}
-      : {
-          next: {
-            newId: (url: string) => newRunId({ issue: parseTicket(url).number, pipeline: next }, now()),
-            start: (url: string, child: string) => startLinkedRun({ parent: meta, pipeline: next, ticket: url, runId: child }, deps),
-          },
-        };
   const runtime = new HerdrRuntime({
     hc: deps.hc,
     runId,
@@ -101,62 +79,7 @@ async function driveHeld(
     ...(meta.space !== undefined ? { space: meta.space } : {}),
     keepTerminals: meta.keepTerminals,
     outliveParent: true,
-    builtins: {
-      'github.intake': githubIntake({
-        gh: deps.gh,
-        runDir: dir,
-        ...(ticket !== undefined ? { ticket } : {}),
-        pipeline: meta.pipeline,
-        runId,
-        inputs: meta.inputs,
-        ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
-      }),
-      'github.open_pr': githubOpenPr({
-        gh: deps.gh,
-        runDir: dir,
-        worktree: meta.worktree,
-        branch: meta.branch,
-        base: meta.base,
-        repo: meta.repo,
-        pipeline: meta.pipeline,
-        runId,
-        ...(meta.fanOut !== undefined ? { slice: { title: meta.fanOut.title } } : {}),
-      }),
-      'github.comment': githubComment({ gh: deps.gh, runDir: dir, runId }),
-      'percolator.report': percolatorReport({ runDir: dir }),
-      'github.open_issues': githubOpenIssues({ gh: deps.gh, runDir: dir, runId, repo: meta.repo, ...nextRuns(v.pipeline.next) }),
-      'github.release': githubRelease({
-        gh: deps.gh,
-        runDir: dir,
-        worktree: meta.worktree,
-        branch: meta.branch,
-        repo: meta.repo,
-        inputs: meta.inputs,
-      }),
-      'github.pr_review': githubPrReview({ gh: deps.gh, runDir: dir, runId, inputs: meta.inputs, repo: meta.repo }),
-      'percolator.route_rules': routeRules({
-        gh: deps.gh,
-        runDir: dir,
-        spec: v.pipeline,
-        specs: v.pipelines,
-        profile: v.profile,
-        ...(v.tracker?.approvers !== undefined ? { approvers: v.tracker.approvers } : {}),
-      }),
-      'percolator.route': routeHandoff({ deps, meta, spec: v.pipeline, specs: v.pipelines }),
-      'percolator.fan_out': fanOut({ deps, meta, spec: v.pipeline }),
-      ...(v.pipeline.fan_out !== undefined
-        ? { 'percolator.seed': percolatorSeed({ runDir: dir, meta, home: deps.home, output: v.pipeline.fan_out.slices.output }) }
-        : {}),
-      'github.private_fork_pr': githubPrivateForkPr({
-        gh: deps.gh,
-        runDir: dir,
-        worktree: meta.worktree,
-        branch: meta.branch,
-        base: meta.base,
-        repo: meta.repo,
-        inputs: meta.inputs,
-      }),
-    },
+    builtins: builtinHandlers({ deps, meta, v, dir, runId, now }),
     gate: githubGate({
       gh: deps.gh,
       runDir: dir,
