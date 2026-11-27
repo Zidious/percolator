@@ -1,3 +1,5 @@
+import type { NodeDef } from '../config/schema.ts';
+
 export type LaunchSpec = {
   model?: string;
   effort?: string;
@@ -17,4 +19,6 @@ export type AgentAdapter = {
   /** The agent accepts an effort level. */
   effort: boolean;
   argv(s: LaunchSpec): string[];
+  /** Problems with an agent step's config only this agent has rules for; `key` is the offending key under the step. */
+  check?(def: NodeDef): { message: string; key?: string }[];
 };

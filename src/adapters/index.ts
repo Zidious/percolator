@@ -42,5 +42,12 @@ export const ADAPTERS: Readonly<Record<'claude' | 'codex' | 'command', AgentAdap
     effort: false,
     // No `--`: the generic CLI's argument parsing is unknown.
     argv: (s) => [...(s.command ?? []), s.message],
+    check: (def) => {
+      const command = def.command;
+      if (command === undefined || command.length === 0) {
+        return [{ message: 'agent "command" needs "command" (the program to run); add command: [program, ...args]' }];
+      }
+      return command[0]!.startsWith('-') ? [{ message: 'command must not start with "-"; put the program first', key: 'command' }] : [];
+    },
   },
 });
