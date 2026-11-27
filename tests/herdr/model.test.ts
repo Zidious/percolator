@@ -2083,6 +2083,11 @@ test('a completed run whose exit posted a comment is COMMENTED, with a link to i
   assert.deepEqual(outcomeOf({ ...readable('t3'), comment: { url: COMMENT } } as RunStatusJson), { tag: 'DELIVERED', text: 'Opened Zidious/percolator/pull/7' });
 });
 
+test('a ticketless run whose exit posted a comment links it as Comment', () => {
+  const run = { ...readable('t3'), pr: null, ticket: null, comment: { url: COMMENT } } as RunStatusJson;
+  assert.deepEqual(outcomeOf(run), { tag: 'COMMENTED', text: 'Comment ↗', url: COMMENT });
+});
+
 test('triggerLine names the trigger that started the run, with its detail', () => {
   const line = (trigger: unknown) => triggerLine({ ...readable('t3'), trigger } as RunStatusJson);
   assert.equal(line({ kind: 'schedule', detail: '0 9 * * 1' }), 'Started by schedule 0 9 * * 1');
