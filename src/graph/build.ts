@@ -5,7 +5,7 @@ import { effectiveKind } from '../config/schema.ts';
 import type { NodeDef, Stage } from '../config/schema.ts';
 import { EXITS, EXIT_KINDS } from '../tracker/index.ts';
 import type { ExitKind } from '../tracker/index.ts';
-import { CORE_GROOM_GATE, FEATURE, STAGE_CONTRACTS } from './core.ts';
+import { CORE_GROOM_GATE, FEATURE, PICK_GATE, ROUTE_CHOOSE, STAGE_CONTRACTS } from './core.ts';
 import type { PipelineHeader } from './core.ts';
 import type { Merged, MergedPipeline, Sourced } from './merge.ts';
 
@@ -134,7 +134,6 @@ function pickPrompt(from: readonly string[], descriptions: BuildOptions['descrip
 }
 
 /** The step id of a router's pick gate; perc status shows it by this name. */
-const PICK_GATE = 'pick-pipeline';
 
 export function buildGraph(
   merged: Readonly<Merged | MergedPipeline>,
@@ -361,7 +360,7 @@ function buildWhole(
     const defs: { id: string; def: NodeDef; key: string }[] = [{ id: 'route.0', def: { builtin: 'percolator.route_rules' }, key: 'router' }];
     if (choose !== undefined) {
       const { from, confirm: _c, prompt, ...agent } = choose;
-      defs.push({ id: 'route.1', def: { ...agent, prompt: prompt ?? pickPrompt(from, o.descriptions) }, key: 'choose' });
+      defs.push({ id: ROUTE_CHOOSE, def: { ...agent, prompt: prompt ?? pickPrompt(from, o.descriptions) }, key: 'choose' });
       defs.push({ id: PICK_GATE, def: { kind: 'gate', on_fail: { back_to: 'route', max_rounds: 3 } }, key: 'choose' });
     }
     defs.push({ id: 'route.3', def: { builtin: 'percolator.route' }, key: 'router' });

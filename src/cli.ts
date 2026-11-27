@@ -35,6 +35,7 @@ import { validate, validateAll } from './validate.ts';
 import { pidAlive } from './run/lock.ts';
 import { otherWatcher, requestStop, stopFile, stoppableWatcher, WATCH_STOP_TIMEOUT_S, WATCH_TERMINAL, WATCHER_LABELS, waitForWatcherExit, watchFile, watchLoop } from './watch/watch.ts';
 import type { Graph } from './graph/build.ts';
+import { PICK_GATE } from './graph/core.ts';
 import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
 import { pipeWriter } from './util/pipe.ts';
@@ -428,7 +429,7 @@ async function runDecide(decision: 'approve' | 'reject', args: string[], deps: D
   const waiting = await readWaiting(dir);
   if (waiting === undefined) throw new Error(`run ${runId} is not waiting at a gate; see where it is with perc status ${runId}`);
   if (pipeline !== undefined) {
-    if (waiting.stepId !== 'pick-pipeline') {
+    if (waiting.stepId !== PICK_GATE) {
       throw new Error(`--pipeline only answers a pick-pipeline gate; run ${runId} is waiting at ${waiting.stepId}`);
     }
     const v = await validate({ configFile: meta.configFile, cwd: meta.repoRoot, home: deps.home, profile: meta.profile, pipeline: meta.pipeline });

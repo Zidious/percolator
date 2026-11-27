@@ -4,14 +4,14 @@ import path from 'node:path';
 import { STAGES } from '../config/schema.ts';
 import type { RunState, StepRecord } from '../engine/state.ts';
 import { loadState } from '../engine/state.ts';
+import { CORE_GROOM_GATE, PICK_GATE, ROUTE_CHOOSE } from '../graph/core.ts';
 import { openedIssues } from '../tracker/exits/issues.ts';
 import { readWaiting } from '../tracker/gate.ts';
 import type { Waiting } from '../tracker/gate.ts';
-import { liveness } from './lock.ts';
 import { prUrl, readLatest } from './outputs.ts';
 import { readRunGraph } from './graph-file.ts';
 import type { RunGraphLoop, RunGraphStep } from './graph-file.ts';
-import { lockIsLive, pidAlive, readDriverLock } from './lock.ts';
+import { liveness, lockIsLive, pidAlive, readDriverLock } from './lock.ts';
 import type { DriverLock } from './lock.ts';
 import { readFanOut } from './fan-out.ts';
 import type { FanOutFile } from './fan-out.ts';
@@ -201,7 +201,7 @@ async function historySteps(dir: string, state: RunState, waiting: Waiting | und
 }
 
 async function isGateStep(dir: string, stepId: string, state: RunState): Promise<boolean> {
-  if (stepId === 'approve-groom') return true;
+  if (stepId === CORE_GROOM_GATE.name) return true;
   for (const h of state.history) {
     if (h.stepId !== stepId) continue;
     const at = path.join(dir, 'steps', stepId, String(h.attempt));
@@ -420,8 +420,6 @@ export function attentionNext(
   return yourTurn({ kind: a.kind, runId: run.id, step: '', ...again, ...slice, ...choices, ...none }).next;
 }
 
-const PICK_GATE = 'pick-pipeline';
-
 /** A pick gate's reject has the choose agent pick again, or pauses at its cap on the last round. */
 function pickDetail(g: Pick<YourTurnInput, 'backTo' | 'capRounds'>): { detail?: string } {
   if (g.backTo === undefined) return {};
@@ -431,7 +429,7 @@ function pickDetail(g: Pick<YourTurnInput, 'backTo' | 'capRounds'>): { detail?: 
 
 /** The choose agent's latest valid pick among `choices`, if it made one (sure or not). */
 async function suggestion(dir: string, state: RunState, choices: string[]): Promise<string | undefined> {
-  const rel = latest(state, 'route.1')?.outputs['pick'];
+  const rel = latest(state, ROUTE_CHOOSE)?.outputs['pick'];
   if (rel === undefined) return undefined;
   const text = await fs.readFile(path.join(dir, rel), 'utf8').catch(() => '');
   return parsePick(text, choices).pipeline;

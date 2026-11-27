@@ -26,6 +26,11 @@ export const CORE_GROOM_GATE: Readonly<{ name: 'approve-groom'; def: Readonly<No
   def: { kind: 'gate', after: 'groom', required: true, on_fail: { back_to: 'groom', max_rounds: 3 } } as NodeDef,
 });
 
+/** A router's choose agent: the first step of its route stage. */
+export const ROUTE_CHOOSE = 'route.1';
+/** The gate after a router's choose agent, which asks the owner when the agent is unsure. */
+export const PICK_GATE = 'pick-pipeline';
+
 /** A pipeline's own settings: everything but what runs its stages (bindings, nodes, rules, use) and its lock flag. */
 export type PipelineHeader = Omit<Pipeline, 'bindings' | 'nodes' | 'rules' | 'use' | 'required'>;
 

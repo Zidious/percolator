@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { PipelineSpec } from '../config/pipelines.ts';
 import type { NodeOutcome, RunContext, Runtime } from '../engine/runtime.ts';
 import type { Step } from '../graph/build.ts';
+import { PICK_GATE, ROUTE_CHOOSE } from '../graph/core.ts';
 import type { StepHandler } from '../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../runtime/outcome.ts';
 import { errText, escalate } from '../tracker/exits/latest.ts';
@@ -19,9 +20,6 @@ import type { DriverDeps } from './prepare.ts';
 
 /** `<run dir>/route.json`: where the router sent the ticket, why, and (once started) the child run. */
 export type Route = { pipeline: string; by: 'named' | 'rule' | 'agent' | 'gate' | 'fallback'; detail: string; child?: string };
-
-const CHOOSE = 'route.1';
-const PICK_GATE = 'pick-pipeline';
 
 const routeFile = (runDir: string) => path.join(runDir, 'route.json');
 
@@ -46,7 +44,7 @@ export function parsePick(text: string, from: readonly string[]): { pipeline?: s
 
 /** The latest pick of the choose agent, if it ran. */
 async function latestPick(ctx: RunContext, runDir: string, spec: PipelineSpec): Promise<{ pipeline?: string; unsure: boolean } | undefined> {
-  const rel = ctx.previousOutputs[CHOOSE]?.['pick'];
+  const rel = ctx.previousOutputs[ROUTE_CHOOSE]?.['pick'];
   if (rel === undefined || spec.choose === undefined) return undefined;
   const text = await fs.readFile(path.join(runDir, rel), 'utf8').catch(() => '');
   return parsePick(text, spec.choose.from);
@@ -98,7 +96,7 @@ export function routeRules(o: { gh: Gh; runDir: string; spec: PipelineSpec; spec
 export function skipDecidedRoute(inner: Runtime, runDir: string, spec: PipelineSpec): Runtime {
   return {
     async executeStep(step: Step, ctx: RunContext): Promise<NodeOutcome> {
-      if (step.stage !== 'route' || (step.id !== CHOOSE && step.id !== PICK_GATE)) return inner.executeStep(step, ctx);
+      if (step.stage !== 'route' || (step.id !== ROUTE_CHOOSE && step.id !== PICK_GATE)) return inner.executeStep(step, ctx);
       if ((await readRoute(runDir)) !== undefined) return { status: 'pass', outputs: {} };
       if (step.id === PICK_GATE && (spec.choose?.confirm ?? 'unsure') === 'unsure') {
         const pick = await latestPick(ctx, runDir, spec);
