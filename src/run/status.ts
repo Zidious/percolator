@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { STAGES } from '../config/schema.ts';
 import type { RunState, StepRecord } from '../engine/state.ts';
-import { loadState } from '../engine/state.ts';
+import { isFinished, isLive, loadState } from '../engine/state.ts';
 import { CORE_GROOM_GATE, PICK_GATE, ROUTE_CHOOSE } from '../graph/core.ts';
 import { openedIssues } from '../tracker/exits/issues.ts';
 import { readWaiting } from '../tracker/gate.ts';
@@ -195,7 +195,7 @@ async function historySteps(dir: string, state: RunState, waiting: Waiting | und
     if (!out.some((s) => s.id === h.stepId)) await add(h.stepId, false);
   }
   const cur = state.currentStep;
-  const live = state.status === 'running' || state.status === 'paused';
+  const live = isLive(state.status);
   if (live && cur !== undefined && !out.some((s) => s.id === cur)) await add(cur, waiting?.stepId === cur);
   return out;
 }
@@ -711,11 +711,11 @@ async function readRun(l: RunListing & { meta: RunMeta }, deps: DriverDeps, list
   const state = l.state ?? (await loadState(dir));
   const graph = await readRunGraph(dir);
   const loopDefs = graph?.loops ?? [];
-  const live = state.status === 'running' || state.status === 'paused';
+  const live = isLive(state.status);
   const waiting = live ? await readWaiting(dir) : undefined;
   const stepDefs = graph?.steps ?? (await historySteps(dir, state, waiting));
   // a finished run has no driver or terminals worth asking hc about
-  const finished = state.status === 'completed' || state.status === 'failed';
+  const finished = isFinished(state.status);
   const alive = finished ? false : await driverAlive(dir, meta, deps);
   const liveT = finished ? { names: {} as Record<string, string> } : await liveTerminals(meta, deps);
   // before any step has run the engine has no current step yet: the run is at its first step (a slice's fanned stage)
