@@ -36,6 +36,8 @@ export type AttentionJson = {
   commands?: string[];
   terminal?: string;
   agentState?: string;
+  /** paused only: the agent's saved screen (an absolute path) when the pause reason names it; `detail` keeps it in its text */
+  transcript?: string;
   /** a pick-pipeline gate only: the pipelines `pick` may name (`perc approve <id> --pipeline <name>`) */
   choices?: string[];
   /** questions or findings only: what the run asks, item by item (`perc answer <id>` numbers them from 1) */
@@ -335,8 +337,12 @@ export function yourTurn(a: YourTurnInput): { message: string; detail?: string; 
         detail: 'Grant one more round and the run goes back with the open findings.',
         next: resume,
       };
-    case 'paused':
-      return { message: `${a.step} paused: ${a.reason}`, next: resume };
+    case 'paused': {
+      // the runtime's reasons start with the step, which the message already names
+      const reason = a.reason ?? ''; // attentionNext asks for the commands only
+      const why = reason.startsWith(`${a.step}: `) ? reason.slice(a.step.length + 2) : reason;
+      return { message: `${a.step} paused`, ...(why.trim() !== '' ? { detail: why } : {}), next: resume };
+    }
     case 'questions':
       return {
         message: `${a.step} has questions for you`,
@@ -530,7 +536,18 @@ async function attentionOf(o: {
       const reason = (state.pausedReason ?? '').replace(/^cap: /, '');
       return { kind: 'cap', since: lastEnd, ...turn('cap', state.currentStep, { reason }), review: failing(from), actions: ['grant'] };
     }
-    return { kind: 'paused', since: lastEnd, ...turn('paused', state.currentStep, { reason: state.pausedReason ?? '' }), review: failing(state.currentStep), actions: ['resume'] };
+    const reason = state.pausedReason ?? '';
+    const named = state.currentStep === undefined ? undefined : transcriptIn(reason, dir, state.currentStep);
+    // the runtime saves the screen best-effort: link it only when it was saved
+    const transcript = named !== undefined && (await fs.stat(named).then((s) => s.isFile(), () => false)) ? named : undefined;
+    return {
+      kind: 'paused',
+      since: lastEnd,
+      ...turn('paused', state.currentStep, { reason }),
+      ...(transcript !== undefined ? { transcript } : {}),
+      review: failing(state.currentStep),
+      actions: ['resume'],
+    };
   }
   // after `perc clean` (no worktree) there is nothing left to do for a failed run
   if (state.status === 'failed') {
@@ -775,4 +792,12 @@ export async function statusJson(deps: DriverDeps): Promise<StatusJson> {
   await Promise.all(Array.from({ length: Math.min(READ_AT_ONCE, listed.length) }, worker));
   const now = (deps.now ?? (() => new Date()))();
   return { schema: 2, runs, watcher: await watcherStatus(deps.home, now, deps.pidAlive ?? pidAlive) };
+}
+
+/** The step's saved agent screen (`<runDir>/steps/<step>/<n>/transcript.txt`) when a pause reason names it. Matched as
+ *  the path is built, so a path with spaces is found whole. */
+export function transcriptIn(reason: string, runDir: string, step: string): string | undefined {
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const sep = esc(path.sep);
+  return reason.match(new RegExp(`${esc(path.join(runDir, 'steps', step))}${sep}\\d+${sep}transcript\\.txt`))?.[0];
 }

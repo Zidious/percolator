@@ -550,14 +550,13 @@ export function readRatio(stored) {
   return stored != null && n > 0 && n < 1 ? n : BOARD_RATIO;
 }
 
-/** How the title bar fits `width` design px with `needs` runs needing you: ⧉ and ✕ always stay; + New run is an icon
- *  under 800px; the "N need you" chip shortens to "N" first, then the Active/All tabs move to a row of their own. */
-export function titleLayout(width, needs) {
+/** How the title bar fits `width` design px with `needs` runs needing you, on the `filter` tab: ⧉ and ✕ always stay;
+ *  + New run is an icon under 800px; the Active/All tabs (and on All, Delete finished runs ↗) move to a row of their
+ *  own first, and only under 270px does the "N need you" chip shorten to "N", so it never reads shorter when wider. */
+export function titleLayout(width, needs, filter) {
   const newRun = width >= 800 ? 'text' : 'icon';
-  if (needs === 0) return { tabs: width >= 330 ? 'inline' : 'below', chip: 'long', newRun };
-  if (width >= 400) return { tabs: 'inline', chip: 'long', newRun };
-  if (width >= 350) return { tabs: 'inline', chip: 'short', newRun };
-  return { tabs: 'below', chip: width >= 270 ? 'long' : 'short', newRun };
+  const inlineFrom = (needs > 0 ? 460 : 330) + (filter === 'all' ? (needs > 0 ? 160 : 190) : 0);
+  return { tabs: width >= inlineFrom ? 'inline' : 'below', chip: width < 270 ? 'short' : 'long', newRun };
 }
 
 // ── the cup (mods/percolator-cup carries a copy of this file) ──
@@ -575,10 +574,39 @@ export function cupLabel(runs) {
 export function notice(run) {
   return {
     title: `${runLabel(run)} needs you`,
-    body: run.attention?.message ?? '',
+    // a paused run's message only names the step: its detail says why
+    body: run.attention?.kind === 'paused' && run.attention.detail ? `${run.attention.message}: ${run.attention.detail}` : (run.attention?.message ?? ''),
     level: 'warning',
     action: { name: `percolator-cup.open/${run.id}` },
   };
+}
+
+/** The markdown the inline reader shows for the file at `path`. A router's pick.md starts with `pipeline:` and
+ *  `unsure:` lines that markdown would run into one paragraph: each becomes a paragraph of its own. */
+export function readerText(path, text) {
+  if (path.split(/[\\/]/).pop() !== 'pick.md') return text;
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const fields = [];
+  let i = 0;
+  for (; i < lines.length; i++) {
+    if (/^(pipeline|unsure):/.test(lines[i])) fields.push(lines[i]);
+    else if (lines[i].trim() !== '') break;
+  }
+  const rest = lines.slice(i).join('\n');
+  return rest === '' ? fields.join('\n\n') + (text.endsWith('\n') ? '\n' : '') : [...fields, rest].join('\n\n');
+}
+
+/** A paused run's detail split around its transcript path (`attention.transcript`), so the view can draw the path as
+ *  a link; null when there is no transcript or the detail does not name it. */
+export function reasonParts(detail, transcript) {
+  const at = transcript ? (detail ?? '').indexOf(transcript) : -1;
+  if (at < 0) return null;
+  return { before: detail.slice(0, at), after: detail.slice(at + transcript.length) };
+}
+
+/** A file:// URL for an absolute path (Windows or POSIX) that the system opens. */
+export function fileUrl(path) {
+  return `file:///${encodeURI(path.replace(/\\/g, '/').replace(/^\//, '')).replace(/[#?]/g, encodeURIComponent)}`;
 }
 
 /** A layout node by id (depth first), or null. */
@@ -612,6 +640,12 @@ export function ownsCommands(place, inWindow) {
  *  (a window is shown while open; a docked copy while its layout block is not hidden). */
 export function showsHere(place, inWindow, blockShown) {
   return ownsCommands(place, inWindow) && (inWindow || blockShown);
+}
+
+/** One check of whether this copy is shown: refresh when it has just become shown (`now` after a check that saw it
+ *  hidden, or the first check), and remember `now` for the next check. */
+export function catchUpStep(wasShown, now) {
+  return { refresh: now && !wasShown, wasShown: now };
 }
 
 /** perc names terminals (`hc` names); Herdr's terminals() lists `{ address, name }`. The live terminal's address for a

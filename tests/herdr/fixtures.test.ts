@@ -137,3 +137,14 @@ test('the fixture has a findings run with two review slots, both files in its bo
   assert.deepEqual(t26.attention.review.map((r: any) => r.step), ['review.0', 'review.1']);
   assert.equal(t26.attention.asked.items.length, 5);
 });
+
+test('the fixture has a paused run with a transcript, and one without', () => {
+  const runs = readFixture('status.json').runs;
+  const crashed = runs.find((r: any) => r.attention?.transcript !== undefined);
+  assert.equal(crashed.attention.message, 'implement paused');
+  assert.ok(crashed.attention.detail.includes(crashed.attention.transcript));
+  assert.ok(fs.existsSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', crashed.attention.transcript)));
+  const t12 = runs.find((r: any) => r.id.startsWith('t12-'));
+  assert.equal(t12.attention.message, 'plan paused');
+  assert.equal(t12.attention.detail, 'contract: plan finished without outputs/plan.md');
+});

@@ -14,6 +14,10 @@ import {
   boardHeight,
   dragBoard,
   titleLayout,
+  catchUpStep,
+  readerText,
+  reasonParts,
+  fileUrl,
   readRatio,
   clock,
   timelineRows,
@@ -219,7 +223,7 @@ test('parseStatus refuses JSON without a runs list', () => {
 test('sortRuns puts attention first, then running, then the rest, each newest first; unreadable last', () => {
   const input = runs();
   const before = ids(input);
-  assert.deepEqual(ids(sortRuns(input)), ['t26', 't24', 't25', 't22', 'dd', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 'audit', 't3', 't5']);
+  assert.deepEqual(ids(sortRuns(input)), ['t26', 't24', 't25', 't22', 'dd', 't27', 't12', 't2', 't11', 't9', 't4', 't23', 't23', 't21', 't17', 't16', 't14', 't13', 't8', 't23', 't21', 't15', 'audit', 't3', 't5']);
   assert.deepEqual(ids(input), before, 'sortRuns does not mutate its input');
 });
 
@@ -227,7 +231,7 @@ test('visibleRuns "active" hides completed and failed runs unless they need atte
   const rs = runs();
   const failedQuiet = { ...readable('t9'), id: 't99-quiet' } as Readable;
   delete failedQuiet.attention;
-  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't25', 't24', 't26', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
+  assert.deepEqual(ids(visibleRuns([...rs, failedQuiet], 'active')), ['t8', 't2', 't4', 't12', 't27', 't25', 't24', 't26', 't9', 't11', 't13', 't14', 't16', 't17', 'dd', 't21', 't22', 't23', 't23', 't5']);
 });
 
 test('visibleRuns "all" keeps everything in order', () => {
@@ -348,7 +352,7 @@ test('actionArgv refuses a reject without feedback', () => {
 });
 
 test('needsCount counts runs with attention; runningCount counts running runs that need nothing', () => {
-  assert.equal(needsCount(runs()), 10);
+  assert.equal(needsCount(runs()), 11);
   assert.equal(runningCount(runs()), 8);
   assert.equal(needsCount([]), 0);
   assert.equal(runningCount([]), 0);
@@ -535,7 +539,7 @@ test('stepAttempts is one step attempts in order', () => {
 });
 
 test('cupLabel says how many need you, else how many run, else Percolator, with its tone', () => {
-  assert.deepEqual(cupLabel(runs()), { text: '10 need you', tone: 'blocked' });
+  assert.deepEqual(cupLabel(runs()), { text: '11 need you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t2')]), { text: '1 needs you', tone: 'blocked' });
   assert.deepEqual(cupLabel([readable('t8'), readable('t3')]), { text: '1 running', tone: 'working' });
   assert.deepEqual(cupLabel([readable('t3'), byId('t5')]), { text: 'Percolator', tone: 'muted' });
@@ -613,17 +617,28 @@ test('readRatio: a stored ratio between 0 and 1, else the default', () => {
   assert.equal(BOARD_RATIO, 0.3);
 });
 
-test('titleLayout: the buttons always fit; the needs chip shortens, then the tabs move to a second row', () => {
-  // + New run is an icon under 800px (text from there): it takes ~30px, so the chip shortens and the tabs move sooner
-  assert.deepEqual(titleLayout(400, 2), { tabs: 'inline', chip: 'long', newRun: 'icon' });
-  assert.deepEqual(titleLayout(380, 2), { tabs: 'inline', chip: 'short', newRun: 'icon' }, 'the default 380px panel');
-  assert.deepEqual(titleLayout(350, 2), { tabs: 'inline', chip: 'short', newRun: 'icon' });
-  assert.deepEqual(titleLayout(340, 2), { tabs: 'below', chip: 'long', newRun: 'icon' });
-  assert.deepEqual(titleLayout(260, 2), { tabs: 'below', chip: 'short', newRun: 'icon' });
-  assert.deepEqual(titleLayout(330, 0), { tabs: 'inline', chip: 'long', newRun: 'icon' }, 'no chip: the tabs fit inline longer');
-  assert.deepEqual(titleLayout(320, 0), { tabs: 'below', chip: 'long', newRun: 'icon' });
-  assert.deepEqual(titleLayout(720, 2).newRun, 'icon');
-  assert.deepEqual(titleLayout(800, 2), { tabs: 'inline', chip: 'long', newRun: 'text' }, 'the window');
+test('titleLayout: the tabs move to their own row before the chip shortens; All needs room for Delete finished runs ↗', () => {
+  assert.deepEqual(titleLayout(380, 2, 'active'), { tabs: 'below', chip: 'long', newRun: 'icon' }, 'the default 380px panel reads N need you');
+  assert.deepEqual(titleLayout(460, 2, 'active'), { tabs: 'inline', chip: 'long', newRun: 'icon' });
+  assert.deepEqual(titleLayout(459, 2, 'active').tabs, 'below');
+  assert.deepEqual(titleLayout(380, 0, 'all'), { tabs: 'below', chip: 'long', newRun: 'icon' });
+  assert.deepEqual(titleLayout(520, 0, 'all').tabs, 'inline');
+  assert.deepEqual(titleLayout(519, 0, 'all').tabs, 'below');
+  assert.deepEqual(titleLayout(620, 2, 'all').tabs, 'inline');
+  assert.deepEqual(titleLayout(619, 2, 'all').tabs, 'below');
+  assert.deepEqual(titleLayout(330, 0, 'active').tabs, 'inline', 'unchanged');
+  assert.deepEqual(titleLayout(329, 0, 'active').tabs, 'below');
+  assert.deepEqual(titleLayout(270, 2, 'active').chip, 'long', 'the 280 panel');
+  assert.deepEqual(titleLayout(269, 2, 'active'), { tabs: 'below', chip: 'short', newRun: 'icon' });
+  assert.deepEqual(titleLayout(720, 2, 'all').newRun, 'icon');
+  assert.deepEqual(titleLayout(800, 2, 'all'), { tabs: 'inline', chip: 'long', newRun: 'text' }, 'the window');
+  // the chip never reads shorter at a wider width
+  for (const filter of ['active', 'all'] as const)
+    for (let w = 200, short = true; w <= 1000; w++) {
+      const s = titleLayout(w, 3, filter).chip === 'short';
+      assert.ok(!s || short, `chip short again at ${w} (${filter})`);
+      short = s;
+    }
 });
 
 const hhmm = (iso: string) => {
@@ -1961,4 +1976,46 @@ test('runAgainArgv names feature (a profile may mark another pipeline default) a
   ]);
   const byDefault = { ...base, profile: 'default', config: null } as Readable;
   assert.deepEqual(runAgainArgv(byDefault), ['run', 'github.com/o/r#9', '--pipeline', 'feature', '--repo', '/r', '--profile', 'default']);
+});
+
+test('catchUpStep: refreshes when the copy becomes shown, never while hidden or already shown', () => {
+  assert.deepEqual(catchUpStep(true, true), { refresh: false, wasShown: true });
+  assert.deepEqual(catchUpStep(true, false), { refresh: false, wasShown: false }, 'hidden: remembered, no fetch');
+  assert.deepEqual(catchUpStep(false, true), { refresh: true, wasShown: true }, 'docked back');
+  assert.deepEqual(catchUpStep(undefined, true), { refresh: true, wasShown: true }, 'first check');
+  assert.deepEqual(catchUpStep(undefined, false), { refresh: false, wasShown: false });
+});
+
+test('readerText: pick.md fields each get a line of their own; other files are unchanged', () => {
+  const pick = 'pipeline: dry-ticket\nunsure: true\nThe ticket asks for a dry run.\nSecond line.';
+  assert.equal(readerText('C:\\runs\\x\\steps\\route.1\\1\\outputs\\pick.md', pick),
+    'pipeline: dry-ticket\n\nunsure: true\n\nThe ticket asks for a dry run.\nSecond line.');
+  assert.equal(readerText('/r/pick.md', 'pipeline: a\r\nunsure: false\r\nwhy'), 'pipeline: a\n\nunsure: false\n\nwhy');
+  assert.equal(readerText('/r/pick.md', 'pipeline: a\n\nunsure: false\n\nwhy'), 'pipeline: a\n\nunsure: false\n\nwhy', 'already apart');
+  assert.equal(readerText('/r/pick.md', 'pipeline: a\n'), 'pipeline: a\n', 'nothing after the fields');
+  assert.equal(readerText('/r/plan.md', 'a\nb'), 'a\nb');
+  assert.equal(readerText('/r/notpick.md', 'pipeline: a\nunsure: true'), 'pipeline: a\nunsure: true');
+});
+
+test('reasonParts: splits the detail around the transcript path', () => {
+  const p = 'C:\\Users\\John Doe\\.percolator\\runs\\r\\steps\\implement\\1\\transcript.txt';
+  assert.deepEqual(reasonParts(`agent exited; full screen in ${p}`, p), { before: 'agent exited; full screen in ', after: '' });
+  assert.deepEqual(reasonParts(`task was not delivered; check its screen in ${p}, then resume`, p),
+    { before: 'task was not delivered; check its screen in ', after: ', then resume' });
+  assert.equal(reasonParts('escalate: plan', undefined), null);
+  assert.equal(reasonParts('escalate: plan', p), null, 'the path is not in the text');
+});
+
+test('fileUrl: a file URL the system opens, spaces escaped', () => {
+  assert.equal(fileUrl('C:\\Users\\John Doe\\t.txt'), 'file:///C:/Users/John%20Doe/t.txt');
+  assert.equal(fileUrl('/home/me/t.txt'), 'file:///home/me/t.txt');
+  assert.equal(fileUrl('C:\\a#b\\t?.txt'), 'file:///C:/a%23b/t%3F.txt', '# and ? do not cut the URL');
+});
+
+test("notice: a paused run's toast keeps why it paused; a gate's body is its message", () => {
+  const run = { ...readable('t12'), attention: { ...readable('t12').attention!, kind: 'paused' as const, message: 'plan paused', detail: 'escalate: plan' } };
+  assert.equal(notice(run).body, 'plan paused: escalate: plan');
+  const bare = { ...run, attention: { ...run.attention, detail: undefined } };
+  assert.equal(notice(bare).body, 'plan paused');
+  assert.equal(notice(readable('t2')).body, 'approve-groom is waiting for approval');
 });

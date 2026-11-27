@@ -57,6 +57,7 @@ import {
   panelShape,
   parentLink,
   titleLayout,
+  catchUpStep,
   unfoldAfterPick,
   moveRow,
   moveStop,
@@ -175,6 +176,7 @@ export default class Percolator extends View {
     }
     // Only the shown copy where the panel lives polls perc (the cup does its own polling, for notices).
     watchRuns(cx, (cx) => this.shown() && this.refresh(cx));
+    this.watchShown(cx);
     cx.timer.every(30000, (cx) => cx.notify()); // the "4m ago" clocks
     cx.spawn(async (cx) => {
       for (;;) {
@@ -205,13 +207,17 @@ export default class Percolator extends View {
     return showsHere(shared('percolator.place'), this.inWindow(), Boolean(node && !node.hidden));
   }
 
-  /** Called each frame: refreshes at once when this copy becomes the shown one again (its data went stale). */
+  /** A hidden block is not rendered, so render alone never sees this copy hidden, nor the moment it is shown again
+   *  (docking back sets the place after `layout.show`): check on a short timer too. */
+  watchShown(cx) {
+    cx.timer.every(250, (cx) => this.catchUp(cx));
+  }
+
+  /** Called each frame and every 250ms: refreshes at once when this copy becomes the shown one again (its data went stale). */
   catchUp(cx) {
-    const now = this.shown();
-    if (now && !this.wasShown) {
-      this.refresh(cx);
-    }
-    this.wasShown = now;
+    const s = catchUpStep(this.wasShown, this.shown());
+    this.wasShown = s.wasShown;
+    if (s.refresh) this.refresh(cx);
   }
 
   refresh(cx) {
@@ -1097,8 +1103,8 @@ export default class Percolator extends View {
           .child(label),
       );
     const window = this.inWindow();
-    // ⧉ and ✕ never leave: the title truncates, the chip shortens to "N", then the tabs take a row of their own.
-    const fit = titleLayout(this.width / zoom(), needs);
+    // ⧉ and ✕ never leave: the title truncates, the tabs take a row of their own, and only under 270 does the chip shorten to "N".
+    const fit = titleLayout(this.width / zoom(), needs, this.filter);
     // inline, the tabs give way before ⧉ and ✕ do (a long notice, Delete finished runs ↗ beside a busy watcher)
     const tabs = h_flex()
       .flex_shrink_1()
