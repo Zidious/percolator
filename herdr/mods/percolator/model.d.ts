@@ -14,7 +14,7 @@ export declare function parseStatus(stdout: string): { ok: true; data: StatusJso
 export declare function sortRuns(runs: RunStatusJson[]): RunStatusJson[];
 export declare function visibleRuns(runs: RunStatusJson[], filter: 'active' | 'all'): RunStatusJson[];
 export declare function rowState(run: RunStatusJson): { tone: Tone; text: string; round?: string };
-export declare function outcomeOf(run: RunStatusJson): { tag: 'DELIVERED' | 'ROUTED' | 'DONE'; text: string };
+export declare function outcomeOf(run: RunStatusJson): { tag: 'DELIVERED' | 'ROUTED' | 'DONE' | 'COMMENTED'; text: string; url?: string };
 export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
 /** `feedback` is the reject feedback, or the picked pipeline for `pick`. */
 /** `run-again` on an unreadable run: null (it has no pipeline or repo to start again). */
@@ -49,6 +49,7 @@ export declare function stepTone(status: string): 'done' | 'working' | 'blocked'
 export declare function resolvePath(base: string, p: string): string;
 export declare function attentionTag(kind: string): string;
 export declare function roundOf(loop: Loop): { n: number; max: number; taken: boolean; atCap: boolean };
+export declare function stageName(step: { id: string; stage: string }): string;
 export declare function roundPill(run: RunStatusJson, stepId: string): { text: string; tone: 'dim' | 'working' | 'blocked' } | null;
 export declare function loopSpans(run: RunStatusJson): { id: string; from: string; to: string; tone: 'dim' | 'working' | 'blocked' }[];
 export declare function canPick(step: { status: string }): boolean;
@@ -78,7 +79,7 @@ export declare function roundView(run: RunStatusJson, stepId: string, roundSel: 
 export type TimelineRow = {
   key: string;
   mark: string;
-  tone: 'done' | 'working' | 'blocked' | null;
+  tone: 'done' | 'working' | 'blocked' | 'dim' | null;
   step: string;
   round: string;
   status: string;
@@ -88,6 +89,8 @@ export type TimelineRow = {
 };
 export declare function clock(iso?: string): string;
 export declare function timelineRows(run: RunStatusJson, now: number): TimelineRow[];
+export declare function inputRows(run: RunStatusJson): (TimelineRow & { title: string })[];
+export declare function triggerLine(run: RunStatusJson): string | null;
 export declare function cupLabel(runs: RunStatusJson[]): { text: string; tone: 'blocked' | 'working' | 'muted' };
 export declare function notice(run: RunStatusJson): {
   title: string;

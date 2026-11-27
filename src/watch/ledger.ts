@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import type { RunTrigger } from '../run/meta.ts';
 import { writeFileAtomic } from '../util/fs.ts';
 
 /**
@@ -15,6 +16,8 @@ export type Fired = {
   pipeline?: string;
   ticket?: string;
   inputs?: Record<string, string>;
+  /** the trigger that fired; absent on an entry recorded before triggers were */
+  trigger?: RunTrigger;
   prepared?: true;
 };
 
@@ -26,7 +29,7 @@ export type Ledger = {
 };
 
 /** What `fire` records and starts. */
-export type FiringRecord = { key: string; pipeline: string; ticket?: string; inputs: Record<string, string> };
+export type FiringRecord = { key: string; pipeline: string; ticket?: string; inputs: Record<string, string>; trigger?: RunTrigger };
 
 /** How far back a schedule looks for a missed tick (`latestTick`); older schedule firings can never recur. */
 const LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -88,6 +91,7 @@ export async function fire(
     pipeline: f.pipeline,
     ...(f.ticket !== undefined ? { ticket: f.ticket } : {}),
     inputs: { ...f.inputs },
+    ...(f.trigger !== undefined ? { trigger: f.trigger } : {}),
   };
   await saveLedger(home, ledger);
   try {

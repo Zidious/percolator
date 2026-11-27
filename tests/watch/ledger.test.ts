@@ -107,3 +107,12 @@ test('pruneLedger drops schedule firings older than the 7-day lookback and keeps
   pruneLedger(ledger, new Date('2026-11-22T10:00:00Z'));
   assert.deepEqual(Object.keys(ledger.fired), ['schedule:o/r:n:0:2026-11-16T10:00', 'label:o/r:fix:7']);
 });
+
+test('fire records the trigger of the firing, so a restarted watcher starts the run with it', async (t) => {
+  const h = await home(t);
+  const ledger = await loadLedger(h);
+  const trigger = { kind: 'label', detail: 'ready' } as const;
+  await fire(h, ledger, { key: 'label:o/r:fix:7', pipeline: 'fix', inputs: {}, trigger }, async () => {}, () => 'run-1', NOW);
+  assert.deepEqual(ledger.fired['label:o/r:fix:7']?.trigger, trigger);
+  assert.deepEqual((await loadLedger(h)).fired['label:o/r:fix:7']?.trigger, trigger);
+});

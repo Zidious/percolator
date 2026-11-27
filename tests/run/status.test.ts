@@ -152,9 +152,14 @@ function expected(m: RunMeta, over: Record<string, unknown>): Record<string, unk
     terminals: {},
     pr: null,
     graph: 'full',
+    trigger: null,
+    comment: null,
     ...over,
   };
 }
+
+/** What a fresh running run adds to `expected`: it is running intake, its first step. */
+const FRESH = { currentStep: 'intake', steps: steps({ intake: { status: 'running' } }) };
 
 /** Steps of a run waiting at approve-groom (see `waitAtGate`). */
 function gateSteps(e: Env, m: RunMeta, gate: Step = { status: 'waiting' }): Step[] {
@@ -896,7 +901,7 @@ test('status json keeps going past a broken run', async () => {
           error: `Cannot read run state ${noStateFile}: ENOENT: no such file or directory, open '${noStateFile}'`,
         },
         { id: badGraph.runId, status: 'unreadable', error: `Run graph ${graphFile} is invalid: version: Invalid input: expected 1; start a new run` },
-        expected(good, { attention: { kind: 'stalled', since: good.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(good) }),
+        expected(good, { ...FRESH, attention: { kind: 'stalled', since: good.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(good) }),
         { id: badState.runId, status: 'unreadable', error: `Run state ${badStateFile} is not valid JSON` },
         { id: 't9-broken', status: 'unreadable', error: `Run metadata ${path.join(broken, 'run.json')} is missing or invalid: file not found` },
       ],
@@ -941,7 +946,7 @@ test('status json never loads config', async () => {
   try {
     const m = await e.prepare();
     await fs.rm(e.configFile);
-    assert.deepEqual(await statusJson(e.deps), { schema: 2, runs: [expected(m, { attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(m) })], watcher: { alive: false, repos: [] } });
+    assert.deepEqual(await statusJson(e.deps), { schema: 2, runs: [expected(m, { ...FRESH, attention: { kind: 'stalled', since: m.createdAt, ...STALLED_FRESH, actions: ['resume'] }, timeline: freshTimeline(m) })], watcher: { alive: false, repos: [] } });
   } finally {
     await e.cleanup();
   }
@@ -1804,6 +1809,119 @@ test('a failed run says why it failed and offers to run again', async () => {
     const r = (await e.status(m)) as Readable;
     assert.equal(r.attention?.message, 'lint failed (exit code 1)');
     assert.deepEqual(r.attention?.actions, ['run-again', 'clean']);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a run started by a trigger carries it; a manual run has trigger null', async () => {
+  const e = await setup();
+  try {
+    const manual = await e.prepare();
+    e.clock.t += 1000;
+    const trigger = { kind: 'schedule', detail: '0 9 * * 1' } as const;
+    const fired = await rewriteMeta(e, await e.prepare('#6'), { trigger });
+    assert.equal(((await e.status(manual)) as Readable).trigger, null);
+    assert.deepEqual(((await e.status(fired)) as Readable).trigger, trigger);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test("the comment a comment exit posted is the run's comment; a gone or blank file gives null and no error", async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const file = path.join(e.dir(m), rel('deliver', 1, 'comment_url'));
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, 'https://github.com/o/r/issues/47#issuecomment-1\n');
+    await e.edit(m, (s) => {
+      s.status = 'completed';
+      s.history.push(rec('deliver', 1, 'pass', { comment_url: rel('deliver', 1, 'comment_url') }));
+    });
+    assert.deepEqual(((await e.status(m)) as Readable).comment, { url: 'https://github.com/o/r/issues/47#issuecomment-1' });
+    await fs.writeFile(file, '  \n');
+    assert.equal(((await e.status(m)) as Readable).comment, null);
+    await fs.rm(file);
+    const r = (await e.status(m)) as Readable;
+    assert.equal(r.status, 'completed');
+    assert.equal(r.comment, null);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a run stalled before its first step is at intake: intake running, the stalled message names it', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    const r = (await e.status(m)) as Readable;
+    assert.equal(r.currentStep, 'intake');
+    assert.equal(r.steps[0]?.status, 'running');
+    assert.equal(r.attention?.kind, 'stalled');
+    assert.equal(r.attention?.message, 'the driver stopped while intake was running');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a paused or failed run with no history is at its first step, which only a running run marks running', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    for (const status of ['paused', 'failed'] as const) {
+      await e.edit(m, (s) => (s.status = status));
+      const r = (await e.status(m)) as Readable;
+      assert.equal(r.currentStep, 'intake', status);
+      assert.equal(r.steps[0]?.status, 'pending', status);
+    }
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a fan-out slice with no history is at its first step, the fanned stage', async () => {
+  const e = await setup();
+  try {
+    const m = await rewriteMeta(e, await e.prepare(), { parent: 'p1', fanOut: { parent: 'p1', slice: 1, from: 'implement', title: 'One' } });
+    const file = path.join(e.dir(m), 'graph.json');
+    const g = JSON.parse(await fs.readFile(file, 'utf8'));
+    const at = g.steps.findIndex((x: { id: string }) => x.id === 'implement');
+    g.steps = g.steps.slice(at);
+    g.loops = g.loops.filter((l: { from: string }) => g.steps.some((x: { id: string }) => x.id === l.from));
+    await fs.writeFile(file, JSON.stringify(g));
+    const r = (await e.full(m)) as Readable;
+    assert.equal(r.currentStep, 'implement');
+    assert.equal(r.attention?.message, 'the driver stopped while implement was running');
+    const liveAttempt = r.timeline.at(-1);
+    assert.equal(liveAttempt?.kind === 'attempt' && liveAttempt.step, 'implement');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a failed run with history and no current step in state has no currentStep', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'failed';
+      s.history.push(rec('intake', 1, 'pass'));
+    });
+    const r = (await e.status(m)) as Readable;
+    assert.equal(Object.hasOwn(r, 'currentStep'), false);
+    assert.equal(r.steps[0]?.status, 'pass');
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a completed run with no history has no currentStep', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => (s.status = 'completed'));
+    assert.equal(Object.hasOwn((await e.status(m)) as Readable, 'currentStep'), false);
   } finally {
     await e.cleanup();
   }

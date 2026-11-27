@@ -75,7 +75,9 @@ test('a schedule fires once for the latest missed tick', async (t) => {
   ledger.lastPoll[mark(specs)] = '2026-11-22T07:30:00.000Z';
   const now = new Date('2026-11-22T10:15:00Z');
   const firings = await poll({ h, gh: new FakeGh(), specs, ledger, now });
-  assert.deepEqual(firings, [{ key: `schedule:${mark(specs)}:2026-11-22T10:00`, pipeline: 'nightly', inputs: { scope: 'all' } }]);
+  assert.deepEqual(firings, [
+    { key: `schedule:${mark(specs)}:2026-11-22T10:00`, pipeline: 'nightly', inputs: { scope: 'all' }, trigger: { kind: 'schedule', detail: '0 * * * * UTC' } },
+  ]);
   assert.equal(ledger.lastPoll[mark(specs)], now.toISOString());
   await fireAll(h, ledger, firings);
   assert.deepEqual(await poll({ h, gh: new FakeGh(), specs, ledger, now: new Date('2026-11-22T10:45:00Z') }), []);
@@ -134,7 +136,9 @@ test('a label trigger fires once per issue', async (t) => {
   const ledger = await loadLedger(h);
   const live = new Set([`https://${REPO}/issues/8`]);
   const first = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:00:00Z'), live });
-  assert.deepEqual(first, [{ key: `label:${REPO}:hotfix:7`, pipeline: 'hotfix', ticket: `https://${REPO}/issues/7`, inputs: {} }]);
+  assert.deepEqual(first, [
+    { key: `label:${REPO}:hotfix:7`, pipeline: 'hotfix', ticket: `https://${REPO}/issues/7`, inputs: {}, trigger: { kind: 'label', detail: 'bug' } },
+  ]);
   await fireAll(h, ledger, first);
   const second = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z'), live });
   assert.deepEqual(second, []);
@@ -218,8 +222,8 @@ test('dependabot fires only for dependabot PRs', async (t) => {
   const specs = spec('deps', [{ dependabot: true }]);
   const firings = await poll({ h, gh, specs, ledger: polled(specs), now: new Date('2026-11-22T10:00:00Z') });
   assert.deepEqual(firings, [
-    { key: `pr:${REPO}:deps:1`, pipeline: 'deps', inputs: { pr: `https://${REPO}/pull/1` } },
-    { key: `pr:${REPO}:deps:2`, pipeline: 'deps', inputs: { pr: `https://${REPO}/pull/2` } },
+    { key: `pr:${REPO}:deps:1`, pipeline: 'deps', inputs: { pr: `https://${REPO}/pull/1` }, trigger: { kind: 'dependabot', detail: '#1' } },
+    { key: `pr:${REPO}:deps:2`, pipeline: 'deps', inputs: { pr: `https://${REPO}/pull/2` }, trigger: { kind: 'dependabot', detail: '#2' } },
   ]);
 });
 
@@ -230,7 +234,9 @@ test('pr_opened skips not_author', async (t) => {
   gh.addPr(REPO, { number: 5, author: 'renovate[bot]' });
   const specs = spec('review', [{ pr_opened: { not_author: ['renovate[bot]'] } }]);
   const firings = await poll({ h, gh, specs, ledger: polled(specs), now: new Date('2026-11-22T10:00:00Z') });
-  assert.deepEqual(firings, [{ key: `pr:${REPO}:review:4`, pipeline: 'review', inputs: { pr: `https://${REPO}/pull/4` } }]);
+  assert.deepEqual(firings, [
+    { key: `pr:${REPO}:review:4`, pipeline: 'review', inputs: { pr: `https://${REPO}/pull/4` }, trigger: { kind: 'pr_opened', detail: '#4' } },
+  ]);
   const every = spec('review', [{ pr_opened: true }]);
   const all = await poll({ h, gh, specs: every, ledger: polled(every), now: new Date('2026-11-22T10:00:00Z') });
   assert.deepEqual(all.map((f) => f.key), [`pr:${REPO}:review:4`, `pr:${REPO}:review:5`]);
@@ -245,8 +251,31 @@ test('check_failed passes branch and run_url', async (t) => {
   const specs = spec('ci-fix', [{ check_failed: { branch: 'main', workflow: 'ci.yml' } }]);
   const firings = await poll({ h, gh, specs, ledger: polled(specs), now: new Date('2026-11-22T10:00:00Z') });
   assert.deepEqual(firings, [
-    { key: `check:${REPO}:ci-fix:${run.databaseId}`, pipeline: 'ci-fix', inputs: { branch: 'main', run_url: run.url } },
+    {
+      key: `check:${REPO}:ci-fix:${run.databaseId}`,
+      pipeline: 'ci-fix',
+      inputs: { branch: 'main', run_url: run.url },
+      trigger: { kind: 'check_failed', detail: 'main' },
+    },
   ]);
+});
+
+test('a schedule with no timezone records its cron alone as the trigger detail', async (t) => {
+  const h = await home(t);
+  const specs = spec('nightly', [{ schedule: '0 * * * *' }]);
+  const ledger = emptyLedger();
+  ledger.lastPoll[mark(specs)] = '2026-11-22T07:30:00.000Z';
+  const firings = await poll({ h, gh: new FakeGh(), specs, ledger, now: new Date('2026-11-22T10:15:00Z') });
+  assert.deepEqual(firings.map((f) => f.trigger), [{ kind: 'schedule', detail: '0 * * * *' }]);
+});
+
+test('a schedule with a timezone appends the zone to the trigger detail', async (t) => {
+  const h = await home(t);
+  const specs = spec('weekly', [{ schedule: '0 9 * * 1', timezone: 'Europe/London' }]);
+  const ledger = emptyLedger();
+  ledger.lastPoll[mark(specs)] = '2026-11-20T00:00:00.000Z';
+  const firings = await poll({ h, gh: new FakeGh(), specs, ledger, now: new Date('2026-11-23T10:00:00Z') });
+  assert.deepEqual(firings.map((f) => f.trigger), [{ kind: 'schedule', detail: '0 9 * * 1 Europe/London' }]);
 });
 
 test('the first poll of a pr trigger records every open PR as seen and fires only later ones', async (t) => {
@@ -356,7 +385,12 @@ test('a failed run re-run that fails again fires once more, keyed by its attempt
   gh.rerun(run.databaseId);
   const again = await poll({ h, gh, specs, ledger, now: new Date('2026-11-22T10:01:00Z') });
   assert.deepEqual(again, [
-    { key: `check:${REPO}:ci-fix:${run.databaseId}.2`, pipeline: 'ci-fix', inputs: { branch: 'main', run_url: run.url } },
+    {
+      key: `check:${REPO}:ci-fix:${run.databaseId}.2`,
+      pipeline: 'ci-fix',
+      inputs: { branch: 'main', run_url: run.url },
+      trigger: { kind: 'check_failed', detail: 'main' },
+    },
   ]);
 });
 

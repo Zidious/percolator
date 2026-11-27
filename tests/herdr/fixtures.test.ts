@@ -148,3 +148,11 @@ test('the fixture has a paused run with a transcript, and one without', () => {
   assert.equal(t12.attention.message, 'plan paused');
   assert.equal(t12.attention.detail, 'contract: plan finished without outputs/plan.md');
 });
+
+test('the fixture has a schedule-trigger run, a completed comment-exit run and a run stalled in intake; every readable run carries trigger and comment', () => {
+  const runs = readFixture('status.json').runs.filter((r: any) => r.status !== 'unreadable');
+  for (const r of runs) assert.ok('trigger' in r && 'comment' in r, r.id);
+  assert.ok(runs.some((r: any) => r.trigger?.kind === 'schedule' && typeof r.trigger.detail === 'string'));
+  assert.ok(runs.some((r: any) => r.status === 'completed' && r.pr === null && typeof r.comment?.url === 'string'));
+  assert.ok(runs.some((r: any) => r.attention?.kind === 'stalled' && r.currentStep === 'intake' && r.timeline.length === 1));
+});
