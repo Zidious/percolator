@@ -6,8 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { initConfig } from './config/init.ts';
 import { writeJsonSchema } from './config/json-schema.ts';
-import { effectiveKind } from './config/schema.ts';
-import type { NodeDef } from './config/schema.ts';
 import { loadState } from './engine/state.ts';
 import type { RunState } from './engine/state.ts';
 import { cliHerdrApp } from './herdr/app.ts';
@@ -16,29 +14,26 @@ import { herdrAppHome, linkHerdr } from './herdr/link.ts';
 import { deleteRun, isFinished, planDelete } from './run/delete.ts';
 import type { DeletePlan } from './run/delete.ts';
 import { drive } from './run/drive.ts';
-import { prUrl } from './run/outputs.ts';
 import { checkResumable } from './run/resumable.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
 import { pipelinesJson, pipelinesText } from './run/pipelines-json.ts';
-import type { RunMeta } from './run/meta.ts';
 import { applyAnswer, askedItems, checkAnswer } from './run/answer.ts';
 import { launchDriver, prepareRun } from './run/prepare.ts';
 import { parseInputs } from './run/request.ts';
 import type { DriverDeps } from './run/prepare.ts';
-import { driverLiveness, readAttention, runStatusJson, statusJson } from './run/status.ts';
-import { attentionNext, failedText } from './run/next-steps.ts';
+import { runStatusJson, statusJson } from './run/status.ts';
+import { itemLine, questionLines, runDetail } from './run/status-text.ts';
+import { attentionNext } from './run/next-steps.ts';
 import { sweepTerminals } from './runtime/herdr-runtime.ts';
 import { deciderLogin, readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
 import { askLine } from './util/ask.ts';
 import { isDirectRun } from './util/entry.ts';
 import { UsageError } from './util/errors.ts';
-import { validate, validateAll } from './validate.ts';
+import { validate, validateAll, validateText } from './validate.ts';
 import { pidAlive } from './run/lock.ts';
 import { otherWatcher, requestStop, stopFile, stoppableWatcher, WATCH_STOP_TIMEOUT_S, WATCH_TERMINAL, WATCHER_LABELS, waitForWatcherExit, watchFile, watchLoop } from './watch/watch.ts';
-import type { Graph } from './graph/build.ts';
 import { PICK_GATE } from './graph/core.ts';
-import type { ValidateResult } from './validate.ts';
 import { runDir } from './workspace/run-dir.ts';
 import { pipeWriter } from './util/pipe.ts';
 import { removeWorktree } from './workspace/worktree.ts';
@@ -195,61 +190,6 @@ function onlyRunId(command: string, positionals: string[]): string {
 
 const defaultConfig = () => path.join(os.homedir(), '.percolator', 'config.yaml');
 
-/** What runs a step: `builtin <name>`, `command <argv>`, `gate`, or `<agent>, model …, effort …, skills …`. */
-function runsWith(def: NodeDef): string {
-  const kind = effectiveKind(def);
-  if (kind === 'builtin') return `builtin ${def.builtin}`;
-  if (kind === 'script') return `command ${(def.command ?? []).join(' ')}`;
-  if (kind === 'gate') return 'gate';
-  const skills = [...(def.skill !== undefined ? [def.skill] : []), ...(def.skills ?? [])];
-  return [
-    def.agent,
-    ...(def.model !== undefined ? [`model ${def.model}`] : []),
-    ...(def.effort !== undefined ? [`effort ${def.effort}`] : []),
-    ...(skills.length > 0 ? [`skills ${skills.join(', ')}`] : []),
-  ].join(', ');
-}
-
-function describe(r: ValidateResult): string {
-  const approvers = r.tracker?.approvers;
-  // the gate falls back to the gh user only when the list is absent; an empty list lets no GitHub comment count
-  const who =
-    approvers === undefined
-      ? 'the gh user running perc'
-      : approvers.length === 0
-        ? 'none on GitHub (only local perc approve/reject)'
-        : approvers.join(', ');
-  const lines = [`pipeline: ${r.pipeline.name}${r.pipeline.default ? ' (default)' : ''}`, `profile: ${r.profile}`, `approvers: ${who}`];
-  const runtime = Object.entries(r.runtime ?? {});
-  if (runtime.length > 0) lines.push(`runtime: ${runtime.map(([k, v]) => `${k} ${String(v)}`).join(', ')}`);
-  for (const [name, version] of Object.entries(r.groundVersions)) lines.push(`ground ${name} ${version}`);
-  for (const m of r.mappings) {
-    const scope = m.applies_to.includes('*') ? '' : ` (applies to ${m.applies_to.join(', ')})`;
-    lines.push(`${m.as} ${m.absPath}${scope}`);
-  }
-  lines.push('', ...graphLines(r.graph));
-  const fan = r.pipeline.fan_out;
-  if (fan !== undefined && r.slice !== undefined) {
-    lines.push('', `slice runs (fan-out of ${fan.stage}, at most ${fan.max_parallel ?? 3} at a time):`, ...graphLines(r.slice));
-  }
-  return `${lines.join('\n')}\n`;
-}
-
-/** A graph's numbered steps, then its back-edges. */
-function graphLines(g: Graph): string[] {
-  const lines = ['steps:'];
-  g.steps.forEach((s, i) => {
-    const pos = s.role === 'hook' ? ` (${s.def.before !== undefined ? `before ${s.def.before}` : `after ${s.def.after}`})` : '';
-    lines.push(`${i + 1}. ${s.id}${pos}: ${runsWith(s.def)}`);
-  });
-  lines.push('', 'back-edges:');
-  for (const e of Object.values(g.backEdges)) {
-    const target = g.steps[e.toStepIndex]!.stage;
-    lines.push(`${e.fromStepId} → ${target} (max ${e.maxRounds}, ${e.onCap})`);
-  }
-  return lines;
-}
-
 async function runInit(args: string[], io: Io): Promise<number> {
   const { values } = parse(args, { config: { type: 'string' }, force: { type: 'boolean' } });
   const file = path.resolve(values.config ?? defaultConfig());
@@ -275,8 +215,7 @@ async function runValidate(args: string[], io: Io): Promise<number> {
     ...(values.update ? { update: true } : {}),
   };
   const results = values.pipeline !== undefined ? [await validate({ ...opts, pipeline: values.pipeline })] : await validateAll(opts);
-  // one block per pipeline, a blank line between them
-  io.stdout(results.map(describe).join('\n'));
+  io.stdout(validateText(results));
   return 0;
 }
 
@@ -386,55 +325,6 @@ async function runAnswer(args: string[], deps: DriverDeps): Promise<number> {
   deps.out(`  terminal ${driver}`);
   deps.out(`  follow with: perc status ${runId}`);
   return 0;
-}
-
-/** The first non-empty line of an asked item, without a leading heading or list marker, `**`, `__` or backticks. */
-const itemLine = (text: string): string =>
-  (text.split(/\r?\n/).find((l) => l.trim() !== '') ?? '')
-    .replace(/^\s*#+\s*/, '')
-    .replace(/^ {0,3}\d{1,9}[.)](?:[ \t]+|$)/, '')
-    .replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '$1')
-    .replace(/(^|[\s(])__(?=\S)(.+?)(?<=\S)__(?=$|[\s,;:!?)]|\.(?:$|\s))/g, '$1$2')
-    .replace(/`([^`]*)`/g, '$1')
-    .trim();
-
-/** A question in full: its first line numbered, the rest indented under it (blank lines kept blank). */
-const questionLines = (n: number, text: string): string[] => {
-  const prefix = `  ${n}. `;
-  const [first = '', ...rest] = text.trim().split(/\r?\n/);
-  return [`${prefix}${first}`, ...rest.map((l) => (l.trim() === '' ? '' : `${' '.repeat(prefix.length)}${l}`))];
-};
-
-/** What a run is doing or waiting for, in one line; an hc failure is reported, never thrown. */
-async function runDetail(dir: string, meta: RunMeta, state: RunState, deps: DriverDeps): Promise<string> {
-  const waiting = await readWaiting(dir).catch(() => undefined);
-  // a gate on a ticketless run posts nothing: it is answered only from here
-  const answer = waiting?.commentUrl ?? `perc approve ${meta.runId} | perc reject ${meta.runId} <feedback>`;
-  const waitingText = waiting && `waiting for approval: ${answer}`;
-  if (state.status === 'running') {
-    // a killed driver leaves waiting.json and attention.json behind, so liveness is always reported
-    const a = await readAttention(dir);
-    const what = waitingText ?? (a !== undefined && a.stepId === state.currentStep ? `${a.kind}: attend terminal ${a.terminal}` : undefined);
-    // the same judgement as the JSON's driver.alive: true live, false stopped, null unknown
-    const d = await driverLiveness(dir, meta, deps);
-    // a foreground drive has no driver terminal; its driver.json says it is alive
-    const live = d.lock === undefined ? `driver ${meta.driver}` : `driver pid ${d.lock.pid}`;
-    const driver =
-      d.alive === true
-        ? undefined
-        : d.alive === false
-          ? `driver not running; perc resume ${meta.runId}`
-          : d.lock !== undefined
-            ? `driver unknown (pid ${d.lock.pid} on ${d.lock.host})`
-            : `driver unknown (hc: ${d.hcError})`;
-    if (what === undefined) return driver ?? live;
-    return driver === undefined ? what : `${what}; ${driver}`;
-  }
-  if (waitingText) return waitingText;
-  if (state.status === 'paused') return state.pausedReason ?? '';
-  if (state.status === 'completed') return (await prUrl(dir, state)) ?? '';
-  if (state.status === 'failed') return failedText(state.currentStep ?? '-', state.failedReason);
-  return '';
 }
 
 async function runStatus(args: string[], deps: DriverDeps): Promise<number> {
