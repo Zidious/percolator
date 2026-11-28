@@ -185,6 +185,12 @@ function onlyRunId(command: string, positionals: string[]): string {
 
 const defaultConfig = () => path.join(os.homedir(), '.percolator', 'config.yaml');
 
+/** The config file (`--config`, resolved; default ~/.percolator/config.yaml) and `--profile` a command loads with. */
+const configOpts = (values: { config?: string | undefined; profile?: string | undefined }) => ({
+  configFile: path.resolve(values.config ?? defaultConfig()),
+  ...(values.profile !== undefined ? { profile: values.profile } : {}),
+});
+
 async function runInit(args: string[], io: Io): Promise<number> {
   const { values } = parse(args, { config: { type: 'string' }, force: { type: 'boolean' } });
   const file = path.resolve(values.config ?? defaultConfig());
@@ -202,11 +208,9 @@ async function runValidate(args: string[], io: Io): Promise<number> {
     pipeline: { type: 'string' },
     update: { type: 'boolean' },
   });
-  const configFile = path.resolve(values.config ?? defaultConfig());
   const opts = {
-    configFile,
+    ...configOpts(values),
     cwd: process.cwd(),
-    ...(values.profile !== undefined ? { profile: values.profile } : {}),
     ...(values.update ? { update: true } : {}),
   };
   const results = values.pipeline !== undefined ? [await validate({ ...opts, pipeline: values.pipeline })] : await validateAll(opts);
@@ -223,6 +227,14 @@ async function runSchema(args: string[], io: Io): Promise<number> {
 }
 
 const exitOf = (s: RunState): number => (s.status === 'failed' ? 1 : 0);
+
+/** What run, resume and answer print once the driver terminal is launched; `more` goes between the terminal and how to follow. */
+function printLaunched(deps: DriverDeps, runId: string, verb: 'started' | 'resumed', terminal: string, more: string[] = []): void {
+  deps.out(`run ${runId} ${verb}`);
+  deps.out(`  terminal ${terminal}`);
+  for (const l of more) deps.out(l);
+  deps.out(`  follow with: perc status ${runId}`);
+}
 
 async function runRun(args: string[], deps: DriverDeps): Promise<number> {
   const { values, positionals } = parseWith(args, {
@@ -241,8 +253,7 @@ async function runRun(args: string[], deps: DriverDeps): Promise<number> {
       ...(values.pipeline !== undefined ? { pipeline: values.pipeline } : {}),
       inputs,
       repoDir: path.resolve(values.repo ?? process.cwd()),
-      configFile: values.config ?? defaultConfig(),
-      ...(values.profile !== undefined ? { profile: values.profile } : {}),
+      ...configOpts(values),
     },
     deps,
   );
@@ -252,13 +263,12 @@ async function runRun(args: string[], deps: DriverDeps): Promise<number> {
     return exitOf(await drive(meta.runId, deps));
   }
   const driver = await launchDriver(meta, deps);
-  deps.out(`run ${meta.runId} started`);
-  deps.out(`  terminal ${driver}`);
-  if (meta.space !== undefined) {
-    deps.out(`  space "${spaceName(meta)}" (the driver stays hidden; "Driver pane ↗" in the Percolator panel peeks at it)`);
-  }
-  deps.out(`  worktree ${meta.worktree}`);
-  deps.out(`  follow with: perc status ${meta.runId}`);
+  printLaunched(deps, meta.runId, 'started', driver, [
+    ...(meta.space !== undefined
+      ? [`  space "${spaceName(meta)}" (the driver stays hidden; "Driver pane ↗" in the Percolator panel peeks at it)`]
+      : []),
+    `  worktree ${meta.worktree}`,
+  ]);
   return 0;
 }
 
@@ -271,8 +281,7 @@ async function runPipelines(args: string[], io: Io, home: string): Promise<numbe
   });
   const j = await pipelinesJson({
     repoDir: path.resolve(values.repo ?? process.cwd()),
-    configFile: values.config ?? defaultConfig(),
-    ...(values.profile !== undefined ? { profile: values.profile } : {}),
+    ...configOpts(values),
     home,
   });
   io.stdout(values.json ? `${JSON.stringify(j, null, 2)}\n` : pipelinesText(j));
@@ -285,10 +294,7 @@ async function runResume(args: string[], deps: DriverDeps): Promise<number> {
   if (values.foreground) return exitOf(await drive(runId, deps));
   // drive's own checks, run here first so a refusal reaches this terminal rather than the driver's
   const { meta } = await checkResumable(runId, deps);
-  const driver = await launchDriver(meta, deps);
-  deps.out(`run ${runId} resumed`);
-  deps.out(`  terminal ${driver}`);
-  deps.out(`  follow with: perc status ${runId}`);
+  printLaunched(deps, runId, 'resumed', await launchDriver(meta, deps));
   return 0;
 }
 
@@ -315,10 +321,7 @@ async function runAnswer(args: string[], deps: DriverDeps): Promise<number> {
   const { meta, state, v } = await checkResumable(runId, deps, { answering: true });
   deps.out(await applyAnswer(dir, state, v.graph, answer, items));
   if (values.foreground) return exitOf(await drive(runId, deps));
-  const driver = await launchDriver(meta, deps);
-  deps.out(`run ${runId} resumed`);
-  deps.out(`  terminal ${driver}`);
-  deps.out(`  follow with: perc status ${runId}`);
+  printLaunched(deps, runId, 'resumed', await launchDriver(meta, deps));
   return 0;
 }
 
@@ -473,8 +476,7 @@ async function runWatch(args: string[], deps: DriverDeps): Promise<number> {
   if (positionals[0] === 'stop') return stopWatch(deps);
   const intervalS = intervalArg(values.interval);
   const repos = (values.repo ?? [process.cwd()]).map((r) => path.resolve(r));
-  const configFile = path.resolve(values.config ?? defaultConfig());
-  const o = { repos, configFile, ...(values.profile !== undefined ? { profile: values.profile } : {}), intervalS };
+  const o = { repos, ...configOpts(values), intervalS };
   if (values.foreground) return watchHere(o, deps);
   return startWatch(o, deps);
 }
