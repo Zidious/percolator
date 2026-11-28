@@ -501,6 +501,62 @@ test('a pipeline without an exit is refused', () => {
   );
 });
 
+test('a pipeline whose exit stage is bound to no exit builtin and sets no exit is refused', () => {
+  throwsAt(
+    () => buildGraph(hotfixWithout('exit', { deliver: { command: ['x'] } })),
+    'c.yaml: profiles.default.pipelines.hotfix: pipeline "hotfix" has no exit: bind its last stage "deliver" to one of github.open_pr, github.comment, github.open_issues, percolator.report, github.release, github.pr_review, github.private_fork_pr or set exit:',
+    'profiles.default.pipelines.hotfix',
+  );
+});
+
+test('a named pipeline built without a home reports its unbound stages at the pipeline', () => {
+  throwsAt(
+    () => buildGraph(hotfix({ bindings: { fix: undefined as never } })),
+    'c.yaml: profiles.default.pipelines.hotfix: pipeline "hotfix" in profile "default" leaves stages unbound: fix; bind each under pipelines.hotfix.bindings:',
+    'profiles.default.pipelines.hotfix',
+  );
+});
+
+test('graph checks fail in order: stages, missing exit, unbound stages, exit binding, hooks, step ids, loops', () => {
+  const firstError = (fn: () => unknown) => {
+    try {
+      fn();
+    } catch (e) {
+      return (e as Error).message;
+    }
+    return 'no error';
+  };
+  const agentExit = { deliver: { agent: 'claude' } };
+  const unknownHook = { lint: { kind: 'script' as const, command: ['x'], after: 'groom' } };
+  const loopingIntake = { intake: { builtin: 'github.intake', kind: 'builtin' as const, max_rounds: 2 } };
+  assert.deepEqual(
+    [
+      // a stage listed twice, and a stage left unbound
+      firstError(() => buildGraph(hotfix({ stages: ['intake', 'fix', 'fix', 'extra', 'deliver'] }))),
+      // no exit, and another stage left unbound
+      firstError(() => buildGraph(hotfix({ exit: undefined, bindings: { fix: undefined as never } }))),
+      // a stage left unbound, and an agent on the exit stage
+      firstError(() => buildGraph(hotfix({ bindings: { fix: undefined as never, ...agentExit } }))),
+      // an agent on the exit stage, and a hook naming an unknown stage
+      firstError(() => buildGraph(hotfix({ bindings: agentExit, nodes: unknownHook }))),
+      // a hook naming an unknown stage, and a looping intake
+      firstError(() => buildGraph(hotfix({ bindings: loopingIntake, nodes: unknownHook }))),
+      // a hook clashing with a step id, and a looping intake
+      firstError(() =>
+        buildGraph(hotfix({ bindings: loopingIntake, nodes: { fix: { kind: 'script', command: ['x'], after: 'review' } } })),
+      ),
+    ],
+    [
+      'c.yaml: profiles.default.pipelines.hotfix.stages.2: stage "fix" is listed twice in pipeline "hotfix"; list each stage once',
+      'c.yaml: profiles.default.pipelines.hotfix: pipeline "hotfix" has no exit: bind its last stage "deliver" to one of github.open_pr, github.comment, github.open_issues, percolator.report, github.release, github.pr_review, github.private_fork_pr or set exit:',
+      'c.yaml: profiles.default.pipelines.hotfix: pipeline "hotfix" in profile "default" leaves stages unbound: fix; bind each under pipelines.hotfix.bindings:',
+      'c.yaml: profiles.default.pipelines.hotfix.bindings.deliver: deliver cannot be an agent node: Percolator opens the PR itself (use { builtin: github.open_pr })',
+      'c.yaml: profiles.default.pipelines.hotfix.nodes.lint.after: "after: groom" names no stage of pipeline "hotfix" (stages: intake, reproduce, fix, review, deliver); attach it to one of those or all',
+      'c.yaml: profiles.default.pipelines.hotfix.nodes.fix: node "fix" clashes with a core step id; rename it',
+    ],
+  );
+});
+
 test('a builtin exit binding implies the exit', () => {
   assert.equal(buildGraph(hotfixWithout('exit', { deliver: { builtin: 'github.open_pr' } })).exit, 'pr');
 });

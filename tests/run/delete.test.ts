@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { loadState, saveState } from '../../src/engine/state.ts';
 import type { RunState } from '../../src/engine/state.ts';
-import { deleteRun, isFinished, planDelete } from '../../src/run/delete.ts';
+import { deleteIds, deleteRun, isFinished, planDelete } from '../../src/run/delete.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { statusJson } from '../../src/run/status.ts';
@@ -615,6 +615,20 @@ test('deleteRun removes the worktree dir when the repo is no longer a git repo',
     );
     assert.equal(await exists(worktree), false);
     assert.equal(await exists(e.dir(m)), false);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('deleteIds reports each unknown id on stderr, deletes the rest, and returns 1', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    let err = '';
+    const code = await deleteIds(['nope-1', m.runId, 'nope-2'], true, e.deps, { stderr: (s) => (err += s) });
+    assert.equal(code, 1);
+    assert.equal(err, 'no run nope-1; perc status lists runs\nno run nope-2; perc status lists runs\n');
+    await assertDeleted(e, m);
   } finally {
     await e.cleanup();
   }

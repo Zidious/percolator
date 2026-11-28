@@ -11,7 +11,7 @@ import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { statusJson } from '../../src/run/status.ts';
 import { terminalName } from '../../src/runtime/herdr-runtime.ts';
-import { writeDecision } from '../../src/tracker/gate.ts';
+import { writeDecision } from '../../src/tracker/gate-store.ts';
 import { GATE_MARKER } from '../../src/tracker/markers.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { FakeHc } from '../helpers/fake-hc.ts';

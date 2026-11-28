@@ -7,7 +7,7 @@ import { PICK_GATE, ROUTE_CHOOSE } from '../graph/core.ts';
 import type { StepHandler } from '../runtime/herdr-runtime.ts';
 import { collectOutputs } from '../runtime/outcome.ts';
 import { errText, escalate } from '../tracker/exits/latest.ts';
-import type { Decision } from '../tracker/gate.ts';
+import type { Decision } from '../tracker/gate-store.ts';
 import type { Gh } from '../tracker/gh.ts';
 import { readIssueMeta } from '../tracker/intake.ts';
 import { writeFileAtomic } from '../util/fs.ts';

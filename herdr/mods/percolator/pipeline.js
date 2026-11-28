@@ -58,7 +58,7 @@ export function header(p, t, r, narrow) {
         .when(Boolean(r.pr?.url), (el) => el.child(link(t, 'pr', 'PR ↗', (_e, cx) => cx.open_url(r.pr.url))))
         .when(Boolean(drv), (el) => el.child(link(t, 'driver', drv.label, () => p.peekDriver())))
         // which pipelines it offers is asked of the repo when it opens: here only whether it can be offered at all
-        .when(runNextChoices(r, [], p.runs) !== null, (el) => el.child(link(t, 'run-next', '▸ Run next…', (_e, cx) => p.openRunNext(cx), { disabled: Boolean(p.busy) })))
+        .when(runNextChoices(r, [], p.runs) !== null, (el) => el.child(link(t, 'run-next', '▸ Run next…', (_e, cx) => p.picker.openRunNext(cx), { disabled: Boolean(p.busy) })))
         .child(link(t, 'delete', 'Delete ↗', (_e, cx) => p.act('delete', cx), { disabled: Boolean(p.busy) }))
         .child(
           div()

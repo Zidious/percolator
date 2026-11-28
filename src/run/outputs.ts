@@ -16,3 +16,6 @@ export async function readLatest(dir: string, state: RunState, key: string): Pro
 export function prUrl(dir: string, state: RunState): Promise<string | undefined> {
   return readLatest(dir, state, 'pr_url');
 }
+
+/** The latest history record of a step. */
+export const latest = (state: RunState, stepId: string) => state.history.findLast((h) => h.stepId === stepId);

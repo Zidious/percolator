@@ -7,8 +7,8 @@ import { locate } from './config/locate.ts';
 import type { Where } from './config/locate.ts';
 import { checkGlobalStages, checkPipelines, pickPipeline, pipelineSpecs } from './config/pipelines.ts';
 import type { PipelineSpec } from './config/pipelines.ts';
-import { GraphFragmentSchema, UserConfigSchema } from './config/schema.ts';
-import type { GraphFragment, GroundSpec, Profile, UserConfig } from './config/schema.ts';
+import { effectiveKind, GraphFragmentSchema, UserConfigSchema } from './config/schema.ts';
+import type { GraphFragment, GroundSpec, NodeDef, Profile, UserConfig } from './config/schema.ts';
 import type { LineIndex } from './config/locate.ts';
 import { selectProfile } from './config/profile.ts';
 import { buildGraph } from './graph/build.ts';
@@ -286,4 +286,64 @@ function extendedProfile(
 /** Human-readable ground version: `<ref> (<commit12>)` for git grounds, `local` for path grounds. */
 export function groundVersion(g: ResolvedGround): string {
   return 'git' in g.source ? `${g.source.ref} (${g.commit.slice(0, 12)})` : 'local';
+}
+
+/** What runs a step: `builtin <name>`, `command <argv>`, `gate`, or `<agent>, model …, effort …, skills …`. */
+function runsWith(def: NodeDef): string {
+  const kind = effectiveKind(def);
+  if (kind === 'builtin') return `builtin ${def.builtin}`;
+  if (kind === 'script') return `command ${(def.command ?? []).join(' ')}`;
+  if (kind === 'gate') return 'gate';
+  const skills = [...(def.skill !== undefined ? [def.skill] : []), ...(def.skills ?? [])];
+  return [
+    def.agent,
+    ...(def.model !== undefined ? [`model ${def.model}`] : []),
+    ...(def.effort !== undefined ? [`effort ${def.effort}`] : []),
+    ...(skills.length > 0 ? [`skills ${skills.join(', ')}`] : []),
+  ].join(', ');
+}
+
+function describe(r: ValidateResult): string {
+  const approvers = r.tracker?.approvers;
+  // the gate falls back to the gh user only when the list is absent; an empty list lets no GitHub comment count
+  const who =
+    approvers === undefined
+      ? 'the gh user running perc'
+      : approvers.length === 0
+        ? 'none on GitHub (only local perc approve/reject)'
+        : approvers.join(', ');
+  const lines = [`pipeline: ${r.pipeline.name}${r.pipeline.default ? ' (default)' : ''}`, `profile: ${r.profile}`, `approvers: ${who}`];
+  const runtime = Object.entries(r.runtime ?? {});
+  if (runtime.length > 0) lines.push(`runtime: ${runtime.map(([k, v]) => `${k} ${String(v)}`).join(', ')}`);
+  for (const [name, version] of Object.entries(r.groundVersions)) lines.push(`ground ${name} ${version}`);
+  for (const m of r.mappings) {
+    const scope = m.applies_to.includes('*') ? '' : ` (applies to ${m.applies_to.join(', ')})`;
+    lines.push(`${m.as} ${m.absPath}${scope}`);
+  }
+  lines.push('', ...graphLines(r.graph));
+  const fan = r.pipeline.fan_out;
+  if (fan !== undefined && r.slice !== undefined) {
+    lines.push('', `slice runs (fan-out of ${fan.stage}, at most ${fan.max_parallel ?? 3} at a time):`, ...graphLines(r.slice));
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/** A graph's numbered steps, then its back-edges. */
+function graphLines(g: Graph): string[] {
+  const lines = ['steps:'];
+  g.steps.forEach((s, i) => {
+    const pos = s.role === 'hook' ? ` (${s.def.before !== undefined ? `before ${s.def.before}` : `after ${s.def.after}`})` : '';
+    lines.push(`${i + 1}. ${s.id}${pos}: ${runsWith(s.def)}`);
+  });
+  lines.push('', 'back-edges:');
+  for (const e of Object.values(g.backEdges)) {
+    const target = g.steps[e.toStepIndex]!.stage;
+    lines.push(`${e.fromStepId} → ${target} (max ${e.maxRounds}, ${e.onCap})`);
+  }
+  return lines;
+}
+
+/** What `perc validate` prints: one block per pipeline, a blank line between them. */
+export function validateText(results: ValidateResult[]): string {
+  return results.map(describe).join('\n');
 }

@@ -8,7 +8,7 @@ import { readRunMeta } from '../../src/run/meta.ts';
 import type { RunMeta } from '../../src/run/meta.ts';
 import { prepareRun } from '../../src/run/prepare.ts';
 import { parsePick } from '../../src/run/route.ts';
-import { readWaiting, writeDecision } from '../../src/tracker/gate.ts';
+import { readWaiting, writeDecision } from '../../src/tracker/gate-store.ts';
 import type { HcRunOptions } from '../../src/herdr/hc.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 import { FakeHc } from '../helpers/fake-hc.ts';

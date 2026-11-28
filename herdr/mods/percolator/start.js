@@ -133,7 +133,7 @@ function foot(p, t, s, pl) {
   const choice = pl ? p.startChoice(pl) : null;
   const can = choice ? p.canStartNow(choice) : { ok: false, why: 'Pick a pipeline' };
   const line = choice && choice.repo ? commandLine(p.startArgvNow(choice)) : '';
-  const busy = p.busy === 'start';
+  const busy = p.panel.busy === 'start';
   const note = s.error ?? s.said ?? (can.ok ? 'Enter starts' : can.why);
   return v_flex()
     .flex_none()
@@ -145,7 +145,7 @@ function foot(p, t, s, pl) {
         .flex_wrap()
         .gap(8)
         .items_center()
-        .child(button(t, 'start-go', 'Start', 'ok', (_e, cx) => p.startRun(cx), { busy, disabled: !can.ok || Boolean(p.busy) }))
+        .child(button(t, 'start-go', 'Start', 'ok', (_e, cx) => p.startRun(cx), { busy, disabled: !can.ok || Boolean(p.panel.busy) }))
         .child(button(t, 'start-cancel', 'Cancel', '', (_e, cx) => p.closeStart(cx)))
         .child(div().min_w(0).text_size(11).text_color(s.error ? t.blocked : t.muted).child(note)),
     );
@@ -169,13 +169,13 @@ function preview(p, t, pl, fold, narrow) {
     .child(div().ml(-16).child(pipeline(view, t, r, fold, narrow, false)));
 }
 
-/** The picker, filling the area under the title bar while it is open (p.start). */
+/** The picker (`p`: the panel's StartPicker), filling the area under the title bar while it is open (p.start). */
 export function startDialog(p, t, { narrow, fold }, width, repos) {
   const s = p.start;
   const list = p.startList();
   const pl = p.startPipeline();
   const side = previewSide(width);
-  const run = s.mode === 'next' ? p.runs.find((r) => r.id === s.run) : null;
+  const run = s.mode === 'next' ? p.panel.runs.find((r) => r.id === s.run) : null;
   const title = run ? `Run next on ${runLabel(run)}` : 'Start a run';
   const form = v_flex()
     .flex_1()

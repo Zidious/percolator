@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { main } from '../../src/cli.ts';
-import { readPipelines } from '../../herdr/mods/percolator/model.js';
+import { readPipelines } from '../../herdr/mods/percolator/status.js';
 
 const fixture = path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'pipelines.json');
 

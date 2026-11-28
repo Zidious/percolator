@@ -4,11 +4,11 @@ import path from 'node:path';
 import { STAGES } from '../config/schema.ts';
 import type { RunState, StepRecord } from '../engine/state.ts';
 import { isFinished, isLive, loadState } from '../engine/state.ts';
-import { CORE_GROOM_GATE, PICK_GATE, ROUTE_CHOOSE } from '../graph/core.ts';
+import { CORE_GROOM_GATE, PICK_GATE } from '../graph/core.ts';
 import { openedIssues } from '../tracker/exits/issues.ts';
-import { readWaiting } from '../tracker/gate.ts';
-import type { Waiting } from '../tracker/gate.ts';
-import { prUrl, readLatest } from './outputs.ts';
+import { readWaiting } from '../tracker/gate-store.ts';
+import type { Waiting } from '../tracker/gate-store.ts';
+import { latest, prUrl, readLatest } from './outputs.ts';
 import { readRunGraph } from './graph-file.ts';
 import type { RunGraphLoop, RunGraphStep } from './graph-file.ts';
 import { liveness, lockIsLive, pidAlive, readDriverLock } from './lock.ts';
@@ -16,105 +16,14 @@ import type { DriverLock } from './lock.ts';
 import { readFanOut } from './fan-out.ts';
 import type { FanOutFile } from './fan-out.ts';
 import { listRuns } from './meta.ts';
-import type { RunListing, RunMeta, RunTrigger } from './meta.ts';
+import type { RunListing, RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 import { askedItems } from './answer.ts';
-import { parsePick } from './route.ts';
-import { watcherStatus } from '../watch/watch.ts';
+import { pickDetail, runAgain, suggestion, yourTurn } from './next-steps.ts';
+import type { YourTurnInput } from './next-steps.ts';
+import type { AttemptJson, AttentionJson, AttentionKind, ChildJson, ReviewItem, RunStatusJson, StatusJson, StepJson, TicketJson, TimelineJson } from './status-json.ts';
+import { watcherStatus } from '../watch/heartbeat.ts';
 import { samePath } from '../util/paths.ts';
-
-export type AttentionKind = 'gate' | 'cap' | 'paused' | 'questions' | 'findings' | 'failed' | 'stalled' | 'agent';
-export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'answer' | 'clean' | 'open-pane' | 'run-again';
-export type ReviewItem = { step: string; key: string; path: string };
-export type AttentionJson = {
-  kind: AttentionKind;
-  since: string;
-  message: string;
-  detail?: string;
-  commentUrl?: string;
-  review?: ReviewItem[];
-  actions: Action[];
-  commands?: string[];
-  terminal?: string;
-  agentState?: string;
-  /** paused only: the agent's saved screen (an absolute path) when the pause reason names it; `detail` keeps it in its text */
-  transcript?: string;
-  /** a pick-pipeline gate only: the pipelines `pick` may name (`perc approve <id> --pipeline <name>`) */
-  choices?: string[];
-  /** questions or findings only: what the run asks, item by item (`perc answer <id>` numbers them from 1) */
-  asked?: { step: string; attempt: number; items: string[] };
-};
-export type StepJson = RunGraphStep & {
-  status: 'pending' | 'running' | 'waiting' | StepRecord['status'];
-  attempts: number;
-  startedAt?: string;
-  endedAt?: string;
-  outputs: Record<string, string>;
-};
-export type DecisionJson = { decision: 'approve' | 'reject'; by?: string };
-export type AttemptJson = {
-  kind: 'attempt';
-  step: string;
-  attempt: number;
-  /** `running` or `waiting` only on the live entry, which is always last */
-  status: Exclude<StepJson['status'], 'pending'>;
-  startedAt?: string;
-  /** absent on the live entry */
-  endedAt?: string;
-  outputs: Record<string, string>;
-  /** gate attempts only: pass is approve, fail is reject */
-  decision?: DecisionJson;
-};
-export type CapJson = { kind: 'cap'; loop: string; from: string; to: string; max: number; at: string };
-export type TimelineJson = AttemptJson | CapJson;
-export type LoopJson = RunGraphLoop & { round: number };
-export type TicketJson = { ref: string; number: number; title?: string; url?: string };
-/** A run this one started (route or fan-out child); `slice` only on a fan-out child. */
-export type ChildJson = { id: string; pipeline: string; status: RunStatusJson['status'] | 'pending'; slice?: { index: number; title: string } };
-export type RunStatusJson =
-  | {
-      id: string;
-      /** the pipeline the run was started on (`feature` for a run from before pipelines) */
-      pipeline: string;
-      /** the `--input` values the run was started with */
-      inputs: Record<string, string>;
-      /** the profile the run was started with */
-      profile: string;
-      /** the config file the run was started with, null when it is perc's default (`~/.percolator/config.yaml`) */
-      config: string | null;
-      /** null on a ticketless run */
-      ticket: TicketJson | null;
-      /** the run that started this one, else null */
-      parent: string | null;
-      /** fan-out slices by index (pending until started), then listed runs whose parent is this run, in listing order */
-      children: ChildJson[];
-      /** the issues the run's exit opened, from its latest `issue_urls` output */
-      opened: { ref: string; url: string }[];
-      repo: string;
-      branch: string;
-      worktree: string;
-      createdAt: string;
-      status: 'running' | 'waiting' | 'paused' | 'failed' | 'completed';
-      /** the step the run is at; before any step has run, its first step; absent once completed */
-      currentStep?: string;
-      driver: { alive: boolean | null; terminal: string; space?: string; shown: boolean };
-      attention?: AttentionJson;
-      steps: StepJson[];
-      loops: LoopJson[];
-      /** every attempt in execution order, oldest first; the live attempt (if any) is last */
-      timeline: TimelineJson[];
-      terminals: Record<string, string>;
-      pr: { url: string } | null;
-      graph: 'full' | 'history';
-      /** the `perc watch` trigger that started the run, null on a manual run (or one from before triggers were recorded) */
-      trigger: RunTrigger | null;
-      /** the comment the run's exit posted, from its latest `comment_url` output */
-      comment: { url: string } | null;
-    }
-  | { id: string; status: 'unreadable'; error: string };
-/** Whether `perc watch` runs (same host, live pid, fresh heartbeat), since when, and the repos it watches. */
-export type WatcherJson = { alive: boolean; since?: string; repos: string[] };
-export type StatusJson = { schema: 2; runs: RunStatusJson[]; watcher: WatcherJson };
 
 /** How the driver was judged: its hc terminal, its `driver.json` lock, or neither (`hcError` when hc failed). */
 export type DriverLiveness = { alive: boolean | null; lock?: DriverLock; hcError?: string };
@@ -210,8 +119,6 @@ async function isGateStep(dir: string, stepId: string, state: RunState): Promise
   return false;
 }
 
-const latest = (state: RunState, stepId: string) => state.history.findLast((h) => h.stepId === stepId);
-
 const absOutputs = (dir: string, outputs: Record<string, string>): Record<string, string> =>
   Object.fromEntries(Object.entries(outputs).map(([k, rel]) => [k, path.join(dir, rel)]));
 
@@ -253,188 +160,6 @@ async function liveTerminals(meta: RunMeta, deps: DriverDeps): Promise<{ names: 
   }
 }
 
-export type YourTurnInput = {
-  kind: AttentionKind;
-  runId: string;
-  step: string;
-  /** absent on a ticketless run */
-  ticket?: string;
-  /** the run's pipeline and inputs, so "start it again" starts the same kind of run */
-  pipeline?: string;
-  inputs?: Record<string, string>;
-  repoRoot: string;
-  /** the run's profile and (unless the default) config file, so it starts under the same config */
-  profile?: string;
-  config?: string;
-  reason?: string;
-  decision?: 'approve' | 'reject';
-  terminal?: string;
-  agentState?: string;
-  /** a failed fan-out slice: its parent run, which starts the slice again once it is deleted */
-  sliceOf?: string;
-  /** a pick-pipeline gate: the pipelines `perc approve --pipeline` may name */
-  choices?: string[];
-  /** findings: the stage a granted round goes back to; gate: the stage a reject goes back to (none: a reject ends the run) */
-  backTo?: string;
-  /** gate: its loop is on its last round, so a reject pauses at this cap of rounds (asking which findings to fix, for a stage loop) */
-  capRounds?: number;
-  capAsksFindings?: boolean;
-  /** findings: the failing step wrote none, so the only answer is to move on */
-  nothingToTick?: boolean;
-};
-
-/**
- * A value as typed (the repo, an input after `--input k=`), backslashes kept as they are. A blank or a `'`:
- * double-quoted, which sh, PowerShell and cmd read alike. A `"`, `$` or backtick: single-quoted, which sh and
- * PowerShell take as typed (no shell reads a `\"` escape alike). Both kinds of quote: PowerShell's `''`, as
- * Windows is the owner's OS.
- */
-const quoted = (v: string): string => {
-  if (!/[\s"'$`]/.test(v)) return v;
-  if (!/["$`]/.test(v)) return `"${v}"`;
-  return `'${v.replace(/'/g, "''")}'`;
-};
-
-/**
- * The `perc run` that starts the same kind of run again: its ticket, its pipeline (named even when feature, as a
- * profile may mark another pipeline default), its inputs, its repo, then its config file (unless the default) and profile.
- */
-export function runAgain(a: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs' | 'repoRoot' | 'profile' | 'config'>): string {
-  const pipeline = a.pipeline !== undefined ? [`--pipeline ${a.pipeline}`] : [];
-  const inputs = Object.entries(a.inputs ?? {}).map(([k, v]) => `--input ${k}=${quoted(v)}`);
-  const config = a.config !== undefined ? [`--config ${quoted(a.config)}`] : [];
-  const profile = a.profile !== undefined ? [`--profile ${a.profile}`] : [];
-  return ['perc run', ...(a.ticket ? [a.ticket] : []), ...pipeline, ...inputs, `--repo ${quoted(a.repoRoot)}`, ...config, ...profile].join(' ');
-}
-
-/** Where a reject of a gate sends the run: back with the feedback, else to the cap of its loop on the last round. */
-function gateDetail(a: Pick<YourTurnInput, 'backTo' | 'capRounds' | 'capAsksFindings'>): string {
-  if (a.backTo === undefined) return "Rejecting ends the run; a failed run can't be resumed.";
-  if (a.capRounds !== undefined) {
-    return a.capAsksFindings === true
-      ? `Rejecting pauses the run at its cap (${a.capRounds} rounds) to ask which findings to fix.`
-      : `Rejecting pauses the run at its cap (${a.capRounds} rounds); perc resume grants one more.`;
-  }
-  return `Rejecting sends the run back to ${a.backTo} with your feedback.`;
-}
-
-/** A failed step, with why it failed when the run recorded it (`lint failed (exit code 1)`). */
-export function failedText(step: string, reason: string | undefined): string {
-  return reason === undefined ? `${step} failed` : `${step} failed (${reason})`;
-}
-
-/** What the owner has to do next, as one sentence plus the exact commands to type. Shared by `perc status` and the JSON. */
-export function yourTurn(a: YourTurnInput): { message: string; detail?: string; next: string[] } {
-  const resume = [`perc resume ${a.runId}`];
-  switch (a.kind) {
-    case 'gate':
-      return {
-        // a ticketless run has no issue for the gate to comment on
-        message: a.ticket ? `${a.step} is waiting for approval` : 'approve or reject here (no issue to comment on)',
-        detail: gateDetail(a),
-        next: [
-          ...(a.choices !== undefined ? a.choices.map((c) => `perc approve ${a.runId} --pipeline ${c}`) : [`perc approve ${a.runId}`]),
-          `perc reject ${a.runId} "<what to change>"`,
-        ],
-      };
-    case 'cap':
-      return {
-        message: `${a.step} hit its cap (${a.reason})`,
-        detail: 'Grant one more round and the run goes back with the open findings.',
-        next: resume,
-      };
-    case 'paused': {
-      // the runtime's reasons start with the step, which the message already names
-      const reason = a.reason ?? ''; // attentionNext asks for the commands only
-      const why = reason.startsWith(`${a.step}: `) ? reason.slice(a.step.length + 2) : reason;
-      return { message: `${a.step} paused`, ...(why.trim() !== '' ? { detail: why } : {}), next: resume };
-    }
-    case 'questions':
-      return {
-        message: `${a.step} has questions for you`,
-        detail: `Answer each one or mark it N/A; ${a.step} then runs again with your answers.`,
-        next: [`perc answer ${a.runId} --answer <n>="<text>" --na <n> …`],
-      };
-    case 'findings':
-      if (a.nothingToTick === true) {
-        return { message: `${a.step} hit its cap and wrote no findings to tick`, detail: 'The only answer is to move on past it.', next: [`perc answer ${a.runId}`] };
-      }
-      return {
-        message: `${a.step} hit its cap with findings left`,
-        detail: `Tick the findings to fix: the run goes back${a.backTo === undefined ? '' : ` to ${a.backTo}`} for one more round with only those. With none ticked, it moves on.`,
-        next: [`perc answer ${a.runId} --agree <n>[,<n>…]`, `perc answer ${a.runId}`],
-      };
-    case 'failed':
-      if (a.sliceOf !== undefined) {
-        return {
-          message: `${a.step} failed`,
-          detail: `Delete this slice (its branch stays), then resume ${a.sliceOf} to run it again`,
-          next: [`perc delete ${a.runId}`, `perc resume ${a.sliceOf}`],
-        };
-      }
-      return {
-        message: failedText(a.step, a.reason),
-        detail: `A failed run can't be resumed. Start a new run ${a.ticket ? 'for the ticket' : `of pipeline ${a.pipeline ?? 'feature'}`}, then delete this one (or clean it up to keep its record).`,
-        next: [runAgain(a), `perc delete ${a.runId}`, `perc clean ${a.runId}`],
-      };
-    case 'stalled':
-      if (a.decision !== undefined) return { message: `${a.decision === 'approve' ? 'approved' : 'rejected'}; resume to continue`, next: resume };
-      return {
-        message: `the driver stopped while ${a.step} was running`,
-        detail: `Nothing is driving this run. Resume picks up at ${a.step}.`,
-        next: resume,
-      };
-    case 'agent':
-      return { message: `${a.step}'s agent is ${a.agentState} in terminal ${a.terminal}`, detail: "Attend the agent's terminal.", next: [] };
-  }
-}
-
-/**
- * The commands `yourTurn` gives for an attention record (they depend on its kind and the run, not on its reason).
- * A failed run with a parent and no `commands` is a fan-out slice (attentionOf gives a slice none).
- */
-export function attentionNext(
-  a: AttentionJson,
-  run: {
-    id: string;
-    ticket: { ref: string } | null;
-    pipeline: string;
-    inputs: Record<string, string>;
-    repo: string;
-    parent?: string | null;
-    profile?: string;
-    config?: string | null;
-  },
-): string[] {
-  const again = {
-    ticket: run.ticket?.ref,
-    pipeline: run.pipeline,
-    inputs: run.inputs,
-    repoRoot: run.repo,
-    ...(run.profile !== undefined ? { profile: run.profile } : {}),
-    ...(typeof run.config === 'string' ? { config: run.config } : {}),
-  };
-  const slice = a.kind === 'failed' && a.commands === undefined && typeof run.parent === 'string' ? { sliceOf: run.parent } : {};
-  const choices = a.choices !== undefined ? { choices: a.choices } : {};
-  const none = a.kind === 'findings' && a.asked?.items.length === 0 ? { nothingToTick: true } : {};
-  return yourTurn({ kind: a.kind, runId: run.id, step: '', ...again, ...slice, ...choices, ...none }).next;
-}
-
-/** A pick gate's reject has the choose agent pick again, or pauses at its cap on the last round. */
-function pickDetail(g: Pick<YourTurnInput, 'backTo' | 'capRounds'>): { detail?: string } {
-  if (g.backTo === undefined) return {};
-  if (g.capRounds !== undefined) return { detail: gateDetail(g) };
-  return { detail: 'Rejecting has the agent pick again with your feedback.' };
-}
-
-/** The choose agent's latest valid pick among `choices`, if it made one (sure or not). */
-async function suggestion(dir: string, state: RunState, choices: string[]): Promise<string | undefined> {
-  const rel = latest(state, ROUTE_CHOOSE)?.outputs['pick'];
-  if (rel === undefined) return undefined;
-  const text = await fs.readFile(path.join(dir, rel), 'utf8').catch(() => '');
-  return parsePick(text, choices).pipeline;
-}
-
 /**
  * Where a reject of `gate` sends the run: the stage of the loop from the gate, else (a gate in a loop stage)
  * of the stage loop from a step of its stage. None: an older graph whose gate has no loop; a reject ends the run.
@@ -456,7 +181,7 @@ function gateBackTo(
   return { backTo, capRounds: loop.max, ...(loop.atCap === 'continue' ? { capAsksFindings: true } : {}) };
 }
 
-async function attentionOf(o: {
+type AttentionInput = {
   dir: string;
   meta: RunMeta;
   state: RunState;
@@ -470,8 +195,158 @@ async function attentionOf(o: {
   config: string | null;
   /** the step the run is at (its first step before any has run) */
   current: string | undefined;
-}): Promise<AttentionJson | undefined> {
-  const { dir, meta, state, waiting, alive, current } = o;
+};
+
+/** What every attention check reads: the run, and what they all derive from it. */
+type AttentionContext = AttentionInput & {
+  lastEnd: string;
+  again: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs' | 'repoRoot' | 'profile' | 'config'>;
+  turn: (kind: AttentionKind, step: string | undefined, x?: Partial<YourTurnInput>) => { message: string; detail?: string };
+  failing: (step: string | undefined) => ReviewItem[];
+};
+
+/** One check of `attentionOf`: its attention when it applies, else undefined (the next check is asked). */
+type AttentionCheck = (c: AttentionContext) => Promise<AttentionJson | undefined>;
+
+/** A waiting gate decided while the driver was dead: resume carries the decision out. */
+const decidedGate: AttentionCheck = async ({ waiting, alive, turn }) => {
+  if (waiting === undefined || alive !== false || !(await exists(path.join(waiting.stepDir, 'decision.json')))) return undefined;
+  const d = await readDecision(waiting.stepDir);
+  return { kind: 'stalled', since: waiting.since, ...turn('stalled', waiting.stepId, d !== undefined ? { decision: d } : {}), actions: ['resume'] };
+};
+
+/** A waiting pick-pipeline gate. */
+const pickGate: AttentionCheck = async (o) => {
+  const { dir, state, waiting } = o;
+  if (waiting === undefined) return undefined;
+  const choices = o.steps.find((s) => s.id === waiting.stepId && s.id === PICK_GATE)?.choices;
+  if (choices === undefined) return undefined;
+  const suggests = await suggestion(dir, state, choices);
+  return {
+    kind: 'gate',
+    since: waiting.since,
+    message: suggests === undefined ? 'pick the pipeline for this ticket' : `pick the pipeline for this ticket (the agent suggests ${suggests})`,
+    ...pickDetail(gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds)),
+    ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
+    review: gateReview(dir, waiting.stepId, o.steps, state),
+    actions: ['pick', 'reject'],
+    choices,
+  };
+};
+
+/** Any other waiting gate. */
+const gate: AttentionCheck = async (o) => {
+  const { dir, state, waiting, turn } = o;
+  if (waiting === undefined) return undefined;
+  const { detail, ...gateTurn } = turn('gate', waiting.stepId, gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds));
+  return {
+    kind: 'gate',
+    since: waiting.since,
+    ...gateTurn,
+    ...(o.graphKnown && detail !== undefined ? { detail } : {}),
+    ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
+    review: gateReview(dir, waiting.stepId, o.steps, state),
+    actions: ['approve', 'reject'],
+  };
+};
+
+/** A run paused on questions, or on findings at a cap. */
+const asked: AttentionCheck = async (o) => {
+  const { dir, state, lastEnd, turn, failing } = o;
+  if (state.status !== 'paused') return undefined;
+  const asking = state.asking;
+  if (asking === undefined) return undefined;
+  const items = await askedItems(dir, state);
+  const findings: Partial<YourTurnInput> = {};
+  if (asking.kind === 'findings') {
+    const to = o.loops.find((l) => l.id === asking.edgeId)?.to;
+    const backTo = o.steps.find((s) => s.id === to)?.stage;
+    if (backTo !== undefined) findings.backTo = backTo;
+    if (items.length === 0) findings.nothingToTick = true;
+  }
+  return {
+    kind: asking.kind,
+    since: lastEnd,
+    ...turn(asking.kind, asking.stepId, findings),
+    // every step whose findings are numbered, the others first as the items are
+    review: [...new Set([...(asking.kind === 'findings' ? (asking.also ?? []).map((s) => s.stepId) : []), asking.stepId])].flatMap(failing),
+    actions: ['answer'],
+    asked: { step: asking.stepId, attempt: asking.attempt, items },
+  };
+};
+
+/** A run paused at a loop's cap. */
+const cap: AttentionCheck = async (o) => {
+  const { state, current, lastEnd, turn, failing } = o;
+  if (state.status !== 'paused' || state.pausedCap === undefined) return undefined;
+  const from = o.loops.find((l) => l.id === state.pausedCap)?.from ?? current;
+  const reason = (state.pausedReason ?? '').replace(/^cap: /, '');
+  return { kind: 'cap', since: lastEnd, ...turn('cap', current, { reason }), review: failing(from), actions: ['grant'] };
+};
+
+/** Any other paused run. */
+const paused: AttentionCheck = async ({ dir, state, current, lastEnd, turn, failing }) => {
+  if (state.status !== 'paused') return undefined;
+  const reason = state.pausedReason ?? '';
+  const named = current === undefined ? undefined : transcriptIn(reason, dir, current);
+  // the runtime saves the screen best-effort: link it only when it was saved
+  const transcript = named !== undefined && (await fs.stat(named).then((s) => s.isFile(), () => false)) ? named : undefined;
+  return {
+    kind: 'paused',
+    since: lastEnd,
+    ...turn('paused', current, { reason }),
+    ...(transcript !== undefined ? { transcript } : {}),
+    review: failing(current),
+    actions: ['resume'],
+  };
+};
+
+/** A failed run that still has its worktree. */
+const failed: AttentionCheck = async ({ meta, state, current, lastEnd, again, turn, failing }) => {
+  if (state.status !== 'failed') return undefined;
+  // after `perc clean` (no worktree) there is nothing left to do for a failed run
+  if (!(await exists(meta.worktree))) return undefined;
+  // a slice is started again by its parent, not by a new run
+  const sliceOf = meta.fanOut?.parent;
+  return {
+    kind: 'failed',
+    since: lastEnd,
+    ...turn('failed', current, {
+      ...(sliceOf !== undefined ? { sliceOf } : {}),
+      ...(state.failedReason !== undefined ? { reason: state.failedReason } : {}),
+    }),
+    review: failing(current),
+    actions: sliceOf === undefined ? ['run-again', 'clean'] : ['clean'],
+    ...(sliceOf === undefined ? { commands: [runAgain(again)] } : {}),
+  };
+};
+
+/** A running run whose driver is dead. */
+const stalled: AttentionCheck = async ({ state, alive, current, lastEnd, turn }) => {
+  if (state.status !== 'running' || alive !== false) return undefined;
+  return { kind: 'stalled', since: lastEnd, ...turn('stalled', current), actions: ['resume'] };
+};
+
+/** A running run whose current step's agent wants attention in its terminal. */
+const agent: AttentionCheck = async ({ dir, state, alive, current, lastEnd, turn }) => {
+  if (state.status !== 'running' || alive !== true) return undefined;
+  const a = await readAttention(dir);
+  if (a === undefined || a.stepId !== current || typeof a.terminal !== 'string') return undefined;
+  return {
+    kind: 'agent',
+    since: typeof a.at === 'string' ? a.at : lastEnd,
+    ...turn('agent', current, { terminal: a.terminal, agentState: typeof a.kind === 'string' ? a.kind : 'waiting' }),
+    terminal: a.terminal,
+    ...(typeof a.kind === 'string' ? { agentState: a.kind } : {}),
+    actions: ['open-pane'],
+  };
+};
+
+/** The checks of `attentionOf`, in order: the first that applies wins. */
+const ATTENTION_CHECKS: AttentionCheck[] = [decidedGate, pickGate, gate, asked, cap, paused, failed, stalled, agent];
+
+async function attentionOf(o: AttentionInput): Promise<AttentionJson | undefined> {
+  const { dir, meta, state } = o;
   const lastEnd = state.history.at(-1)?.endedAt || meta.createdAt;
   const again = {
     ticket: meta.ticket,
@@ -486,105 +361,12 @@ async function attentionOf(o: {
     return { message: t.message, ...(t.detail !== undefined ? { detail: t.detail } : {}) };
   };
   const failing = (step: string | undefined) => (step === undefined ? [] : review(dir, step, latest(state, step)?.outputs));
-  if (waiting !== undefined) {
-    if (alive === false && (await exists(path.join(waiting.stepDir, 'decision.json')))) {
-      const d = await readDecision(waiting.stepDir);
-      return { kind: 'stalled', since: waiting.since, ...turn('stalled', waiting.stepId, d !== undefined ? { decision: d } : {}), actions: ['resume'] };
-    }
-    const choices = o.steps.find((s) => s.id === waiting.stepId && s.id === PICK_GATE)?.choices;
-    if (choices !== undefined) {
-      const suggests = await suggestion(dir, state, choices);
-      return {
-        kind: 'gate',
-        since: waiting.since,
-        message: suggests === undefined ? 'pick the pipeline for this ticket' : `pick the pipeline for this ticket (the agent suggests ${suggests})`,
-        ...pickDetail(gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds)),
-        ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
-        review: gateReview(dir, waiting.stepId, o.steps, state),
-        actions: ['pick', 'reject'],
-        choices,
-      };
-    }
-    const { detail, ...gateTurn } = turn('gate', waiting.stepId, gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds));
-    return {
-      kind: 'gate',
-      since: waiting.since,
-      ...gateTurn,
-      ...(o.graphKnown && detail !== undefined ? { detail } : {}),
-      ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
-      review: gateReview(dir, waiting.stepId, o.steps, state),
-      actions: ['approve', 'reject'],
-    };
+  const c: AttentionContext = { ...o, lastEnd, again, turn, failing };
+  for (const check of ATTENTION_CHECKS) {
+    const hit = await check(c);
+    if (hit !== undefined) return hit;
   }
-  if (state.status === 'paused') {
-    const asking = state.asking;
-    if (asking !== undefined) {
-      const items = await askedItems(dir, state);
-      const findings: Partial<YourTurnInput> = {};
-      if (asking.kind === 'findings') {
-        const to = o.loops.find((l) => l.id === asking.edgeId)?.to;
-        const backTo = o.steps.find((s) => s.id === to)?.stage;
-        if (backTo !== undefined) findings.backTo = backTo;
-        if (items.length === 0) findings.nothingToTick = true;
-      }
-      return {
-        kind: asking.kind,
-        since: lastEnd,
-        ...turn(asking.kind, asking.stepId, findings),
-        // every step whose findings are numbered, the others first as the items are
-        review: [...new Set([...(asking.kind === 'findings' ? (asking.also ?? []).map((s) => s.stepId) : []), asking.stepId])].flatMap(failing),
-        actions: ['answer'],
-        asked: { step: asking.stepId, attempt: asking.attempt, items },
-      };
-    }
-    if (state.pausedCap !== undefined) {
-      const from = o.loops.find((l) => l.id === state.pausedCap)?.from ?? current;
-      const reason = (state.pausedReason ?? '').replace(/^cap: /, '');
-      return { kind: 'cap', since: lastEnd, ...turn('cap', current, { reason }), review: failing(from), actions: ['grant'] };
-    }
-    const reason = state.pausedReason ?? '';
-    const named = current === undefined ? undefined : transcriptIn(reason, dir, current);
-    // the runtime saves the screen best-effort: link it only when it was saved
-    const transcript = named !== undefined && (await fs.stat(named).then((s) => s.isFile(), () => false)) ? named : undefined;
-    return {
-      kind: 'paused',
-      since: lastEnd,
-      ...turn('paused', current, { reason }),
-      ...(transcript !== undefined ? { transcript } : {}),
-      review: failing(current),
-      actions: ['resume'],
-    };
-  }
-  // after `perc clean` (no worktree) there is nothing left to do for a failed run
-  if (state.status === 'failed') {
-    if (!(await exists(meta.worktree))) return undefined;
-    // a slice is started again by its parent, not by a new run
-    const sliceOf = meta.fanOut?.parent;
-    return {
-      kind: 'failed',
-      since: lastEnd,
-      ...turn('failed', current, {
-        ...(sliceOf !== undefined ? { sliceOf } : {}),
-        ...(state.failedReason !== undefined ? { reason: state.failedReason } : {}),
-      }),
-      review: failing(current),
-      actions: sliceOf === undefined ? ['run-again', 'clean'] : ['clean'],
-      ...(sliceOf === undefined ? { commands: [runAgain(again)] } : {}),
-    };
-  }
-  if (state.status !== 'running') return undefined;
-  if (alive === false) return { kind: 'stalled', since: lastEnd, ...turn('stalled', current), actions: ['resume'] };
-  if (alive !== true) return undefined;
-  const a = await readAttention(dir);
-  if (a === undefined || a.stepId !== current || typeof a.terminal !== 'string') return undefined;
-  return {
-    kind: 'agent',
-    since: typeof a.at === 'string' ? a.at : lastEnd,
-    ...turn('agent', current, { terminal: a.terminal, agentState: typeof a.kind === 'string' ? a.kind : 'waiting' }),
-    terminal: a.terminal,
-    ...(typeof a.kind === 'string' ? { agentState: a.kind } : {}),
-    actions: ['open-pane'],
-  };
+  return undefined;
 }
 
 /** Who decided a gate attempt: `decision.json`, else the `@login` in its approval or findings output. Any failure only means no one. */

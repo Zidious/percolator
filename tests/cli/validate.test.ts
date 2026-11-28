@@ -6,7 +6,7 @@ import { after, before, test } from 'node:test';
 import { ConfigError } from '../../src/config/load.ts';
 import { RuleViolationError } from '../../src/graph/rules.ts';
 import { EXIT_KINDS, EXITS } from '../../src/tracker/index.ts';
-import { groundVersion, profileFragment, validate, validateAll } from '../../src/validate.ts';
+import { groundVersion, profileFragment, validate, validateAll, validateText } from '../../src/validate.ts';
 import { GraphFragmentSchema } from '../../src/config/schema.ts';
 import type { Profile } from '../../src/config/schema.ts';
 import type { ResolvedGround } from '../../src/grounds/resolve.ts';
@@ -777,4 +777,14 @@ test('profileFragment carries every graph fragment key a profile sets, but use (
   const profile = Object.fromEntries([...keys, 'use', 'runtime'].map((k) => [k, { marker: k }])) as unknown as Profile;
   assert.deepEqual(profileFragment(profile), Object.fromEntries(keys.map((k) => [k, { marker: k }])));
   assert.deepEqual(profileFragment({} as Profile), {});
+});
+
+test('validateText prints one block per pipeline: header, grounds, mappings, steps, back-edges', async () => {
+  const r = await validate(opts());
+  const block = validateText([r]);
+  const lines = block.split('\n');
+  assert.deepEqual(lines.slice(0, 5), ['pipeline: feature (default)', 'profile: work', 'approvers: the gh user running perc', 'ground company local', 'ground team local']);
+  assert.ok(block.includes('\nsteps:\n1. intake: builtin github.intake\n2. groom: claude\n3. approve-groom (after groom): gate\n'), block);
+  assert.ok(block.endsWith('\nback-edges:\napprove-groom → groom (max 3, escalate)\nreview → implement (max 3, continue)\n'), block);
+  assert.equal(validateText([r, r]), `${block}\n${block}`);
 });

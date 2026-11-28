@@ -1,7 +1,6 @@
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { z } from 'zod';
 import type { NodeOutcome, RunContext } from '../engine/runtime.ts';
 import type { Step } from '../graph/build.ts';
 import type { StepHandler } from '../runtime/herdr-runtime.ts';
@@ -12,73 +11,14 @@ import { commentIdOf } from './gh.ts';
 import type { Gh, IssueComment } from './gh.ts';
 import { parseGateComment, renderGateComment, withRejection } from './gate-comment.ts';
 import type { GateComment } from './gate-comment.ts';
+import { DecisionSchema, earlierGate, gateJson, readGate, readJson, waitingFile } from './gate-store.ts';
+import type { Decision, SavedGate, Waiting } from './gate-store.ts';
 import { issueMetaIfAny } from './intake.ts';
+import type { IssueMeta } from './intake.ts';
 import { parseCommand } from './prior-groom.ts';
-
-export type Decision = {
-  decision: 'approve' | 'reject';
-  feedback?: string;
-  /** a pick-pipeline gate's answer: `perc approve <run-id> --pipeline <name>` */
-  pipeline?: string;
-  by: string;
-  via: 'comment' | 'local';
-  url?: string;
-};
-/** `commentUrl` is absent when the run has no issue: the gate then waits only for `perc approve`/`perc reject`. */
-export type Waiting = { stepId: string; stepDir: string; since: string; commentUrl?: string };
-
-const DecisionSchema = z
-  .object({
-    decision: z.enum(['approve', 'reject']),
-    feedback: z.string().optional(),
-    pipeline: z.string().optional(),
-    by: z.string(),
-    via: z.enum(['comment', 'local']),
-    url: z.string().optional(),
-  })
-  .passthrough();
-
-const WaitingSchema = z.object({
-  stepId: z.string(),
-  stepDir: z.string(),
-  since: z.string(),
-  commentUrl: z.string().optional(),
-});
 
 const OUTPUT_CAP = 60000;
 const BODY_CAP = 65000;
-
-const waitingFile = (runDir: string) => path.join(runDir, 'waiting.json');
-
-async function readJson(file: string): Promise<unknown | undefined> {
-  let text: string;
-  try {
-    text = await fs.readFile(file, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw err;
-  }
-  return JSON.parse(text);
-}
-
-export async function readWaiting(runDir: string): Promise<Waiting | undefined> {
-  const file = waitingFile(runDir);
-  const invalid = (why: string) => new Error(`Waiting file ${file} is invalid: ${why}; delete it and resume the run`);
-  let raw: unknown;
-  try {
-    raw = await readJson(file);
-  } catch (err) {
-    if (err instanceof SyntaxError) throw invalid(err.message);
-    throw err;
-  }
-  if (raw === undefined) return undefined;
-  const r = WaitingSchema.safeParse(raw);
-  if (!r.success) {
-    const i = r.error.issues[0]!;
-    throw invalid(`${i.path.join('.') || 'value'}: ${i.message}`);
-  }
-  return r.data;
-}
 
 /** The gh login of whoever decides locally; the OS user (as one handle) when gh cannot say. */
 export async function deciderLogin(gh: Gh, username: () => string = () => os.userInfo().username): Promise<string> {
@@ -89,17 +29,6 @@ export async function deciderLogin(gh: Gh, username: () => string = () => os.use
     // gh not logged in or unreachable: fall back to the OS user
   }
   return username().replace(/\s+/g, '-');
-}
-
-export async function writeDecision(
-  runDir: string,
-  d: { decision: 'approve' | 'reject'; feedback?: string; pipeline?: string; by: string },
-): Promise<Waiting> {
-  const waiting = await readWaiting(runDir);
-  if (!waiting) throw new Error('run is not waiting at a gate');
-  const full: Decision = { ...d, via: 'local' };
-  await writeFileAtomic(path.join(waiting.stepDir, 'decision.json'), `${JSON.stringify(full, null, 2)}\n`);
-  return waiting;
 }
 
 export { parseCommand } from './prior-groom.ts';
@@ -131,39 +60,6 @@ function previousStepOutputs(step: Step, ctx: RunContext): Record<string, string
     if (out && Object.keys(out).length > 0) return out;
   }
   return {};
-}
-
-/** `<stepDir>/gate.json`: where this round's comment is and when its text went up. */
-type SavedGate = { commentUrl: string; commentId: number; round?: number; postedAt: string };
-
-const gateJson = (g: SavedGate) => `${JSON.stringify(g, null, 2)}\n`;
-
-async function readGate(file: string): Promise<SavedGate | undefined> {
-  let raw: Partial<SavedGate> | undefined;
-  try {
-    raw = (await readJson(file)) as Partial<SavedGate> | undefined;
-  } catch (err) {
-    if (err instanceof SyntaxError) throw new Error(`Gate file ${file} is invalid: ${err.message}; delete it and resume the run`);
-    throw err;
-  }
-  if (!raw) return undefined;
-  // a gate.json from before the upgrade has only commentUrl and postedAt
-  return { ...raw, commentId: raw.commentId ?? commentIdOf(raw.commentUrl ?? '') } as SavedGate;
-}
-
-/** This round's gate.json in an earlier attempt dir of the step, newest attempt first. */
-async function earlierGate(stepDir: string, round: number): Promise<SavedGate | undefined> {
-  const parent = path.dirname(stepDir);
-  const self = path.basename(stepDir);
-  const attempts = (await fs.readdir(parent, { withFileTypes: true }))
-    .filter((d) => d.isDirectory() && d.name !== self)
-    .map((d) => d.name)
-    .sort((a, b) => Number(b) - Number(a));
-  for (const a of attempts) {
-    const g = await readGate(path.join(parent, a, 'gate.json'));
-    if (g?.round === round) return g;
-  }
-  return undefined;
 }
 
 const escalate = (reason: string): NodeOutcome => ({ status: 'escalate', outputs: {}, reason });
@@ -237,6 +133,139 @@ export function githubGate(o: {
     return { status, outputs: collected.outputs };
   };
 
+  /** This round's marked gate comment: from gate.json (this attempt's or an earlier one's), else found on the issue and edited, else posted. */
+  const ensureGateComment = async (
+    step: Step,
+    ctx: RunContext,
+    io: { stepDir: string },
+    meta: IssueMeta,
+    round: number,
+  ): Promise<SavedGate> => {
+    const gateFile = path.join(io.stepDir, 'gate.json');
+    let saved = await readGate(gateFile);
+    if (!saved) {
+      // an earlier attempt of this round (an escalation, then a resume) already put the text up:
+      // no gh write, and replies since then still count
+      saved = await earlierGate(io.stepDir, round);
+      if (saved) await writeFileAtomic(gateFile, gateJson(saved));
+    }
+    if (saved) return saved;
+    const self = (await o.gh.user()).toLowerCase();
+    let found: { c: IssueComment; g: GateComment } | undefined;
+    for (const c of (await o.gh.issue(meta.repo, meta.number)).comments) {
+      if (c.author.toLowerCase() !== self) continue;
+      const g = parseGateComment(c.body);
+      if (g?.runId === o.runId && g.stepId === step.id) {
+        found = { c, g };
+        break;
+      }
+    }
+    const frame = { runId: o.runId, stepId: step.id, round, rejected: found?.g.rejected ?? [] };
+    // GitHub refuses a body over 65536 chars: the header and every round's feedback come first
+    const cap = Math.min(OUTPUT_CAP, BODY_CAP - renderGateComment({ ...frame, outputs: '' }).length);
+    const outputs = await renderOutputs(o.runDir, o.runId, previousStepOutputs(step, ctx), cap);
+    const body = renderGateComment({ ...frame, outputs });
+    const bodyFile = path.join(io.stepDir, 'gate-comment.md');
+    await writeFileAtomic(bodyFile, body);
+    if (found) {
+      // replies to earlier rounds came before this edit, so the poll below never counts them
+      const editedAt = await o.gh.editComment(meta.repo, found.c.id, bodyFile);
+      saved = { commentUrl: found.c.url, commentId: found.c.id, round, postedAt: editedAt };
+    } else {
+      const before = new Date(now()).toISOString();
+      const url = await o.gh.comment(meta.repo, meta.number, bodyFile);
+      // the comment exists now: a failed lookup must not escalate, or the resume would search again
+      const posted = await o.gh
+        .issue(meta.repo, meta.number)
+        .then((i) => i.comments.find((c) => c.url === url))
+        .catch(() => undefined);
+      saved = { commentUrl: url, commentId: commentIdOf(url), round, postedAt: posted?.createdAt ?? before };
+    }
+    await writeFileAtomic(gateFile, gateJson(saved));
+    return saved;
+  };
+
+  /** Polls for a local decision.json, and every `trackerPollMs` for an approver's command posted after `postedAt`. */
+  const waitForDecision = async (
+    io: { stepDir: string },
+    meta: IssueMeta,
+    approvers: string[],
+    postedAt: string,
+  ): Promise<{ decision: Decision } | { escalated: NodeOutcome }> => {
+    const decisionFile = path.join(io.stepDir, 'decision.json');
+    const postedMs = Date.parse(postedAt);
+    let decision: Decision | undefined;
+    let lastPoll: number | undefined;
+    while (!decision) {
+      if (await exists(decisionFile)) {
+        const parsed = DecisionSchema.safeParse(await readJson(decisionFile).catch((e) => `unreadable: ${msg(e)}`));
+        if (!parsed.success) {
+          return { escalated: escalate(`${decisionFile} is invalid: ${parsed.error.issues.map((i) => `${i.path.join('.') || 'value'}: ${i.message}`).join('; ')}`) };
+        }
+        decision = parsed.data as Decision;
+        break;
+      }
+      if (lastPoll === undefined || now() - lastPoll >= trackerPollMs) {
+        lastPoll = now();
+        try {
+          const issue = await o.gh.issue(meta.repo, meta.number);
+          const candidates: IssueComment[] = issue.comments
+            .filter((c) => Date.parse(c.createdAt) > postedMs && approvers.includes(c.author.toLowerCase()))
+            .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+          for (const c of candidates) {
+            const cmd = parseCommand(c.body);
+            if (!cmd) continue;
+            decision = {
+              decision: cmd.decision,
+              ...(cmd.feedback === '' ? {} : { feedback: cmd.feedback }),
+              by: c.author,
+              via: 'comment',
+              url: c.url,
+            };
+            break;
+          }
+        } catch {
+          // retried on the next tracker poll
+        }
+        if (decision) break;
+      }
+      await sleep(pollMs).catch((err: unknown) => {
+        throw new Aborted(err);
+      });
+    }
+    return { decision };
+  };
+
+  /** Best-effort: the comment shows the outcome, and a later run reuses the round only by reading it. */
+  const recordOnComment = async (
+    io: { stepDir: string },
+    meta: IssueMeta,
+    commentId: number,
+    round: number,
+    decision: Decision,
+  ): Promise<void> => {
+    try {
+      // a legacy url without `#issuecomment-` has no id: id 0 could be any other comment
+      const current =
+        commentId > 0 ? (await o.gh.issue(meta.repo, meta.number)).comments.find((c) => c.id === commentId) : undefined;
+      const parsed = current && parseGateComment(current.body);
+      if (current && parsed) {
+        const next: GateComment =
+          decision.decision === 'approve'
+            ? { ...parsed, approvedBy: decision.by }
+            : withRejection(parsed, { round, by: decision.by, ...(decision.feedback !== undefined ? { feedback: decision.feedback } : {}) });
+        const body = renderGateComment(next);
+        if (body !== current.body.replace(/\r\n/g, '\n')) {
+          const bodyFile = path.join(io.stepDir, 'gate-comment.md');
+          await writeFileAtomic(bodyFile, body);
+          await o.gh.editComment(meta.repo, commentId, bodyFile);
+        }
+      }
+    } catch {
+      // the run goes on: the decision itself is already made
+    }
+  };
+
   return async (step, ctx, io) => {
     // a conditional gate (when_output: issues) stops only when there is something to approve
     const when = step.def?.when_output;
@@ -250,56 +279,12 @@ export function githubGate(o: {
       // keyed on the round, not the attempt: an escalation after posting re-runs the gate in a new
       // attempt dir, and that attempt must find (not re-post) this round's comment
       const round = ctx.state.history.filter((h) => h.stepId === step.id && (h.status === 'pass' || h.status === 'fail')).length + 1;
-      const gateFile = path.join(io.stepDir, 'gate.json');
 
       let commentUrl: string;
       let commentId: number;
       let postedAt: string;
       try {
-        let saved = await readGate(gateFile);
-        if (!saved) {
-          // an earlier attempt of this round (an escalation, then a resume) already put the text up:
-          // no gh write, and replies since then still count
-          saved = await earlierGate(io.stepDir, round);
-          if (saved) await writeFileAtomic(gateFile, gateJson(saved));
-        }
-        if (saved) {
-          ({ commentUrl, commentId, postedAt } = saved);
-        } else {
-          const self = (await o.gh.user()).toLowerCase();
-          let found: { c: IssueComment; g: GateComment } | undefined;
-          for (const c of (await o.gh.issue(meta.repo, meta.number)).comments) {
-            if (c.author.toLowerCase() !== self) continue;
-            const g = parseGateComment(c.body);
-            if (g?.runId === o.runId && g.stepId === step.id) {
-              found = { c, g };
-              break;
-            }
-          }
-          const frame = { runId: o.runId, stepId: step.id, round, rejected: found?.g.rejected ?? [] };
-          // GitHub refuses a body over 65536 chars: the header and every round's feedback come first
-          const cap = Math.min(OUTPUT_CAP, BODY_CAP - renderGateComment({ ...frame, outputs: '' }).length);
-          const outputs = await renderOutputs(o.runDir, o.runId, previousStepOutputs(step, ctx), cap);
-          const body = renderGateComment({ ...frame, outputs });
-          const bodyFile = path.join(io.stepDir, 'gate-comment.md');
-          await writeFileAtomic(bodyFile, body);
-          if (found) {
-            // replies to earlier rounds came before this edit, so the poll below never counts them
-            const editedAt = await o.gh.editComment(meta.repo, found.c.id, bodyFile);
-            saved = { commentUrl: found.c.url, commentId: found.c.id, round, postedAt: editedAt };
-          } else {
-            const before = new Date(now()).toISOString();
-            const url = await o.gh.comment(meta.repo, meta.number, bodyFile);
-            // the comment exists now: a failed lookup must not escalate, or the resume would search again
-            const posted = await o.gh
-              .issue(meta.repo, meta.number)
-              .then((i) => i.comments.find((c) => c.url === url))
-              .catch(() => undefined);
-            saved = { commentUrl: url, commentId: commentIdOf(url), round, postedAt: posted?.createdAt ?? before };
-          }
-          await writeFileAtomic(gateFile, gateJson(saved));
-          ({ commentUrl, commentId, postedAt } = saved);
-        }
+        ({ commentUrl, commentId, postedAt } = await ensureGateComment(step, ctx, io, meta, round));
       } catch (err) {
         return escalate(`gate ${step.id}: ${msg(err)}`);
       }
@@ -309,69 +294,11 @@ export function githubGate(o: {
       wroteWaiting = true;
       o.onWaiting?.(step.id, commentUrl);
 
-      const decisionFile = path.join(io.stepDir, 'decision.json');
-      const postedMs = Date.parse(postedAt);
-      let decision: Decision | undefined;
-      let lastPoll: number | undefined;
-      while (!decision) {
-        if (await exists(decisionFile)) {
-          const parsed = DecisionSchema.safeParse(await readJson(decisionFile).catch((e) => `unreadable: ${msg(e)}`));
-          if (!parsed.success) {
-            return escalate(`${decisionFile} is invalid: ${parsed.error.issues.map((i) => `${i.path.join('.') || 'value'}: ${i.message}`).join('; ')}`);
-          }
-          decision = parsed.data as Decision;
-          break;
-        }
-        if (lastPoll === undefined || now() - lastPoll >= trackerPollMs) {
-          lastPoll = now();
-          try {
-            const issue = await o.gh.issue(meta.repo, meta.number);
-            const candidates: IssueComment[] = issue.comments
-              .filter((c) => Date.parse(c.createdAt) > postedMs && approvers.includes(c.author.toLowerCase()))
-              .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-            for (const c of candidates) {
-              const cmd = parseCommand(c.body);
-              if (!cmd) continue;
-              decision = {
-                decision: cmd.decision,
-                ...(cmd.feedback === '' ? {} : { feedback: cmd.feedback }),
-                by: c.author,
-                via: 'comment',
-                url: c.url,
-              };
-              break;
-            }
-          } catch {
-            // retried on the next tracker poll
-          }
-          if (decision) break;
-        }
-        await sleep(pollMs).catch((err: unknown) => {
-          throw new Aborted(err);
-        });
-      }
+      const waited = await waitForDecision(io, meta, approvers, postedAt);
+      if ('escalated' in waited) return waited.escalated;
+      const { decision } = waited;
 
-      // best-effort: the comment shows the outcome, and a later run reuses the round only by reading it
-      try {
-        // a legacy url without `#issuecomment-` has no id: id 0 could be any other comment
-        const current =
-          commentId > 0 ? (await o.gh.issue(meta.repo, meta.number)).comments.find((c) => c.id === commentId) : undefined;
-        const parsed = current && parseGateComment(current.body);
-        if (current && parsed) {
-          const next: GateComment =
-            decision.decision === 'approve'
-              ? { ...parsed, approvedBy: decision.by }
-              : withRejection(parsed, { round, by: decision.by, ...(decision.feedback !== undefined ? { feedback: decision.feedback } : {}) });
-          const body = renderGateComment(next);
-          if (body !== current.body.replace(/\r\n/g, '\n')) {
-            const bodyFile = path.join(io.stepDir, 'gate-comment.md');
-            await writeFileAtomic(bodyFile, body);
-            await o.gh.editComment(meta.repo, commentId, bodyFile);
-          }
-        }
-      } catch {
-        // the run goes on: the decision itself is already made
-      }
+      await recordOnComment(io, meta, commentId, round, decision);
 
       await fs.rm(waitingPath, { force: true });
       wroteWaiting = false;

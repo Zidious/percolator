@@ -3,7 +3,7 @@
 // `{ "fixtures": "<file>" }` reads a file instead. Refreshes on changes under ~/.percolator/runs, with a 10s fallback.
 
 import { appHome, exec, home, readTextFile, watchFolder } from 'herdr';
-import { pipelinesFixture, readPipelines, readStatus, resolvePath } from './model.js';
+import { pipelinesFixture, readPipelines, readStatus, resolvePath } from './status.js';
 
 export const firstLine = (text) =>
   String(text ?? '')
