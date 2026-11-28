@@ -1044,6 +1044,20 @@ const spaceRepo = (space, tops) => {
   return typeof top === 'string' && top !== 'loading' ? mainRepo(top) : null;
 };
 
+/**
+ * The spaces where they are now: a space's `folder` is only where its new terminals start, so each is put at its first
+ * terminal's live folder (panes(), in its tabs' order), the place Herdr names it by; a space without one keeps its own.
+ */
+export function spacesWhere(spaces, panes) {
+  return spaces.map((s) => {
+    for (const tab of s.tabs ?? []) {
+      const p = panes.find((x) => x.tab === tab.id && x.terminal != null && x.cwd);
+      if (p) return { ...s, folder: p.cwd };
+    }
+    return s;
+  });
+}
+
 /** The start picker's repos: the open spaces' git repos in space order, then earlier runs' repos, each once. */
 export function startRepos(spaces, tops, runs) {
   const seen = new Set();
@@ -1060,6 +1074,15 @@ export function startRepos(spaces, tops, runs) {
   }
   for (const repo of knownRepos(runs)) add(repo, false);
   return out;
+}
+
+/** The folder name of a repo path (Windows or POSIX, trailing separators ignored). */
+export const repoName = (path) => String(path).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || String(path);
+
+/** The picker's repo rows: each named by its folder, with its path under it only when another row has that name. */
+export function repoChoices(repos) {
+  const names = repos.map((r) => repoName(r.repo));
+  return repos.map((r, i) => ({ ...r, name: names[i], under: names.indexOf(names[i]) !== names.lastIndexOf(names[i]) ? r.repo : '' }));
 }
 
 /** The repo to preselect: the shown space's, else the first open space's, else the latest run's, else null. */

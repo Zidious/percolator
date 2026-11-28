@@ -207,14 +207,20 @@ export type SpaceInfo = {
   branch: string | null;
   active: boolean;
   status: unknown;
-  tabs: unknown[];
+  tabs: { id: string }[];
 };
+export declare function spacesWhere(
+  spaces: SpaceInfo[],
+  panes: { tab: string; terminal: string | null; cwd?: string | null }[],
+): SpaceInfo[];
 /** Per space folder: its git toplevel, null when not a repo, 'loading' while asked. */
 export type Tops = Record<string, string | null>;
 export declare function repoKey(path: string): string;
 export declare function sameRepo(a: string | null, b: string | null): boolean;
 export declare function mainRepo(top: string): string;
 export declare function startRepos(spaces: SpaceInfo[], tops: Tops, runs: RunStatusJson[]): { repo: string; open: boolean }[];
+export declare function repoName(path: string): string;
+export declare function repoChoices(repos: { repo: string; open: boolean }[]): { repo: string; open: boolean; name: string; under: string }[];
 export declare function startRepo(spaces: SpaceInfo[], tops: Tops, runs: RunStatusJson[]): string | null;
 export declare function ticketRepo(text: string): string | null;
 export declare function guessRepo(ticketText: string, runs: RunStatusJson[]): string | null;

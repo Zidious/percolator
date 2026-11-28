@@ -12,6 +12,7 @@ import {
   nextCommand,
   openOverlay,
   props,
+  panes,
   readTextFile,
   run as command,
   setShared,
@@ -27,6 +28,7 @@ import {
   actionForKey,
   answerArgv,
   askOf,
+  spacesWhere,
   startRepos,
   startedRun,
   activeBox,
@@ -577,10 +579,11 @@ export default class Percolator extends View {
     return s;
   }
 
-  /** The spaces open in Herdr: none until the panel knows it is connected to perc, so fixtures and missing modes never probe the machine's real folders. */
+  /** The spaces open in Herdr, each where its first terminal is now (spacesWhere): none until the panel knows it is
+   *  connected to perc, so fixtures and missing modes never probe the machine's real folders. */
   openSpaces() {
     if (this.conn !== 'perc') return [];
-    return spaces() ?? [];
+    return spacesWhere(spaces() ?? [], panes() ?? []);
   }
 
   /** The header's Start watcher / Stop:`perc watch …` or `perc watch stop`; what it says goes beside the tabs. */
