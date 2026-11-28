@@ -6,7 +6,8 @@ import path from 'node:path';
 import { test } from 'node:test';
 import type { RunContext } from '../../src/engine/runtime.ts';
 import type { Step } from '../../src/graph/build.ts';
-import { deciderLogin, githubGate, readWaiting, writeDecision } from '../../src/tracker/gate.ts';
+import { deciderLogin, githubGate } from '../../src/tracker/gate.ts';
+import { readWaiting, writeDecision } from '../../src/tracker/gate-store.ts';
 import { parseGateComment, renderGateComment } from '../../src/tracker/gate-comment.ts';
 import { FakeGh } from '../helpers/fake-gh.ts';
 

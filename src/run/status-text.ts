@@ -1,5 +1,5 @@
 import type { RunState } from '../engine/state.ts';
-import { readWaiting } from '../tracker/gate.ts';
+import { readWaiting } from '../tracker/gate-store.ts';
 import type { RunMeta } from './meta.ts';
 import { failedText } from './next-steps.ts';
 import { prUrl } from './outputs.ts';
