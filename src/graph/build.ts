@@ -145,12 +145,62 @@ export function buildGraph(
   return sliceParent(graph, fanStage);
 }
 
+/** What the phases of buildWhole share; each phase adds its part. */
+type BuildCtx = {
+  merged: Readonly<Merged | MergedPipeline>;
+  home: { profile: string; locator: Locator } | undefined;
+  o: BuildOptions;
+  name: string;
+  isFeature: boolean;
+  headerSourced: Sourced<PipelineHeader>;
+  header: PipelineHeader;
+  at: (key: string) => Where;
+  stages: string[];
+  exitStage: string;
+  fan: PipelineHeader['fan_out'];
+  router: boolean;
+  /** what runs each stage (resolveBindings) */
+  bindings: Record<string, Sourced<NodeDef[]>>;
+  /** the exit kind: exit:, or implied by the exit stage's binding (checkExit); undefined builds as pr (route on a router) */
+  exit: ExitKind | undefined;
+  /** the laid-out steps and where each stage's region starts (layoutSteps) */
+  steps: Step[];
+  regionStart: Record<Stage, number>;
+};
+type HeaderCtx = Omit<BuildCtx, 'bindings' | 'exit' | 'steps' | 'regionStart'>;
+type BoundCtx = Omit<BuildCtx, 'steps' | 'regionStart'>;
+
 /** The whole pipeline's graph, and the stage it fans out at (if any). */
 function buildWhole(
   merged: Readonly<Merged | MergedPipeline>,
   home: { profile: string; locator: Locator } | undefined,
   o: BuildOptions,
 ): { graph: Graph; fanStage?: string } {
+  const head = checkHeader({ merged, home, o });
+  const bound = { ...head, ...resolveBindings(head) };
+  const checked = { ...bound, exit: checkExit(bound) };
+  const ctx: BuildCtx = { ...checked, ...layoutSteps(checked) };
+  const { loopStages, backEdges, failRoutes } = deriveEdges(ctx);
+  const { name, header, stages, fan, router, exit, steps, regionStart } = ctx;
+
+  const contracts = contractsFor({ ...header, stages, ...(exit !== undefined ? { exit } : {}) }, name);
+  if (fan !== undefined) contracts[fan.slices.from] = [...new Set([...contracts[fan.slices.from]!, fan.slices.output])];
+  const graph: Graph = {
+    pipeline: name,
+    stages,
+    contracts,
+    exit: router ? 'route' : (exit ?? 'pr'),
+    loopStages,
+    steps,
+    regionStart,
+    backEdges,
+    failRoutes,
+  };
+  return fan === undefined ? { graph } : { graph, fanStage: fan.stage };
+}
+
+/** The pipeline header: its stages, fan_out and router settings. */
+function checkHeader({ merged, home, o }: Pick<BuildCtx, 'merged' | 'home' | 'o'>): HeaderCtx {
   const named = 'header' in merged ? (merged as MergedPipeline) : undefined;
   const name = named?.name ?? 'feature';
   const isFeature = name === 'feature';
@@ -209,7 +259,12 @@ function buildWhole(
       );
     }
   }
+  return { merged, home, o, name, isFeature, headerSourced, header, at, stages, exitStage, fan, router };
+}
 
+/** What runs each stage; refuses a missing exit and unbound stages. */
+function resolveBindings(ctx: HeaderCtx): Pick<BuildCtx, 'bindings' | 'exit'> {
+  const { merged, home, name, isFeature, header, at, stages, exitStage, router } = ctx;
   // what runs each stage: the merged bindings, plus the defaults a named pipeline gets
   const bindings: Record<string, Sourced<NodeDef[]>> = { ...merged.bindings };
   let exit: ExitKind | undefined = header.exit;
@@ -239,7 +294,13 @@ function buildWhole(
     const { path: _path, ...where } = locate(home.locator, 'config', `pipelines.${name}.bindings`);
     throw new GraphError(message, where);
   }
+  return { bindings, exit };
+}
 
+/** The exit kind, once the exit stage's binding is checked against it and what the exit needs. */
+function checkExit(ctx: BoundCtx): ExitKind | undefined {
+  const { name, isFeature, header, at, stages, exitStage, router, bindings } = ctx;
+  let { exit } = ctx;
   // the exit stage: never an agent; on a named pipeline its binding and exit: agree
   if (!router) {
     const exitBinding = bindings[exitStage]!;
@@ -294,7 +355,12 @@ function buildWhole(
       }
     }
   }
+  return exit;
+}
 
+/** The steps in run order (hooks, slots, a router's route slot) and where each stage's region starts. */
+function layoutSteps(ctx: BoundCtx): Pick<BuildCtx, 'steps' | 'regionStart'> {
+  const { merged, o, name, headerSourced, header, stages, exitStage, router, bindings } = ctx;
   const hooks = Object.entries(merged.nodes).map(([nodeName, sourced]) => {
     const def = sourced.value;
     if (def.before === undefined && def.after === undefined) {
@@ -384,7 +450,12 @@ function buildWhole(
     }
     seen.add(s.id);
   }
+  return { steps, regionStart };
+}
 
+/** Loop stages, back-edges and fail routes. */
+function deriveEdges(ctx: BuildCtx): Pick<Graph, 'loopStages' | 'backEdges' | 'failRoutes'> {
+  const { merged, name, stages, router, steps, regionStart } = ctx;
   // loop stages: review always (default 3 rounds), any other stage whose last slot node sets max_rounds
   const lastSlotOf = (stage: string) => steps.findLast((s) => s.role === 'slot' && s.stage === stage)!;
   const loopStages = stages.filter((stage) => stage === 'review' || lastSlotOf(stage).def.max_rounds !== undefined);
@@ -488,21 +559,7 @@ function buildWhole(
     }
   }
   for (const id of Object.keys(backEdges)) failRoutes[id] = id;
-
-  const contracts = contractsFor({ ...header, stages, ...(exit !== undefined ? { exit } : {}) }, name);
-  if (fan !== undefined) contracts[fan.slices.from] = [...new Set([...contracts[fan.slices.from]!, fan.slices.output])];
-  const graph: Graph = {
-    pipeline: name,
-    stages,
-    contracts,
-    exit: router ? 'route' : (exit ?? 'pr'),
-    loopStages,
-    steps,
-    regionStart,
-    backEdges,
-    failRoutes,
-  };
-  return fan === undefined ? { graph } : { graph, fanStage: fan.stage };
+  return { loopStages, backEdges, failRoutes };
 }
 
 /**
