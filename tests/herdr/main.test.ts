@@ -12,7 +12,7 @@ const HOST: Record<string, string[]> = {
   'gpui-base': ['v_flex', 'h_flex', 'InputState', 'ScrollHandle', 'Scrollbar', 'TextareaState', 'Input', 'Textarea', 'TextView'],
   herdr: [
     'checking', 'closeOverlay', 'exec', 'layout', 'nextCommand', 'openOverlay', 'pickFolder', 'props', 'readTextFile', 'run',
-    'setShared', 'settings', 'shared', 'spaces', 'terminals', 'theme', 'appHome', 'home', 'watchFolder', 'agents',
+    'setShared', 'settings', 'shared', 'spaces', 'terminals', 'theme', 'appHome', 'home', 'watchFolder', 'agents', 'panes',
   ],
 };
 registerHooks({
@@ -60,6 +60,18 @@ test('+ New run opened again after closing it redraws the picker when the pipeli
   p.openStart(cx);
   assert.equal(p.start?.mode, 'new');
   assert.ok(cx.redraws > before, 'reopening the picker must redraw the panel');
+});
+
+test("the panel's open spaces sit where their first terminal is now, not where the space was made", () => {
+  const { v } = pickerOn({ conn: 'perc' });
+  fakes.spaces = () => [{ ...toSpace({ folder: 'C:/src/idle-coffee' }), tabs: [{ id: 't1' }] }];
+  fakes.panes = () => [{ pane: 'p1', terminal: 'a', tab: 't1', cwd: 'C:/src/percolator' }];
+  try {
+    assert.deepEqual(v.openSpaces().map((s: { folder: string }) => s.folder), ['C:/src/percolator']);
+  } finally {
+    delete fakes.spaces;
+    delete fakes.panes;
+  }
 });
 
 type Space = { folder: string; machine?: string | null; active?: boolean };
@@ -149,6 +161,41 @@ test('each space folder is probed once, and remote or empty folders never', asyn
   await settle();
   assert.deepEqual(asked, ['/a']);
   assert.deepEqual(p.tops, { '/a': '/a' });
+});
+
+test("Refresh asks git again about every space folder and moves the automatic preselection to a space's new repo", async () => {
+  const spaces: Space[] = [{ folder: '/src/a', active: true }];
+  const tops: Record<string, string | null> = {};
+  const { p, cx, asked, settle } = panelWithSpaces(spaces, tops);
+  p.probeSpaces(cx);
+  await settle();
+  p.openStart(cx);
+  await settle();
+  assert.equal(p.start.repo, 'C:/src/old'); // /src/a was not a repo yet
+  tops['/src/a'] = '/src/a'; // the owner ran git init there…
+  spaces.push({ folder: '/notes' }); // …and added a space
+  tops['/notes'] = '/notes';
+  p.refreshRepos(cx);
+  await settle();
+  assert.deepEqual(asked, ['/src/a', '/src/a', '/src/a', '/notes']); // probe, opening, Refresh
+  assert.equal(p.start.repo, '/src/a');
+  assert.equal(p.start.auto, true);
+});
+
+test("Refresh lists the picked repo's pipelines again, so a fixed config shows", async () => {
+  const { v, p, cx, settle } = panelWithSpaces([], {});
+  Object.assign(v, { conn: 'perc', perc: { node: 'node', cli: 'cli.js' } });
+  p.openStart(cx);
+  p.pipes['C:/src/old'] = { ok: false, error: 'no profile matches this repository' };
+  fakes.exec = async () => ({ code: 0, stdout: JSON.stringify({ schema: 1, pipelines: [{ name: 'feature', inputs: [] }] }), stderr: '' });
+  try {
+    p.refreshRepos(cx);
+    await settle();
+  } finally {
+    delete fakes.exec;
+  }
+  assert.equal(p.pipes['C:/src/old'].ok, true);
+  assert.equal(p.start.pick, 'feature');
 });
 
 test('a probe that resolves after the owner picked a pipeline keeps the repo', async () => {

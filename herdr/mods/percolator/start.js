@@ -5,7 +5,7 @@
 
 import { div } from 'gpui-kit';
 import { Input, h_flex, v_flex } from 'gpui-base';
-import { commandLine, pipelineOption, previewRun, previewSide, runLabel, sameRepo, startFields } from './model.js';
+import { commandLine, pipelineOption, previewRun, previewSide, repoChoices, repoName, runLabel, sameRepo, startFields } from './model.js';
 import { pipeline } from './pipeline.js';
 import { button, link, own } from './ui.js';
 
@@ -115,18 +115,24 @@ function fieldsPart(p, t, s, pl) {
   return part;
 }
 
-/** `repos`: startRepos's `{ repo, open }` items; the open spaces' repos carry an Open tag. */
+/** `repos`: startRepos's `{ repo, open }` items, shown by folder name; the open spaces' repos carry an Open tag. */
 function repoPart(p, t, s, repos) {
   const part = v_flex().flex_none().gap(2).child(label(t, 'Repo'));
-  if (s.mode === 'next') return part.child(div().min_w(0).truncate().text_size(12).child(s.repo ?? ''));
+  if (s.mode === 'next') return part.child(div().min_w(0).truncate().text_size(12).child(s.repo ? repoName(s.repo) : ''));
   const all = s.repo && !repos.some((r) => sameRepo(r.repo, s.repo)) ? [{ repo: s.repo, open: false }, ...repos] : repos;
   return part
     .children(
-      all.map((r, i) =>
-        choice(t, `repo-${i}`, sameRepo(r.repo, s.repo), r.repo, '', (_e, cx) => p.pickRepo(r.repo, cx), { tags: r.open ? ['Open'] : [] }),
+      repoChoices(all).map((r, i) =>
+        choice(t, `repo-${i}`, sameRepo(r.repo, s.repo), r.name, r.under, (_e, cx) => p.pickRepo(r.repo, cx), { tags: r.open ? ['Open'] : [] }),
       ),
     )
-    .child(h_flex().pt(2).child(link(t, 'repo-folder', 'Choose folder…', (_e, cx) => p.chooseFolder(cx))));
+    .child(
+      h_flex()
+        .pt(2)
+        .gap(8)
+        .child(link(t, 'repo-folder', 'Choose folder…', (_e, cx) => p.chooseFolder(cx)))
+        .child(link(t, 'repo-refresh', 'Refresh', (_e, cx) => p.refreshRepos(cx))),
+    );
 }
 
 function foot(p, t, s, pl) {

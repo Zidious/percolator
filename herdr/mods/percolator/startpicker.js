@@ -93,6 +93,17 @@ export class StartPicker {
     this.loadPipelines(cx);
   }
 
+  /**
+   * The picker's Refresh: forgets where each space folder's repo is and every pipeline listing, so a folder that became
+   * a repo, a new space, or a fixed config shows; an automatic preselection follows the answers (probeSpaces).
+   */
+  refreshRepos(cx) {
+    for (const [folder, top] of Object.entries(this.tops)) if (top !== 'loading') delete this.tops[folder];
+    for (const [repo, got] of Object.entries(this.pipes)) if (got !== 'loading') delete this.pipes[repo];
+    this.probeSpaces(cx);
+    this.loadPipelines(cx);
+  }
+
   /** "▸ Run next…" on the selected finished run: its ticket (or the issues it opened) and repo, fixed. Again closes. */
   openRunNext(cx) {
     const r = this.panel.current();

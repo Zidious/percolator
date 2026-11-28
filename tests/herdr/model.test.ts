@@ -116,6 +116,8 @@ import {
   guessRepo,
   knownRepos,
   mainRepo,
+  repoChoices,
+  spacesWhere,
   repoKey,
   sameRepo,
   startRepo,
@@ -1430,6 +1432,47 @@ test('mainRepo maps a run worktree to its repo and leaves other folders alone', 
   assert.equal(mainRepo('/home/me/app/.worktrees/t1-x'), '/home/me/app');
   assert.equal(mainRepo('/home/me/app'), '/home/me/app');
   assert.equal(mainRepo('/home/me/app/.worktrees'), '/home/me/app/.worktrees');
+});
+
+test("spacesWhere puts each space at its first terminal's live folder, in tab order, else leaves its own folder", () => {
+  const sp = (id: string, folder: string, tabs: string[]): SpaceInfo => ({ ...space({ folder }), id, tabs: tabs.map((t) => ({ id: t })) });
+  const spaces = [
+    sp('s1', 'C:/src/idle-coffee', ['t1', 't2']), // made in idle-coffee, its shell went to percolator
+    sp('s2', 'C:/src/app', ['t3']), // only a mod pane and a terminal whose folder is unknown
+    sp('s3', 'C:/src/other', []),
+  ];
+  const panes = [
+    { pane: 'p0', terminal: null, mod: 'percolator', tab: 't1', cwd: null },
+    { pane: 'p1', terminal: 'a', tab: 't2', cwd: 'C:/src/far' },
+    { pane: 'p2', terminal: 'b', tab: 't1', cwd: 'C:/src/percolator' },
+    { pane: 'p3', terminal: 'c', tab: 't1', cwd: 'C:/src/later' },
+    { pane: 'p4', terminal: 'd', tab: 't3', cwd: null },
+  ];
+  assert.deepEqual(
+    spacesWhere(spaces, panes).map((s) => [s.id, s.folder]),
+    [
+      ['s1', 'C:/src/percolator'],
+      ['s2', 'C:/src/app'],
+      ['s3', 'C:/src/other'],
+    ],
+  );
+});
+
+test('repoChoices names each repo by its folder, with the path under it only when two share a name', () => {
+  assert.deepEqual(
+    repoChoices([
+      { repo: 'C:/Users/me/github.com/idle-coffee', open: true },
+      { repo: 'C:\\Users\\me\\percolator\\', open: false },
+      { repo: '/src/app', open: false },
+      { repo: 'C:/work/app', open: false },
+    ]),
+    [
+      { repo: 'C:/Users/me/github.com/idle-coffee', open: true, name: 'idle-coffee', under: '' },
+      { repo: 'C:\\Users\\me\\percolator\\', open: false, name: 'percolator', under: '' },
+      { repo: '/src/app', open: false, name: 'app', under: '/src/app' },
+      { repo: 'C:/work/app', open: false, name: 'app', under: 'C:/work/app' },
+    ],
+  );
 });
 
 test('startRepos: open spaces first in space order, then earlier runs, each repo once', () => {
