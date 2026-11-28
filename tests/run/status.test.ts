@@ -1600,6 +1600,19 @@ test('perc status on a pick-pipeline gate names --pipeline for each choice, then
   }
 });
 
+test('a pick-pipeline gate decided while the driver is dead asks you to resume, not to pick', async () => {
+  const e = await setup();
+  try {
+    const m = await waitAtPick(e, 'pipeline: hotfix\nunsure: false\n');
+    await writeJson(path.join(e.dir(m), 'steps', 'pick-pipeline', '1', 'decision.json'), { decision: 'approve', by: 'alice', via: 'local' });
+    await e.deps.hc.rm(m.driver);
+    const r = (await e.status(m)) as Readable;
+    assert.deepEqual(r.attention, { kind: 'stalled', since: NOW.toISOString(), message: 'approved; resume to continue', actions: ['resume'] });
+  } finally {
+    await e.cleanup();
+  }
+});
+
 test('runAgain double-quotes a repo or input with a blank and keeps Windows backslashes single', () => {
   assert.equal(
     runAgain({ ticket: 'o/r#1', pipeline: 'hotfix', inputs: { path: 'C:\\a b\\c' }, repoRoot: 'C:\\My Repos\\r' }),
@@ -1670,6 +1683,42 @@ test('paused on questions', async () => {
       actions: ['answer'],
       asked: { step: 'plan', attempt: 1, items: ['Which DB?', 'Keep v1?'] },
     });
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a paused run that asks questions while a gate waits asks for the gate first', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.waitAtGate(m);
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.pausedReason = 'questions: plan asks 1';
+      s.asking = { kind: 'questions', stepId: 'plan', attempt: 1, items: ['Which DB?'] };
+    });
+    const a = ((await e.status(m)) as Readable).attention!;
+    assert.deepEqual([a.kind, a.message, a.actions], ['gate', 'approve-groom is waiting for approval', ['approve', 'reject']]);
+  } finally {
+    await e.cleanup();
+  }
+});
+
+test('a paused run that asks questions and is at a cap asks the questions first', async () => {
+  const e = await setup();
+  try {
+    const m = await e.prepare();
+    await e.edit(m, (s) => {
+      s.status = 'paused';
+      s.currentStep = 'plan';
+      s.pausedReason = 'questions: plan asks 1';
+      s.pausedCap = 'approve-groom';
+      s.asking = { kind: 'questions', stepId: 'plan', attempt: 1, items: ['Which DB?'] };
+      s.history.push(rec('plan', 1, 'escalate'));
+    });
+    const a = ((await e.status(m)) as Readable).attention!;
+    assert.deepEqual([a.kind, a.message, a.actions], ['questions', 'plan has questions for you', ['answer']]);
   } finally {
     await e.cleanup();
   }

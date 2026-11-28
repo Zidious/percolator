@@ -181,7 +181,7 @@ function gateBackTo(
   return { backTo, capRounds: loop.max, ...(loop.atCap === 'continue' ? { capAsksFindings: true } : {}) };
 }
 
-async function attentionOf(o: {
+type AttentionInput = {
   dir: string;
   meta: RunMeta;
   state: RunState;
@@ -195,8 +195,158 @@ async function attentionOf(o: {
   config: string | null;
   /** the step the run is at (its first step before any has run) */
   current: string | undefined;
-}): Promise<AttentionJson | undefined> {
-  const { dir, meta, state, waiting, alive, current } = o;
+};
+
+/** What every attention check reads: the run, and what they all derive from it. */
+type AttentionContext = AttentionInput & {
+  lastEnd: string;
+  again: Pick<YourTurnInput, 'ticket' | 'pipeline' | 'inputs' | 'repoRoot' | 'profile' | 'config'>;
+  turn: (kind: AttentionKind, step: string | undefined, x?: Partial<YourTurnInput>) => { message: string; detail?: string };
+  failing: (step: string | undefined) => ReviewItem[];
+};
+
+/** One check of `attentionOf`: its attention when it applies, else undefined (the next check is asked). */
+type AttentionCheck = (c: AttentionContext) => Promise<AttentionJson | undefined>;
+
+/** A waiting gate decided while the driver was dead: resume carries the decision out. */
+const decidedGate: AttentionCheck = async ({ waiting, alive, turn }) => {
+  if (waiting === undefined || alive !== false || !(await exists(path.join(waiting.stepDir, 'decision.json')))) return undefined;
+  const d = await readDecision(waiting.stepDir);
+  return { kind: 'stalled', since: waiting.since, ...turn('stalled', waiting.stepId, d !== undefined ? { decision: d } : {}), actions: ['resume'] };
+};
+
+/** A waiting pick-pipeline gate. */
+const pickGate: AttentionCheck = async (o) => {
+  const { dir, state, waiting } = o;
+  if (waiting === undefined) return undefined;
+  const choices = o.steps.find((s) => s.id === waiting.stepId && s.id === PICK_GATE)?.choices;
+  if (choices === undefined) return undefined;
+  const suggests = await suggestion(dir, state, choices);
+  return {
+    kind: 'gate',
+    since: waiting.since,
+    message: suggests === undefined ? 'pick the pipeline for this ticket' : `pick the pipeline for this ticket (the agent suggests ${suggests})`,
+    ...pickDetail(gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds)),
+    ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
+    review: gateReview(dir, waiting.stepId, o.steps, state),
+    actions: ['pick', 'reject'],
+    choices,
+  };
+};
+
+/** Any other waiting gate. */
+const gate: AttentionCheck = async (o) => {
+  const { dir, state, waiting, turn } = o;
+  if (waiting === undefined) return undefined;
+  const { detail, ...gateTurn } = turn('gate', waiting.stepId, gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds));
+  return {
+    kind: 'gate',
+    since: waiting.since,
+    ...gateTurn,
+    ...(o.graphKnown && detail !== undefined ? { detail } : {}),
+    ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
+    review: gateReview(dir, waiting.stepId, o.steps, state),
+    actions: ['approve', 'reject'],
+  };
+};
+
+/** A run paused on questions, or on findings at a cap. */
+const asked: AttentionCheck = async (o) => {
+  const { dir, state, lastEnd, turn, failing } = o;
+  if (state.status !== 'paused') return undefined;
+  const asking = state.asking;
+  if (asking === undefined) return undefined;
+  const items = await askedItems(dir, state);
+  const findings: Partial<YourTurnInput> = {};
+  if (asking.kind === 'findings') {
+    const to = o.loops.find((l) => l.id === asking.edgeId)?.to;
+    const backTo = o.steps.find((s) => s.id === to)?.stage;
+    if (backTo !== undefined) findings.backTo = backTo;
+    if (items.length === 0) findings.nothingToTick = true;
+  }
+  return {
+    kind: asking.kind,
+    since: lastEnd,
+    ...turn(asking.kind, asking.stepId, findings),
+    // every step whose findings are numbered, the others first as the items are
+    review: [...new Set([...(asking.kind === 'findings' ? (asking.also ?? []).map((s) => s.stepId) : []), asking.stepId])].flatMap(failing),
+    actions: ['answer'],
+    asked: { step: asking.stepId, attempt: asking.attempt, items },
+  };
+};
+
+/** A run paused at a loop's cap. */
+const cap: AttentionCheck = async (o) => {
+  const { state, current, lastEnd, turn, failing } = o;
+  if (state.status !== 'paused' || state.pausedCap === undefined) return undefined;
+  const from = o.loops.find((l) => l.id === state.pausedCap)?.from ?? current;
+  const reason = (state.pausedReason ?? '').replace(/^cap: /, '');
+  return { kind: 'cap', since: lastEnd, ...turn('cap', current, { reason }), review: failing(from), actions: ['grant'] };
+};
+
+/** Any other paused run. */
+const paused: AttentionCheck = async ({ dir, state, current, lastEnd, turn, failing }) => {
+  if (state.status !== 'paused') return undefined;
+  const reason = state.pausedReason ?? '';
+  const named = current === undefined ? undefined : transcriptIn(reason, dir, current);
+  // the runtime saves the screen best-effort: link it only when it was saved
+  const transcript = named !== undefined && (await fs.stat(named).then((s) => s.isFile(), () => false)) ? named : undefined;
+  return {
+    kind: 'paused',
+    since: lastEnd,
+    ...turn('paused', current, { reason }),
+    ...(transcript !== undefined ? { transcript } : {}),
+    review: failing(current),
+    actions: ['resume'],
+  };
+};
+
+/** A failed run that still has its worktree. */
+const failed: AttentionCheck = async ({ meta, state, current, lastEnd, again, turn, failing }) => {
+  if (state.status !== 'failed') return undefined;
+  // after `perc clean` (no worktree) there is nothing left to do for a failed run
+  if (!(await exists(meta.worktree))) return undefined;
+  // a slice is started again by its parent, not by a new run
+  const sliceOf = meta.fanOut?.parent;
+  return {
+    kind: 'failed',
+    since: lastEnd,
+    ...turn('failed', current, {
+      ...(sliceOf !== undefined ? { sliceOf } : {}),
+      ...(state.failedReason !== undefined ? { reason: state.failedReason } : {}),
+    }),
+    review: failing(current),
+    actions: sliceOf === undefined ? ['run-again', 'clean'] : ['clean'],
+    ...(sliceOf === undefined ? { commands: [runAgain(again)] } : {}),
+  };
+};
+
+/** A running run whose driver is dead. */
+const stalled: AttentionCheck = async ({ state, alive, current, lastEnd, turn }) => {
+  if (state.status !== 'running' || alive !== false) return undefined;
+  return { kind: 'stalled', since: lastEnd, ...turn('stalled', current), actions: ['resume'] };
+};
+
+/** A running run whose current step's agent wants attention in its terminal. */
+const agent: AttentionCheck = async ({ dir, state, alive, current, lastEnd, turn }) => {
+  if (state.status !== 'running' || alive !== true) return undefined;
+  const a = await readAttention(dir);
+  if (a === undefined || a.stepId !== current || typeof a.terminal !== 'string') return undefined;
+  return {
+    kind: 'agent',
+    since: typeof a.at === 'string' ? a.at : lastEnd,
+    ...turn('agent', current, { terminal: a.terminal, agentState: typeof a.kind === 'string' ? a.kind : 'waiting' }),
+    terminal: a.terminal,
+    ...(typeof a.kind === 'string' ? { agentState: a.kind } : {}),
+    actions: ['open-pane'],
+  };
+};
+
+/** The checks of `attentionOf`, in order: the first that applies wins. */
+const ATTENTION_CHECKS: AttentionCheck[] = [decidedGate, pickGate, gate, asked, cap, paused, failed, stalled, agent];
+
+async function attentionOf(o: AttentionInput): Promise<AttentionJson | undefined> {
+  const { dir, meta, state } = o;
   const lastEnd = state.history.at(-1)?.endedAt || meta.createdAt;
   const again = {
     ticket: meta.ticket,
@@ -211,105 +361,12 @@ async function attentionOf(o: {
     return { message: t.message, ...(t.detail !== undefined ? { detail: t.detail } : {}) };
   };
   const failing = (step: string | undefined) => (step === undefined ? [] : review(dir, step, latest(state, step)?.outputs));
-  if (waiting !== undefined) {
-    if (alive === false && (await exists(path.join(waiting.stepDir, 'decision.json')))) {
-      const d = await readDecision(waiting.stepDir);
-      return { kind: 'stalled', since: waiting.since, ...turn('stalled', waiting.stepId, d !== undefined ? { decision: d } : {}), actions: ['resume'] };
-    }
-    const choices = o.steps.find((s) => s.id === waiting.stepId && s.id === PICK_GATE)?.choices;
-    if (choices !== undefined) {
-      const suggests = await suggestion(dir, state, choices);
-      return {
-        kind: 'gate',
-        since: waiting.since,
-        message: suggests === undefined ? 'pick the pipeline for this ticket' : `pick the pipeline for this ticket (the agent suggests ${suggests})`,
-        ...pickDetail(gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds)),
-        ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
-        review: gateReview(dir, waiting.stepId, o.steps, state),
-        actions: ['pick', 'reject'],
-        choices,
-      };
-    }
-    const { detail, ...gateTurn } = turn('gate', waiting.stepId, gateBackTo(waiting.stepId, o.steps, o.loops, state.rounds));
-    return {
-      kind: 'gate',
-      since: waiting.since,
-      ...gateTurn,
-      ...(o.graphKnown && detail !== undefined ? { detail } : {}),
-      ...(waiting.commentUrl !== undefined ? { commentUrl: waiting.commentUrl } : {}),
-      review: gateReview(dir, waiting.stepId, o.steps, state),
-      actions: ['approve', 'reject'],
-    };
+  const c: AttentionContext = { ...o, lastEnd, again, turn, failing };
+  for (const check of ATTENTION_CHECKS) {
+    const hit = await check(c);
+    if (hit !== undefined) return hit;
   }
-  if (state.status === 'paused') {
-    const asking = state.asking;
-    if (asking !== undefined) {
-      const items = await askedItems(dir, state);
-      const findings: Partial<YourTurnInput> = {};
-      if (asking.kind === 'findings') {
-        const to = o.loops.find((l) => l.id === asking.edgeId)?.to;
-        const backTo = o.steps.find((s) => s.id === to)?.stage;
-        if (backTo !== undefined) findings.backTo = backTo;
-        if (items.length === 0) findings.nothingToTick = true;
-      }
-      return {
-        kind: asking.kind,
-        since: lastEnd,
-        ...turn(asking.kind, asking.stepId, findings),
-        // every step whose findings are numbered, the others first as the items are
-        review: [...new Set([...(asking.kind === 'findings' ? (asking.also ?? []).map((s) => s.stepId) : []), asking.stepId])].flatMap(failing),
-        actions: ['answer'],
-        asked: { step: asking.stepId, attempt: asking.attempt, items },
-      };
-    }
-    if (state.pausedCap !== undefined) {
-      const from = o.loops.find((l) => l.id === state.pausedCap)?.from ?? current;
-      const reason = (state.pausedReason ?? '').replace(/^cap: /, '');
-      return { kind: 'cap', since: lastEnd, ...turn('cap', current, { reason }), review: failing(from), actions: ['grant'] };
-    }
-    const reason = state.pausedReason ?? '';
-    const named = current === undefined ? undefined : transcriptIn(reason, dir, current);
-    // the runtime saves the screen best-effort: link it only when it was saved
-    const transcript = named !== undefined && (await fs.stat(named).then((s) => s.isFile(), () => false)) ? named : undefined;
-    return {
-      kind: 'paused',
-      since: lastEnd,
-      ...turn('paused', current, { reason }),
-      ...(transcript !== undefined ? { transcript } : {}),
-      review: failing(current),
-      actions: ['resume'],
-    };
-  }
-  // after `perc clean` (no worktree) there is nothing left to do for a failed run
-  if (state.status === 'failed') {
-    if (!(await exists(meta.worktree))) return undefined;
-    // a slice is started again by its parent, not by a new run
-    const sliceOf = meta.fanOut?.parent;
-    return {
-      kind: 'failed',
-      since: lastEnd,
-      ...turn('failed', current, {
-        ...(sliceOf !== undefined ? { sliceOf } : {}),
-        ...(state.failedReason !== undefined ? { reason: state.failedReason } : {}),
-      }),
-      review: failing(current),
-      actions: sliceOf === undefined ? ['run-again', 'clean'] : ['clean'],
-      ...(sliceOf === undefined ? { commands: [runAgain(again)] } : {}),
-    };
-  }
-  if (state.status !== 'running') return undefined;
-  if (alive === false) return { kind: 'stalled', since: lastEnd, ...turn('stalled', current), actions: ['resume'] };
-  if (alive !== true) return undefined;
-  const a = await readAttention(dir);
-  if (a === undefined || a.stepId !== current || typeof a.terminal !== 'string') return undefined;
-  return {
-    kind: 'agent',
-    since: typeof a.at === 'string' ? a.at : lastEnd,
-    ...turn('agent', current, { terminal: a.terminal, agentState: typeof a.kind === 'string' ? a.kind : 'waiting' }),
-    terminal: a.terminal,
-    ...(typeof a.kind === 'string' ? { agentState: a.kind } : {}),
-    actions: ['open-pane'],
-  };
+  return undefined;
 }
 
 /** Who decided a gate attempt: `decision.json`, else the `@login` in its approval or findings output. Any failure only means no one. */
