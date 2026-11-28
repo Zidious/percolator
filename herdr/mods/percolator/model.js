@@ -1,26 +1,27 @@
 // The Percolator panel's pure logic: what `perc status --json` (schema 2) means for the board, the pipeline and the
-// actions. No `herdr` imports, so node:test covers it (tests/herdr/model.test.ts); model.d.ts declares it.
+// actions. No `herdr` imports, so node:test covers it (tests/herdr/model.test.ts); model.d.ts declares it. What the cup
+// needs too lives in status.js, re-exported here so the panel imports it all from this file.
+
+import { needsYou, runLabel } from './status.js';
+
+export {
+  parseStatus,
+  needsYou,
+  newlyNeeding,
+  needsCount,
+  runningCount,
+  readStatus,
+  resolvePath,
+  runLabel,
+  cupLabel,
+  notice,
+  findNode,
+  cupMoves,
+  readPipelines,
+  pipelinesFixture,
+} from './status.js';
 
 export const STAGES = Object.freeze(['intake', 'groom', 'plan', 'implement', 'review', 'deliver']);
-
-const INVALID = 'perc status --json returned invalid JSON';
-
-/** `perc status --json` stdout → `{ ok: true, data }`, or `{ ok: false, error }` when it is not a status object. */
-export function parseStatus(stdout) {
-  let data;
-  try {
-    data = JSON.parse(stdout);
-  } catch {
-    return { ok: false, error: INVALID };
-  }
-  if (data === null || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.runs)) {
-    return { ok: false, error: INVALID };
-  }
-  return { ok: true, data };
-}
-
-/** Whether a run waits on you. A blocked agent does not: Herdr already shows it, so the panel counts that run as running. */
-export const needsYou = (r) => Boolean(r.attention) && r.attention.kind !== 'agent';
 
 /** The tone the active stop rings in: blocked when the run needs you or failed, else working. */
 export const nowTone = (r) => (needsYou(r) || r.status === 'failed' ? 'blocked' : 'working');
@@ -97,13 +98,6 @@ export function outcomeOf(run) {
   if (end.kind === 'done') return { tag: 'DONE', text: '' };
   if (end.kind === 'commented') return { tag: 'COMMENTED', text: run.ticket ? `#${run.ticket.number} ↗` : 'Comment ↗', url: end.url };
   return { tag: 'DELIVERED', text: 'Done.' };
-}
-
-/** Runs in `next` that need you and did not in `prev` (or were not there); none on the first load (`prev` null). */
-export function newlyNeeding(prev, next) {
-  if (prev === null) return [];
-  const had = new Set(prev.filter(needsYou).map((r) => r.id));
-  return next.filter((r) => needsYou(r) && !had.has(r.id));
 }
 
 /** The `perc` argv for an action, or null when it needs no perc call (open-pane). Feedback stays one element; `pick`
@@ -212,25 +206,6 @@ export function answerArgv(run, values) {
   return argv;
 }
 
-/** Runs that need you. */
-export function needsCount(runs) {
-  return runs.filter(needsYou).length;
-}
-
-/** Running runs that need nothing from you. */
-export function runningCount(runs) {
-  return runs.filter((r) => r.status === 'running' && !needsYou(r)).length;
-}
-
-/** parseStatus, and refuses a schema this panel does not know. */
-export function readStatus(stdout) {
-  const parsed = parseStatus(stdout);
-  if (parsed.ok && parsed.data.schema !== 2) {
-    return { ok: false, error: `perc status --json returned schema ${parsed.data.schema}; update the Percolator panel` };
-  }
-  return parsed;
-}
-
 /** Seconds as "12s", "4m", "3h" or "2d". */
 export function duration(seconds) {
   const s = Math.max(0, seconds);
@@ -257,13 +232,6 @@ const TONES = { pass: 'done', running: 'working', waiting: 'blocked', fail: 'blo
 /** The theme colour name for a step status, or null for one that has not run. */
 export function stepTone(status) {
   return TONES[status] ?? null;
-}
-
-const ABSOLUTE = /^(?:[\\/]|[A-Za-z]:[\\/])/;
-
-/** `p` as is when absolute, else joined to the folder `base`. */
-export function resolvePath(base, p) {
-  return ABSOLUTE.test(p) ? p : `${base.replace(/[\\/]+$/, '')}/${p}`;
 }
 
 /** The tag shown before an attention message. */
@@ -580,28 +548,6 @@ export function titleLayout(width) {
   return { chip: width < 270 ? 'short' : 'long', newRun: width >= 800 ? 'text' : 'icon' };
 }
 
-// ── the cup (mods/percolator-cup carries a copy of this file) ──
-
-/** The cup's label and its theme tone: who needs you, else what runs, else the name. */
-export function cupLabel(runs) {
-  const n = needsCount(runs);
-  if (n > 0) return { text: `${n} need${n === 1 ? 's' : ''} you`, tone: 'blocked' };
-  const running = runningCount(runs);
-  if (running > 0) return { text: `${running} running`, tone: 'working' };
-  return { text: 'Percolator', tone: 'muted' };
-}
-
-/** The notification for a run that newly needs you; clicking it opens the run through the cup. */
-export function notice(run) {
-  return {
-    title: `${runLabel(run)} needs you`,
-    // a paused run's message only names the step: its detail says why
-    body: run.attention?.kind === 'paused' && run.attention.detail ? `${run.attention.message}: ${run.attention.detail}` : (run.attention?.message ?? ''),
-    level: 'warning',
-    action: { name: `percolator-cup.open/${run.id}` },
-  };
-}
-
 /** The markdown the inline reader shows for the file at `path`. A router's pick.md starts with `pipeline:` and
  *  `unsure:` lines that markdown would run into one paragraph: each becomes a paragraph of its own. */
 export function readerText(path, text) {
@@ -628,27 +574,6 @@ export function reasonParts(detail, transcript) {
 /** A file:// URL for an absolute path (Windows or POSIX) that the system opens. */
 export function fileUrl(path) {
   return `file:///${encodeURI(path.replace(/\\/g, '/').replace(/^\//, '')).replace(/[#?]/g, encodeURIComponent)}`;
-}
-
-/** A layout node by id (depth first), or null. */
-export function findNode(node, id) {
-  if (!node || typeof node !== 'object') return null;
-  if (node.id === id) return node;
-  for (const child of node.children ?? []) {
-    const found = findNode(child, id);
-    if (found) return found;
-  }
-  return null;
-}
-
-/** What the cup does to the panel. `open`: which places show it now; `why`: 'click' toggles, 'open' (a notice)
- *  only shows. Nothing open → show it where it was last (`place`, shared `percolator.place`; docked by default). */
-export function cupMoves(place, open, why) {
-  if (open.panel || open.window) {
-    if (why !== 'click') return [];
-    return [...(open.panel ? ['hide-panel'] : []), ...(open.window ? ['close-window'] : [])];
-  }
-  return [place === 'window' ? 'open-window' : 'show-panel'];
 }
 
 /** Whether this panel copy acts on `percolator.*` commands: only the one where the panel lives (shared
@@ -866,11 +791,6 @@ export function ticketTitle(run) {
   return run.ticket?.title ?? run.ticket?.ref ?? run.id;
 }
 
-/** How a run is named in a short line: `#<issue>`, else (ticketless) its pipeline. */
-export function runLabel(run) {
-  return run.ticket ? `#${run.ticket.number}` : (run.pipeline ?? '#?');
-}
-
 /** The pipeline chip a run shows: its pipeline, or null on `feature` (the default line, so boards look as before). */
 export function pipelineChip(run) {
   return typeof run.pipeline === 'string' && run.pipeline !== 'feature' ? run.pipeline : null;
@@ -1084,27 +1004,6 @@ export function selectAfterRefresh(rows, selId, pending) {
 }
 
 // ── starting a run (`perc pipelines --json`, schema 1) ──
-
-const INVALID_PIPELINES = 'perc pipelines --json returned invalid JSON';
-
-/** `perc pipelines --json` stdout → `{ ok: true, data }`, or `{ ok: false, error }` when it is not one this panel knows. */
-export function readPipelines(stdout) {
-  let data;
-  try {
-    data = JSON.parse(stdout);
-  } catch {
-    return { ok: false, error: INVALID_PIPELINES };
-  }
-  if (data === null || typeof data !== 'object' || !Array.isArray(data.pipelines)) return { ok: false, error: INVALID_PIPELINES };
-  if (data.schema !== 1) return { ok: false, error: `perc pipelines --json returned schema ${data.schema}; update the Percolator panel` };
-  return { ok: true, data };
-}
-
-/** In fixtures mode, the pipelines come from pipelines.json beside the status fixture. */
-export function pipelinesFixture(statusFixture) {
-  if (!/[\\/]/.test(statusFixture)) return 'pipelines.json';
-  return `${statusFixture.replace(/[\\/][^\\/]*$/, '')}/pipelines.json`;
-}
 
 /** What the start dialog asks for a pipeline: its ticket field (hidden when it takes none) and its inputs. */
 export function startFields(pipeline) {

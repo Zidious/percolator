@@ -1,11 +1,11 @@
 // The Percolator cup: a status-bar button that says who needs you, toggles the panel, and posts a notice when a run
 // newly needs you. It is always alive (the panel may be hidden), so it owns watching and notifying.
-// Carries copies of the panel's model.js, mark.js and source.js (same perc call, same watch). Commands: `percolator-cup.open/<run-id>`, `percolator-cup.toggle`.
+// Carries copies of the panel's status.js, mark.js and source.js (same perc call, same watch). Commands: `percolator-cup.open/<run-id>`, `percolator-cup.toggle`.
 
 import { View, div } from 'gpui-kit';
 import { h_flex } from 'gpui-base';
 import { checking, closeOverlay, layout, nextCommand, notify, openOverlay, run, setShared, shared, theme } from 'herdr';
-import { cupLabel, cupMoves, findNode, needsCount, newlyNeeding, notice, runningCount } from './model.js';
+import { cupLabel, cupMoves, findNode, needsCount, newlyNeeding, notice, runningCount } from './status.js';
 import { mark } from './mark.js';
 import { connectSource, fetchStatus, watchRuns } from './source.js';
 

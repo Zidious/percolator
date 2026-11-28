@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { readPipelines, runNextChoices } from '../../herdr/mods/percolator/model.js';
+import { runNextChoices } from '../../herdr/mods/percolator/model.js';
+import { readPipelines } from '../../herdr/mods/percolator/status.js';
 
 function readFixture(name: string): any {
   return JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', name), 'utf8'));

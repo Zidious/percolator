@@ -2,7 +2,7 @@ import type { StepRecord } from '../engine/state.ts';
 import type { RunGraphLoop, RunGraphStep } from './graph-file.ts';
 import type { RunTrigger } from './meta.ts';
 
-// The `perc status --json` contract; its only reader is herdr/mods/percolator/model.js.
+// The `perc status --json` contract; its only readers are herdr/mods/percolator/status.js and model.js.
 
 export type AttentionKind = 'gate' | 'cap' | 'paused' | 'questions' | 'findings' | 'failed' | 'stalled' | 'agent';
 export type Action = 'approve' | 'pick' | 'reject' | 'grant' | 'resume' | 'answer' | 'clean' | 'open-pane' | 'run-again';

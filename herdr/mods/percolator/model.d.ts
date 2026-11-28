@@ -1,6 +1,23 @@
 // Types for model.js, so `pnpm typecheck` covers tests/herdr/model.test.ts. The run shape is the
-// `perc status --json` contract (src/run/status.ts).
+// `perc status --json` contract (src/run/status-json.ts).
 import type { Action, RunStatusJson, StatusJson } from '../../../src/run/status-json.ts';
+export type { CupMove } from './status.js';
+export {
+  parseStatus,
+  needsYou,
+  newlyNeeding,
+  needsCount,
+  runningCount,
+  readStatus,
+  resolvePath,
+  runLabel,
+  cupLabel,
+  notice,
+  findNode,
+  cupMoves,
+  readPipelines,
+  pipelinesFixture,
+} from './status.js';
 
 type Readable = Exclude<RunStatusJson, { status: 'unreadable' }>;
 export type Step = Readable['steps'][number];
@@ -10,12 +27,10 @@ export type Attempt = Extract<TimelineEntry, { kind: 'attempt' }>;
 export type Tone = 'blocked' | 'working' | 'muted';
 
 export declare const STAGES: readonly Stage[];
-export declare function parseStatus(stdout: string): { ok: true; data: StatusJson } | { ok: false; error: string };
 export declare function sortRuns(runs: RunStatusJson[]): RunStatusJson[];
 export declare function visibleRuns(runs: RunStatusJson[], filter: 'active' | 'all'): RunStatusJson[];
 export declare function rowState(run: RunStatusJson): { tone: Tone; text: string; round?: string };
 export declare function outcomeOf(run: RunStatusJson): { tag: 'DELIVERED' | 'ROUTED' | 'DONE' | 'COMMENTED'; text: string; url?: string };
-export declare function newlyNeeding(prev: RunStatusJson[] | null, next: RunStatusJson[]): RunStatusJson[];
 /** `feedback` is the reject feedback, or the picked pipeline for `pick`. */
 /** `run-again` on an unreadable run: null (it has no pipeline or repo to start again). */
 export declare const ACTIONS: Record<string, { label: string; style: string; key?: string }>;
@@ -39,17 +54,12 @@ export declare function watcherState(
   status: StatusJson,
   o?: { startedAt: number | null; now: number; live: { address: string; name?: string }[] },
 ): { alive: boolean; label: string; argv: string[] | null };
-export declare function needsYou(run: RunStatusJson): boolean;
 export declare function nowTone(run: RunStatusJson): 'blocked' | 'working';
-export declare function needsCount(runs: RunStatusJson[]): number;
-export declare function runningCount(runs: RunStatusJson[]): number;
 export type Loop = Readable['loops'][number];
-export declare function readStatus(stdout: string): { ok: true; data: StatusJson } | { ok: false; error: string };
 export declare function duration(seconds: number): string;
 export declare function ago(iso: string | undefined, now: number): string;
 export declare function took(step: { startedAt?: string; endedAt?: string; status: string }, now: number): string;
 export declare function stepTone(status: string): 'done' | 'working' | 'blocked' | null;
-export declare function resolvePath(base: string, p: string): string;
 export declare function attentionTag(kind: string): string;
 export declare function roundOf(loop: Loop): { n: number; max: number; taken: boolean; atCap: boolean };
 export declare function stageName(step: { id: string; stage: string }): string;
@@ -94,20 +104,6 @@ export declare function clock(iso?: string): string;
 export declare function timelineRows(run: RunStatusJson, now: number): TimelineRow[];
 export declare function inputRows(run: RunStatusJson): (TimelineRow & { title: string })[];
 export declare function triggerLine(run: RunStatusJson): string | null;
-export declare function cupLabel(runs: RunStatusJson[]): { text: string; tone: 'blocked' | 'working' | 'muted' };
-export declare function notice(run: RunStatusJson): {
-  title: string;
-  body: string;
-  level: 'warning';
-  action: { name: string };
-};
-export declare function findNode(node: unknown, id: string): any;
-export type CupMove = 'show-panel' | 'hide-panel' | 'open-window' | 'close-window';
-export declare function cupMoves(
-  place: unknown,
-  open: { panel: boolean; window: boolean },
-  why: 'click' | 'open',
-): CupMove[];
 export declare function ownsCommands(place: unknown, inWindow: boolean): boolean;
 export declare const BOARD_RATIO: number;
 export declare function boardHeight(ratio: number, area: number, min: number): number;
@@ -129,7 +125,6 @@ export declare function agentCard(
 ): { address: string | null; name: string; status: string; program: string; since: string } | null;
 export declare function driverPeek(run: RunStatusJson | null | undefined): { terminal: string; label: 'Driver pane ↗' } | null;
 export declare function ticketTitle(run: Readable): string;
-export declare function runLabel(run: RunStatusJson): string;
 export declare function pipelineChip(run: { pipeline?: string }): string | null;
 export declare function deleteArgv(ids: string[]): string[];
 export declare function deleteCommand(ids: string[]): string;
@@ -197,8 +192,6 @@ export type Pipeline = {
 export type BrokenPipeline = { name: string; error: string };
 export type PipelinesJson = { schema: 1; repo: string; profile: string; pipelines: (Pipeline | BrokenPipeline)[] };
 export type StartChoice = { pipeline: Pipeline; ticket?: string; inputs: Record<string, string>; repo: string | null };
-export declare function readPipelines(stdout: string): { ok: true; data: PipelinesJson } | { ok: false; error: string };
-export declare function pipelinesFixture(statusFixture: string): string;
 export declare function startFields(pipeline: Pipeline): {
   ticket: 'required' | 'optional' | 'hidden';
   inputs: { name: string; required: boolean; description: string }[];
