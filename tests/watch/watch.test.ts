@@ -10,7 +10,8 @@ import { prepareRun } from '../../src/run/prepare.ts';
 import { validate } from '../../src/validate.ts';
 import { loadLedger, saveLedger } from '../../src/watch/ledger.ts';
 import { triggerId } from '../../src/watch/poll.ts';
-import { otherWatcher, requestStop, stopFile, waitForWatcherExit, watcherStatus, watchFile, watchLoop } from '../../src/watch/watch.ts';
+import { otherWatcher, watcherStatus, watchFile } from '../../src/watch/heartbeat.ts';
+import { requestStop, stopFile, waitForWatcherExit, watchLoop } from '../../src/watch/watch.ts';
 import { setupRunEnv } from '../helpers/run-env.ts';
 import type { RunEnv } from '../helpers/run-env.ts';
 

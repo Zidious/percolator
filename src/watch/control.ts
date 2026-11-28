@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import type { Terminal } from '../herdr/hc.ts';
 import { pidAlive } from '../run/lock.ts';
 import type { DriverDeps } from '../run/prepare.ts';
-import { otherWatcher, requestStop, stopFile, stoppableWatcher, WATCH_STOP_TIMEOUT_S, WATCH_TERMINAL, WATCHER_LABELS, waitForWatcherExit, watchFile, watchLoop } from './watch.ts';
+import { otherWatcher, stoppableWatcher, watchFile } from './heartbeat.ts';
+import { requestStop, stopFile, WATCH_STOP_TIMEOUT_S, WATCH_TERMINAL, WATCHER_LABELS, waitForWatcherExit, watchLoop } from './watch.ts';
 import type { WatchOptions } from './watch.ts';
 
 /** A terminal labelled as the watcher; one merely named like it is never ours. */

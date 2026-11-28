@@ -22,7 +22,7 @@ import { askedItems } from './answer.ts';
 import { pickDetail, runAgain, suggestion, yourTurn } from './next-steps.ts';
 import type { YourTurnInput } from './next-steps.ts';
 import type { AttemptJson, AttentionJson, AttentionKind, ChildJson, ReviewItem, RunStatusJson, StatusJson, StepJson, TicketJson, TimelineJson } from './status-json.ts';
-import { watcherStatus } from '../watch/watch.ts';
+import { watcherStatus } from '../watch/heartbeat.ts';
 import { samePath } from '../util/paths.ts';
 
 /** How the driver was judged: its hc terminal, its `driver.json` lock, or neither (`hcError` when hc failed). */

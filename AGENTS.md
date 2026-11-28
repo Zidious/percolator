@@ -62,7 +62,7 @@ Read the module before changing it.
 | `src/adapters/` | agent argv builders (`claude`, `codex`, `command`); rules only one agent has go in its adapter's `check` |
 | `src/workspace/` | worktrees, run/step dirs, ground materialization, skill plugins |
 | `src/util/` | paths, atomic fs, argv-only exec; `cron.ts` (cron with time zones, Intl only), `sections.ts` (`## ` sections of drafted issues and slices), `errors.ts` (`UsageError`) |
-| `src/watch/` | `perc watch`: trigger polling, the firing ledger (`~/.percolator/watch/fired.json`), the watch loop and its heartbeat (`watch.json`); `control.ts`: starting and stopping the watcher terminal |
+| `src/watch/` | `perc watch`: trigger polling, the firing ledger (`~/.percolator/watch/fired.json`), the watch loop; `heartbeat.ts`: its heartbeat (`watch.json`) and who is watching; `control.ts`: starting and stopping the watcher terminal |
 | `src/validate.ts` | config → graph validation pipeline |
 | `templates/` | recommended config written by `perc init` |
 | `skills/` | agent-agnostic skills shipped in the package |
