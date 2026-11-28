@@ -16,7 +16,7 @@ import type { DriverLock } from './lock.ts';
 import { readFanOut } from './fan-out.ts';
 import type { FanOutFile } from './fan-out.ts';
 import { listRuns } from './meta.ts';
-import type { RunListing, RunMeta, RunTrigger } from './meta.ts';
+import type { RunListing, RunMeta } from './meta.ts';
 import type { DriverDeps } from './prepare.ts';
 import { askedItems } from './answer.ts';
 import { pickDetail, runAgain, suggestion, yourTurn } from './next-steps.ts';

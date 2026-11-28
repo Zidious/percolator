@@ -44,7 +44,7 @@ export class StartPicker {
     );
   }
 
-  /** The input's state: made with the pipelines (startPipelines), so render only reads it. */
+  /** The input's state: made with the pipelines (loadPipelines), so render only reads it. */
   inputState(pipeline, input) {
     return this.inputs[`${pipeline}/${input.name}`] ?? null;
   }

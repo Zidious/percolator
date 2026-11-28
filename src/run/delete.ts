@@ -361,4 +361,3 @@ export async function deleteIds(named: string[], yes: boolean, deps: DriverDeps,
   }
   return deleteAll(plans, failed, deps, io);
 }
-
