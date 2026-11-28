@@ -11,8 +11,7 @@ import type { RunState } from './engine/state.ts';
 import { cliHerdrApp } from './herdr/app.ts';
 import { cliHc } from './herdr/hc.ts';
 import { herdrAppHome, linkHerdr } from './herdr/link.ts';
-import { deleteRun, isFinished, planDelete } from './run/delete.ts';
-import type { DeletePlan } from './run/delete.ts';
+import { cleanRun, deleteFinished, deleteIds } from './run/delete.ts';
 import { drive } from './run/drive.ts';
 import { checkResumable } from './run/resumable.ts';
 import { listRuns, readRunMeta, spaceName } from './run/meta.ts';
@@ -24,7 +23,6 @@ import type { DriverDeps } from './run/prepare.ts';
 import { runStatusJson, statusJson } from './run/status.ts';
 import { itemLine, questionLines, runDetail } from './run/status-text.ts';
 import { attentionNext } from './run/next-steps.ts';
-import { sweepTerminals } from './runtime/herdr-runtime.ts';
 import { deciderLogin, readWaiting, writeDecision } from './tracker/gate.ts';
 import { cliGh } from './tracker/gh.ts';
 import { askLine } from './util/ask.ts';
@@ -36,7 +34,6 @@ import { otherWatcher, requestStop, stopFile, stoppableWatcher, WATCH_STOP_TIMEO
 import { PICK_GATE } from './graph/core.ts';
 import { runDir } from './workspace/run-dir.ts';
 import { pipeWriter } from './util/pipe.ts';
-import { removeWorktree } from './workspace/worktree.ts';
 
 export type Io = { stdout(s: string): void; stderr(s: string): void };
 
@@ -422,114 +419,7 @@ async function runDecide(decision: 'approve' | 'reject', args: string[], deps: D
 async function runClean(args: string[], deps: DriverDeps): Promise<number> {
   const { values, positionals } = parseWith(args, { force: { type: 'boolean' } });
   const runId = onlyRunId('clean', positionals);
-  const dir = runDir(deps.home, runId);
-  const meta = await readRunMeta(dir);
-  const driver = await deps.hc.get(meta.driver);
-  if (driver?.state === 'live') throw new Error(`run ${runId} is being driven by terminal ${meta.driver}; stop it first (or perc delete ${runId})`);
-  if (values.force !== true) {
-    // a paused or running run still has live node terminals the owner may want
-    const { status } = await loadState(dir);
-    if (status !== 'completed' && status !== 'failed') {
-      throw new Error(`run ${runId} is ${status}; finish it or use perc clean ${runId} --force, or perc delete ${runId} to remove it entirely`);
-    }
-  }
-  const removed = await sweepTerminals(deps.hc, runId);
-  await removeWorktree({ repoRoot: meta.repoRoot, dir: meta.worktree, force: values.force === true });
-  deps.out(`removed ${removed.length} terminal(s) and worktree ${meta.worktree}`);
-  return 0;
-}
-
-const WORKTREE_STATE = {
-  dirty: 'uncommitted changes will be lost',
-  clean: 'clean',
-  gone: 'already removed',
-  unknown: 'unknown',
-} as const;
-
-/** Only `y` or `yes` (any case, surrounding blanks ignored) proceeds. */
-async function confirmed(deps: DriverDeps, question: string): Promise<void> {
-  const answer = await deps.ask!(question);
-  if (!/^y(es)?$/i.test(answer.trim())) throw new Error('aborted; nothing deleted');
-}
-
-function deleteSummary(p: DeletePlan, deps: DriverDeps): void {
-  deps.out(`perc delete will remove run ${p.id}`);
-  if (p.ticket !== undefined) deps.out(`  ticket ${p.ticket.ref}${p.ticket.title !== undefined ? ` ${p.ticket.title}` : ''}`);
-  if (p.meta !== undefined && p.meta.pipeline !== 'feature') deps.out(`  pipeline ${p.meta.pipeline}`);
-  deps.out(`  status ${p.status}`);
-  const wt = p.worktree ?? { path: `<repo>/.worktrees/${p.id}`, state: 'unknown' as const };
-  deps.out(`  worktree ${wt.path} (${WORKTREE_STATE[wt.state]})`);
-  deps.out(`  keeps branch ${p.meta?.branch ?? `percolator/${p.id}`}`);
-}
-
-/** Deletes each plan, carrying on past a failure (one stderr line each); 1 when any failed. */
-async function deleteAll(plans: DeletePlan[], failed: number, deps: DriverDeps, io: Io): Promise<number> {
-  for (const p of plans) {
-    try {
-      deps.out(await deleteRun(p, deps));
-    } catch (err) {
-      failed++;
-      io.stderr(`${(err as Error).message}
-`);
-    }
-  }
-  return failed > 0 ? 1 : 0;
-}
-
-async function deleteFinished(yes: boolean, deps: DriverDeps, io: Io): Promise<number> {
-  const plans: DeletePlan[] = [];
-  for (const l of await listRuns(deps.home)) {
-    let p: DeletePlan;
-    try {
-      p = await planDelete(path.basename(l.dir), deps);
-    } catch (err) {
-      // removed since the listing (another delete, the panel's): nothing left to delete
-      if (!(await fs.stat(l.dir).then(() => true, () => false))) continue;
-      throw err;
-    }
-    if (isFinished(p.status)) plans.push(p);
-  }
-  if (plans.length === 0) {
-    deps.out('no finished runs');
-    return 0;
-  }
-  if (!yes) {
-    deps.out(`perc delete will remove ${plans.length} finished run(s)`);
-    for (const p of plans) deps.out(`  ${p.id}  ${p.ticket?.ref ?? p.meta?.pipeline ?? '-'}  ${p.status}  worktree ${p.worktree?.state ?? 'unknown'}`);
-    deps.out('  keeps their branches');
-    await confirmed(deps, `delete ${plans.length} run(s)? [y/N] `);
-  }
-  return deleteAll(plans, 0, deps, io);
-}
-
-/** Exactly the runs named (the panel passes the ones its confirm listed); an unknown id is reported and skipped. */
-async function deleteIds(named: string[], yes: boolean, deps: DriverDeps, io: Io): Promise<number> {
-  const ids = [...new Set(named)];
-  if (ids.length === 1) {
-    const plan = await planDelete(ids[0]!, deps);
-    if (!yes) {
-      deleteSummary(plan, deps);
-      await confirmed(deps, `delete run ${plan.id}? [y/N] `);
-    }
-    deps.out(await deleteRun(plan, deps));
-    return 0;
-  }
-  const plans: DeletePlan[] = [];
-  let failed = 0;
-  for (const id of ids) {
-    try {
-      plans.push(await planDelete(id, deps));
-    } catch (err) {
-      failed++;
-      io.stderr(`${(err as Error).message}
-`);
-    }
-  }
-  if (!yes && plans.length > 0) {
-    for (const p of plans) deleteSummary(p, deps);
-    await confirmed(deps, `delete ${plans.length} run(s)? [y/N] `);
-  }
-  return deleteAll(plans, failed, deps, io);
+  return cleanRun(runId, values.force === true, deps);
 }
 
 async function runDelete(args: string[], deps: DriverDeps, io: Io): Promise<number> {
