@@ -67,7 +67,7 @@ Read the module before changing it.
 | `templates/` | recommended config written by `perc init` |
 | `skills/` | agent-agnostic skills shipped in the package |
 | `scripts/` | repo tooling run by package scripts (`herdr-sync.ts`); typechecked, tested under `tests/scripts/` |
-| `herdr/` | Herdr panel (`mods/percolator/`, plain JS, pure logic in `model.js` with its `ATTENTION` and `ACTIONS` tables (a new attention kind or action is one entry), what the cup needs too in `status.js` (`model.js` re-exports it), the start picker in `start.js`) and status-bar cup (`mods/percolator-cup/`), layout, fixtures |
+| `herdr/` | Herdr panel (`mods/percolator/`, plain JS, pure logic in `model.js` with its `ATTENTION` and `ACTIONS` tables (a new attention kind or action is one entry), what the cup needs too in `status.js` (`model.js` re-exports it), the start picker drawn in `start.js` over its state and handlers in `startpicker.js`) and status-bar cup (`mods/percolator-cup/`), layout, fixtures |
 | `docs/` | user-facing topic pages linked from `README.md` (how it works, configuration, pipelines, steering, integrations, development); `docs/superpowers/` is local scratch, never committed |
 
 ## Conventions

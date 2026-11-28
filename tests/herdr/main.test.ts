@@ -29,20 +29,24 @@ registerHooks({
 });
 const MAIN: string = '../../herdr/mods/percolator/main.js'; // untyped: the panel's view has no .d.ts
 const { default: Percolator } = await import(MAIN);
+const STARTPICKER: string = '../../herdr/mods/percolator/startpicker.js'; // untyped too
+const { StartPicker } = await import(STARTPICKER);
+
+/** A panel (`v`, with `panel`'s fields) and its start picker (`p`, with `picker`'s), built without their hosts. */
+function pickerOn(panel: Record<string, unknown>, picker: Record<string, unknown> = {}) {
+  const v = Object.assign(Object.create(Percolator.prototype), panel);
+  const p = Object.assign(Object.create(StartPicker.prototype), { panel: v, start: null, pipes: {}, tops: {}, inputs: {} }, picker);
+  v.picker = p;
+  return { v, p };
+}
 
 /** A panel with one run on `repo` whose pipelines are already listed, and a cx that counts redraws. */
 function panelWithListedPipelines() {
   const repo = 'C:/src/app';
-  const p = Object.create(Percolator.prototype);
-  Object.assign(p, {
-    runs: [{ id: 'r1', repo, createdAt: '2026-11-23T00:00:00Z' }],
-    start: null,
-    typing: false,
-    pipes: { [repo]: { ok: true, data: { pipelines: [{ name: 'feature', inputs: [] }] } } },
-    inputs: {},
-    ticketInput: { set_value() {} },
-    handle: { focus() {} },
-  });
+  const { p } = pickerOn(
+    { runs: [{ id: 'r1', repo, createdAt: '2026-11-23T00:00:00Z' }], typing: false, handle: { focus() {} } },
+    { pipes: { [repo]: { ok: true, data: { pipelines: [{ name: 'feature', inputs: [] }] } } }, ticketInput: { set_value() {} } },
+  );
   const cx = { redraws: 0, notify() { this.redraws++; }, spawn() { throw new Error('the pipelines are listed: nothing to fetch'); } };
   return { p, cx };
 }
@@ -67,26 +71,26 @@ const listed = { ok: true, data: { pipelines: [{ name: 'feature', inputs: [] }] 
  * answers only when the test calls `release()`. cx.spawn keeps the jobs so the test can await them.
  */
 function panelWithSpaces(spaces: Space[], tops: Record<string, string | null>, held: string[] = []) {
-  const p = Object.create(Percolator.prototype);
   const asked: string[] = [];
   let release = () => {};
   const gate = new Promise<void>((r) => (release = r));
-  Object.assign(p, {
-    runs: [{ id: 'r1', repo: 'C:/src/old', createdAt: '2026-11-23T00:00:00Z', ticket: { ref: 'owner/old#1' } }],
-    start: null,
-    typing: false,
-    tops: {},
-    pipes: { 'C:/src/old': listed, 'C:/src/app': listed, 'C:/src/mine': listed, '/src/a': listed, '/notes': listed },
-    inputs: {},
-    ticketInput: { text: '', set_value(v: string) { this.text = v; }, value() { return this.text; } },
-    handle: { focus() {} },
-    openSpaces: () => spaces.map(toSpace),
-    gitTop: async (folder: string) => {
-      asked.push(folder);
-      if (held.includes(folder)) await gate;
-      return tops[folder] ?? null;
+  const { v, p } = pickerOn(
+    {
+      runs: [{ id: 'r1', repo: 'C:/src/old', createdAt: '2026-11-23T00:00:00Z', ticket: { ref: 'owner/old#1' } }],
+      typing: false,
+      handle: { focus() {} },
+      openSpaces: () => spaces.map(toSpace),
     },
-  });
+    {
+      pipes: { 'C:/src/old': listed, 'C:/src/app': listed, 'C:/src/mine': listed, '/src/a': listed, '/notes': listed },
+      ticketInput: { text: '', set_value(this: { text: string }, v: string) { this.text = v; }, value(this: { text: string }) { return this.text; } },
+      gitTop: async (folder: string) => {
+        asked.push(folder);
+        if (held.includes(folder)) await gate;
+        return tops[folder] ?? null;
+      },
+    },
+  );
   const jobs: Promise<unknown>[] = [];
   const cx = {
     notify() {},
@@ -97,7 +101,7 @@ function panelWithSpaces(spaces: Space[], tops: Record<string, string | null>, h
   const settle = async () => {
     while (jobs.length) await jobs.shift();
   };
-  return { p, cx, asked, settle, release };
+  return { v, p, cx, asked, settle, release };
 }
 
 const APP_SPACES: Space[] = [{ folder: '/src/a' }, { folder: 'C:/src/app/.worktrees/t1-x', active: true }];
@@ -278,7 +282,7 @@ test('gitTop asks git for the toplevel with an argv, in the folder, with a 10s t
   ];
   fakes.exec = (...a: unknown[]) => (calls.push(a), answers.shift()!());
   try {
-    const p = Object.create(Percolator.prototype);
+    const p = Object.create(StartPicker.prototype);
     assert.equal(await p.gitTop('C:/src/app/sub'), 'C:/src/app');
     assert.equal(await p.gitTop('/notes'), null);
     assert.equal(await p.gitTop('/gone'), null);
@@ -343,7 +347,7 @@ function panelAsking(run: ReturnType<typeof asking>) {
       let v = '';
       return { value: () => v, set_value: (x: string) => (v = x), on };
     },
-    startRun: () => performed.push({ action: 'startRun', argv: [] }),
+    picker: { start: { mode: 'new', error: null, said: null }, startRun: () => performed.push({ action: 'startRun', argv: [] }) },
     perform: (action: string, argv: string[]) => performed.push({ action, argv }),
   });
   const cx = { notify() {} };
@@ -377,7 +381,6 @@ test('submitting the questions form needs every question answered or N/A', () =>
 
 test('Enter in an answer field submits the answers, never starts a run; typing clears the answer error', () => {
   const { p, cx, performed } = panelAsking(asking('questions'));
-  p.start = { mode: 'new', error: null, said: null };
   p.syncAsks();
   const [first, second] = p.asks['r1/plan/1'].inputs;
   first.set_value('Postgres');
@@ -411,9 +414,9 @@ test('a refused Start also ends the automatic preselection', async () => {
 });
 
 test('pressing Start ends the automatic preselection, so a late probe leaves its repo alone', async () => {
-  const { p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
+  const { v, p, cx, settle, release } = panelWithSpaces(APP_SPACES, APP_TOPS, ['/src/a', 'C:/src/app/.worktrees/t1-x']);
   p.probeSpaces(cx);
-  p.conn = 'fixtures'; // says what it would run instead of spawning perc
+  v.conn = 'fixtures'; // says what it would run instead of spawning perc
   p.openStart(cx);
   p.startRun(cx);
   const said = p.start.said;
@@ -428,15 +431,13 @@ test('pressing Start ends the automatic preselection, so a late probe leaves its
 test("fixtures mode lists no open spaces, so it never probes the machine's real folders", () => {
   fakes.spaces = () => [toSpace({ folder: 'C:/src/real', active: true })];
   try {
-    const p = Object.create(Percolator.prototype);
-    p.conn = 'fixtures';
-    p.tops = {};
+    const { v, p } = pickerOn({ conn: 'fixtures' });
     const spawned: unknown[] = [];
     p.probeSpaces({ spawn: (fn: unknown) => spawned.push(fn), notify() {} });
-    assert.deepEqual(p.openSpaces(), []);
+    assert.deepEqual(v.openSpaces(), []);
     assert.deepEqual(spawned, []);
-    p.conn = 'perc';
-    assert.equal(p.openSpaces().length, 1);
+    v.conn = 'perc';
+    assert.equal(v.openSpaces().length, 1);
   } finally {
     delete fakes.spaces;
   }
@@ -459,18 +460,16 @@ test("a late probe that moves the automatic repo preselects the new repo's defau
 test('before the panel knows it is connected to perc it lists and probes no open spaces', () => {
   fakes.spaces = () => [toSpace({ folder: 'C:/src/real', active: true })];
   try {
-    const p = Object.create(Percolator.prototype);
-    p.tops = {};
-    p.gitTop = async () => null;
+    const { v, p } = pickerOn({}, { gitTop: async () => null });
     const spawned: unknown[] = [];
     const cx = { spawn: (fn: unknown) => spawned.push(fn), notify() {} };
     for (const conn of [null, 'missing']) {
-      p.conn = conn;
+      v.conn = conn;
       p.probeSpaces(cx);
-      assert.deepEqual(p.openSpaces(), [], `conn ${conn}`);
+      assert.deepEqual(v.openSpaces(), [], `conn ${conn}`);
     }
     assert.deepEqual(spawned, []);
-    p.conn = 'perc';
+    v.conn = 'perc';
     p.probeSpaces(cx);
     assert.equal(spawned.length, 1);
   } finally {
@@ -531,7 +530,7 @@ async function panelOnFixture(sel: string) {
   const all = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '..', '..', 'herdr', 'fixtures', 'status.json'), 'utf8')).runs;
   const p = Object.create(Percolator.prototype);
   Object.assign(p, {
-    runs: all, filter: 'all', files: {}, sel, stopSel: null, unfolded: [], start: null, rejecting: false, conn: 'perc', width: 900,
+    runs: all, filter: 'all', files: {}, sel, stopSel: null, unfolded: [], picker: { start: null }, rejecting: false, conn: 'perc', width: 900,
     feedback: { set_value() {} }, boardScroll: { scroll_to_item() {} },
   });
   const sent: unknown[][] = [];
